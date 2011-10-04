@@ -103,8 +103,8 @@ static void e1000_write_reg_io(struct e1000_hw *hw, uint32_t offset,
 
 #define E1000_WRITE_REG_IO(a, reg, val) \
 	    e1000_write_reg_io((a), E1000_##reg, val)
-static int32_t e1000_configure_kmrn_for_10_100(struct e1000_hw *hw);
-static int32_t e1000_configure_kmrn_for_1000(struct e1000_hw *hw);
+static int32_t e1000_configure_kmrn_for_10_100(struct e1000_hw *hw, uint16_t duplex);
+static int32_t e1000_configure_kmrn_for_1000(struct e1000_hw *hw, uint16_t duplex);
 
 /* IGP cable length table */
 static const
@@ -392,6 +392,12 @@ e1000_set_mac_type(struct e1000_hw *hw)
         break;
     }
 
+    /* In rare occasions, ESB2 systems would end up started without
+     * the RX unit being turned on.
+     */
+    if (hw->mac_type == e1000_80003es2lan)
+        hw->rx_needs_kicking = TRUE;
+ 
     return E1000_SUCCESS;
 }
 
@@ -1481,8 +1487,8 @@ e1000_copper_link_ggp_setup(struct e1000_hw *hw)
             if (ret_val)
                 return ret_val;
 
-            /* Enable Pass False Carrier on the PHY */
-            phy_data |= GG82563_KMCR_PASS_FALSE_CARRIER;
+            /* Disable Pass False Carrier on the PHY*/
+            phy_data &= ~GG82563_KMCR_PASS_FALSE_CARRIER;
 
             ret_val = e1000_write_phy_reg(hw, GG82563_PHY_KMRN_MODE_CTRL,
                                           phy_data);
@@ -1806,7 +1812,7 @@ e1000_setup_copper_link(struct e1000_hw *hw)
 * hw - Struct containing variables accessed by shared code
 ******************************************************************************/
 static int32_t
-e1000_configure_kmrn_for_10_100(struct e1000_hw *hw)
+e1000_configure_kmrn_for_10_100(struct e1000_hw *hw, uint16_t duplex)
 {
     int32_t ret_val = E1000_SUCCESS;
     uint32_t tipg;
@@ -1826,11 +1832,24 @@ e1000_configure_kmrn_for_10_100(struct e1000_hw *hw)
     tipg |= DEFAULT_80003ES2LAN_TIPG_IPGT_10_100;
     E1000_WRITE_REG(hw, TIPG, tipg);
 
+    ret_val = e1000_read_phy_reg(hw, GG82563_PHY_KMRN_MODE_CTRL,
+                                 &reg_data);
+    if (ret_val)
+        return ret_val;
+    /* Enable pass false carrier when in half duplex mode. */
+    if (duplex == HALF_DUPLEX)
+        reg_data |= GG82563_KMCR_PASS_FALSE_CARRIER;
+    else
+        reg_data &= ~GG82563_KMCR_PASS_FALSE_CARRIER;
+
+    ret_val = e1000_write_phy_reg(hw, GG82563_PHY_KMRN_MODE_CTRL,
+                                  reg_data);
+
     return ret_val;
 }
 
 static int32_t
-e1000_configure_kmrn_for_1000(struct e1000_hw *hw)
+e1000_configure_kmrn_for_1000(struct e1000_hw *hw, uint16_t duplex)
 {
     int32_t ret_val = E1000_SUCCESS;
     uint16_t reg_data;
@@ -1849,6 +1868,17 @@ e1000_configure_kmrn_for_1000(struct e1000_hw *hw)
     tipg &= ~E1000_TIPG_IPGT_MASK;
     tipg |= DEFAULT_80003ES2LAN_TIPG_IPGT_1000;
     E1000_WRITE_REG(hw, TIPG, tipg);
+
+    ret_val = e1000_read_phy_reg(hw, GG82563_PHY_KMRN_MODE_CTRL,
+                                 &reg_data);
+    if (ret_val)
+        return ret_val;
+
+    /* Disable Pass False Carrier on the PHY */
+    reg_data &= ~GG82563_KMCR_PASS_FALSE_CARRIER;
+
+    ret_val = e1000_write_phy_reg(hw, GG82563_PHY_KMRN_MODE_CTRL,
+                                  reg_data);
 
     return ret_val;
 }
@@ -2890,9 +2920,10 @@ e1000_get_speed_and_duplex(struct e1000_hw *hw,
     if ((hw->mac_type == e1000_80003es2lan) && 
         (hw->media_type == e1000_media_type_copper)) {
         if (*speed == SPEED_1000)
-            ret_val = e1000_configure_kmrn_for_1000(hw);
+            ret_val = e1000_configure_kmrn_for_1000(hw, *duplex);
         else
-            ret_val = e1000_configure_kmrn_for_10_100(hw);
+            ret_val = e1000_configure_kmrn_for_10_100(hw, *duplex);
+
         if (ret_val)
             return ret_val;
     }

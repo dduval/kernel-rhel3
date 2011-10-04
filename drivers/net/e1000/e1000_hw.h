@@ -1387,6 +1387,7 @@ struct e1000_hw {
     boolean_t in_ifs_mode;
     boolean_t mng_reg_access_disabled;
     boolean_t leave_av_bit_off;
+    boolean_t rx_needs_kicking;
 };
 
 
