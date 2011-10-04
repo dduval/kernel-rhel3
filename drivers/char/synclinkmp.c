@@ -900,8 +900,7 @@ static void close(struct tty_struct *tty, struct file *filp)
 	if (tty->driver.flush_buffer)
 		tty->driver.flush_buffer(tty);
 
-	if (tty->ldisc.flush_buffer)
-		tty->ldisc.flush_buffer(tty);
+	tty_ldisc_flush(tty);
 
 	shutdown(info);
 
@@ -1308,10 +1307,7 @@ static void flush_buffer(struct tty_struct *tty)
 	del_timer(&info->tx_timer);
 	spin_unlock_irqrestore(&info->lock,flags);
 
-	wake_up_interruptible(&tty->write_wait);
-	if ((tty->flags & (1 << TTY_DO_WRITE_WAKEUP)) &&
-	    tty->ldisc.write_wakeup)
-		(tty->ldisc.write_wakeup)(tty);
+	tty_wakeup(tty);
 }
 
 /* throttle (stop) transmitter
@@ -1977,14 +1973,7 @@ void bh_transmit(SLMP_INFO *info)
 			__FILE__,__LINE__,info->device_name);
 
 	if (tty) {
-		if ((tty->flags & (1 << TTY_DO_WRITE_WAKEUP)) &&
-		    tty->ldisc.write_wakeup) {
-			if ( debug_level >= DEBUG_LEVEL_BH )
-				printk( "%s(%d):%s calling ldisc.write_wakeup\n",
-					__FILE__,__LINE__,info->device_name);
-			(tty->ldisc.write_wakeup)(tty);
-		}
-		wake_up_interruptible(&tty->write_wait);
+		tty_wakeup(tty);
 	}
 }
 
@@ -4980,15 +4969,8 @@ CheckAgain:
 			}
 			else
 #endif
-			{
-				if ( tty && tty->ldisc.receive_buf ) {
-					/* Call the line discipline receive callback directly. */
-					tty->ldisc.receive_buf(tty,
-						info->tmp_rx_buf,
-						info->flag_buf,
-						framesize);
-				}
-			}
+				tty_ldisc_receive_buf(tty,info->tmp_rx_buf,
+					info->flag_buf, framesize);
 		}
 	}
 	/* Free the buffers used by this frame. */

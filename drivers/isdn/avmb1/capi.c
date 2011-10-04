@@ -463,28 +463,34 @@ static int handle_recv_skb(struct capiminor *mp, struct sk_buff *skb)
 	struct sk_buff *nskb;
 	unsigned int datalen;
 	u16 errcode, datahandle;
+	struct tty_ldisc *ld;
 
 	datalen = skb->len - CAPIMSG_LEN(skb->data);
 	if (mp->tty) {
-		if (mp->tty->ldisc.receive_buf == 0) {
+		if (!(ld = tty_ldisc_ref(mp->tty)) || !ld->receive_buf) {
 			printk(KERN_ERR "capi: ldisc has no receive_buf function\n");
+			if (ld)
+				tty_ldisc_deref(ld);
 			return -1;
 		}
 		if (mp->ttyinstop) {
 #if defined(_DEBUG_DATAFLOW) || defined(_DEBUG_TTYFUNCS)
 			printk(KERN_DEBUG "capi: recv tty throttled\n");
 #endif
+			tty_ldisc_deref(ld);
 			return -1;
 		}
-		if (mp->tty->ldisc.receive_room &&
-		    mp->tty->ldisc.receive_room(mp->tty) < datalen) {
+		if (ld->receive_room &&
+		    ld->receive_room(mp->tty) < datalen) {
 #if defined(_DEBUG_DATAFLOW) || defined(_DEBUG_TTYFUNCS)
 			printk(KERN_DEBUG "capi: no room in tty\n");
 #endif
+			tty_ldisc_deref(ld);
 			return -1;
 		}
 		if ((nskb = gen_data_b3_resp_for(mp, skb)) == 0) {
 			printk(KERN_ERR "capi: gen_data_b3_resp failed\n");
+			tty_ldisc_deref(ld);
 			return -1;
 		}
 		datahandle = CAPIMSG_U16(skb->data,CAPIMSG_BASELEN+4);
@@ -493,6 +499,7 @@ static int handle_recv_skb(struct capiminor *mp, struct sk_buff *skb)
 			printk(KERN_ERR "capi: send DATA_B3_RESP failed=%x\n",
 					errcode);
 			kfree_skb(nskb);
+			tty_ldisc_deref(ld);
 			return -1;
 		}
 		(void)skb_pull(skb, CAPIMSG_LEN(skb->data));
@@ -500,7 +507,8 @@ static int handle_recv_skb(struct capiminor *mp, struct sk_buff *skb)
 		printk(KERN_DEBUG "capi: DATA_B3_RESP %u len=%d => ldisc\n",
 					datahandle, skb->len);
 #endif
-		mp->tty->ldisc.receive_buf(mp->tty, skb->data, 0, skb->len);
+		ld->receive_buf(mp->tty, skb->data, 0, skb->len);
+		tty_ldisc_deref(ld);
 		kfree_skb(skb);
 		return 0;
 
@@ -684,8 +692,13 @@ static void capi_signal(u16 applid, void *param)
 		kfree_skb(skb);
 		(void)capiminor_del_ack(mp, datahandle);
 		if (mp->tty) {
-			if (mp->tty->ldisc.write_wakeup)
-				mp->tty->ldisc.write_wakeup(mp->tty);
+			struct tty_ldisc *ld;
+
+			if ((ld = tty_ldisc_ref(mp->tty)) != NULL) {
+				if (ld->write_wakeup)
+					ld->write_wakeup(mp->tty);
+				tty_ldisc_deref(ld);
+			}
 		} else {
 			wake_up_interruptible(&mp->sendwait);
 		}

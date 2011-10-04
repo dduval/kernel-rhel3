@@ -284,6 +284,8 @@ EXPORT_SYMBOL(ip_dev_find);
 EXPORT_SYMBOL(inetdev_by_index);
 EXPORT_SYMBOL(in_dev_finish_destroy);
 EXPORT_SYMBOL(ip_defrag);
+EXPORT_SYMBOL(ip_defrag_user_id_alloc);
+EXPORT_SYMBOL(ip_defrag_user_id_free);
 EXPORT_SYMBOL(inet_peer_idlock);
 
 /* Route manipulation */

@@ -235,17 +235,16 @@ void __init cpu_init (void)
 	/*
 	 * set up and load the per-CPU TSS
 	 */
-	estack = (char *)boot_exception_stacks + EXCEPTION_STKSZ;
+	estack = boot_exception_stacks + EXCEPTION_STKSZ;
 	for (v = 0; v < N_EXCEPTION_STACKS; v++) {
-		if(cpu == 0) {
-			t->ist[v] = estack;
+		if (cpu == 0) {
+			t->ist[v] = (u64)estack;
 			estack += EXCEPTION_STKSZ;
-		}
-		else {
-			estack = __get_free_pages(GFP_ATOMIC, EXCEPTION_STK_ORDER);
-			if(!estack) 
-				panic("Can't allocate exception stack %d for CPU %d\n", v, cpu);
-			t->ist[v] = estack + EXCEPTION_STKSZ;		
+		} else {
+			estack = (char *)__get_free_pages(GFP_ATOMIC, EXCEPTION_STK_ORDER);
+			if (!estack)
+				panic("Can't allocate exception stack %ld for CPU %d\n", v, cpu);
+			t->ist[v] = (u64)estack + EXCEPTION_STKSZ;		
 		}
 	}
 

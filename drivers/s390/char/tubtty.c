@@ -448,10 +448,7 @@ tty3270_flush_buffer(struct tty_struct *tty)
 		ob->bc_cnt = 0;
 		TUBUNLOCK(tubp->irq, flags);
 	}
-	wake_up_interruptible(&tty->write_wait);
-	if ((tty->flags & (1 << TTY_DO_WRITE_WAKEUP)) &&
-	    tty->ldisc.write_wakeup)
-		(tty->ldisc.write_wakeup)(tty);
+	tty_wakeup(tty);
 }
 
 static int
@@ -649,10 +646,7 @@ tty3270_bh(void *data)
 	}
 
 	if (tty != NULL) {
-		if ((tty->flags & (1 << TTY_DO_WRITE_WAKEUP)) &&
-		    tty->ldisc.write_wakeup != NULL)
-			(tty->ldisc.write_wakeup)(tty);
-		wake_up_interruptible(&tty->write_wait);
+		tty_wakeup(tty);
 	}
 do_unlock:
 	TUBUNLOCK(tubp->irq, flags);

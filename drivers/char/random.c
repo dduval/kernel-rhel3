@@ -1885,6 +1885,8 @@ static int poolsize_strategy(ctl_table *table, int *name, int nlen,
 	 */
 	if (newval && newlen) {
 		len = newlen;
+		if (len < 0)
+			return -EINVAL;
 		if (len > table->maxlen)
 			len = table->maxlen;
 		if (copy_from_user(table->data, newval, len))

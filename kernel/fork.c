@@ -1005,6 +1005,10 @@ struct task_struct *copy_process(unsigned long clone_flags,
 	} else
 		link_pid(p, p->pids + PIDTYPE_TGID, &p->group_leader->pids[PIDTYPE_TGID].pid);
 
+	/* clear controlling tty of new task if parent's was just cleared */
+	if (!current->tty && p->tty)
+		p->tty = NULL;
+
 	nr_threads++;
 	write_unlock_irq(&tasklist_lock);
 	retval = 0;

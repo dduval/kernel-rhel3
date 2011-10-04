@@ -1328,12 +1328,7 @@ static void port_softint(void *private)
 	if (!tty)
 		return;
 
-	if ((tty->flags & (1 << TTY_DO_WRITE_WAKEUP)) && tty->ldisc.write_wakeup) {
-		dbg("%s - write wakeup call.", __FUNCTION__);
-		(tty->ldisc.write_wakeup)(tty);
-	}
-
-	wake_up_interruptible(&tty->write_wait);
+	tty_wakeup(tty);
 }
 
 

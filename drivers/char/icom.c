@@ -1344,11 +1344,9 @@ static void icom_close(struct tty_struct * tty, struct file * filp)
         tty->driver.flush_buffer(tty);
         spin_lock_irqsave(&icom_lock,flags);
     }
-    if (tty->ldisc.flush_buffer) {
-        spin_unlock_irqrestore(&icom_lock,flags);
-        tty->ldisc.flush_buffer(tty);
-        spin_lock_irqsave(&icom_lock,flags);
-    }
+    spin_unlock_irqrestore(&icom_lock,flags);
+    tty_ldisc_flush(tty);
+    spin_lock_irqsave(&icom_lock,flags);
     tty->closing = 0;
     icom_port_info->event = 0;
     icom_port_info->tty = 0;
@@ -2664,9 +2662,7 @@ static void do_softint(void *private_)
         return;
 
     if (test_and_clear_bit(0, &info->event)) {
-        if ((tty->flags & (1 << TTY_DO_WRITE_WAKEUP)) && tty->ldisc.write_wakeup)
-            (tty->ldisc.write_wakeup)(tty);
-        wake_up_interruptible(&tty->write_wait);
+        tty_wakeup(tty);
         trace_nolock(info, TRACE_WAKEUP,0);
     }
 }

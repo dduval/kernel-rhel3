@@ -2444,7 +2444,7 @@ int filemap_sync(struct vm_area_struct * vma, unsigned long address,
 	unsigned long end = address + size;
 	int error = 0;
 
-	if ((vma->vm_flags & VM_HUGETLB) || address < vma->vm_start || end >= vma->vm_end)
+	if ((vma->vm_flags & VM_HUGETLB) || address < vma->vm_start || end > vma->vm_end)
 		return error;
 
 	/* Aquire the lock early; it may be possible to avoid dropping

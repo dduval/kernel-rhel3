@@ -98,6 +98,7 @@ int exec_usermodehelper(char *program_path, char *argv[], char *envp[])
 	struct task_struct *curtask = current;
 
 	set_special_pids(1, 1);
+	curtask->tty = NULL;
 
 	use_init_fs_context();
 

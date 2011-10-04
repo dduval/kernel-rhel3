@@ -1293,3 +1293,4 @@ sys_call_table:
 	data8 ia64_ni_syscall
 	data8 ia64_ni_syscall
 	data8 ia64_ni_syscall
+	data8 ia64_ni_syscall

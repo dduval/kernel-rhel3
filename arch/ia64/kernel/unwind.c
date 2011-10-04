@@ -1910,7 +1910,7 @@ unw_unwind (struct unw_frame_info *info)
 int
 unw_unwind_to_user (struct unw_frame_info *info)
 {
-	unsigned long ip;
+	unsigned long ip, sp;
 
 	while (unw_unwind(info) >= 0) {
 		if (unw_get_rp(info, &ip) < 0) {
@@ -1923,6 +1923,9 @@ unw_unwind_to_user (struct unw_frame_info *info)
 		 * We don't have unwind info for the gate page, so we consider that part
 		 * of user-space for the purpose of unwinding.
 		 */
+		unw_get_sp(info, &sp);
+		if (sp >= (unsigned long)info->task + IA64_STK_OFFSET)
+			break;
 		if (ip < GATE_ADDR + PAGE_SIZE)
 			return 0;
 	}

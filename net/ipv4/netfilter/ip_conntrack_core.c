@@ -831,7 +831,10 @@ unsigned int ip_conntrack_in(unsigned int hooknum,
 
 	/* Gather fragments. */
 	if ((*pskb)->nh.iph->frag_off & htons(IP_MF|IP_OFFSET)) {
-		*pskb = ip_ct_gather_frags(*pskb);
+		*pskb = ip_ct_gather_frags(*pskb,
+		                           hooknum == NF_IP_PRE_ROUTING ?
+		                           IP_DEFRAG_CONNTRACK_IN :
+		                           IP_DEFRAG_CONNTRACK_OUT);
 		if (!*pskb)
 			return NF_STOLEN;
 	}
@@ -1192,19 +1195,20 @@ void ip_ct_refresh(struct ip_conntrack *ct, unsigned long extra_jiffies)
 
 /* Returns new sk_buff, or NULL */
 struct sk_buff *
-ip_ct_gather_frags(struct sk_buff *skb)
+ip_ct_gather_frags(struct sk_buff *skb, u_int32_t user)
 {
 	struct sock *sk = skb->sk;
 #ifdef CONFIG_NETFILTER_DEBUG
 	unsigned int olddebug = skb->nf_debug;
 #endif
+
 	if (sk) {
 		sock_hold(sk);
 		skb_orphan(skb);
 	}
 
 	local_bh_disable(); 
-	skb = ip_defrag(skb);
+	skb = ip_defrag(skb, user);
 	local_bh_enable();
 
 	if (!skb) {

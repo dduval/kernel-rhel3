@@ -632,13 +632,7 @@ void sendBuffers(u8 port, HvLpIndex lp)
 			pov->overflowMessage = 0;
 
 		if (port_info[port].tty) {
-			if ((port_info[port].tty->
-			     flags & (1 << TTY_DO_WRITE_WAKEUP))
-			    && (port_info[port].tty->ldisc.write_wakeup))
-				(port_info[port].tty->ldisc.
-				 write_wakeup) (port_info[port].tty);
-			wake_up_interruptible(&port_info[port].tty->
-					      write_wait);
+			tty_wakeup(port_info[port].tty);
 		}
 	}
 

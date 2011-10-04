@@ -323,7 +323,11 @@ struct tss_struct {
 	u32 reserved4;
 	u16 reserved5;
 	u16 io_map_base;
-	u32 io_bitmap[IO_BITMAP_SIZE];
+	u32 io_bitmap[IO_BITMAP_SIZE+1];
+	/*
+	 * pads the TSS to be cacheline-aligned (size is 0x100)
+	 */
+	u32 __cacheline_filler[5];
 } __attribute__((packed)) ____cacheline_aligned;
 
 struct thread_struct {

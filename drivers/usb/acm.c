@@ -281,14 +281,10 @@ static void acm_write_bulk(struct urb *urb)
 static void acm_softint(void *private)
 {
 	struct acm *acm = private;
-	struct tty_struct *tty = acm->tty;
 
 	if (!ACM_READY(acm)) return;
 
-	if ((tty->flags & (1 << TTY_DO_WRITE_WAKEUP)) && tty->ldisc.write_wakeup)
-		(tty->ldisc.write_wakeup)(tty);
-
-	wake_up_interruptible(&tty->write_wait);
+	tty_wakeup(acm->tty);
 }
 
 /*

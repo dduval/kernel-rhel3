@@ -67,7 +67,7 @@ static void sab8253x_flush_to_ldiscS(void *private_) /* need a separate version 
 		skb = skb_dequeue(port->sab8253xc_rcvbuflist);
 		count = skb->data_len;
 		cp = skb->data;
-		(*tty->ldisc.receive_buf)(tty, cp, 0, count);
+		tty_ldisc_receive_buf(tty, cp, 0, count);
 		dev_kfree_skb_any(skb);
 	}
 	port->DoingInterrupt = 0;
@@ -1108,10 +1108,7 @@ void sab8253x_closeS(struct tty_struct *tty, struct file * filp)
 	{
 		tty->driver.flush_buffer(tty);
 	}
-	if (tty->ldisc.flush_buffer)
-	{
-		tty->ldisc.flush_buffer(tty);
-	}
+	tty_ldisc_flush(tty);
 	tty->closing = 0;
 	port->event = 0;
 	port->tty = 0;

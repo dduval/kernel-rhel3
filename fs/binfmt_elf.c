@@ -488,7 +488,7 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 	struct elf_phdr * elf_ppnt, *elf_phdata;
 	unsigned long elf_bss, k, elf_brk;
 	int elf_exec_fileno;
-	int retval, i;
+	int retval, i, dumpable = 1;
 	unsigned int size;
 	unsigned long elf_entry, interp_load_addr = 0;
 	unsigned long start_code, end_code, start_data, end_data;
@@ -607,6 +607,8 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 			retval = PTR_ERR(interpreter);
 			if (IS_ERR(interpreter))
 				goto out_free_interp;
+			if (permission(interpreter->f_dentry->d_inode, MAY_READ) != 0)
+				dumpable = 0;
 			retval = kernel_read(interpreter, 0, bprm->buf, BINPRM_BUF_SIZE);
 			if (retval != BINPRM_BUF_SIZE) {
 				if (retval >= 0)
@@ -704,6 +706,8 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 	retval = flush_old_exec(bprm);
 	if (retval)
 		goto out_free_dentry;
+	if (!dumpable)
+		current->mm->dumpable = 0;
 	current->flags |= relocexec;
 
 #ifdef __i386__
@@ -987,7 +991,7 @@ out_free_ph:
 
 static int load_elf_library(struct file *file)
 {
-	struct elf_phdr *elf_phdata;
+	struct elf_phdr *elf_phdata, *elf_phdata_save;
 	unsigned long elf_bss, bss, len;
 	int retval, error, i, j;
 	struct elfhdr elf_ex;
@@ -1015,6 +1019,7 @@ static int load_elf_library(struct file *file)
 	if (!elf_phdata)
 		goto out;
 
+	elf_phdata_save = elf_phdata;
 	error = -ENOEXEC;
 	retval = kernel_read(file, elf_ex.e_phoff, (char *) elf_phdata, j);
 	if (retval != j)
@@ -1051,7 +1056,7 @@ static int load_elf_library(struct file *file)
 	error = 0;
 
 out_free_ph:
-	kfree(elf_phdata);
+	kfree(elf_phdata_save);
 out:
 	return error;
 }

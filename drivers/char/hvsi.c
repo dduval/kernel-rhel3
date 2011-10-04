@@ -984,11 +984,7 @@ static void hvsi_write_worker(unsigned long arg)
 #endif /* DEBUG */
 
 		wake_up_all(&hp->emptyq);
-		if (test_bit(TTY_DO_WRITE_WAKEUP, &hp->tty->flags)
-				&& hp->tty->ldisc.write_wakeup) {
-			hp->tty->ldisc.write_wakeup(hp->tty);
-		}
-		wake_up_interruptible(&hp->tty->write_wait);
+		tty_wakeup(&hp->tty);
 	}
 
 	spin_unlock_irqrestore(&hp->lock, flags);
