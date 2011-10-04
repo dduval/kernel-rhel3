@@ -1197,9 +1197,11 @@ smb_proc_read(struct inode *inode, off_t offset, int count, char *data)
 	data_len = WVAL(buf, 1);
 
 	/* we can NOT simply trust the data_len given by the server ... */
-	if (data_len > server->packet_size - (buf+3 - server->packet)) {
+	if (data_len > count ||
+	    data_len > server->packet_size - (buf+3 - server->packet)) {
 		printk(KERN_ERR "smb_proc_read: invalid data length!! "
-		       "%d > %d - (%p - %p)\n",
+		       "%d > %d || %d > %d - (%p - %p)\n",
+		       data_len, count,
 		       data_len, server->packet_size, buf+3, server->packet);
 		result = -EIO;
 		goto out;

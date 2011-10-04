@@ -198,7 +198,8 @@ ubsec_sslmac(
 
   /* Grab Data From User Space */
   
-  copy_from_user(&IOInfo, pIOInfo, sizeof(ubsec_sslmac_io_t));
+  if (copy_from_user(&IOInfo, pIOInfo, sizeof(ubsec_sslmac_io_t)))
+    return -EFAULT;
   
 #if 0
   PRINTK("content type = %d\n", IOInfo.ContentType);
@@ -218,7 +219,7 @@ ubsec_sslmac(
   
   if(SourceBufferBytes > MAX_FILE_SIZE) {
     PRINTK("input file too large <%d,%d>\n", SourceBufferBytes, MAX_FILE_SIZE);
-    error = EINVAL;
+    error = -EINVAL;
     return(error);
   }
 
@@ -275,7 +276,10 @@ ubsec_sslmac(
     error = UBSEC_STATUS_NO_RESOURCE;
     goto ReturnErrorLabel;
   }
-  copy_from_user(pKernSourceBuffer, pUserSourceBuffer, SourceBufferBytes);
+  if (copy_from_user(pKernSourceBuffer, pUserSourceBuffer, SourceBufferBytes)) {
+    error = -EFAULT;
+    goto ReturnErrorLabel;
+  }
 
   /* Assemble Destination Fragment */
 
@@ -329,24 +333,24 @@ ubsec_sslmac(
   case UBSEC_STATUS_TIMEOUT:
     PRINTK(" ubsec_SslCommand() timeout\n");
     ubsec_ResetDevice(pContext);
-    error = ETIMEDOUT;
+    error = -ETIMEDOUT;
     goto ReturnErrorLabel;
     break;
     
   case UBSEC_STATUS_INVALID_PARAMETER:
     PRINTK("  ubsec_SslCommand() invalid parameter\n");
-    error = EINVAL;
+    error = -EINVAL;
     goto ReturnErrorLabel;
     break;
     
   case UBSEC_STATUS_NO_RESOURCE:
     PRINTK(" ubsec_SslCommand() no resource. Number done: %d\n", NumCommands);
-    error = ENOBUFS;
+    error = -ENOBUFS;
     goto ReturnErrorLabel;
     break;
     
   default:
-    error = ENOMSG;
+    error = -ENOMSG;
     goto ReturnErrorLabel;
     break;
   }
@@ -357,7 +361,7 @@ ubsec_sslmac(
     Gotosleep(&pCommandContext->WaitQ);
     if (!pCommandContext->CallBackStatus) {
               pCommandContext->Status=UBSEC_STATUS_TIMEOUT;
-      	      error = ETIMEDOUT;
+      	      error = -ETIMEDOUT;
       	      ubsec_ResetDevice(pContext);
       	      goto ReturnErrorLabel;
 
@@ -375,7 +379,7 @@ ubsec_sslmac(
 #endif
     
     if(delayTotalUs >= 3000000) {
-      error = ETIMEDOUT;
+      error = -ETIMEDOUT;
       ubsec_ResetDevice(pContext);
       goto ReturnErrorLabel;
     }
@@ -394,9 +398,15 @@ ubsec_sslmac(
 
   IOInfo.time_us = CommandContext.tv_start.tv_sec * 1000000 + CommandContext.tv_start.tv_usec;
   if(IOInfo.result_status == UBSEC_STATUS_SUCCESS) {
-    copy_to_user(IOInfo.HmacBuffer, pKernDestBuffer, DestBufferBytes);
+    if (copy_to_user(IOInfo.HmacBuffer, pKernDestBuffer, DestBufferBytes)) {
+      error = -EFAULT;
+      goto ReturnErrorLabel;
+    }
 #if 1
-    copy_to_user(pIOInfo, &IOInfo, sizeof(ubsec_sslmac_io_t));
+    if (copy_to_user(pIOInfo, &IOInfo, sizeof(ubsec_sslmac_io_t))) {
+      error = -EFAULT;
+      goto ReturnErrorLabel;
+    }
 #endif
   }
   

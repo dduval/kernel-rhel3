@@ -42,6 +42,7 @@ KeyCommandCopyin(unsigned long Command,
 		 unsigned char *KeyLoc,
 		 ubsec_FragmentInfo_pt pDSAMessageFragList)
 {
+  int error = 0;
 
   /*
    * Now we need to format the command for the SRL.
@@ -50,24 +51,24 @@ KeyCommandCopyin(unsigned long Command,
   switch (Command) {
   case UBSEC_DH_PUBLIC    :
   case UBSEC_DH_SHARED  :
-    if(ubsec_keysetup_Diffie_Hellman(Command, pSRLParams,
-					     pIOparams, KeyLoc) != 0)
-	return -EINVAL;
+    if((error = ubsec_keysetup_Diffie_Hellman(Command, pSRLParams,
+					     pIOparams, KeyLoc)) != 0)
+	return error;
     break;
 
   case UBSEC_RSA_PUBLIC  :
   case UBSEC_RSA_PRIVATE  : 
-   if( ubsec_keysetup_RSA(Command, pSRLParams,
-				  pIOparams, KeyLoc) != 0)
-	return -EINVAL;
+   if((error = ubsec_keysetup_RSA(Command, pSRLParams,
+				  pIOparams, KeyLoc)) != 0)
+	return error;
     break;
 
   case UBSEC_DSA_VERIFY: 
   case UBSEC_DSA_SIGN: 
-    if (ubsec_keysetup_DSA(Command, pSRLParams,
+    if ((error = ubsec_keysetup_DSA(Command, pSRLParams,
 			   pIOparams, KeyLoc, 
-			   pDSAMessageFragList) != 0) {
-      return UBSEC_STATUS_NO_RESOURCE;
+			   pDSAMessageFragList)) != 0) {
+      return error;
     }
     break;
 
@@ -76,7 +77,7 @@ KeyCommandCopyin(unsigned long Command,
     return -EINVAL;
   }
 
-return 0 ;
+return error;
 }
 
 /*
@@ -101,23 +102,26 @@ KeyCommandCopyout(unsigned long Command,
     pDHSRLparams=&pSRLParams->DHParams;
     pDHIOparams=&pIOparams->DHParams;
     pDHIOparams->K.KeyLength = pDHSRLparams->K.KeyLength; 
-    copy_to_user(pDHIOparams->K.KeyValue,
+    if (copy_to_user(pDHIOparams->K.KeyValue,
 		 &KeyLoc[MAX_KEY_BYTE_SIZE*DH_K_OFFSET],
-		 ROUNDUP_TO_32_BIT(pDHIOparams->K.KeyLength)/8);
+		 ROUNDUP_TO_32_BIT(pDHIOparams->K.KeyLength)/8))
+      return -EFAULT;
     break;
 
   case UBSEC_DH_PUBLIC:
     pDHSRLparams=&pSRLParams->DHParams;
     pDHIOparams=&pIOparams->DHParams;
     pDHIOparams->Y.KeyLength = pDHSRLparams->Y.KeyLength;
-    copy_to_user(pDHIOparams->Y.KeyValue,
+    if (copy_to_user(pDHIOparams->Y.KeyValue,
 		 &KeyLoc[MAX_KEY_BYTE_SIZE*DH_Y_OFFSET],
-		 ROUNDUP_TO_32_BIT(pDHIOparams->Y.KeyLength)/8);
+		 ROUNDUP_TO_32_BIT(pDHIOparams->Y.KeyLength)/8))
+      return -EFAULT;
 
     pDHIOparams->X.KeyLength = pDHSRLparams->X.KeyLength;
-    copy_to_user(pDHIOparams->X.KeyValue,
+    if (copy_to_user(pDHIOparams->X.KeyValue,
 		 &KeyLoc[MAX_KEY_BYTE_SIZE*DH_X_OFFSET],
-		 ROUNDUP_TO_32_BIT(pDHIOparams->X.KeyLength)/8);
+		 ROUNDUP_TO_32_BIT(pDHIOparams->X.KeyLength)/8))
+      return -EFAULT;
     break;
   case UBSEC_RSA_PUBLIC  :
   case UBSEC_RSA_PRIVATE  : 
@@ -125,9 +129,10 @@ KeyCommandCopyout(unsigned long Command,
     pRSAIOparams=&pIOparams->RSAParams;
     pRSAIOparams->OutputKeyInfo.KeyLength =
       pRSASRLparams->OutputKeyInfo.KeyLength;
-    copy_to_user(pRSAIOparams->OutputKeyInfo.KeyValue,
+    if (copy_to_user(pRSAIOparams->OutputKeyInfo.KeyValue,
 		 &KeyLoc[MAX_KEY_BYTE_SIZE*RSA_OUT_OFFSET],
-		 ROUNDUP_TO_32_BIT(pRSAIOparams->OutputKeyInfo.KeyLength)/8);
+		 ROUNDUP_TO_32_BIT(pRSAIOparams->OutputKeyInfo.KeyLength)/8))
+      return -EFAULT;
     break;
 
   case UBSEC_DSA_SIGN     : 
@@ -135,21 +140,23 @@ KeyCommandCopyout(unsigned long Command,
     pDSAIOparams=&pIOparams->DSAParams;
     pDSAIOparams->SigS.KeyLength = pDSASRLparams->SigS.KeyLength;
     pDSAIOparams->SigR.KeyLength = pDSASRLparams->SigR.KeyLength;
-    copy_to_user(pDSAIOparams->SigS.KeyValue,
+    if (copy_to_user(pDSAIOparams->SigS.KeyValue,
 		 &KeyLoc[MAX_KEY_BYTE_SIZE*DSA_S_OFFSET],
-		 ROUNDUP_TO_32_BIT(pDSAIOparams->SigS.KeyLength)/8);
-    copy_to_user(pDSAIOparams->SigR.KeyValue,
+		 ROUNDUP_TO_32_BIT(pDSAIOparams->SigS.KeyLength)/8)
+     || copy_to_user(pDSAIOparams->SigR.KeyValue,
 		 &KeyLoc[MAX_KEY_BYTE_SIZE*DSA_R_OFFSET],
-		 ROUNDUP_TO_32_BIT(pDSAIOparams->SigR.KeyLength)/8);
+		 ROUNDUP_TO_32_BIT(pDSAIOparams->SigR.KeyLength)/8))
+      return -EFAULT;
     break;
 
   case UBSEC_DSA_VERIFY   : 
     pDSAIOparams=&pIOparams->DSAParams;
     pDSASRLparams=&pSRLParams->DSAParams;
     pDSAIOparams->V.KeyLength = pDSASRLparams->V.KeyLength;
-    copy_to_user(pDSAIOparams->V.KeyValue,
+    if (copy_to_user(pDSAIOparams->V.KeyValue,
 		 &KeyLoc[MAX_KEY_BYTE_SIZE*DSA_V_OFFSET],
-		 ROUNDUP_TO_32_BIT(pDSAIOparams->V.KeyLength)/8);
+		 ROUNDUP_TO_32_BIT(pDSAIOparams->V.KeyLength)/8))
+      return -EFAULT;
     break;
   }
 return 0 ;
@@ -175,8 +182,9 @@ ubsec_keysetup_Diffie_Hellman(unsigned long command,
   /* Validation */
  CHECK_SIZE(pDHIOparams->N.KeyLength,MAX_KEY_LENGTH_BITS);
  CHECK_SIZE(pDHIOparams->Y.KeyLength,MAX_KEY_LENGTH_BITS);
-  copy_from_user( &KeyLoc[MAX_KEY_BYTE_SIZE*DH_N_OFFSET],pDHIOparams->N.KeyValue,
-	 ROUNDUP_TO_32_BIT(pDHIOparams->N.KeyLength)/8);
+  if (copy_from_user( &KeyLoc[MAX_KEY_BYTE_SIZE*DH_N_OFFSET],pDHIOparams->N.KeyValue,
+	 ROUNDUP_TO_32_BIT(pDHIOparams->N.KeyLength)/8))
+    return -EFAULT;
   pDHSRLparams->N.KeyValue=(void *)&KeyLoc[MAX_KEY_BYTE_SIZE*DH_N_OFFSET];
   pDHSRLparams->N.KeyLength = pDHIOparams->N.KeyLength;
 
@@ -190,14 +198,16 @@ ubsec_keysetup_Diffie_Hellman(unsigned long command,
     /* Validation of the Length */
     CHECK_SIZE(pDHIOparams->K.KeyLength,MAX_KEY_LENGTH_BITS);
     CHECK_SIZE(pDHIOparams->X.KeyLength,MAX_KEY_LENGTH_BITS);
-    copy_from_user(&KeyLoc[MAX_KEY_BYTE_SIZE*DH_Y_OFFSET],pDHIOparams->Y.KeyValue,
-	   ROUNDUP_TO_32_BIT(pDHIOparams->Y.KeyLength)/8);
+    if (copy_from_user(&KeyLoc[MAX_KEY_BYTE_SIZE*DH_Y_OFFSET],pDHIOparams->Y.KeyValue,
+	   ROUNDUP_TO_32_BIT(pDHIOparams->Y.KeyLength)/8))
+      return -EFAULT;
 
     /*
      * Copy in our secret value x. 
      */
-    copy_from_user(&KeyLoc[MAX_KEY_BYTE_SIZE*DH_X_OFFSET],pDHIOparams->X.KeyValue,
-	   ROUNDUP_TO_32_BIT(pDHIOparams->X.KeyLength)/8);
+    if (copy_from_user(&KeyLoc[MAX_KEY_BYTE_SIZE*DH_X_OFFSET],pDHIOparams->X.KeyValue,
+	   ROUNDUP_TO_32_BIT(pDHIOparams->X.KeyLength)/8))
+      return -EFAULT;
     pDHSRLparams->X.KeyLength = pDHIOparams->X.KeyLength;
 	/*
 	 * Output parameter is the shared key. Must represent integral
@@ -214,8 +224,9 @@ ubsec_keysetup_Diffie_Hellman(unsigned long command,
     /* Validation of the Length */
     CHECK_SIZE(pDHIOparams->G.KeyLength,MAX_KEY_LENGTH_BITS);
 
-    copy_from_user( &KeyLoc[MAX_KEY_BYTE_SIZE*DH_G_OFFSET],pDHIOparams->G.KeyValue,
-	   ROUNDUP_TO_32_BIT(pDHIOparams->G.KeyLength)/8);
+    if (copy_from_user( &KeyLoc[MAX_KEY_BYTE_SIZE*DH_G_OFFSET],pDHIOparams->G.KeyValue,
+	   ROUNDUP_TO_32_BIT(pDHIOparams->G.KeyLength)/8))
+      return -EFAULT;
     pDHSRLparams->G.KeyValue=(void *)(&KeyLoc[MAX_KEY_BYTE_SIZE*DH_G_OFFSET]);
     pDHSRLparams->G.KeyLength = pDHIOparams->G.KeyLength;
     pDHSRLparams->RNGEnable=pDHIOparams->RNGEnable;
@@ -229,8 +240,9 @@ ubsec_keysetup_Diffie_Hellman(unsigned long command,
 
       CHECK_SIZE(pDHIOparams->UserX.KeyLength,MAX_KEY_LENGTH_BITS);
 
-      copy_from_user(&KeyLoc[MAX_KEY_BYTE_SIZE*DH_USERX_OFFSET],pDHIOparams->UserX.KeyValue,
-	     ROUNDUP_TO_32_BIT(pDHIOparams->UserX.KeyLength)/8);
+      if (copy_from_user(&KeyLoc[MAX_KEY_BYTE_SIZE*DH_USERX_OFFSET],pDHIOparams->UserX.KeyValue,
+	     ROUNDUP_TO_32_BIT(pDHIOparams->UserX.KeyLength)/8))
+        return -EFAULT;
       pDHSRLparams->UserX.KeyValue=(void *)
 	(&KeyLoc[MAX_KEY_BYTE_SIZE*DH_USERX_OFFSET]);
       pDHSRLparams->UserX.KeyLength = pDHIOparams->UserX.KeyLength;
@@ -288,8 +300,9 @@ ubsec_keysetup_RSA(unsigned long command, ubsec_KeyCommandParams_pt pSRLparams,
   CHECK_SIZE(pRSAIOparams->InputKeyInfo.KeyLength,MAX_KEY_LENGTH_BITS);
   CHECK_SIZE(pRSAIOparams->OutputKeyInfo.KeyLength,MAX_KEY_LENGTH_BITS);
 
-  copy_from_user(&KeyLoc[MAX_KEY_BYTE_SIZE*RSA_IN_OFFSET],pRSAIOparams->InputKeyInfo.KeyValue,
-	 ROUNDUP_TO_32_BIT(pRSAIOparams->InputKeyInfo.KeyLength)/8);
+  if (copy_from_user(&KeyLoc[MAX_KEY_BYTE_SIZE*RSA_IN_OFFSET],pRSAIOparams->InputKeyInfo.KeyValue,
+	 ROUNDUP_TO_32_BIT(pRSAIOparams->InputKeyInfo.KeyLength)/8))
+    return -EFAULT;
 
   /*
    * Output buffer will have to be corrected to be an integral number of 
@@ -305,16 +318,18 @@ ubsec_keysetup_RSA(unsigned long command, ubsec_KeyCommandParams_pt pSRLparams,
     CHECK_SIZE(pRSAIOparams->ModN.KeyLength,MAX_KEY_LENGTH_BITS);
     CHECK_SIZE(pRSAIOparams->ExpE.KeyLength,MAX_KEY_LENGTH_BITS);
 
-    copy_from_user(&KeyLoc[MAX_KEY_BYTE_SIZE*RSA_N_OFFSET],pRSAIOparams->ModN.KeyValue,
-	   ROUNDUP_TO_32_BIT(pRSAIOparams->ModN.KeyLength)/8);
+    if (copy_from_user(&KeyLoc[MAX_KEY_BYTE_SIZE*RSA_N_OFFSET],pRSAIOparams->ModN.KeyValue,
+	   ROUNDUP_TO_32_BIT(pRSAIOparams->ModN.KeyLength)/8))
+      return -EFAULT;
     pRSASRLparams->ModN.KeyValue=
       (void *)(&KeyLoc[MAX_KEY_BYTE_SIZE*RSA_N_OFFSET]);
     pRSASRLparams->ModN.KeyLength = pRSAIOparams->ModN.KeyLength;
 
 
     pRSASRLparams->OutputKeyInfo.KeyLength=pRSAIOparams->OutputKeyInfo.KeyLength;
-    copy_from_user( &KeyLoc[MAX_KEY_BYTE_SIZE*RSA_E_OFFSET],pRSAIOparams->ExpE.KeyValue,
-	   ROUNDUP_TO_32_BIT(pRSAIOparams->ExpE.KeyLength)/8);
+    if (copy_from_user( &KeyLoc[MAX_KEY_BYTE_SIZE*RSA_E_OFFSET],pRSAIOparams->ExpE.KeyValue,
+	   ROUNDUP_TO_32_BIT(pRSAIOparams->ExpE.KeyLength)/8))
+      return -EFAULT;
     pRSASRLparams->ExpE.KeyValue= (void *)(&KeyLoc[MAX_KEY_BYTE_SIZE*RSA_E_OFFSET]);
     pRSASRLparams->ExpE.KeyLength = pRSAIOparams->ExpE.KeyLength;
     pRSASRLparams->InputKeyInfo.KeyLength = pRSAIOparams->InputKeyInfo.KeyLength;
@@ -325,26 +340,31 @@ ubsec_keysetup_RSA(unsigned long command, ubsec_KeyCommandParams_pt pSRLparams,
     CHECK_SIZE(pRSAIOparams->PrimeEdp.KeyLength,MAX_RSA_PRIVATE_KEY_LENGTH_BITS);
     CHECK_SIZE(pRSAIOparams->PrimeEdq.KeyLength,MAX_RSA_PRIVATE_KEY_LENGTH_BITS);
     CHECK_SIZE(pRSAIOparams->Pinv.KeyLength,MAX_RSA_PRIVATE_KEY_LENGTH_BITS);
-    copy_from_user( &KeyLoc[MAX_KEY_BYTE_SIZE*RSA_P_OFFSET],pRSAIOparams->PrimeP.KeyValue,
-	   ROUNDUP_TO_32_BIT(pRSAIOparams->PrimeP.KeyLength)/8);
+    if (copy_from_user( &KeyLoc[MAX_KEY_BYTE_SIZE*RSA_P_OFFSET],pRSAIOparams->PrimeP.KeyValue,
+	   ROUNDUP_TO_32_BIT(pRSAIOparams->PrimeP.KeyLength)/8))
+      return -EFAULT;
     pRSASRLparams->PrimeP.KeyValue= (void *)(&KeyLoc[MAX_KEY_BYTE_SIZE*RSA_P_OFFSET]);
     pRSASRLparams->PrimeP.KeyLength = pRSAIOparams->PrimeP.KeyLength;
-    copy_from_user( &KeyLoc[MAX_KEY_BYTE_SIZE*RSA_Q_OFFSET],pRSAIOparams->PrimeQ.KeyValue,
-	   ROUNDUP_TO_32_BIT(pRSAIOparams->PrimeQ.KeyLength)/8);
+    if (copy_from_user( &KeyLoc[MAX_KEY_BYTE_SIZE*RSA_Q_OFFSET],pRSAIOparams->PrimeQ.KeyValue,
+	   ROUNDUP_TO_32_BIT(pRSAIOparams->PrimeQ.KeyLength)/8))
+      return -EFAULT;
     pRSASRLparams->PrimeQ.KeyValue = (void *)(&KeyLoc[MAX_KEY_BYTE_SIZE*RSA_Q_OFFSET]);
     pRSASRLparams->PrimeQ.KeyLength = pRSAIOparams->PrimeQ.KeyLength;
-    copy_from_user( &KeyLoc[MAX_KEY_BYTE_SIZE*RSA_EDP_OFFSET],pRSAIOparams->PrimeEdp.KeyValue,
-	   ROUNDUP_TO_32_BIT(pRSAIOparams->PrimeEdp.KeyLength)/8);
+    if (copy_from_user( &KeyLoc[MAX_KEY_BYTE_SIZE*RSA_EDP_OFFSET],pRSAIOparams->PrimeEdp.KeyValue,
+	   ROUNDUP_TO_32_BIT(pRSAIOparams->PrimeEdp.KeyLength)/8))
+      return -EFAULT;
     pRSASRLparams->PrimeEdp.KeyValue=
       (void *)(&KeyLoc[MAX_KEY_BYTE_SIZE*RSA_EDP_OFFSET]);
     pRSASRLparams->PrimeEdp.KeyLength = pRSAIOparams->PrimeEdp.KeyLength;
-    copy_from_user( &KeyLoc[MAX_KEY_BYTE_SIZE*RSA_EDQ_OFFSET],pRSAIOparams->PrimeEdq.KeyValue,
-	   ROUNDUP_TO_32_BIT(pRSAIOparams->PrimeEdq.KeyLength)/8);
+    if (copy_from_user( &KeyLoc[MAX_KEY_BYTE_SIZE*RSA_EDQ_OFFSET],pRSAIOparams->PrimeEdq.KeyValue,
+	   ROUNDUP_TO_32_BIT(pRSAIOparams->PrimeEdq.KeyLength)/8))
+      return -EFAULT;
     pRSASRLparams->PrimeEdq.KeyValue=
       (void *)(&KeyLoc[MAX_KEY_BYTE_SIZE*RSA_EDQ_OFFSET]);
     pRSASRLparams->PrimeEdq.KeyLength = pRSAIOparams->PrimeEdq.KeyLength;
-    copy_from_user( &KeyLoc[MAX_KEY_BYTE_SIZE*RSA_PINV_OFFSET],pRSAIOparams->Pinv.KeyValue,
-	   ROUNDUP_TO_32_BIT(pRSAIOparams->Pinv.KeyLength)/8);
+    if (copy_from_user( &KeyLoc[MAX_KEY_BYTE_SIZE*RSA_PINV_OFFSET],pRSAIOparams->Pinv.KeyValue,
+	   ROUNDUP_TO_32_BIT(pRSAIOparams->Pinv.KeyLength)/8))
+      return -EFAULT;
     pRSASRLparams->Pinv.KeyValue= (void *)(&KeyLoc[MAX_KEY_BYTE_SIZE*RSA_PINV_OFFSET]);
     pRSASRLparams->Pinv.KeyLength = pRSAIOparams->Pinv.KeyLength;
 
@@ -376,7 +396,8 @@ ubsec_keysetup_DSA(unsigned long command,
   ubsec_FragmentInfo_t IOInputFragment; /* Local (single IOCTL input) fragment for DSA */
 
   /* Copy single IOCTL fragment info into local copy */
-  copy_from_user( &IOInputFragment,pDSAIOparams->InputFragments,sizeof(IOInputFragment));
+  if (copy_from_user( &IOInputFragment,pDSAIOparams->InputFragments,sizeof(IOInputFragment)))
+    return -EFAULT;
   pDSAIOparams->InputFragments = &IOInputFragment;   /* points to local (single) fragment descriptor    */
   pDSASRLparams->InputFragments = pMessageFragList;      /* points back to calling fragment list */
 
@@ -385,8 +406,9 @@ ubsec_keysetup_DSA(unsigned long command,
    */
   pDSASRLparams->HashEnable = pDSAIOparams->HashEnable;
 
-  copy_from_user( &KeyLoc[MAX_KEY_BYTE_SIZE*DSA_IN_OFFSET],(void *)pDSAIOparams->InputFragments->FragmentAddress,
-		  pDSAIOparams->InputFragments->FragmentLength);
+  if (copy_from_user( &KeyLoc[MAX_KEY_BYTE_SIZE*DSA_IN_OFFSET],(void *)pDSAIOparams->InputFragments->FragmentAddress,
+		  pDSAIOparams->InputFragments->FragmentLength))
+    return -EFAULT;
   
   /* Sync the input message DMA memory so that the CryptoNetX device can access it.  */
   /***********************************************************************************/
@@ -408,40 +430,44 @@ ubsec_keysetup_DSA(unsigned long command,
 							    &KeyLoc[MAX_KEY_BYTE_SIZE*DSA_IN_OFFSET],
 							    pDSAIOparams->InputFragments->FragmentLength)) == 0) {
     /* Input message for DSA requires too many fragments; return error code */
-    return -1;
+    return UBSEC_STATUS_NO_RESOURCE;
   }
   for (i=0;i<(pDSASRLparams->NumInputFragments-1);i++) {
     if ((pDSASRLparams->InputFragments[i].FragmentLength)%64)
       /* Input message fragmentation for DSA violates CryptoNet requirements for fragment sizes */
-      return -1;
+      return UBSEC_STATUS_NO_RESOURCE;
   }
   
   /* If the message has already been hashed, the input hash must be 20 bytes and in a single fragment */
   if ( (!pDSAIOparams->HashEnable) && \
        ((pDSAIOparams->InputFragments->FragmentLength != 20) || (pDSASRLparams->NumInputFragments != 1)) )
-    return -1; 
+    return UBSEC_STATUS_NO_RESOURCE; 
   
   CHECK_SIZE(pDSAIOparams->ModQ.KeyLength,MAX_DSA_MODQ_LENGTH_BITS);
   CHECK_SIZE(pDSAIOparams->ModP.KeyLength,MAX_DSA_KEY_LENGTH_BITS);
   CHECK_SIZE(pDSAIOparams->BaseG.KeyLength,MAX_DSA_KEY_LENGTH_BITS);
   CHECK_SIZE(pDSAIOparams->Key.KeyLength,MAX_DSA_KEY_LENGTH_BITS);
 
-  copy_from_user( &KeyLoc[MAX_KEY_BYTE_SIZE*DSA_Q_OFFSET],pDSAIOparams->ModQ.KeyValue,
-	 ROUNDUP_TO_32_BIT(pDSAIOparams->ModQ.KeyLength)/8);
+  if (copy_from_user( &KeyLoc[MAX_KEY_BYTE_SIZE*DSA_Q_OFFSET],pDSAIOparams->ModQ.KeyValue,
+	 ROUNDUP_TO_32_BIT(pDSAIOparams->ModQ.KeyLength)/8))
+    return -EFAULT;
   pDSASRLparams->ModQ.KeyValue = (void *)(&KeyLoc[MAX_KEY_BYTE_SIZE*DSA_Q_OFFSET]);
   pDSASRLparams->ModQ.KeyLength = pDSAIOparams->ModQ.KeyLength;
 
-  copy_from_user( &KeyLoc[MAX_KEY_BYTE_SIZE*DSA_P_OFFSET],pDSAIOparams->ModP.KeyValue,
-	 ROUNDUP_TO_32_BIT(pDSAIOparams->ModP.KeyLength)/8);
+  if (copy_from_user( &KeyLoc[MAX_KEY_BYTE_SIZE*DSA_P_OFFSET],pDSAIOparams->ModP.KeyValue,
+	 ROUNDUP_TO_32_BIT(pDSAIOparams->ModP.KeyLength)/8))
+    return -EFAULT;
   pDSASRLparams->ModP.KeyValue = (void *)(&KeyLoc[MAX_KEY_BYTE_SIZE*DSA_P_OFFSET]);
   pDSASRLparams->ModP.KeyLength = pDSAIOparams->ModP.KeyLength;
-  copy_from_user( &KeyLoc[MAX_KEY_BYTE_SIZE*DSA_G_OFFSET],pDSAIOparams->BaseG.KeyValue,
-	 ROUNDUP_TO_32_BIT(pDSAIOparams->BaseG.KeyLength)/8);
+  if (copy_from_user( &KeyLoc[MAX_KEY_BYTE_SIZE*DSA_G_OFFSET],pDSAIOparams->BaseG.KeyValue,
+	 ROUNDUP_TO_32_BIT(pDSAIOparams->BaseG.KeyLength)/8))
+    return -EFAULT;
   pDSASRLparams->BaseG.KeyValue = (void *)(&KeyLoc[MAX_KEY_BYTE_SIZE*DSA_G_OFFSET]);
   pDSASRLparams->BaseG.KeyLength = pDSAIOparams->BaseG.KeyLength;
 
-  copy_from_user( &KeyLoc[MAX_KEY_BYTE_SIZE*DSA_KEY_OFFSET],pDSAIOparams->Key.KeyValue,
-	 ROUNDUP_TO_32_BIT(pDSAIOparams->Key.KeyLength)/8);
+  if (copy_from_user( &KeyLoc[MAX_KEY_BYTE_SIZE*DSA_KEY_OFFSET],pDSAIOparams->Key.KeyValue,
+	 ROUNDUP_TO_32_BIT(pDSAIOparams->Key.KeyLength)/8))
+    return -EFAULT;
   pDSASRLparams->Key.KeyValue = (void *)(&KeyLoc[MAX_KEY_BYTE_SIZE*DSA_KEY_OFFSET]);
   pDSASRLparams->Key.KeyLength = pDSAIOparams->Key.KeyLength;
 
@@ -458,8 +484,9 @@ ubsec_keysetup_DSA(unsigned long command,
     pDSASRLparams->RNGEnable=pDSAIOparams->RNGEnable;
     if (!pDSASRLparams->RNGEnable) {
       CHECK_SIZE(pDSAIOparams->Random.KeyLength,MAX_DSA_KEY_LENGTH_BITS);
-      copy_from_user(&KeyLoc[MAX_KEY_BYTE_SIZE*DSA_RAND_OFFSET],pDSAIOparams->Random.KeyValue,
-	     ROUNDUP_TO_32_BIT(pDSAIOparams->Random.KeyLength)/8);
+      if (copy_from_user(&KeyLoc[MAX_KEY_BYTE_SIZE*DSA_RAND_OFFSET],pDSAIOparams->Random.KeyValue,
+	     ROUNDUP_TO_32_BIT(pDSAIOparams->Random.KeyLength)/8))
+        return -EFAULT;
       pDSASRLparams->Random.KeyValue = (void *)
 	(&KeyLoc[MAX_KEY_BYTE_SIZE*DSA_RAND_OFFSET]);
       pDSASRLparams->Random.KeyLength = pDSAIOparams->Random.KeyLength;
@@ -479,11 +506,13 @@ ubsec_keysetup_DSA(unsigned long command,
      */
     CHECK_SIZE(pDSAIOparams->SigS.KeyLength,MAX_DSA_SIG_LENGTH_BITS);
     CHECK_SIZE(pDSAIOparams->SigR.KeyLength,MAX_DSA_SIG_LENGTH_BITS);
-    copy_from_user( &KeyLoc[MAX_KEY_BYTE_SIZE*DSA_S_OFFSET],pDSAIOparams->SigS.KeyValue,
-	   ROUNDUP_TO_32_BIT(pDSAIOparams->SigS.KeyLength)/8);
+    if (copy_from_user( &KeyLoc[MAX_KEY_BYTE_SIZE*DSA_S_OFFSET],pDSAIOparams->SigS.KeyValue,
+	   ROUNDUP_TO_32_BIT(pDSAIOparams->SigS.KeyLength)/8))
+      return -EFAULT;
     pDSASRLparams->SigS.KeyLength = pDSAIOparams->SigS.KeyLength;
-    copy_from_user( &KeyLoc[MAX_KEY_BYTE_SIZE*DSA_R_OFFSET],pDSAIOparams->SigR.KeyValue,
-	   ROUNDUP_TO_32_BIT(pDSAIOparams->SigR.KeyLength)/8);
+    if (copy_from_user( &KeyLoc[MAX_KEY_BYTE_SIZE*DSA_R_OFFSET],pDSAIOparams->SigR.KeyValue,
+	   ROUNDUP_TO_32_BIT(pDSAIOparams->SigR.KeyLength)/8))
+    return -EFAULT;
     pDSASRLparams->SigR.KeyLength = pDSAIOparams->SigR.KeyLength;
 
     /*

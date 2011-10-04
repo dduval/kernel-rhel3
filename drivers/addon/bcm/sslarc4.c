@@ -201,7 +201,8 @@ ubsec_sslarc4(
   
 #endif /* ifndef STATIC_ALLOC_OF_CRYPTO_BUFFERS */
 
-  copy_from_user(&IOInfo, pIOInfo, sizeof(ubsec_arc4_io_t));
+  if (copy_from_user(&IOInfo, pIOInfo, sizeof(ubsec_arc4_io_t)))
+    return -EFAULT;
   pUserSourceBuffer = IOInfo.SourceBuffer;
   SourceBufferBytes = IOInfo.SourceBufferBytes;
 
@@ -215,7 +216,7 @@ ubsec_sslarc4(
   
   if(SourceBufferBytes > MAX_FILE_SIZE) {
     PRINTK("input file too large <%d,%d>\n", SourceBufferBytes, MAX_FILE_SIZE);
-    error = EINVAL;
+    error = -EINVAL;
     return(error);
   }
   
@@ -287,7 +288,10 @@ ubsec_sslarc4(
     goto ReturnErrorLabel;
   }
   memset(pArc4Params->KeyStateIn,0, sizeof(ubsec_ARC4_State_t));
-  copy_from_user(pArc4Params->KeyStateIn, IOInfo.KeyStateInBuffer, sizeof(ubsec_ARC4_State_t));
+  if (copy_from_user(pArc4Params->KeyStateIn, IOInfo.KeyStateInBuffer, sizeof(ubsec_ARC4_State_t))) {
+    error = -EFAULT;
+    goto ReturnErrorLabel;
+  }
 
 
   /* Assemble Source Fragments */
@@ -309,7 +313,10 @@ ubsec_sslarc4(
   }
   
   if( (IOInfo.KeyStateFlag & ARC4_NULL_DATA_MODE)  != ARC4_NULL_DATA_MODE)
-  	copy_from_user(pKernSourceBuffer, pUserSourceBuffer, SourceBufferBytes);
+  	if (copy_from_user(pKernSourceBuffer, pUserSourceBuffer, SourceBufferBytes)) {
+          error = -EFAULT;
+          goto ReturnErrorLabel;
+        }
   
   /* Assemble Destination Fragments */
 
@@ -344,24 +351,24 @@ ubsec_sslarc4(
   case UBSEC_STATUS_TIMEOUT:
     PRINTK(" ubsec_SslCommand() timeout\n");
     ubsec_ResetDevice(pContext);
-    error = ETIMEDOUT;
+    error = -ETIMEDOUT;
     goto ReturnErrorLabel;
     break;
     
   case UBSEC_STATUS_INVALID_PARAMETER:
     PRINTK("  ubsec_SslCommand() invalid parameter\n");
-    error = EINVAL;
+    error = -EINVAL;
     goto ReturnErrorLabel;
     break;
     
   case UBSEC_STATUS_NO_RESOURCE:
     PRINTK(" ubsec_SslCommand() no resource. Number done: %d\n", NumCommands);
-    error = ENOBUFS;
+    error = -ENOBUFS;
     goto ReturnErrorLabel;
     break;
     
   default:
-    error = ENOMSG;
+    error = -ENOMSG;
     goto ReturnErrorLabel;
     break;
   }
@@ -373,7 +380,7 @@ ubsec_sslarc4(
     if (!pCommandContext->CallBackStatus) {
          pCommandContext->Status=UBSEC_STATUS_TIMEOUT;
          ubsec_ResetDevice(pContext);
-         error = ETIMEDOUT;
+         error = -ETIMEDOUT;
          goto ReturnErrorLabel;
     }
 #else
@@ -388,7 +395,7 @@ ubsec_sslarc4(
 #endif
     
     if(delayTotalUs >= 3000000) {
-      error = ETIMEDOUT;
+      error = -ETIMEDOUT;
       ubsec_ResetDevice(pContext);
       goto ReturnErrorLabel;
     }
@@ -414,11 +421,20 @@ ubsec_sslarc4(
   
   IOInfo.time_us = CommandContext.tv_start.tv_sec * 1000000 + CommandContext.tv_start.tv_usec;
   if(IOInfo.result_status == UBSEC_STATUS_SUCCESS) {
-    copy_to_user(IOInfo.DestBuffer, pKernDestBuffer, SourceBufferBytes);
-    if( (IOInfo.KeyStateFlag & ARC4_STATE_SUPPRESS_WRITEBACK) != ARC4_STATE_SUPPRESS_WRITEBACK){
-      copy_to_user(IOInfo.StateOutBuffer, pKernStateBuffer, 260);
+    if (copy_to_user(IOInfo.DestBuffer, pKernDestBuffer, SourceBufferBytes)) {
+      error = -EFAULT;
+      goto ReturnErrorLabel;
     }
-    copy_to_user(pIOInfo, &IOInfo, sizeof(ubsec_arc4_io_t));
+    if( (IOInfo.KeyStateFlag & ARC4_STATE_SUPPRESS_WRITEBACK) != ARC4_STATE_SUPPRESS_WRITEBACK){
+      if (copy_to_user(IOInfo.StateOutBuffer, pKernStateBuffer, 260)) {
+        error = -EFAULT;
+        goto ReturnErrorLabel;
+      }
+    }
+    if (copy_to_user(pIOInfo, &IOInfo, sizeof(ubsec_arc4_io_t))) {
+      error = -EFAULT;
+      goto ReturnErrorLabel;
+    }
   }
   
  ReturnErrorLabel:

@@ -193,7 +193,8 @@ do_encrypt(ubsec_DeviceContext_t pContext,ubsec_io_t *pat, unsigned int features
 	/*
 	 * Copy control packet into kernel space.
 	 */
-  copy_from_user( at, pat , sizeof(*at));
+  if (copy_from_user( at, pat , sizeof(*at)))
+    return -EFAULT;
   /*
   if (UBSEC_USING_CRYPT(at->flags) == UBSEC_3DES)
   {
@@ -238,12 +239,12 @@ if ( UBSEC_USING_MAC(at->flags) ){
 #ifdef STATIC_ALLOC_OF_CRYPTO_BUFFERS
   if( source_buf_size > MAX_FILE_SIZE ) {
     PRINTK("input buffer size too large <%d,%d>\n",source_buf_size,MAX_FILE_SIZE);
-    Status=EINVAL;
+    Status=-EINVAL;
     goto Error_Ret;
   }
   if( dest_buf_size > MAX_FILE_SIZE ) {
     PRINTK("required output buffer too large <%d,%d>\n",dest_buf_size,MAX_FILE_SIZE);
-    Status=EINVAL;
+    Status=-EINVAL;
     goto Error_Ret;
   }
 #endif
@@ -279,7 +280,7 @@ if ( UBSEC_USING_MAC(at->flags) ){
   num_packets = at->num_packets;
   if( num_packets > MAX_COMMANDS ) {
     PRINTK("too many packets/commands\n");
-    Status=EINVAL;
+    Status=-EINVAL;
     goto Error_Ret;
   }
 
@@ -287,7 +288,7 @@ if ( UBSEC_USING_MAC(at->flags) ){
   if (at->num_fragments > UBSEC_MAX_FRAGMENTS)
   {
     PRINTK("too many fragments\n");
-    Status=EINVAL;
+    Status=-EINVAL;
     goto Error_Ret;
   }
 #endif
@@ -490,20 +491,23 @@ if ( UBSEC_USING_MAC(at->flags) ){
     PRINTK("invalid source buffer size -- "
 	   "given size %u -- total used/needed %u\n", 
 	   source_buf_size, src_pos);
-    Status=EINVAL;
+    Status=-EINVAL;
     goto Error_Ret;
   }
   if(dest_pos != dest_buf_size ) {
     PRINTK("invalid dest buffer size -- "
 	   "given size %u -- total used/needed %u\n", 
 	   dest_buf_size, dest_pos);
-    Status=EINVAL;
+    Status=-EINVAL;
     goto Error_Ret;
   }
 
   /*memset(kern_source_buf,0,dest_buf_size);*/
   memset(kern_source_buf,0,(((dest_buf_size>source_buf_size)?dest_buf_size:source_buf_size)+alignbytes));
-  copy_from_user(kern_source_buf, user_source_buf, source_buf_size);
+  if (copy_from_user(kern_source_buf, user_source_buf, source_buf_size)) {
+    Status=-EFAULT;
+    goto Error_Ret;
+  }
 
   /* Sync the DMA memory so that the CryptoNetX device can access it. */
   OS_SyncToDevice(kern_source_buf, 0, source_buf_size); /* (MemHandle, offset, bytes) */
@@ -539,7 +543,7 @@ if ( UBSEC_USING_MAC(at->flags) ){
   case UBSEC_STATUS_NO_RESOURCE:
     PRINTK("ubsec  ubsec_Command() No crypto resource. Num Done %d\n",num_packets);
   default:
-    Status=ENOMSG;
+    Status=-ENOMSG;
     goto Error_Ret;
     break;
   }
@@ -571,7 +575,7 @@ if ( UBSEC_USING_MAC(at->flags) ){
 #else
      PRINTK(" Gotosleep timedout.\n");
      ubsec_ResetDevice(pContext);
-     Status = ETIMEDOUT;
+     Status = -ETIMEDOUT;
      goto Error_Ret;
 #endif
      }
@@ -582,7 +586,7 @@ if ( UBSEC_USING_MAC(at->flags) ){
     ubsec_PollDevice(pContext);
 #endif
     if (delay_total_us >= 3000000) {
-    Status=ETIMEDOUT;
+    Status=-ETIMEDOUT;
 #ifdef DEBUG_TIMEOUT
 	/* This loop is to push all the remaining MCR's,  missed by specific  rare interrupt preemting a PushMCR condition */
 	while(1)	
@@ -641,18 +645,22 @@ skip_error_ret:
   OS_SyncToCPU(kern_dest_buf, 0, user_dest_buf_size); /* (MemHandle, offset, bytes) */
 
 /* FIX for align bubble */
-  if (alignbytes ==0 )  /* expect alignbytes == 0 in DECODE */
-  	copy_to_user(user_dest_buf, kern_dest_buf, user_dest_buf_size);
-  else {
+  if (alignbytes ==0 ) { /* expect alignbytes == 0 in DECODE */
+  	if (copy_to_user(user_dest_buf, kern_dest_buf, user_dest_buf_size)) {
+		Status=-EFAULT;
+	}
+  } else {
 	/* Copy what ever the user wants */
 	if (user_dest_buf_size <= (dest_buf_size-MacSize) ){
-  		copy_to_user(user_dest_buf, kern_dest_buf, user_dest_buf_size);
+  		if (copy_to_user(user_dest_buf, kern_dest_buf, user_dest_buf_size))
+			Status=-EFAULT;
 		goto Error_Ret;
 		}
 	
-  	copy_to_user(user_dest_buf, kern_dest_buf, (dest_buf_size-MacSize)); /* copy encrypt */
-  	copy_to_user(user_dest_buf+(dest_buf_size-MacSize), bus_to_virt((long)PhysAuthBuf),
-			((user_dest_buf_size < dest_buf_size)?(user_dest_buf_size-(dest_buf_size-MacSize)):MacSize ) );  /* copy whatever auth the user wants */
+  	if (copy_to_user(user_dest_buf, kern_dest_buf, (dest_buf_size-MacSize)) /* copy encrypt */ ||
+  	    copy_to_user(user_dest_buf+(dest_buf_size-MacSize), bus_to_virt((long)PhysAuthBuf),
+			((user_dest_buf_size < dest_buf_size)?(user_dest_buf_size-(dest_buf_size-MacSize)):MacSize ) ) )  /* copy whatever auth the user wants */
+			Status=-EFAULT;
 	}
 
   at->time_us = CommandContext.tv_start.tv_sec * 1000000 + CommandContext.tv_start.tv_usec;
@@ -683,9 +691,11 @@ skip_error_ret:
    * Copy back time to user space.
    */
 #if 0
-  copy_to_user((unsigned char *)&(pat->time_us), (unsigned char *)&time_us, sizeof(time_us));
+  if (copy_to_user((unsigned char *)&(pat->time_us), (unsigned char *)&time_us, sizeof(time_us)))
+    Status=-EFAULT;
 #else
-  copy_to_user(pat, at, sizeof(*at));
+  if (copy_to_user(pat, at, sizeof(*at)))
+    Status=-EFAULT;
 #endif
 
   return(Status);

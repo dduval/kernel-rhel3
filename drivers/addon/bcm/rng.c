@@ -131,7 +131,8 @@ ubsec_rng(ubsec_DeviceContext_t *ubsecContext, ubsec_rng_io_t *pIOInfo)
 		
 		
 
-  copy_from_user( pRngIOInfo, pIOInfo, sizeof(*pRngIOInfo));
+  if (copy_from_user( pRngIOInfo, pIOInfo, sizeof(*pRngIOInfo)))
+    return -EFAULT;
   pIOparams=&pRngIOInfo->Rng;
 
 #ifndef LINUX2dot2
@@ -232,8 +233,11 @@ ubsec_rng(ubsec_DeviceContext_t *ubsecContext, ubsec_rng_io_t *pIOInfo)
   	 * Now we need to copy out those parameters that were changed
   	 */
     pIOparams->Result.KeyLength = pRngparams->Result.KeyLength;
-    copy_to_user(pIOparams->Result.KeyValue, RngLoc, 
-	ROUNDUP_TO_32_BIT(pIOparams->Result.KeyLength)/8);
+    if (copy_to_user(pIOparams->Result.KeyValue, RngLoc, 
+	ROUNDUP_TO_32_BIT(pIOparams->Result.KeyLength)/8)) {
+      error = -EFAULT;
+      goto Free_Return;
+    }
 
 
   } else {
@@ -247,7 +251,8 @@ ubsec_rng(ubsec_DeviceContext_t *ubsecContext, ubsec_rng_io_t *pIOInfo)
 	/*
 	 * Copyback the result
 	 */
-	copy_to_user(pIOInfo, pRngIOInfo, sizeof(*pRngIOInfo));
+	if (copy_to_user(pIOInfo, pRngIOInfo, sizeof(*pRngIOInfo)) && !error)
+		error = -EFAULT;
 Free_Return:
   	if (prng_buf != NULL)
 		kfree(prng_buf);

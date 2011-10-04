@@ -104,24 +104,27 @@ static int ubsec_mathsetup(unsigned long command,
   /* 
    * Setup Math parameter locations and align them. Start with modulus N.
    */
-  copy_from_user( &MathLoc[MAX_KEY_BYTE_SIZE*MATH_MODN_OFFSET],pIOparams->ModN.KeyValue,
-	 ROUNDUP_TO_32_BIT(pIOparams->ModN.KeyLength)/8);
+  if (copy_from_user( &MathLoc[MAX_KEY_BYTE_SIZE*MATH_MODN_OFFSET],pIOparams->ModN.KeyValue,
+	 ROUNDUP_TO_32_BIT(pIOparams->ModN.KeyLength)/8))
+    return -EFAULT;
   /*  Modulus is a virtual address. */
   pSRLparams->ModN.KeyValue=(void *)&MathLoc[MAX_KEY_BYTE_SIZE*MATH_MODN_OFFSET];
 
   /* Always copy in paramA */
    /* Validation of the Length */
    CHECK_SIZE(pIOparams->ParamA.KeyLength , MAX_MATH_LENGTH_BITS);
-  copy_from_user( &MathLoc[MAX_KEY_BYTE_SIZE*MATH_PARAMA_OFFSET],pIOparams->ParamA.KeyValue,
-	 ROUNDUP_TO_32_BIT(pIOparams->ParamA.KeyLength)/8);
+  if (copy_from_user( &MathLoc[MAX_KEY_BYTE_SIZE*MATH_PARAMA_OFFSET],pIOparams->ParamA.KeyValue,
+	 ROUNDUP_TO_32_BIT(pIOparams->ParamA.KeyLength)/8))
+    return -EFAULT;
   pSRLparams->ParamA.KeyValue=(void *) (&MathLoc[MAX_KEY_BYTE_SIZE*MATH_PARAMA_OFFSET]);
 
   /* Optionally copy in paramB */
   if (command!=UBSEC_MATH_MODREM) {
    /* Validation of the Length */
    CHECK_SIZE(pIOparams->ParamB.KeyLength , MAX_MATH_LENGTH_BITS);
-    copy_from_user( &MathLoc[MAX_KEY_BYTE_SIZE*MATH_PARAMB_OFFSET],pIOparams->ParamB.KeyValue,
-	 ROUNDUP_TO_32_BIT(pIOparams->ParamB.KeyLength)/8);
+    if (copy_from_user( &MathLoc[MAX_KEY_BYTE_SIZE*MATH_PARAMB_OFFSET],pIOparams->ParamB.KeyValue,
+	 ROUNDUP_TO_32_BIT(pIOparams->ParamB.KeyLength)/8))
+      return -EFAULT;
     pSRLparams->ParamB.KeyValue=(void *) (&MathLoc[MAX_KEY_BYTE_SIZE*MATH_PARAMB_OFFSET]);
   }
    
@@ -132,23 +135,26 @@ static int ubsec_mathsetup(unsigned long command,
   if (command == UBSEC_MATH_DBLMODEXP) {
 
     /* Second modulus N2 */
-    copy_from_user( &MathLoc[MAX_KEY_BYTE_SIZE*MATH_MODN2_OFFSET],pIOparams->ModN2.KeyValue,
-		    ROUNDUP_TO_32_BIT(pIOparams->ModN2.KeyLength)/8);
+    if (copy_from_user( &MathLoc[MAX_KEY_BYTE_SIZE*MATH_MODN2_OFFSET],pIOparams->ModN2.KeyValue,
+		    ROUNDUP_TO_32_BIT(pIOparams->ModN2.KeyLength)/8))
+      return -EFAULT;
     /*  Modulus is a virtual address. */
     pSRLparams->ModN2.KeyValue=(void *)&MathLoc[MAX_KEY_BYTE_SIZE*MATH_MODN2_OFFSET];
 
     /* Parameter C */
     /* Validation of the Length */
     CHECK_SIZE(pIOparams->ParamC.KeyLength , MAX_MATH_LENGTH_BITS);
-    copy_from_user( &MathLoc[MAX_KEY_BYTE_SIZE*MATH_PARAMC_OFFSET],pIOparams->ParamC.KeyValue,
-		    ROUNDUP_TO_32_BIT(pIOparams->ParamC.KeyLength)/8);
+    if (copy_from_user( &MathLoc[MAX_KEY_BYTE_SIZE*MATH_PARAMC_OFFSET],pIOparams->ParamC.KeyValue,
+		    ROUNDUP_TO_32_BIT(pIOparams->ParamC.KeyLength)/8))
+      return -EFAULT;
     pSRLparams->ParamC.KeyValue=(void *) (&MathLoc[MAX_KEY_BYTE_SIZE*MATH_PARAMC_OFFSET]);
 
     /* Parameter D */
     /* Validation of the Length */
     CHECK_SIZE(pIOparams->ParamD.KeyLength , MAX_MATH_LENGTH_BITS);
-    copy_from_user( &MathLoc[MAX_KEY_BYTE_SIZE*MATH_PARAMD_OFFSET],pIOparams->ParamD.KeyValue,
-		    ROUNDUP_TO_32_BIT(pIOparams->ParamD.KeyLength)/8);
+    if (copy_from_user( &MathLoc[MAX_KEY_BYTE_SIZE*MATH_PARAMD_OFFSET],pIOparams->ParamD.KeyValue,
+		    ROUNDUP_TO_32_BIT(pIOparams->ParamD.KeyLength)/8))
+      return -EFAULT;
     pSRLparams->ParamD.KeyValue=(void *) (&MathLoc[MAX_KEY_BYTE_SIZE*MATH_PARAMD_OFFSET]);
 
     /* Second result Result2 */
@@ -187,7 +193,8 @@ ubsec_math(ubsec_DeviceContext_t pContext,
   }
   memset(pmath_buf,0,4096);
 
-  copy_from_user( pMathIOInfo, pIOInfo, sizeof(*pMathIOInfo));
+  if (copy_from_user( pMathIOInfo, pIOInfo, sizeof(*pMathIOInfo)))
+    return -EFAULT;
   pIOparams=&pMathIOInfo->Math;
 
 #if 0
@@ -227,9 +234,8 @@ ubsec_math(ubsec_DeviceContext_t pContext,
   case UBSEC_MATH_MODEXP :
   case UBSEC_MATH_MODREM :
   case UBSEC_MATH_DBLMODEXP:
-    	if(ubsec_mathsetup(pMathIOInfo->command, &kcmd->Parameters,
-			       &pMathIOInfo->Math, MathLoc) < 0) {
-	error = -EINVAL;
+    	if((error = ubsec_mathsetup(pMathIOInfo->command, &kcmd->Parameters,
+			       &pMathIOInfo->Math, MathLoc)) < 0) {
 	goto Free_Return;
 	}
     break;
@@ -284,7 +290,7 @@ ubsec_math(ubsec_DeviceContext_t pContext,
     if (delay_total_us >= 30000000) {
       PRINTK("Command timeout\n");
       pCommandContext->Status=UBSEC_STATUS_TIMEOUT;
-      error = ETIMEDOUT;
+      error = -ETIMEDOUT;
       ubsec_ResetDevice(pContext);
       goto Return;
     }
@@ -296,7 +302,7 @@ ubsec_math(ubsec_DeviceContext_t pContext,
     if (!pCommandContext->CallBackStatus) {
               pCommandContext->Status=UBSEC_STATUS_TIMEOUT;
       	      ubsec_ResetDevice(pContext);
-	      error = ETIMEDOUT;
+	      error = -ETIMEDOUT;
 	      goto Return;
     }                          
   }
@@ -315,15 +321,21 @@ ubsec_math(ubsec_DeviceContext_t pContext,
   	 * Now we need to copyout those parameters that were changed
   	 */
     pIOparams->Result.KeyLength = pMathparams->Result.KeyLength;
-    copy_to_user(pIOparams->Result.KeyValue,
+    if (copy_to_user(pIOparams->Result.KeyValue,
 		 &MathLoc[MAX_KEY_BYTE_SIZE*MATH_RESULT_OFFSET],
-		 ROUNDUP_TO_32_BIT(pIOparams->Result.KeyLength)/8);
+		 ROUNDUP_TO_32_BIT(pIOparams->Result.KeyLength)/8)) {
+      error = -EFAULT;
+      goto Free_Return;
+    }
     /* Optionally copy out the Double ModExp params */
     if (pMathIOInfo->command == UBSEC_MATH_DBLMODEXP) {
       pIOparams->Result2.KeyLength = pMathparams->Result2.KeyLength;
-      copy_to_user(pIOparams->Result2.KeyValue,
+      if (copy_to_user(pIOparams->Result2.KeyValue,
 		   &MathLoc[MAX_KEY_BYTE_SIZE*MATH_RESULT2_OFFSET],
-		   ROUNDUP_TO_32_BIT(pIOparams->Result2.KeyLength)/8);
+		   ROUNDUP_TO_32_BIT(pIOparams->Result2.KeyLength)/8)) {
+        error = -EFAULT;
+        goto Free_Return;
+      }
     }
 
   } else {
@@ -334,7 +346,8 @@ ubsec_math(ubsec_DeviceContext_t pContext,
 	/*
 	 * Copyback the result
 	 */
-	copy_to_user(pIOInfo, pMathIOInfo, sizeof(*pMathIOInfo));
+	if (copy_to_user(pIOInfo, pMathIOInfo, sizeof(*pMathIOInfo)))
+          error = -EFAULT;
  Free_Return:
   	if (pmath_buf) kfree(pmath_buf);
 	return error;

@@ -187,7 +187,8 @@ ubsec_sslcipher(
   
 #endif /* ifndef STATIC_ALLOC_OF_CRYPTO_BUFFERS */
 
-  copy_from_user(&IOInfo, pIOInfo, sizeof(ubsec_sslcipher_io_t));
+  if (copy_from_user(&IOInfo, pIOInfo, sizeof(ubsec_sslcipher_io_t)))
+    return -EFAULT;
   if (UBSEC_USING_CRYPT(IOInfo.command) == UBSEC_3DES)
   {
      if (!(features & UBSEC_EXTCHIPINFO_3DES))
@@ -200,7 +201,7 @@ ubsec_sslcipher(
   
   if(SourceBufferBytes > MAX_FILE_SIZE) {
     PRINTK("input file too large <%d,%d>\n", SourceBufferBytes, MAX_FILE_SIZE);
-    error = EINVAL;
+    error = -EINVAL;
     return(error);
   }
 
@@ -249,7 +250,10 @@ ubsec_sslcipher(
     goto ReturnErrorLabel;
   }
   
-  copy_from_user(pKernSourceBuffer, pUserSourceBuffer, SourceBufferBytes);
+  if (copy_from_user(pKernSourceBuffer, pUserSourceBuffer, SourceBufferBytes)) {
+    error = -EFAULT;
+    goto ReturnErrorLabel;
+  }
   
   /* Assemble Destination Fragments */
 
@@ -282,24 +286,24 @@ ubsec_sslcipher(
   case UBSEC_STATUS_TIMEOUT:
     PRINTK(" ubsec_SslCommand() timeout\n");
     ubsec_ResetDevice(pContext);
-    error = ETIMEDOUT;
+    error = -ETIMEDOUT;
     goto ReturnErrorLabel;
     break;
     
   case UBSEC_STATUS_INVALID_PARAMETER:
     PRINTK("  ubsec_SslCommand() invalid parameter\n");
-    error = EINVAL;
+    error = -EINVAL;
     goto ReturnErrorLabel;
     break;
     
   case UBSEC_STATUS_NO_RESOURCE:
     PRINTK(" ubsec_SslCommand() no resource. Number done: %d\n", NumCommands);
-    error = ENOBUFS;
+    error = -ENOBUFS;
     goto ReturnErrorLabel;
     break;
     
   default:
-    error = ENOMSG;
+    error = -ENOMSG;
     goto ReturnErrorLabel;
     break;
   }
@@ -311,7 +315,7 @@ ubsec_sslcipher(
     if (!pCommandContext->CallBackStatus) {
               pCommandContext->Status=UBSEC_STATUS_TIMEOUT;
               ubsec_ResetDevice(pContext);
-              error = ETIMEDOUT;
+              error = -ETIMEDOUT;
               goto ReturnErrorLabel;
 
     }                          
@@ -328,7 +332,7 @@ ubsec_sslcipher(
 #endif
     
     if(delayTotalUs >= 3000000) {
-      error = ETIMEDOUT;
+      error = -ETIMEDOUT;
       ubsec_ResetDevice(pContext);
       goto ReturnErrorLabel;
     }
@@ -347,8 +351,11 @@ ubsec_sslcipher(
 
   IOInfo.time_us = CommandContext.tv_start.tv_sec * 1000000 + CommandContext.tv_start.tv_usec;
   if(IOInfo.result_status == UBSEC_STATUS_SUCCESS) {
-    copy_to_user(IOInfo.DestBuffer, pKernDestBuffer, SourceBufferBytes);
-    copy_to_user(pIOInfo, &IOInfo, sizeof(ubsec_arc4_io_t));
+    if (copy_to_user(IOInfo.DestBuffer, pKernDestBuffer, SourceBufferBytes)
+     || copy_to_user(pIOInfo, &IOInfo, sizeof(ubsec_arc4_io_t))) {
+      error = -EFAULT;
+      goto ReturnErrorLabel;
+    }
   }
   
  ReturnErrorLabel:

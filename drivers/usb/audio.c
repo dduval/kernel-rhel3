@@ -2140,6 +2140,7 @@ static int usb_audio_ioctl_mixdev(struct inode *inode, struct file *file, unsign
 		strncpy(info.id, "USB_AUDIO", sizeof(info.id));
 		strncpy(info.name, "USB Audio Class Driver", sizeof(info.name));
 		info.modify_counter = ms->modcnt;
+		memset(&info.fillers[0], 0, sizeof(info.fillers));
 		if (copy_to_user((void *)arg, &info, sizeof(info)))
 			return -EFAULT;
 		return 0;

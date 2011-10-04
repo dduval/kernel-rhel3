@@ -60,7 +60,8 @@ obsolete_chipinfo(
   
   linux_chipinfo_io_t   IOInfo;
   
-  copy_from_user(&IOInfo, pIOInfo, sizeof(linux_chipinfo_io_t));
+  if (copy_from_user(&IOInfo, pIOInfo, sizeof(linux_chipinfo_io_t)))
+    return -EFAULT;
   
 #ifdef UBSEC_5820
   IOInfo.max_key_len = 2048;
@@ -68,7 +69,8 @@ obsolete_chipinfo(
   IOInfo.max_key_len = 1024;
 #endif
   
-  copy_to_user(pIOInfo, &IOInfo, sizeof(linux_chipinfo_io_t));
+  if (copy_to_user(pIOInfo, &IOInfo, sizeof(linux_chipinfo_io_t)))
+    return -EFAULT;
   
   IOInfo.result_status = UBSEC_STATUS_SUCCESS;
   

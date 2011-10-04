@@ -1919,6 +1919,7 @@ static int edge_ioctl (struct usb_serial_port *port, struct file *file, unsigned
 			icount.parity = cnow.parity;
 			icount.brk = cnow.brk;
 			icount.buf_overrun = cnow.buf_overrun;
+			memset(&icount.reserved[0], 0, sizeof(icount.reserved));
 
 			dbg("%s (%d) TIOCGICOUNT RX=%d, TX=%d", __FUNCTION__,  port->number, icount.rx, icount.tx );
 			if (copy_to_user((void *)arg, &icount, sizeof(icount)))

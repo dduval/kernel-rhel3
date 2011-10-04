@@ -239,7 +239,8 @@ ubsec_ioctl(struct inode *inode,struct file *filp,unsigned int cmd, unsigned lon
     {
       ubsec_stats_io_t IOInfo;
       int device_num;
-      copy_from_user((void *) &IOInfo,(void *) arg, sizeof(ubsec_stats_io_t)); 
+      if (copy_from_user((void *) &IOInfo,(void *) arg, sizeof(ubsec_stats_io_t)))
+        return -EFAULT; 
       device_num  = IOInfo.device_num;
 
 
@@ -247,18 +248,21 @@ ubsec_ioctl(struct inode *inode,struct file *filp,unsigned int cmd, unsigned lon
 		return -1;
 
       ubsec_GetStatistics(DeviceInfoList[device_num].Context, &IOInfo.dev_stats);
-      copy_to_user((void *) arg, (void *) &IOInfo, sizeof(ubsec_stats_io_t));
+      if (copy_to_user((void *) arg, (void *) &IOInfo, sizeof(ubsec_stats_io_t)))
+        return -EFAULT;
     }
     break;
     
   case UBSEC_EXTCHIPINFO_FUNC:
-    copy_from_user((void *)&ExtChipInfo, (void *)arg, sizeof(ubsec_chipinfo_io_t)); 
+    if (copy_from_user((void *)&ExtChipInfo, (void *)arg, sizeof(ubsec_chipinfo_io_t)))
+      return -EFAULT; 
     if (ExtChipInfo.Status !=sizeof(ubsec_chipinfo_io_t)) {
       UserCopySize = sizeof(ubsec_chipinfo_io_t);
       if (UserCopySize > ExtChipInfo.Status)
 	UserCopySize = ExtChipInfo.Status;
       ExtChipInfo.Status = UBSEC_STATUS_NO_DEVICE;
-      copy_to_user((void *)arg, (void *)&ExtChipInfo, UserCopySize);
+      if (copy_to_user((void *)arg, (void *)&ExtChipInfo, UserCopySize))
+        return -EFAULT;
       return(-1);
     }
     else if ((ExtChipInfo.CardNum >= NumDevices) || (ExtChipInfo.CardNum < 0)) {
@@ -271,7 +275,8 @@ ubsec_ioctl(struct inode *inode,struct file *filp,unsigned int cmd, unsigned lon
       ExtChipInfo.Features &= DeviceInfoList[ExtChipInfo.CardNum].Features;
       ExtChipInfo.Status = UBSEC_STATUS_SUCCESS; 
     }
-    copy_to_user((void *)arg, (void *)&ExtChipInfo, sizeof(ubsec_chipinfo_io_t)); 
+    if (copy_to_user((void *)arg, (void *)&ExtChipInfo, sizeof(ubsec_chipinfo_io_t)))
+      return -EFAULT; 
     if (ExtChipInfo.Status != UBSEC_STATUS_SUCCESS)
       return(-1);
     else
@@ -279,14 +284,16 @@ ubsec_ioctl(struct inode *inode,struct file *filp,unsigned int cmd, unsigned lon
     break;
     
   case UBSEC_DEVICEDUMP:
-    copy_from_user((void *)&PInt_Contents, (void *)arg, sizeof(int));
+    if (copy_from_user((void *)&PInt_Contents, (void *)arg, sizeof(int)))
+      return -EFAULT;
     Retval=DumpDeviceInfo((PInt)&PInt_Contents);
     if (Retval)
       return(-1); /* Error */
     break;
 
   case UBSEC_FAILDEVICE:
-    copy_from_user((void *)&PInt_Contents, (void *)arg, sizeof(int));
+    if (copy_from_user((void *)&PInt_Contents, (void *)arg, sizeof(int)))
+      return -EFAULT;
     Retval=FailDevices((PInt)&PInt_Contents);
     if (Retval)
       return(-1); /* Error */
@@ -296,7 +303,8 @@ ubsec_ioctl(struct inode *inode,struct file *filp,unsigned int cmd, unsigned lon
 #ifdef BCM_OEM_1
 	DISABLE_BCM_OEM1();
 #endif /*BCM_OEM_1 */
-    copy_from_user((void *)&PInt_Contents, (void *)arg, sizeof(int));
+    if (copy_from_user((void *)&PInt_Contents, (void *)arg, sizeof(int)))
+      return -EFAULT;
     Retval=TestDevices((PInt)&PInt_Contents);
 #ifdef BCM_OEM_1
 	ENABLE_BCM_OEM1();
@@ -305,7 +313,8 @@ ubsec_ioctl(struct inode *inode,struct file *filp,unsigned int cmd, unsigned lon
       return (Retval); /* Error */
 
   case UBSEC_GETVERSION:
-    copy_from_user((void *)&PInt_Contents, (void *)arg, sizeof(int));
+    if (copy_from_user((void *)&PInt_Contents, (void *)arg, sizeof(int)))
+      return -EFAULT;
     Retval=GetHardwareVersion((PInt)&PInt_Contents); /* For the moment one card */
     Retval=Retval<<16;
     Retval+=Version;
@@ -317,7 +326,8 @@ ubsec_ioctl(struct inode *inode,struct file *filp,unsigned int cmd, unsigned lon
     break;
 
   case UBSEC_GETNUMCARDS:
-	copy_to_user((void *)arg,&NumDevices,sizeof(int));
+	if (copy_to_user((void *)arg,&NumDevices,sizeof(int)))
+          return -EFAULT;
     return NumDevices;
 
 
@@ -325,13 +335,15 @@ ubsec_ioctl(struct inode *inode,struct file *filp,unsigned int cmd, unsigned lon
 	{
 	ubsec_Function_Ptrs_t fptrs;
 	get_ubsec_Function_Ptrs(&fptrs);
-      	copy_to_user((void *) arg, (void *) &fptrs, sizeof(ubsec_Function_Ptrs_t));
+      	if (copy_to_user((void *) arg, (void *) &fptrs, sizeof(ubsec_Function_Ptrs_t)))
+          return -EFAULT;
 	}
     break;
 
 #ifdef DVT 
   case UBSEC_RESERVED:
-    copy_from_user((void *)&DVTparams, (void *)arg, sizeof(DVT_Params_t));
+    if (copy_from_user((void *)&DVTparams, (void *)arg, sizeof(DVT_Params_t)))
+      return -EFAULT;
     if ((DVTparams.CardNum >= NumDevices) || (DVTparams.CardNum < 0)) {
       {PRINTK("Invalid CardNum (%d), must be 0",DVTparams.CardNum);}
       if (NumDevices == 1)
@@ -365,7 +377,8 @@ ubsec_ioctl(struct inode *inode,struct file *filp,unsigned int cmd, unsigned lon
       /* Pass all other commands down to the SRL */
       Retval=ubsec_dvt_handler((void *)DeviceInfoList[DVTparams.CardNum].Context,(void *)&DVTparams); 
     };
-    copy_to_user((void *)arg, (void *)&DVTparams, sizeof(DVT_Params_t));
+    if (copy_to_user((void *)arg, (void *)&DVTparams, sizeof(DVT_Params_t)))
+      return -EFAULT;
     return(Retval);
     break;
 #endif /* DVT */

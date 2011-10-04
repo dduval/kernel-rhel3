@@ -34,6 +34,7 @@
 #undef GOTOSLEEP
 #endif
 
+#define MAX_KMALLOC_SIZE	0x20000
 
 /**************************************************************************
  *
@@ -68,7 +69,8 @@ int ubsec_keysetup(ubsec_DeviceContext_t pContext, ubsec_key_io_t *pKeyIOInfo)
   CommandContext_pt		pCommandContext=NULL;
   unsigned char			*pkey_buf = NULL;
   ubsec_key_io_t                KeyIOInfoForDSA;
-  int                           add_dsa_buf_bytes = 0;
+  ubsec_FragmentInfo_t		InputFragments; 
+  int                           dsa_buf_bytes = 4096;
   int i;
   int timeout;
   int message_alignment;  
@@ -87,30 +89,38 @@ sizeof(*KeyIOInfo)+(MAX_KEY_BYTE_SIZE*DSA_IN_OFFSET))%64))&63)
 
   memset(DSAMessageFragList,0,sizeof(DSAMessageFragList)); 
 
-  copy_from_user( &KeyIOInfoForDSA,pKeyIOInfo, sizeof(KeyIOInfoForDSA));
+  if(copy_from_user(&KeyIOInfoForDSA, pKeyIOInfo, sizeof(KeyIOInfoForDSA)))
+    return -EFAULT;
+
+  if(copy_from_user(&InputFragments,
+                    KeyIOInfoForDSA.key.DSAParams.InputFragments,
+                    sizeof(InputFragments)))
+    return -EFAULT;
 
   if((KeyIOInfoForDSA.command == UBSEC_DSA_SIGN) || (KeyIOInfoForDSA.command == UBSEC_DSA_VERIFY)) {
     message_alignment = DSA_MESSAGE_ALIGNMENT;
-    add_dsa_buf_bytes = KeyIOInfoForDSA.key.DSAParams.InputFragments->FragmentLength + DSA_MESSAGE_ALIGNMENT;
+    dsa_buf_bytes += InputFragments.FragmentLength + DSA_MESSAGE_ALIGNMENT;
   } else {
     message_alignment = 0;
-    add_dsa_buf_bytes = 0;
   }
 
+  if ((dsa_buf_bytes < 0) || (dsa_buf_bytes > MAX_KMALLOC_SIZE))
+    return -EINVAL;
+
   /* Allocate temporary buffer for key structure */
-  pkey_buf = (unsigned char *) kmalloc((4096+add_dsa_buf_bytes),GFP_KERNEL|GFP_ATOMIC);
+  pkey_buf = (unsigned char *) kmalloc((dsa_buf_bytes),GFP_KERNEL|GFP_ATOMIC);
   if(pkey_buf == NULL) {
     PRINTK("no memory for key buffer\n");
     return -ENOMEM;
   }
-  memset(pkey_buf,0, 4096+add_dsa_buf_bytes);
+  memset(pkey_buf,0, dsa_buf_bytes);
 
   pCommandContext = (CommandContext_pt)pkey_buf;
   kcmd = (ubsec_KeyCommandInfo_pt) &pCommandContext[1];
   KeyIOInfo = (ubsec_key_io_pt)&kcmd[1];
   KeyLoc = ((unsigned char *)&KeyIOInfo[1]) + message_alignment;
   
-  copy_from_user( KeyIOInfo, pKeyIOInfo, sizeof(*KeyIOInfo));
+  memcpy(KeyIOInfo, &KeyIOInfoForDSA, sizeof(*KeyIOInfo));
 
   /* DSA needs extra indirection setup */
 
@@ -218,7 +228,8 @@ Return:
   /*
    * Copy back the result block.
    */
-  copy_to_user(pKeyIOInfo, KeyIOInfo, sizeof(*KeyIOInfo));
+  if (copy_to_user(pKeyIOInfo, KeyIOInfo, sizeof(*KeyIOInfo)) && !error)
+    error = -EFAULT;
 
   if (pkey_buf) kfree(pkey_buf);
 

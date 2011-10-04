@@ -117,19 +117,19 @@ static inline void set_tssldt_descriptor(struct ldttss_desc *dst, unsigned long 
 	dst->base1 = PTR_MIDDLE(ptr) & 0xFF; 
 	dst->type = type;
 	dst->p = 1; 
-	dst->limit1 = 0xF;
+	dst->limit1 = (size >> 16) & 0xF;
 	dst->base2 = (PTR_MIDDLE(ptr) >> 8) & 0xFF; 
 	dst->base3 = PTR_HIGH(ptr); 
 }
 
 static inline void set_tss_desc(unsigned cpu, void *addr)
 { 
-	set_tssldt_descriptor((void*)&cpu_gdt_table[cpu][GDT_ENTRY_TSS], (unsigned long)addr, DESC_TSS, sizeof(struct tss_struct)); 
+	set_tssldt_descriptor((void*)&cpu_gdt_table[cpu][GDT_ENTRY_TSS], (unsigned long)addr, DESC_TSS, sizeof(struct tss_struct)-1);
 } 
 
 static inline void set_ldt_desc(unsigned cpu, void *addr, int size)
 { 
-	set_tssldt_descriptor((void*)&cpu_gdt_table[cpu][GDT_ENTRY_LDT], (unsigned long)addr, DESC_LDT, size); 
+	set_tssldt_descriptor((void*)&cpu_gdt_table[cpu][GDT_ENTRY_LDT], (unsigned long)addr, DESC_LDT, size*8-1);
 }	
 
 /*

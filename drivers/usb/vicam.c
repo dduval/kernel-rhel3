@@ -466,7 +466,7 @@ vicam_ioctl(struct video_device *dev, unsigned int ioctlnr, void *arg)
 			struct video_capability b;
 
 			DBG("VIDIOCGCAP\n");
-			strcpy(b.name, "ViCam-based Camera");
+			strncpy(b.name, "ViCam-based Camera", sizeof(b.name));
 			b.type = VID_TYPE_CAPTURE;
 			b.channels = 1;
 			b.audios = 0;
