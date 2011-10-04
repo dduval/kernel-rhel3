@@ -209,7 +209,6 @@ struct page * reclaim_page(zone_t * zone)
 		 */
 		del_page_from_inactive_clean_list(page);
 		add_page_to_inactive_dirty_list(page);
-		zone->inactive_clean_pages--;
 		pte_chain_unlock(page);
 		UnlockPage(page);
 	}
