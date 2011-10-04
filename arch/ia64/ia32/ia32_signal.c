@@ -614,7 +614,7 @@ sys32_rt_sigtimedwait (sigset32_t *uthese, siginfo_t32 *uinfo, struct timespec32
 			return -EFAULT;
 	}
 	set_fs(KERNEL_DS);
-	ret = sys_rt_sigtimedwait(&s, &info, &t, sigsetsize);
+	ret = sys_rt_sigtimedwait(&s, uinfo? &info :NULL, uts? &t :NULL, sigsetsize);
 	set_fs(old_fs);
 	if (ret >= 0 && uinfo) {
 		if (copy_siginfo_to_user32(uinfo, &info))
@@ -740,12 +740,12 @@ restore_sigcontext_ia32 (struct pt_regs *regs, struct sigcontext_ia32 *sc, int *
 
 #define COPY(ia64x, ia32x)	err |= __get_user(regs->ia64x, &sc->ia32x)
 
-#define copyseg_gs(tmp)		(regs->r16 |= (unsigned long) tmp << 48)
-#define copyseg_fs(tmp)		(regs->r16 |= (unsigned long) tmp << 32)
-#define copyseg_cs(tmp)		(regs->r17 |= tmp)
-#define copyseg_ss(tmp)		(regs->r17 |= (unsigned long) tmp << 16)
-#define copyseg_es(tmp)		(regs->r16 |= (unsigned long) tmp << 16)
-#define copyseg_ds(tmp)		(regs->r16 |= tmp)
+#define copyseg_gs(tmp)		(regs->r16 |= (unsigned long) (tmp) << 48)
+#define copyseg_fs(tmp)		(regs->r16 |= (unsigned long) (tmp) << 32)
+#define copyseg_cs(tmp)		(regs->r17 |= (tmp))
+#define copyseg_ss(tmp)		(regs->r17 |= (unsigned long) (tmp) << 16)
+#define copyseg_es(tmp)		(regs->r16 |= (unsigned long) (tmp) << 16)
+#define copyseg_ds(tmp)		(regs->r16 |= (tmp))
 
 #define COPY_SEG(seg)					\
 	{						\
@@ -892,8 +892,6 @@ setup_frame_ia32 (int sig, struct k_sigaction *ka, sigset_t *set, struct pt_regs
 	regs->cr_iip = IA32_SA_HANDLER(ka);
 
 	set_fs(USER_DS);
-	regs->r16 = (__USER_DS << 16) |  (__USER_DS); /* ES == DS, GS, FS are zero */
-	regs->r17 = (__USER_DS << 16) | __USER_CS;
 
 #if 0
 	regs->eflags &= ~TF_MASK;
@@ -965,9 +963,6 @@ setup_rt_frame_ia32 (int sig, struct k_sigaction *ka, siginfo_t *info,
 	regs->cr_iip = IA32_SA_HANDLER(ka);
 
 	set_fs(USER_DS);
-
-	regs->r16 = (__USER_DS << 16) |  (__USER_DS); /* ES == DS, GS, FS are zero */
-	regs->r17 = (__USER_DS << 16) | __USER_CS;
 
 #if 0
 	regs->eflags &= ~TF_MASK;

@@ -9,7 +9,8 @@ obj-m           :=
 obj-n           :=
 obj-            :=
 
-mod-subdirs     := cipe qla2200 aep bcm megarac ips_60026 cmpci_564
+mod-subdirs     := cipe qla2200 aep bcm megarac ips_61052 cmpci_564 \
+		   megaraid_2009 fusion_20505 qla2200_60600b11
 
 O_TARGET := addon.o
 
@@ -22,17 +23,17 @@ list-multi	:=
 
 subdir-$(CONFIG_CIPE) += cipe
 subdir-$(CONFIG_MEGARAC) += megarac
-subdir-$(CONFIG_SCSI_IPS) += ips_60026
+subdir-$(CONFIG_SCSI_IPS) += ips_61052
 subdir-$(CONFIG_SOUND_CMPCI) += cmpci_564
 
 subdir-$(CONFIG_CRYPTO_AEP) += aep
 subdir-$(CONFIG_CRYPTO_BROADCOM) += bcm
-subdir-$(CONFIG_FC_QLA2100) += qla2200
-subdir-$(CONFIG_FC_QLA2200) += qla2200
-subdir-$(CONFIG_FC_QLA2300) += qla2200
-
-
-
+subdir-$(CONFIG_FC_QLA2100) += qla2200 qla2200_60600b11
+subdir-$(CONFIG_FC_QLA2200) += qla2200 qla2200_60600b11
+subdir-$(CONFIG_FC_QLA2300) += qla2200 qla2200_60600b11
+subdir-$(CONFIG_SCSI_IPR) += ipr
+subdir-$(CONFIG_SCSI_MEGARAID2) += megaraid_2009
+subdir-$(CONFIG_FUSION) += fusion_20505
 
 
 include $(TOPDIR)/Rules.make

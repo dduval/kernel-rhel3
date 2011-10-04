@@ -243,6 +243,15 @@ void __init init_memory_mapping(void)
 	unsigned long end;
 	unsigned long next; 
 	unsigned long pgds, pmds, tables; 
+	unsigned long efer;
+
+	/* we need to set correct supported_pte_mask
+	 * before we setup direct memory mappings
+	 */
+	rdmsrl(MSR_EFER, efer);
+	if (!(efer & EFER_NX)) {
+		__supported_pte_mask &= ~_PAGE_NX;
+	}
 
 	end = end_pfn_map << PAGE_SHIFT; 
 

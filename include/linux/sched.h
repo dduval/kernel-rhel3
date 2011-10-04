@@ -167,6 +167,9 @@ extern void trap_init(void);
 extern void update_process_times(int user);
 extern void update_process_time_intertick(task_t *,
 					  struct kernel_stat_tick_times *);
+#ifdef CONFIG_NO_IDLE_HZ
+extern void update_process_times_us(int user, int system);
+#endif
 extern void update_one_process(task_t *p, struct kernel_stat_tick_times *,
 			       int cpu);
 extern void scheduler_tick(int timer_tick);
@@ -571,6 +574,15 @@ struct task_struct {
 
 	unsigned long ptrace_message;
 	siginfo_t *last_siginfo; /* For ptrace use.  */
+
+#ifndef __GENKSYMS__ /* preserve KMI/ABI ksyms compatibility for mod linkage */
+#if defined(CONFIG_IA64) && defined(CONFIG_IA32_SUPPORT)
+	struct desc_struct tls_array[GDT_ENTRY_TLS_ENTRIES];
+#endif
+#if defined(CONFIG_AUDIT) || defined(CONFIG_AUDIT_MODULE)
+	void *audit;
+#endif
+#endif /* !__GENKSYMS__ */
 };
 
 /*
@@ -608,6 +620,7 @@ struct task_struct {
 #define PT_TRACE_VFORK_DONE 0x00000100
 #define PT_TRACE_EXIT   0x00000200
 #define PT_DTRACE	0x00000400      /* delayed trace (used on m68k, i386) */
+#define PT_AUDITED	0x00000800      /* being audited */
 
 #define is_dumpable(tsk)    ((tsk)->task_dumpable && (tsk)->mm && (tsk)->mm->dumpable)
 
@@ -746,6 +759,7 @@ extern struct task_struct *find_task_by_pid(int pid);
 /* per-UID process charging. */
 extern struct user_struct * alloc_uid(uid_t);
 extern void free_uid(struct user_struct *);
+extern void switch_uid(struct user_struct *);
 
 #include <asm/current.h>
 
@@ -754,6 +768,9 @@ extern unsigned long itimer_ticks;
 extern unsigned long itimer_next;
 extern struct timeval xtime;
 extern void do_timer(struct pt_regs *);
+#ifdef CONFIG_NO_IDLE_HZ
+extern void do_timer_ticks(int ticks);
+#endif
 
 #define CURRENT_TIME (xtime.tv_sec)
 

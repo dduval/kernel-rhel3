@@ -2936,6 +2936,8 @@ again:
 		QETH_DBF_TEXT2(0,trace,"scd:doio");
 		sprintf(dbf_text,"%4x",(__s16)result);
 		QETH_DBF_TEXT2(0,trace,dbf_text);
+		/* re-enable qeth_send_control_data again */
+		atomic_set(&card->write_busy,0);
 		return NULL;
 	}
 

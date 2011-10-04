@@ -14,7 +14,7 @@
  *	  - speed-ups (list handling fixes, issued_list, optimizations.)
  *	  - lots of cleanups.
  *
- * Version : v2.00.9 (Sep 04, 2003) - Atul Mukker <Atul.Mukker@lsil.com>
+ * Version : v2.10.1.1 (Jan 16, 2004) - Atul Mukker <Atul.Mukker@lsil.com>
  *
  * Description: Linux device driver for LSI Logic MegaRAID controller
  *
@@ -102,7 +102,7 @@ static struct file_operations megadev_fops = {
 static struct mcontroller mcontroller[MAX_CONTROLLERS];
 
 /* The current driver version */
-static u32 driver_ver = 0x02000000;
+static u32 driver_ver = 0x02100000;
 
 /* major number used by the device for character interface */
 static int major;
@@ -142,6 +142,7 @@ megaraid_validate_parms(void)
  * products. All of them share the same vendor id, device id, and subsystem
  * vendor id but different subsystem ids. As of now, driver does not use the
  * subsystem id.
+ * PERC4E device ids are for the PCI-Express controllers
  */
 static int
 megaraid_detect(Scsi_Host_Template *host_template)
@@ -150,13 +151,16 @@ megaraid_detect(Scsi_Host_Template *host_template)
 	u16	dev_sw_table[] = {	/* Table of all supported
 					   vendor/device ids */
 
-		PCI_VENDOR_ID_DELL,		PCI_DEVICE_ID_DISCOVERY, 
-		PCI_VENDOR_ID_DELL,		PCI_DEVICE_ID_PERC4_DI, 
-		PCI_VENDOR_ID_LSI_LOGIC,	PCI_DEVICE_ID_PERC4_QC_VERDE, 
-		PCI_VENDOR_ID_AMI,		PCI_DEVICE_ID_AMI_MEGARAID, 
-		PCI_VENDOR_ID_AMI,		PCI_DEVICE_ID_AMI_MEGARAID2, 
-		PCI_VENDOR_ID_AMI,		PCI_DEVICE_ID_AMI_MEGARAID3, 
-		PCI_VENDOR_ID_INTEL,		PCI_DEVICE_ID_AMI_MEGARAID3, 
+		PCI_VENDOR_ID_LSI_LOGIC,	PCI_DEVICE_ID_LSI_SATA_PCIX,
+		PCI_VENDOR_ID_LSI_LOGIC,	PCI_DEVICE_ID_PERC4E_DC_SC,
+		PCI_VENDOR_ID_DELL,		PCI_DEVICE_ID_PERC4E_SI_DI,
+		PCI_VENDOR_ID_DELL,		PCI_DEVICE_ID_DISCOVERY,
+		PCI_VENDOR_ID_DELL,		PCI_DEVICE_ID_PERC4_DI,
+		PCI_VENDOR_ID_LSI_LOGIC,	PCI_DEVICE_ID_PERC4_QC_VERDE,
+		PCI_VENDOR_ID_AMI,		PCI_DEVICE_ID_AMI_MEGARAID,
+		PCI_VENDOR_ID_AMI,		PCI_DEVICE_ID_AMI_MEGARAID2,
+		PCI_VENDOR_ID_AMI,		PCI_DEVICE_ID_AMI_MEGARAID3,
+		PCI_VENDOR_ID_INTEL,		PCI_DEVICE_ID_AMI_MEGARAID3,
 		PCI_VENDOR_ID_LSI_LOGIC,	PCI_DEVICE_ID_AMI_MEGARAID3 };
 
 
@@ -246,7 +250,6 @@ mega_find_card(Scsi_Host_Template *host_template, u16 pci_vendor,
 	u8	did_ioremap_f = 0;
 	u8	did_req_region_f = 0;
 	u8	did_scsi_reg_f = 0;
-	u8	got_ipdev_f = 0;
 	u8	alloc_int_buf_f = 0;
 	u8	alloc_scb_f = 0;
 	u8	got_irq_f = 0;
@@ -261,7 +264,6 @@ mega_find_card(Scsi_Host_Template *host_template, u16 pci_vendor,
 		did_ioremap_f = 0;
 		did_req_region_f = 0;
 		did_scsi_reg_f = 0;
-		got_ipdev_f = 0;
 		alloc_int_buf_f = 0;
 		alloc_scb_f = 0;
 		got_irq_f = 0;
@@ -277,9 +279,15 @@ mega_find_card(Scsi_Host_Template *host_template, u16 pci_vendor,
 		 * valid and 64 bit is implicit
 		 */
 		if( (pci_vendor == PCI_VENDOR_ID_DELL &&
-			pci_device == PCI_DEVICE_ID_PERC4_DI) ||
+				pci_device == PCI_DEVICE_ID_PERC4_DI) ||
 			(pci_vendor == PCI_VENDOR_ID_LSI_LOGIC &&
-			pci_device == PCI_DEVICE_ID_PERC4_QC_VERDE) ) {
+				pci_device == PCI_DEVICE_ID_PERC4_QC_VERDE) ||
+			(pci_vendor == PCI_VENDOR_ID_LSI_LOGIC &&
+				pci_device == PCI_DEVICE_ID_PERC4E_DC_SC) ||
+			(pci_vendor == PCI_VENDOR_ID_DELL &&
+				pci_device == PCI_DEVICE_ID_PERC4E_SI_DI) ||
+			(pci_vendor == PCI_VENDOR_ID_LSI_LOGIC &&
+				pci_device == PCI_DEVICE_ID_LSI_SATA_PCIX)) {
 
 			flag |= BOARD_64BIT;
 		}
@@ -367,21 +375,6 @@ mega_find_card(Scsi_Host_Template *host_template, u16 pci_vendor,
 		adapter = (adapter_t *)host->hostdata;
 		memset(adapter, 0, sizeof(adapter_t));
 
-		/*
-		 * Allocate a pci device structure for allocations done
-		 * internally - all of which would be in memory <4GB
-		 */
-		adapter->ipdev = kmalloc(sizeof(struct pci_dev), GFP_KERNEL);
-
-		if( adapter->ipdev == NULL ) goto fail_attach;
-
-		got_ipdev_f = 1;
-
-		memcpy(adapter->ipdev, pdev, sizeof(struct pci_dev));
-
-		if( pci_set_dma_mask(adapter->ipdev, 0xffffffff) != 0 )
-			goto fail_attach;
-
 		printk(KERN_NOTICE
 			"scsi%d:Found MegaRAID controller at 0x%lx, IRQ:%d\n",
 			host->host_no, mega_baseport, irq);
@@ -395,12 +388,25 @@ mega_find_card(Scsi_Host_Template *host_template, u16 pci_vendor,
 		adapter->flag = flag;
 		spin_lock_init(&adapter->lock);
 
-		// replace adapter->lock with io_request_lock for kernels w/o
-		// per host lock and delete the line which tries to initialize
-		// the lock in host structure.
+#ifdef SCSI_HAS_HOST_LOCK
+#  if LINUX_VERSION_CODE <= KERNEL_VERSION(2,4,9)
+		/* This is the Red Hat AS2.1 kernel */
 		adapter->host_lock = &adapter->lock;
-
+		host->lock = adapter->host_lock;
+#  elif LINUX_VERSION_CODE < KERNEL_VERSION(2,6,0)
+		/* This is the later Red Hat 2.4 kernels */
+		adapter->host_lock = &adapter->lock;
 		host->host_lock = adapter->host_lock;
+#  else
+		/* This is the 2.6 and later kernel series */
+		adapter->host_lock = &adapter->lock;
+		scsi_set_host_lock(&adapter->lock);
+#  endif
+#else
+		/* And this is the remainder of the 2.4 kernel series */
+		adapter->host_lock = &io_request_lock;
+#endif
+
 		host->cmd_per_lun = max_cmd_per_lun;
 		host->max_sectors = max_sectors_per_io;
 
@@ -614,14 +620,17 @@ mega_find_card(Scsi_Host_Template *host_template, u16 pci_vendor,
 
 		/* Set the Mode of addressing to 64 bit if we can */
 		if((adapter->flag & BOARD_64BIT)&&(sizeof(dma_addr_t) == 8)) {
-			pci_set_dma_mask(pdev, 0xffffffffffffffff);
-			adapter->has_64bit_addr = 1;
+			if (pci_set_dma_mask(pdev, 0xffffffffffffffffULL) == 0)
+				adapter->has_64bit_addr = 1;
 		}
-		else  {
-			pci_set_dma_mask(pdev, 0xffffffff);
-			adapter->has_64bit_addr = 0;
+		if (!adapter->has_64bit_addr)  {
+			if (pci_set_dma_mask(pdev, 0xffffffff) != 0) {
+				printk("megaraid%d: DMA not available.\n",
+					host->host_no);
+				goto fail_attach;
+			}
 		}
-		
+
 		init_MUTEX(&adapter->int_mtx);
 		init_waitqueue_head(&adapter->int_waitq);
 
@@ -670,8 +679,6 @@ fail_attach:
 					adapter->buf_dma_handle);
 		}
 
-		if( got_ipdev_f ) kfree(adapter->ipdev);
-
 		if( did_scsi_reg_f ) scsi_unregister(host);
 
 		if( did_ioremap_f ) {
@@ -702,7 +709,7 @@ mega_setup_mailbox(adapter_t *adapter)
 			sizeof(mbox64_t), &adapter->una_mbox64_dma);
 
 	if( !adapter->una_mbox64 ) return -1;
-		
+
 	adapter->mbox = &adapter->una_mbox64->mbox;
 
 	adapter->mbox = (mbox_t *)((((unsigned long) adapter->mbox) + 15) &
@@ -755,7 +762,7 @@ mega_query_adapter(adapter_t *adapter)
 {
 	dma_addr_t	prod_info_dma_handle;
 	mega_inquiry3	*inquiry3;
-	u8	raw_mbox[16];
+	u8	raw_mbox[sizeof(mbox_t)];
 	mbox_t	*mbox;
 	int	retval;
 
@@ -764,7 +771,7 @@ mega_query_adapter(adapter_t *adapter)
 	mbox = (mbox_t *)raw_mbox;
 
 	memset((void *)adapter->mega_buffer, 0, MEGA_BUFFER_SIZE);
-	memset(mbox, 0, 16);
+	memset(raw_mbox, 0, sizeof(raw_mbox));
 
 	/*
 	 * Try to issue Inquiry3 command
@@ -1696,21 +1703,22 @@ issue_scb_block(adapter_t *adapter, u_char *raw_mbox)
 	u8	status;
 	int	i;
 
-	raw_mbox[0x1] = 0xFE;	/* Set cmdid */
-	raw_mbox[0xF] = 1;	/* Set busy */
-
 	/* Wait until mailbox is free */
 	if(mega_busywait_mbox (adapter))
 		goto bug_blocked_mailbox;
 
 	/* Copy mailbox data into host structure */
-	memcpy((char *) mbox, raw_mbox, 16);
+	memcpy((char *)mbox, raw_mbox, 16);
+	mbox->cmdid = 0xFE;
+	mbox->busy = 1;
 
 	switch (raw_mbox[0]) {
+	case MEGA_MBOXCMD_EXTPTHRU:
+		if( !adapter->has_64bit_addr ) break;
+		// else fall through
 	case MEGA_MBOXCMD_LREAD64:
 	case MEGA_MBOXCMD_LWRITE64:
 	case MEGA_MBOXCMD_PASSTHRU64:
-	case MEGA_MBOXCMD_EXTPTHRU:
 		mbox64->xfer_segment_lo = mbox->xferaddr;
 		mbox64->xfer_segment_hi = 0;
 		mbox->xferaddr = 0xFFFFFFFF;
@@ -1990,6 +1998,7 @@ mega_cmd_done(adapter_t *adapter, u8 completed[], int nstatus, int status)
 	Scsi_Cmnd	*cmd = NULL;
 	mega_passthru	*pthru = NULL;
 	mbox_t	*mbox = NULL;
+	int	islogical;
 	u8	c;
 	scb_t	*scb;
 	int	cmdid;
@@ -2073,8 +2082,9 @@ mega_cmd_done(adapter_t *adapter, u8 completed[], int nstatus, int status)
 #if MEGA_HAVE_STATS
 			{
 
-			int	islogical = adapter->logdrv_chan[cmd->channel];
 			int	logdrv = mbox->logdrv;
+
+			islogical = adapter->logdrv_chan[cmd->channel];
 
 			/*
 			 * Maintain an error counter for the logical drive.
@@ -2111,23 +2121,21 @@ mega_cmd_done(adapter_t *adapter, u8 completed[], int nstatus, int status)
 		 * hard disk and not logical, request should return failure! -
 		 * PJ
 		 */
-		if(cmd->cmnd[0] == INQUIRY) {
-			int islogical = adapter->logdrv_chan[cmd->channel];
+		islogical = adapter->logdrv_chan[cmd->channel];
+		if (cmd->cmnd[0] == INQUIRY && !islogical) {
 
-			if(!islogical) {
-				if( cmd->use_sg ) {
-					sgl = (struct scatterlist *)
-						cmd->request_buffer;
-					c = *(u8 *)sgl[0].address;
-				}
-				else {
-					c = *(u8 *)cmd->request_buffer;
-				}
+			if( cmd->use_sg ) {
+				sgl = (struct scatterlist *)
+					cmd->request_buffer;
+				c = *(u8 *)sgl[0].address;
+			}
+			else {
+				c = *(u8 *)cmd->request_buffer;
+			}
 
-				if(IS_RAID_CH(adapter, cmd->channel) &&
-						((c & 0x1F ) == TYPE_DISK)) {
-					status = 0xF0;
-				}
+			if(IS_RAID_CH(adapter, cmd->channel) &&
+					((c & 0x1F ) == TYPE_DISK)) {
+				status = 0xF0;
 			}
 		}
 
@@ -2244,12 +2252,11 @@ mega_free_scb(adapter_t *adapter, scb_t *scb)
 		break;
 
 	case MEGA_BULK_DATA:
-		pci_unmap_page(adapter->host->pci_dev, scb->dma_h_bulkdata,
+		pci_unmap_page(adapter->dev, scb->dma_h_bulkdata,
 			scb->cmd->request_bufflen, scb->dma_direction);
 
 		if( scb->dma_direction == PCI_DMA_FROMDEVICE ) {
-			pci_dma_sync_single(adapter->host->pci_dev,
-					scb->dma_h_bulkdata,
+			pci_dma_sync_single(adapter->dev, scb->dma_h_bulkdata,
 					scb->cmd->request_bufflen,
 					PCI_DMA_FROMDEVICE);
 		}
@@ -2257,13 +2264,14 @@ mega_free_scb(adapter_t *adapter, scb_t *scb)
 		break;
 
 	case MEGA_SGLIST:
-		pci_unmap_sg(adapter->host->pci_dev, scb->cmd->request_buffer,
+		pci_unmap_sg(adapter->dev,
+			(struct scatterlist *)scb->cmd->request_buffer,
 			scb->cmd->use_sg, scb->dma_direction);
 
 		if( scb->dma_direction == PCI_DMA_FROMDEVICE ) {
-			pci_dma_sync_sg(adapter->host->pci_dev,
-					scb->cmd->request_buffer,
-					scb->cmd->use_sg, PCI_DMA_FROMDEVICE);
+			pci_dma_sync_sg(adapter->dev,
+				(struct scatterlist *)scb->cmd->request_buffer,
+				scb->cmd->use_sg, PCI_DMA_FROMDEVICE);
 		}
 
 		break;
@@ -2333,8 +2341,7 @@ mega_build_sglist(adapter_t *adapter, scb_t *scb, u32 *buf, u32 *len)
 
 		offset = ((unsigned long)cmd->request_buffer & ~PAGE_MASK);
 
-		scb->dma_h_bulkdata = pci_map_page(adapter->host->pci_dev,
-						  page, offset,
+		scb->dma_h_bulkdata = pci_map_page(adapter->dev, page, offset,
 						  cmd->request_bufflen,
 						  scb->dma_direction);
 		scb->dma_type = MEGA_BULK_DATA;
@@ -2356,7 +2363,7 @@ mega_build_sglist(adapter_t *adapter, scb_t *scb, u32 *buf, u32 *len)
 		}
 
 		if( scb->dma_direction == PCI_DMA_TODEVICE ) {
-			pci_dma_sync_single(adapter->host->pci_dev,
+			pci_dma_sync_single(adapter->dev,
 					scb->dma_h_bulkdata,
 					cmd->request_bufflen,
 					PCI_DMA_TODEVICE);
@@ -2372,8 +2379,7 @@ mega_build_sglist(adapter_t *adapter, scb_t *scb, u32 *buf, u32 *len)
 	 *
 	 * The number of sg elements returned must not exceed our limit
 	 */
-	sgcnt = pci_map_sg(adapter->host->pci_dev, sgl, cmd->use_sg,
-			scb->dma_direction);
+	sgcnt = pci_map_sg(adapter->dev, sgl, cmd->use_sg, scb->dma_direction);
 
 	scb->dma_type = MEGA_SGLIST;
 
@@ -2401,9 +2407,9 @@ mega_build_sglist(adapter_t *adapter, scb_t *scb, u32 *buf, u32 *len)
 	*len = (u32)cmd->request_bufflen;
 
 	if( scb->dma_direction == PCI_DMA_TODEVICE ) {
-		pci_dma_sync_sg(adapter->host->pci_dev,
-				(struct scatterlist *)cmd->request_buffer,
-				cmd->use_sg, PCI_DMA_TODEVICE);
+		pci_dma_sync_sg(adapter->dev,
+			(struct scatterlist *)cmd->request_buffer,
+			cmd->use_sg, PCI_DMA_TODEVICE);
 	}
 
 	/* Return count of SG requests */
@@ -2460,7 +2466,7 @@ megaraid_release(struct Scsi_Host *host)
 {
 	adapter_t	*adapter;
 	mbox_t	*mbox;
-	u_char	raw_mbox[16];
+	u_char	raw_mbox[sizeof(mbox_t)];
 #ifdef CONFIG_PROC_FS
 	char	buf[12] = { 0 };
 #endif
@@ -2471,17 +2477,19 @@ megaraid_release(struct Scsi_Host *host)
 	printk(KERN_NOTICE "megaraid: being unloaded...");
 
 	/* Flush adapter cache */
-	memset(mbox, 0, 16);
+	memset(raw_mbox, 0, sizeof(raw_mbox));
 	raw_mbox[0] = FLUSH_ADAPTER;
 
-	irq_disable(adapter);
+	if( adapter->flag & BOARD_IOMAP ) 
+		irq_disable(adapter);
+
 	free_irq(adapter->host->irq, adapter);
 
 	/* Issue a blocking (interrupts disabled) command to the card */
 	issue_scb_block(adapter, raw_mbox);
 
 	/* Flush disks cache */
-	memset(mbox, 0, 16);
+	memset(raw_mbox, 0, sizeof(raw_mbox));
 	raw_mbox[0] = FLUSH_SYSTEM;
 
 	/* Issue a blocking (interrupts disabled) command to the card */
@@ -2541,8 +2549,6 @@ megaraid_release(struct Scsi_Host *host)
 	kfree(adapter->scb_list);
 	pci_free_consistent(adapter->dev, sizeof(mbox64_t),
 			(void *)adapter->una_mbox64, adapter->una_mbox64_dma);
-
-	kfree(adapter->ipdev);
 
 	hba_count--;
 
@@ -2725,7 +2731,7 @@ megaraid_abort(Scsi_Cmnd *scp)
 		 */
 		if( !(iter % 1000) ) {
 			printk(
-			"megarid: Waiting for %d commands to flush: iter:%ld\n",
+			"megaraid: Waiting for %d commands to flush: iter:%ld\n",
 				atomic_read(&adapter->pend_cmds), iter);
 		}
 
@@ -2744,7 +2750,7 @@ megaraid_abort(Scsi_Cmnd *scp)
 
 	if( rval == SUCCESS ) {
 		printk(KERN_INFO
-			"megaraid: abort sequence successfully complete.\n");
+			"megaraid: abort sequence successfully completed.\n");
 	}
 
 	return rval;
@@ -2805,7 +2811,7 @@ megaraid_reset(Scsi_Cmnd *cmd)
 		 */
 		if( !(iter % 1000) ) {
 			printk(
-			"megarid: Waiting for %d commands to flush: iter:%ld\n",
+			"megaraid: Waiting for %d commands to flush: iter:%ld\n",
 				atomic_read(&adapter->pend_cmds), iter);
 		}
 
@@ -2824,7 +2830,7 @@ megaraid_reset(Scsi_Cmnd *cmd)
 
 	if( rval == SUCCESS ) {
 		printk(KERN_INFO
-			"megaraid: reset sequence successfully complete.\n");
+			"megaraid: reset sequence successfully completed.\n");
 	}
 
 	return rval;
@@ -2955,7 +2961,7 @@ proc_read_config(char *page, char **start, off_t offset, int count, int *eof,
 	len += sprintf(page+len, "Base = %08lx, Irq = %d, ", adapter->base,
 			adapter->host->irq);
 
-	len += sprintf(page+len, "Logical Drives = %d, Channels = %d\n",
+	len += sprintf(page+len, "Initial Logical Drives = %d, Channels = %d\n",
 			adapter->numldrv, adapter->product_info.nchannels);
 
 	len += sprintf(page+len, "Version =%s:%s, DRAM = %dMb\n",
@@ -3111,7 +3117,7 @@ proc_rebuild_rate(char *page, char **start, off_t offset, int count, int *eof,
 	struct pci_dev	*pdev;
 	int	len = 0;
 
-	pdev = adapter->ipdev;
+	pdev = adapter->dev;
 
 	if( (inquiry = mega_allocate_inquiry(&dma_handle, pdev)) == NULL ) {
 		*eof = 1;
@@ -3173,7 +3179,7 @@ proc_battery(char *page, char **start, off_t offset, int count, int *eof,
 	char	str[256];
 	int	len = 0;
 
-	pdev = adapter->ipdev;
+	pdev = adapter->dev;
 
 	if( (inquiry = mega_allocate_inquiry(&dma_handle, pdev)) == NULL ) {
 		*eof = 1;
@@ -3211,22 +3217,22 @@ proc_battery(char *page, char **start, off_t offset, int count, int *eof,
 
 	if(battery_status & MEGA_BATT_MODULE_MISSING)
 		strcat(str, " Module Missing");
-	
+
 	if(battery_status & MEGA_BATT_LOW_VOLTAGE)
 		strcat(str, " Low Voltage");
-	
+
 	if(battery_status & MEGA_BATT_TEMP_HIGH)
 		strcat(str, " Temperature High");
-	
+
 	if(battery_status & MEGA_BATT_PACK_MISSING)
 		strcat(str, " Pack Missing");
-	
+
 	if(battery_status & MEGA_BATT_CHARGE_INPROG)
 		strcat(str, " Charge In-progress");
-	
+
 	if(battery_status & MEGA_BATT_CHARGE_FAIL)
 		strcat(str, " Charge Fail");
-	
+
 	if(battery_status & MEGA_BATT_CYCLES_EXCEEDED)
 		strcat(str, " Cycles Exceeded");
 
@@ -3356,7 +3362,7 @@ proc_pdrv(adapter_t *adapter, char *page, int channel)
 	char	str[80];
 	int	i;
 
-	pdev = adapter->ipdev;
+	pdev = adapter->dev;
 
 	if( (inquiry = mega_allocate_inquiry(&dma_handle, pdev)) == NULL ) {
 		return len;
@@ -3405,32 +3411,27 @@ proc_pdrv(adapter_t *adapter, char *page, int channel)
 		switch( state & 0x0F ) {
 
 		case PDRV_ONLINE:
-			sprintf(str,
-			"Channel:%2d Id:%2d State: Online",
+			sprintf(str, "Channel:%2d Id:%2d State: Online",
 				channel, tgt);
 			break;
 
 		case PDRV_FAILED:
-			sprintf(str,
-			"Channel:%2d Id:%2d State: Failed",
+			sprintf(str, "Channel:%2d Id:%2d State: Failed",
 				channel, tgt);
 			break;
 
 		case PDRV_RBLD:
-			sprintf(str,
-			"Channel:%2d Id:%2d State: Rebuild",
+			sprintf(str, "Channel:%2d Id:%2d State: Rebuild",
 				channel, tgt);
 			break;
 
 		case PDRV_HOTSPARE:
-			sprintf(str,
-			"Channel:%2d Id:%2d State: Hot spare",
+			sprintf(str, "Channel:%2d Id:%2d State: Hot spare",
 				channel, tgt);
 			break;
 
 		default:
-			sprintf(str,
-			"Channel:%2d Id:%2d State: Un-configured",
+			sprintf(str, "Channel:%2d Id:%2d State: Un-configured",
 				channel, tgt);
 			break;
 
@@ -3545,7 +3546,7 @@ proc_rdrv_10(char *page, char **start, off_t offset, int count, int *eof,
  * @eof - set if no more data needs to be returned
  * @data - pointer to our soft state
  *
- * Display real time information about the logical drives 0 through 9.
+ * Display real time information about the logical drives 10 through 19.
  */
 static int
 proc_rdrv_20(char *page, char **start, off_t offset, int count, int *eof,
@@ -3568,7 +3569,7 @@ proc_rdrv_20(char *page, char **start, off_t offset, int count, int *eof,
  * @eof - set if no more data needs to be returned
  * @data - pointer to our soft state
  *
- * Display real time information about the logical drives 0 through 9.
+ * Display real time information about the logical drives 20 through 29.
  */
 static int
 proc_rdrv_30(char *page, char **start, off_t offset, int count, int *eof,
@@ -3591,7 +3592,7 @@ proc_rdrv_30(char *page, char **start, off_t offset, int count, int *eof,
  * @eof - set if no more data needs to be returned
  * @data - pointer to our soft state
  *
- * Display real time information about the logical drives 0 through 9.
+ * Display real time information about the logical drives 30 through 39.
  */
 static int
 proc_rdrv_40(char *page, char **start, off_t offset, int count, int *eof,
@@ -3616,7 +3617,7 @@ proc_rdrv_40(char *page, char **start, off_t offset, int count, int *eof,
  * /proc/scsi/scsi interface
  */
 static int
-proc_rdrv(adapter_t *adapter, char *page, int start, int end )
+proc_rdrv(adapter_t *adapter, char *page, int start, int end)
 {
 	dma_addr_t	dma_handle;
 	logdrv_param	*lparam;
@@ -3632,7 +3633,7 @@ proc_rdrv(adapter_t *adapter, char *page, int start, int end )
 	int	i;
 	u8	span8_flag = 1;
 
-	pdev = adapter->ipdev;
+	pdev = adapter->dev;
 
 	if( (inquiry = mega_allocate_inquiry(&dma_handle, pdev)) == NULL ) {
 		return len;
@@ -3652,7 +3653,7 @@ proc_rdrv(adapter_t *adapter, char *page, int start, int end )
 	memset(&mc, 0, sizeof(megacmd_t));
 
 	if( adapter->flag & BOARD_40LD ) {
-		
+
 		array_sz = sizeof(disk_array_40ld);
 
 		rdrv_state = ((mega_inquiry3 *)inquiry)->ldrv_state;
@@ -3749,7 +3750,7 @@ proc_rdrv(adapter_t *adapter, char *page, int start, int end )
 			else {
 				lparam = (logdrv_param*) &((diskarray_span4_t*)
 						(disk_array))->log_drv[i];
-			}	
+			}
 		}
 
 		/*
@@ -3794,7 +3795,7 @@ proc_rdrv(adapter_t *adapter, char *page, int start, int end )
 			len += sprintf(page+len,
 					", initialization in progress");
 		}
-		
+
 		len += sprintf(page+len, "\n");
 
 		len += sprintf(page+len, "Span depth:%3d, ",
@@ -3968,7 +3969,7 @@ mega_partsize(Disk *disk, kdev_t dev, int *geom)
 
 	if (blksize_size[ma])
 		block = blksize_size[ma][mi];
-		
+
 	if (!(bh = bread(MKDEV(ma,mi), 0, block)))
 		return -1;
 
@@ -4028,7 +4029,7 @@ megaraid_reboot_notify (struct notifier_block *this, unsigned long code,
 {
 	adapter_t *adapter;
 	struct Scsi_Host *host;
-	u8 raw_mbox[16];
+	u8 raw_mbox[sizeof(mbox_t)];
 	mbox_t *mbox;
 	int i;
 
@@ -4044,10 +4045,12 @@ megaraid_reboot_notify (struct notifier_block *this, unsigned long code,
 		mbox = (mbox_t *)raw_mbox;
 
 		/* Flush adapter cache */
-		memset(mbox, 0, 16);
+		memset(raw_mbox, 0, sizeof(raw_mbox));
 		raw_mbox[0] = FLUSH_ADAPTER;
 
-		irq_disable(adapter);
+		if( adapter->flag & BOARD_IOMAP ) 
+			irq_disable(adapter);
+
 		free_irq(adapter->host->irq, adapter);
 
 		/*
@@ -4057,7 +4060,7 @@ megaraid_reboot_notify (struct notifier_block *this, unsigned long code,
 		issue_scb_block(adapter, raw_mbox);
 
 		/* Flush disks cache */
-		memset(mbox, 0, 16);
+		memset(raw_mbox, 0, sizeof(raw_mbox));
 		raw_mbox[0] = FLUSH_SYSTEM;
 
 		issue_scb_block(adapter, raw_mbox);
@@ -4376,7 +4379,7 @@ megadev_ioctl(struct inode *inode, struct file *filep, unsigned int cmd,
 		 * For all internal commands, the buffer must be allocated in
 		 * <4GB address range
 		 */
-		pdev = adapter->ipdev;
+		pdev = adapter->dev;
 
 		/* Is it a passthru command or a DCMD */
 		if( uioc.uioc_rmbox[0] == MEGA_MBOXCMD_PASSTHRU ) {
@@ -4788,13 +4791,13 @@ megadev_close (struct inode *inode, struct file *filep)
 static int
 mega_is_bios_enabled(adapter_t *adapter)
 {
-	unsigned char	raw_mbox[16];
+	unsigned char	raw_mbox[sizeof(mbox_t)];
 	mbox_t	*mbox;
 	int	ret;
 
 	mbox = (mbox_t *)raw_mbox;
 
-	memset(mbox, 0, 16);
+	memset(raw_mbox, 0, sizeof(raw_mbox));
 
 	memset((void *)adapter->mega_buffer, 0, MEGA_BUFFER_SIZE);
 
@@ -4821,13 +4824,13 @@ mega_is_bios_enabled(adapter_t *adapter)
 static void
 mega_enum_raid_scsi(adapter_t *adapter)
 {
-	unsigned char raw_mbox[16];
+	unsigned char raw_mbox[sizeof(mbox_t)];
 	mbox_t *mbox;
 	int i;
 
 	mbox = (mbox_t *)raw_mbox;
 
-	memset(mbox, 0, 16);
+	memset(raw_mbox, 0, sizeof(raw_mbox));
 
 	/*
 	 * issue command to find out what channels are raid/scsi
@@ -4850,7 +4853,7 @@ mega_enum_raid_scsi(adapter_t *adapter)
 
 	}
 
-	for( i = 0; i < adapter->product_info.nchannels; i++ ) { 
+	for( i = 0; i < adapter->product_info.nchannels; i++ ) {
 		if( (adapter->mega_ch_class >> i) & 0x01 ) {
 			printk(KERN_INFO "megaraid: channel[%d] is raid.\n",
 					i);
@@ -4876,7 +4879,7 @@ static void
 mega_get_boot_drv(adapter_t *adapter)
 {
 	struct private_bios_data	*prv_bios_data;
-	unsigned char	raw_mbox[16];
+	unsigned char	raw_mbox[sizeof(mbox_t)];
 	mbox_t	*mbox;
 	u16	cksum = 0;
 	u8	*cksum_p;
@@ -4885,7 +4888,7 @@ mega_get_boot_drv(adapter_t *adapter)
 
 	mbox = (mbox_t *)raw_mbox;
 
-	memset(mbox, 0, sizeof(raw_mbox));
+	memset(raw_mbox, 0, sizeof(raw_mbox));
 
 	raw_mbox[0] = BIOS_PVT_DATA;
 	raw_mbox[2] = GET_BIOS_PVT_DATA;
@@ -4942,13 +4945,13 @@ mega_get_boot_drv(adapter_t *adapter)
 static int
 mega_support_random_del(adapter_t *adapter)
 {
-	unsigned char raw_mbox[16];
+	unsigned char raw_mbox[sizeof(mbox_t)];
 	mbox_t *mbox;
 	int rval;
 
 	mbox = (mbox_t *)raw_mbox;
 
-	memset(mbox, 0, 16);
+	memset(raw_mbox, 0, sizeof(raw_mbox));
 
 	/*
 	 * issue command
@@ -4971,13 +4974,13 @@ mega_support_random_del(adapter_t *adapter)
 static int
 mega_support_ext_cdb(adapter_t *adapter)
 {
-	unsigned char raw_mbox[16];
+	unsigned char raw_mbox[sizeof(mbox_t)];
 	mbox_t *mbox;
 	int rval;
 
 	mbox = (mbox_t *)raw_mbox;
 
-	memset(mbox, 0, 16);
+	memset(raw_mbox, 0, sizeof(raw_mbox));
 	/*
 	 * issue command to find out if controller supports extended CDBs.
 	 */
@@ -5055,7 +5058,9 @@ static int
 mega_do_del_logdrv(adapter_t *adapter, int logdrv)
 {
 	int	rval;
-	u8	raw_mbox[16];
+	u8	raw_mbox[sizeof(mbox_t)];
+
+	memset(raw_mbox, 0, sizeof(raw_mbox));
 
 	raw_mbox[0] = FC_DEL_LOGDRV;
 	raw_mbox[2] = OP_DEL_LOGDRV;
@@ -5090,12 +5095,12 @@ mega_do_del_logdrv(adapter_t *adapter, int logdrv)
 static void
 mega_get_max_sgl(adapter_t *adapter)
 {
-	unsigned char	raw_mbox[16];
+	unsigned char	raw_mbox[sizeof(mbox_t)];
 	mbox_t	*mbox;
 
 	mbox = (mbox_t *)raw_mbox;
 
-	memset(mbox, 0, sizeof(raw_mbox));
+	memset(raw_mbox, 0, sizeof(raw_mbox));
 
 	memset((void *)adapter->mega_buffer, 0, MEGA_BUFFER_SIZE);
 
@@ -5113,7 +5118,7 @@ mega_get_max_sgl(adapter_t *adapter)
 	}
 	else {
 		adapter->sglen = *((char *)adapter->mega_buffer);
-		
+
 		/*
 		 * Make sure this is not more than the resources we are
 		 * planning to allocate
@@ -5135,12 +5140,12 @@ mega_get_max_sgl(adapter_t *adapter)
 static int
 mega_support_cluster(adapter_t *adapter)
 {
-	unsigned char	raw_mbox[16];
+	unsigned char	raw_mbox[sizeof(mbox_t)];
 	mbox_t	*mbox;
 
 	mbox = (mbox_t *)raw_mbox;
 
-	memset(mbox, 0, sizeof(raw_mbox));
+	memset(raw_mbox, 0, sizeof(raw_mbox));
 
 	memset((void *)adapter->mega_buffer, 0, MEGA_BUFFER_SIZE);
 
@@ -5185,7 +5190,7 @@ mega_get_ldrv_num(adapter_t *adapter, Scsi_Cmnd *cmd, int channel)
 	int		ldrv_num;
 
 	tgt = cmd->target;
-	
+
 	if ( tgt > adapter->this_id )
 		tgt--;	/* we do not get inquires for initiator id */
 
@@ -5487,7 +5492,7 @@ mega_internal_dev_inquiry(adapter_t *adapter, u8 ch, u8 tgt,
 	 * For all internal commands, the buffer must be allocated in <4GB
 	 * address range
 	 */
-	pdev = adapter->ipdev;
+	pdev = adapter->dev;
 
 	pthru = pci_alloc_consistent(pdev, sizeof(mega_passthru),
 			&pthru_dma_handle);

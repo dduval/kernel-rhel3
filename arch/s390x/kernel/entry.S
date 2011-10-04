@@ -156,17 +156,17 @@ do_call_softirq:
 	.globl  system_call
 system_call:
         SAVE_ALL __LC_SVC_OLD_PSW,1
-	larl    %r7,sys_call_table
-	llgh    %r8,__LC_SVC_INT_CODE # get svc number from lowcore
-        sll     %r8,3
+	larl    %r10,sys_call_table
+	llgh    %r7,__LC_SVC_INT_CODE # get svc number from lowcore
+        sll     %r7,3
         GET_CURRENT               # load pointer to task_struct to R9
 	stosm   48(%r15),0x03     # reenable interrupts
         tm      SP_PSW+3(%r15),0x01  # are we running in 31 bit mode ?
         jo      sysc_noemu
-	la      %r8,4(%r8)        # use 31 bit emulation system calls
+	la      %r10,4(%r10)      # use 31 bit emulation system calls
 sysc_noemu:
-        lgf     %r8,0(%r8,%r7)    # load address of system call routine
-        tm      __TASK_ptrace+7(%r9),0x02 # PT_TRACESYS
+        lgf     %r8,0(%r7,%r10)   # load address of system call routine
+        tm      __TASK_ptrace+7(%r9),0x22 # PT_TRACESYS|PT_AUDITED
         jnz     sysc_tracesys
         basr    %r14,%r8          # call sys_xxxx
         stg     %r2,SP_R2(%r15)   # store return value (change R2 on stack)
@@ -214,26 +214,25 @@ sysc_tracesys:
 # special linkage: %r11 contains the return address for trace_svc
 #
 trace_svc:
-	lghi    %r0,-ENOSYS
-	stg     %r0,SP_R2(%r15)     # give sysc_trace an -ENOSYS retval
-        brasl   %r14,syscall_trace
-	lg      %r2,SP_R2(%r15)
-	cghi    %r2,-ENOSYS
-	je      trace_svc_go
-	sllg    %r2,%r2,56          # strace wants to change the syscall
-	srlg    %r2,%r2,53          # zap unused bits & multiply by 8
-	tm      SP_PSW+3(%r15),0x01 # are we running in 31 bit mode ?
-        jo      trace_svc_noemu
-	la      %r2,4(%r2)          # use 31 bit emulation system calls
-trace_svc_noemu:
-	lgf	%r8,0(%r2,%r7)      # load address of system call routine
+	srl	%r7,3
+	stg	%r7,SP_R2(%r15)
+	la	%r2,SP_PTREGS(%r15)
+        brasl   %r14,syscall_trace_enter
+	larl	%r1,.Lnr_syscalls
+	clc	SP_R2(8,%r15),0(%r1)
+	jnl     trace_svc_nogo
+	lg	%r7,SP_R2(%r15)     # strace might have changed the
+	sll	%r7,3               #  system call
+	lgf	%r8,0(%r7,%r10)     # load address of system call routine
 trace_svc_go:	
 	lmg     %r3,%r6,SP_R3(%r15)
 	lg      %r2,SP_ORIG_R2(%r15)
         basr    %r14,%r8            # call sys_xxx
         stg     %r2,SP_R2(%r15)     # store return value
+trace_svc_nogo:
+	la	%r2,SP_PTREGS(%r15)
 	lgr	%r14,%r11	    # return point is in %r11
-        jg      syscall_trace       # return point is sysc_return
+        jg      syscall_trace_exit  # return point is sysc_return
 
 #
 # a new process exits the kernel with ret_from_fork
@@ -709,17 +708,17 @@ pgm_per_only:
 #
 pgm_svcper:
 	SAVE_ALL __LC_SVC_OLD_PSW,1
-	larl    %r7,sys_call_table
-	llgh    %r8,__LC_SVC_INT_CODE # get svc number from lowcore
-        sll     %r8,3
+	larl    %r10,sys_call_table
+	llgh    %r7,__LC_SVC_INT_CODE # get svc number from lowcore
+        sll     %r7,3
         GET_CURRENT               # load pointer to task_struct to R9
 	stosm   48(%r15),0x03     # reenable interrupts
         tm      SP_PSW+3(%r15),0x01  # are we running in 31 bit mode ?
         jo      pgm_svcper_noemu
-	la      %r8,4(%r8)        # use 31 bit emulation system calls
+	la      %r10,4(%r10)      # use 31 bit emulation system calls
 pgm_svcper_noemu:
-        lgf     %r8,0(%r8,%r7)    # load address of system call routine
-        tm      __TASK_ptrace+7(%r9),0x02 # PT_TRACESYS
+        lgf     %r8,0(%r7,%r10)   # load address of system call routine
+        tm      __TASK_ptrace+7(%r9),0x22 # PT_TRACESYS|PT_AUDITED
         jnz     pgm_tracesys
         basr    %r14,%r8          # call sys_xxxx
         stg     %r2,SP_R2(%r15)   # store return value (change R2 on stack)
@@ -752,6 +751,7 @@ pgm_tracesys:
         .globl io_int_handler
 io_int_handler:
         SAVE_ALL __LC_IO_OLD_PSW,0
+	mc	0,0
         GET_CURRENT                    # load pointer to task_struct to R9
         la      %r2,SP_PTREGS(%r15)    # address of register-save area
 	llgh    %r3,__LC_SUBCHANNEL_NR # load subchannel number
@@ -816,6 +816,7 @@ io_signal_return:
         .globl  ext_int_handler
 ext_int_handler:
         SAVE_ALL __LC_EXT_OLD_PSW,0
+	mc	0,0
         GET_CURRENT                    # load pointer to task_struct to R9
 	llgh	%r6,__LC_EXT_INT_CODE  # get interruption code
 	lgr	%r1,%r6		       # calculate index = code & 0xff
@@ -829,6 +830,8 @@ ext_int_loop:
 	ch	%r6,16(%r7)	       # compare external interrupt code
 	jne	ext_int_next
 	lg	%r1,8(%r7)	       # get handler address
+	ltgr	%r1,%r1
+	jz	ext_int_next
 	la	%r2,SP_PTREGS(%r15)    # address of register-save area
 	lgr	%r3,%r6		       # interruption code
 	basr	%r14,%r1	       # call handler
@@ -844,6 +847,7 @@ ext_int_next:
         .globl mcck_int_handler
 mcck_int_handler:
         SAVE_ALL __LC_MCK_OLD_PSW,0
+	mc	0,0
 	brasl   %r14,s390_do_machine_check
 mcck_return:
         RESTORE_ALL 0
@@ -882,3 +886,4 @@ restart_go:
  */
                .align 4
 .Lc_ac:        .long  0,0,1
+.Lnr_syscalls: .long  NR_syscalls

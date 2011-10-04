@@ -207,6 +207,9 @@ do {							\
 #define exit_elf_binfmt			exit_elf32_binfmt
 
 #define load_elf_binary load_elf32_binary
+#define exec_shield exec_shield32
+
+extern int exec_shield32;
 
 #undef CONFIG_BINFMT_ELF
 #ifdef CONFIG_BINFMT_ELF32

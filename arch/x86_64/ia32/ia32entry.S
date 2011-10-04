@@ -56,7 +56,7 @@ ENTRY(ia32_syscall)
 	cld
 	SAVE_ARGS
 	GET_CURRENT(%r10)
-	testl $PT_TRACESYS,tsk_ptrace(%r10) 
+	testl $PT_TRACESYS|PT_AUDITED,tsk_ptrace(%r10) 
 	jne  ia32_tracesys
 	cmpl $(IA32_NR_syscalls),%eax
 	jae  ia32_badsys
@@ -69,7 +69,7 @@ ia32_tracesys:
 	SAVE_REST
 	movq $-ENOSYS,RAX(%rsp)
 	movq %rsp,%rdi        /* &pt_regs -> arg1 */
-	call syscall_trace
+	call syscall_trace_enter
 	LOAD_ARGS ARGOFFSET  /* reload args from stack in case ptrace changed it */
 	addq $ARGOFFSET,%rsp	
 	cmpl $(IA32_NR_syscalls),%eax
@@ -80,7 +80,7 @@ ia32_tracesys_end:
 	movq %rax,RAX-ARGOFFSET(%rsp)
 1:	SAVE_REST
 	movq %rsp,%rdi		/* &pt_regs -> arg1 */ 
-	call syscall_trace
+	call syscall_trace_leave
 	addq $ARGOFFSET,%rsp
 	jmp int_ret_from_sys_call
 		

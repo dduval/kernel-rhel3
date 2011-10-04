@@ -40,10 +40,6 @@ _GLOBAL(sys32_recvfrom)
 	clrldi		r8, r8, 32	/* int *addr_len parm */
 	b		.sys_recvfrom
 
-_GLOBAL(sys32_getsockopt)
-	clrldi		r7, r7, 32	/* int *optlen parm */
-	b		.sys_getsockopt
-
 _GLOBAL(sys32_bdflush)
 	extsw		r4,r4		/* sign extend long data parm */
 	b		.sys_bdflush

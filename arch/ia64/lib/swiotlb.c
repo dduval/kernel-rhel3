@@ -75,7 +75,7 @@ static unsigned char **io_tlb_orig_addr;
  */
 static spinlock_t io_tlb_lock = SPIN_LOCK_UNLOCKED;
 
-static int __init
+int __init
 setup_io_tlb_npages (char *str)
 {
 	io_tlb_nslabs = simple_strtoul(str, NULL, 0) << (PAGE_SHIFT - IO_TLB_SHIFT);
@@ -343,9 +343,10 @@ swiotlb_map_single (struct pci_dev *hwdev, void *ptr, size_t size, int direction
  * DMA can be marked as "clean" so that update_mmu_cache() doesn't have to
  * flush them when they get mapped into an executable vm-area.
  */
-static void
+static inline void
 mark_clean (void *addr, size_t size)
 {
+#ifdef __ia64__
 	unsigned long pg_addr, end;
 
 	pg_addr = PAGE_ALIGN((unsigned long) addr);
@@ -355,6 +356,7 @@ mark_clean (void *addr, size_t size)
 		set_bit(PG_arch_1, &page->flags);
 		pg_addr += PAGE_SIZE;
 	}
+#endif
 }
 
 /*

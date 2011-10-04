@@ -1015,8 +1015,10 @@ struct proto_ops inet_stream_ops = {
 	recvmsg:	inet_recvmsg,
 	mmap:		sock_no_mmap,
 	sendpage:	tcp_sendpage,
+#if INET_AIO_WORKS
 	kvec_read:	inet_kvec_read,
 	kvec_write:	inet_kvec_write,
+#endif
 };
 
 struct proto_ops inet_dgram_ops = {
@@ -1038,8 +1040,10 @@ struct proto_ops inet_dgram_ops = {
 	recvmsg:	inet_recvmsg,
 	mmap:		sock_no_mmap,
 	sendpage:	inet_sendpage,
+#if INET_AIO_WORKS
 	kvec_read:	inet_kvec_read,
 	kvec_write:	inet_kvec_write,
+#endif
 };
 
 struct net_proto_family inet_family_ops = {

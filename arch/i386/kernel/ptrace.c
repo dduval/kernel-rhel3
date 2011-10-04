@@ -13,6 +13,7 @@
 #include <linux/errno.h>
 #include <linux/ptrace.h>
 #include <linux/user.h>
+#include <linux/audit.h>
 
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
@@ -512,11 +513,8 @@ out:
 	return ret;
 }
 
-asmlinkage void syscall_trace(void)
+static void syscall_ptrace(void)
 {
-	if ((current->ptrace & (PT_PTRACED|PT_TRACESYS)) !=
-						(PT_PTRACED|PT_TRACESYS))
-		return;
 	/* the 0x80 provides a way for the tracing parent to distinguish
 	   between a syscall stop and SIGTRAP delivery */
 	current->exit_code = SIGTRAP | ((current->ptrace & PT_TRACESYSGOOD)
@@ -534,4 +532,22 @@ asmlinkage void syscall_trace(void)
 		current->exit_code = 0;
 	}
 	recalc_sigpending();
+}
+
+asmlinkage void syscall_trace_enter(struct pt_regs *regs)
+{
+	if ((current->ptrace & (PT_PTRACED|PT_TRACESYS)) == (PT_PTRACED|PT_TRACESYS))
+		syscall_ptrace();
+
+	if (isaudit(current) && (current->ptrace & PT_AUDITED))
+		audit_intercept(regs);
+}
+
+asmlinkage void syscall_trace_leave(struct pt_regs *regs)
+{
+	if (isaudit(current) && (current->ptrace & PT_AUDITED))
+		audit_result(regs);
+
+	if ((current->ptrace & (PT_PTRACED|PT_TRACESYS)) == (PT_PTRACED|PT_TRACESYS))
+		syscall_ptrace();
 }

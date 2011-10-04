@@ -127,8 +127,6 @@ static inline void remove_page_from_hash_queue(struct page * page)
  */
 void __remove_inode_page(struct page *page)
 {
-	if (PageDirty(page) && !PageSwapCache(page))
-		BUG();
 	remove_page_from_inode_queue(page);
 	remove_page_from_hash_queue(page);
 }
@@ -1941,7 +1939,7 @@ ssize_t generic_file_read(struct file * filp, char * buf, size_t count, loff_t *
 	return generic_file_new_read(filp, buf, count, ppos, 0);
 }
 
-static int file_send_actor(read_descriptor_t * desc, struct page *page, unsigned long offset , unsigned long size)
+int file_send_actor(read_descriptor_t * desc, struct page *page, unsigned long offset , unsigned long size)
 {
 	ssize_t written;
 	unsigned long count = desc->count;
@@ -2019,20 +2017,24 @@ static ssize_t common_sendfile(int out_fd, int in_fd, loff_t *offset, size_t cou
 
 	retval = 0;
 	if (count) {
-		read_descriptor_t desc;
-		
 		if (!offset)
 			offset = &in_file->f_pos;
 
-		desc.written = 0;
-		desc.count = count;
-		desc.buf = (char *) out_file;
-		desc.error = 0;
-		do_generic_file_read(in_file, offset, &desc, file_send_actor, 0);
+		if (IS_SENDFILE_FOP(in_inode) && in_file->f_op && ((struct file_operations_ext *)in_file->f_op)->sendfile)
+			retval = ((struct file_operations_ext *)in_file->f_op)->sendfile(in_file, out_file, count, offset);
+		else {
+			read_descriptor_t desc;
 
-		retval = desc.written;
-		if (!retval)
-			retval = desc.error;
+			desc.written = 0;
+			desc.count = count;
+			desc.buf = (char *) out_file;
+			desc.error = 0;
+			do_generic_file_read(in_file, offset, &desc, file_send_actor, 0);
+
+			retval = desc.written;
+			if (!retval)
+				retval = desc.error;
+		}
 	}
 
 fput_out:

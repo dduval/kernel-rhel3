@@ -1,6 +1,10 @@
 /*
-	Copyright 2003 Red Hat Inc
-	Copyright 2003 Jeff Garzik
+
+    ata_piix.c - Intel PATA/SATA controllers
+
+
+	Copyright 2003-2004 Red Hat Inc
+	Copyright 2003-2004 Jeff Garzik
 
 
 	Copyright header from piix.c:
@@ -10,9 +14,6 @@
     Copyright (C) 2003 Red Hat Inc <alan@redhat.com>
 
     May be copied or modified under the terms of the GNU General Public License
-
-	TODO:
-	* check traditional port enable/disable bits in pata port_probe
 
  */
 #include <linux/config.h>
@@ -24,12 +25,13 @@
 #include <linux/delay.h>
 #include "scsi.h"
 #include "hosts.h"
-#include <linux/ata.h>
+#include <linux/libata.h>
 
 #define DRV_NAME	"ata_piix"
-#define DRV_VERSION	"0.93"
+#define DRV_VERSION	"1.00"
 
 enum {
+	PIIX_IOCFG		= 0x54, /* IDE I/O configuration register */
 	ICH5_PCS		= 0x92,	/* port control and status */
 
 	PIIX_FLAG_COMBINED	= (1 << 30), /* combined mode possible */
@@ -37,15 +39,20 @@ enum {
 	PIIX_COMB_PRI		= (1 << 0), /* combined mode, PATA primary */
 	PIIX_COMB_SEC		= (1 << 1), /* combined mode, PATA secondary */
 
+	PIIX_80C_PRI		= (1 << 5) | (1 << 4),
+	PIIX_80C_SEC		= (1 << 7) | (1 << 6),
+
 	ich5_pata		= 0,
 	ich5_sata		= 1,
 	piix4_pata		= 2,
 };
 
-static int __devinit piix_init_one (struct pci_dev *pdev,
+static int piix_init_one (struct pci_dev *pdev,
 				    const struct pci_device_id *ent);
-static void piix_port_probe(struct ata_port *ap);
-static void piix_port_disable(struct ata_port *ap);
+
+static void piix_pata_phy_reset(struct ata_port *ap);
+static void piix_sata_phy_reset(struct ata_port *ap);
+static void piix_sata_port_disable(struct ata_port *ap);
 static void piix_set_piomode (struct ata_port *ap, struct ata_device *adev,
 			      unsigned int pio);
 static void piix_set_udmamode (struct ata_port *ap, struct ata_device *adev,
@@ -53,22 +60,35 @@ static void piix_set_udmamode (struct ata_port *ap, struct ata_device *adev,
 
 static unsigned int in_module_init = 1;
 
-static struct pci_device_id piix_pci_tbl[] __devinitdata = {
-#ifdef CONFIG_SCSI_ATA_PATA
+static struct pci_device_id piix_pci_tbl[] = {
+#ifdef ATA_ENABLE_PATA
 	{ 0x8086, 0x7111, PCI_ANY_ID, PCI_ANY_ID, 0, 0, piix4_pata },
 	{ 0x8086, 0x24db, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich5_pata },
 	{ 0x8086, 0x25a2, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich5_pata },
 #endif
+
+	/* NOTE: The following PCI ids must be kept in sync with the
+	 * list in drivers/pci/quirks.c.
+	 */
 
 	{ 0x8086, 0x24d1, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich5_sata },
 	{ 0x8086, 0x24df, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich5_sata },
 	{ 0x8086, 0x25a3, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich5_sata },
 	{ 0x8086, 0x25b0, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich5_sata },
 
+	/* ICH6 operates in two modes, "looks-like-ICH5" mode,
+	 * and enhanced mode, with queueing and other fancy stuff.
+	 * This is distinguished by PCI class code.
+	 */
+	{ 0x8086, 0x2651, PCI_ANY_ID, PCI_ANY_ID,
+	  PCI_CLASS_STORAGE_IDE << 8, 0xffff00, ich5_sata },
+	{ 0x8086, 0x2652, PCI_ANY_ID, PCI_ANY_ID,
+	  PCI_CLASS_STORAGE_IDE << 8, 0xffff00, ich5_sata },
+
 	{ }	/* terminate list */
 };
 
-struct pci_driver piix_pci_driver = {
+static struct pci_driver piix_pci_driver = {
 	.name			= DRV_NAME,
 	.id_table		= piix_pci_tbl,
 	.probe			= piix_init_one,
@@ -84,58 +104,95 @@ static Scsi_Host_Template piix_sht = {
 	.eh_strategy_handler	= ata_scsi_error,
 	.can_queue		= ATA_DEF_QUEUE,
 	.this_id		= ATA_SHT_THIS_ID,
-	.sg_tablesize		= ATA_MAX_PRD,
+	.sg_tablesize		= LIBATA_MAX_PRD,
 	.max_sectors		= ATA_MAX_SECTORS,
 	.cmd_per_lun		= ATA_SHT_CMD_PER_LUN,
 	.use_new_eh_code	= ATA_SHT_NEW_EH_CODE,
 	.emulated		= ATA_SHT_EMULATED,
 	.use_clustering		= ATA_SHT_USE_CLUSTERING,
 	.proc_name		= DRV_NAME,
+	.bios_param		= ata_std_bios_param,
 };
 
-struct ata_host_info piix_pata_ops = {
-	.port_probe		= ata_port_probe,
+static struct ata_port_operations piix_pata_ops = {
 	.port_disable		= ata_port_disable,
 	.set_piomode		= piix_set_piomode,
 	.set_udmamode		= piix_set_udmamode,
+
 	.tf_load		= ata_tf_load_pio,
+	.tf_read		= ata_tf_read_pio,
+	.check_status		= ata_check_status_pio,
+	.exec_command		= ata_exec_command_pio,
+
+	.phy_reset		= piix_pata_phy_reset,
+	.phy_config		= pata_phy_config,
+
+	.bmdma_start		= ata_bmdma_start_pio,
+	.fill_sg		= ata_fill_sg,
+	.eng_timeout		= ata_eng_timeout,
+
+	.irq_handler		= ata_interrupt,
+
+	.port_start		= ata_port_start,
+	.port_stop		= ata_port_stop,
 };
 
-struct ata_host_info piix_sata_ops = {
-	.port_probe		= piix_port_probe,
-	.port_disable		= piix_port_disable,
+static struct ata_port_operations piix_sata_ops = {
+	.port_disable		= piix_sata_port_disable,
 	.set_piomode		= piix_set_piomode,
 	.set_udmamode		= piix_set_udmamode,
+
 	.tf_load		= ata_tf_load_pio,
+	.tf_read		= ata_tf_read_pio,
+	.check_status		= ata_check_status_pio,
+	.exec_command		= ata_exec_command_pio,
+
+	.phy_reset		= piix_sata_phy_reset,
+	.phy_config		= pata_phy_config,	/* not a typo */
+
+	.bmdma_start		= ata_bmdma_start_pio,
+	.fill_sg		= ata_fill_sg,
+	.eng_timeout		= ata_eng_timeout,
+
+	.irq_handler		= ata_interrupt,
+
+	.port_start		= ata_port_start,
+	.port_stop		= ata_port_stop,
 };
 
-struct ata_board ata_board_tbl[] __devinitdata = {
+static struct ata_port_info piix_port_info[] = {
 	/* ich5_pata */
 	{
 		.sht		= &piix_sht,
-		.host_flags	= ATA_FLAG_SLAVE_POSS,
+		.host_flags	= ATA_FLAG_SLAVE_POSS | ATA_FLAG_SRST,
 		.pio_mask	= 0x03,	/* pio3-4 */
-		.udma_mask	= 0x07,	/* udma0-2 ; FIXME */
-		.host_info	= &piix_pata_ops,
+		.udma_mask	= ATA_UDMA_MASK_40C, /* FIXME: cbl det */
+		.port_ops	= &piix_pata_ops,
 	},
 
 	/* ich5_sata */
 	{
 		.sht		= &piix_sht,
-		.host_flags	= ATA_FLAG_SATA | PIIX_FLAG_COMBINED,
+		.host_flags	= ATA_FLAG_SATA | PIIX_FLAG_COMBINED |
+				  ATA_FLAG_SRST,
 		.pio_mask	= 0x03,	/* pio3-4 */
 		.udma_mask	= 0x7f,	/* udma0-6 ; FIXME */
-		.host_info	= &piix_sata_ops,
+		.port_ops	= &piix_sata_ops,
 	},
 
 	/* piix4_pata */
 	{
 		.sht		= &piix_sht,
-		.host_flags	= ATA_FLAG_SLAVE_POSS,
+		.host_flags	= ATA_FLAG_SLAVE_POSS | ATA_FLAG_SRST,
 		.pio_mask	= 0x03, /* pio3-4 */
-		.udma_mask	= 0x07,	/* udma0-2 ; FIXME */
-		.host_info	= &piix_pata_ops,
+		.udma_mask	= ATA_UDMA_MASK_40C, /* FIXME: cbl det */
+		.port_ops	= &piix_pata_ops,
 	},
+};
+
+static struct pci_bits piix_enable_bits[] = {
+	{ 0x41U, 1U, 0x80UL, 0x80UL },	/* port 0 */
+	{ 0x43U, 1U, 0x80UL, 0x80UL },	/* port 1 */
 };
 
 MODULE_AUTHOR("Andre Hedrick, Alan Cox, Andrzej Krzysztofowicz, Jeff Garzik");
@@ -144,54 +201,106 @@ MODULE_LICENSE("GPL");
 MODULE_DEVICE_TABLE(pci, piix_pci_tbl);
 
 /**
- *	piix_port_probe -
- *	@ap:
+ *	piix_pata_cbl_detect - Probe host controller cable detect info
+ *	@ap: Port for which cable detect info is desired
+ *
+ *	Read 80c cable indicator from SATA PCI device's PCI config
+ *	register.  This register is normally set by firmware (BIOS).
  *
  *	LOCKING:
- *
+ *	None (inherited from caller).
  */
-
-static void piix_port_probe(struct ata_port *ap)
+static void piix_pata_cbl_detect(struct ata_port *ap)
 {
-	u16 pcs;
 	struct pci_dev *pdev = ap->host_set->pdev;
+	u8 tmp, mask;
 
-	pci_read_config_word(pdev, ICH5_PCS, &pcs);
+	/* no 80c support in host controller? */
+	if ((ap->udma_mask & ~ATA_UDMA_MASK_40C) == 0)
+		goto cbl40;
 
-	/* if port not enabled, exit */
-	if ((pcs & (1 << ap->port_no)) == 0) {
-		ata_port_disable(ap);
-		DPRINTK("port %d disabled, ignoring\n", ap->port_no);
-		return;
-	}
+	/* check BIOS cable detect results */
+	mask = ap->port_no == 0 ? PIIX_80C_PRI : PIIX_80C_SEC;
+	pci_read_config_byte(pdev, PIIX_IOCFG, &tmp);
+	if ((tmp & mask) == 0)
+		goto cbl40;
 
-	/* if port enabled but no device, disable port and exit */
-	if ((pcs & (1 << (ap->port_no + 4))) == 0) {
-		pcs &= ~(1 << ap->port_no);
-		pci_write_config_word(pdev, ICH5_PCS, pcs);
+	ap->cbl = ATA_CBL_PATA80;
+	return;
 
-		ata_port_disable(ap);
-		DPRINTK("port %d has no dev, disabling\n", ap->port_no);
-		return;
-	}
-
-	ata_port_probe(ap);
+cbl40:
+	ap->cbl = ATA_CBL_PATA40;
+	ap->udma_mask &= ATA_UDMA_MASK_40C;
 }
 
 /**
- *	piix_port_disable - 
- *	@ap:
+ *	piix_pata_phy_reset - Probe specified port on PATA host controller
+ *	@ap: Port to probe
+ *
+ *	Probe PATA phy.
  *
  *	LOCKING:
- *
+ *	None (inherited from caller).
  */
 
-static void piix_port_disable(struct ata_port *ap)
+static void piix_pata_phy_reset(struct ata_port *ap)
+{
+	if (!pci_test_config_bits(ap->host_set->pdev,
+				  &piix_enable_bits[ap->port_no])) {
+		ata_port_disable(ap);
+		printk(KERN_INFO "ata%u: port disabled. ignoring.\n", ap->id);
+		return;
+	}
+
+	piix_pata_cbl_detect(ap);
+
+	ata_port_probe(ap);
+
+	ata_bus_reset(ap);
+}
+
+/**
+ *	piix_pcs_probe - Probe SATA port configuration and status register
+ *	@ap: Port to probe
+ *	@have_port: (output) Non-zero if SATA port is enabled
+ *	@have_device: (output) Non-zero if SATA phy indicates device present
+ *
+ *	Reads SATA PCI device's PCI config register Port Configuration
+ *	and Status (PCS) to determine port and device availability.
+ *
+ *	LOCKING:
+ *	None (inherited from caller).
+ */
+static void piix_pcs_probe (struct ata_port *ap, unsigned int *have_port,
+			    unsigned int *have_device)
 {
 	struct pci_dev *pdev = ap->host_set->pdev;
 	u16 pcs;
 
-	ata_port_disable(ap);
+	pci_read_config_word(pdev, ICH5_PCS, &pcs);
+
+	/* is SATA port enabled? */
+	if (pcs & (1 << ap->port_no)) {
+		*have_port = 1;
+
+		if (pcs & (1 << (ap->port_no + 4)))
+			*have_device = 1;
+	}
+}
+
+/**
+ *	piix_pcs_disable - Disable SATA port
+ *	@ap: Port to disable
+ *
+ *	Disable SATA phy for specified port.
+ *
+ *	LOCKING:
+ *	None (inherited from caller).
+ */
+static void piix_pcs_disable (struct ata_port *ap)
+{
+	struct pci_dev *pdev = ap->host_set->pdev;
+	u16 pcs;
 
 	pci_read_config_word(pdev, ICH5_PCS, &pcs);
 
@@ -202,13 +311,77 @@ static void piix_port_disable(struct ata_port *ap)
 }
 
 /**
- *	piix_set_piomode - 
- *	@ap:
- *	@adev:
- *	@pio:
+ *	piix_sata_phy_reset - Probe specified port on SATA host controller
+ *	@ap: Port to probe
+ *
+ *	Probe SATA phy.
  *
  *	LOCKING:
+ *	None (inherited from caller).
+ */
+
+static void piix_sata_phy_reset(struct ata_port *ap)
+{
+	unsigned int have_port = 0, have_dev = 0;
+
+	if (!pci_test_config_bits(ap->host_set->pdev,
+				  &piix_enable_bits[ap->port_no])) {
+		ata_port_disable(ap);
+		printk(KERN_INFO "ata%u: port disabled. ignoring.\n", ap->id);
+		return;
+	}
+
+	piix_pcs_probe(ap, &have_port, &have_dev);
+
+	/* if port not enabled, exit */
+	if (!have_port) {
+		ata_port_disable(ap);
+		printk(KERN_INFO "ata%u: SATA port disabled. ignoring.\n",
+		       ap->id);
+		return;
+	}
+
+	/* if port enabled but no device, disable port and exit */
+	if (!have_dev) {
+		piix_sata_port_disable(ap);
+		printk(KERN_INFO "ata%u: SATA port has no device. disabling.\n",
+		       ap->id);
+		return;
+	}
+
+	ap->cbl = ATA_CBL_SATA;
+
+	ata_port_probe(ap);
+
+	ata_bus_reset(ap);
+}
+
+/**
+ *	piix_sata_port_disable - Disable SATA port
+ *	@ap: Port to disable.
  *
+ *	Disable SATA port.
+ *
+ *	LOCKING:
+ *	None (inherited from caller).
+ */
+
+static void piix_sata_port_disable(struct ata_port *ap)
+{
+	ata_port_disable(ap);
+	piix_pcs_disable(ap);
+}
+
+/**
+ *	piix_set_piomode - Initialize host controller PATA PIO timings
+ *	@ap: Port whose timings we are configuring
+ *	@adev: um
+ *	@pio: PIO mode, 0 - 4
+ *
+ *	Set PIO mode for device, in host controller PCI config space.
+ *
+ *	LOCKING:
+ *	None (inherited from caller).
  */
 
 static void piix_set_piomode (struct ata_port *ap, struct ata_device *adev,
@@ -252,13 +425,15 @@ static void piix_set_piomode (struct ata_port *ap, struct ata_device *adev,
 }
 
 /**
- *	piix_set_udmamode - 
- *	@ap:
- *	@adev:
- *	@udma:
+ *	piix_set_udmamode - Initialize host controller PATA PIO timings
+ *	@ap: Port whose timings we are configuring
+ *	@adev: um
+ *	@udma: udma mode, 0 - 6
+ *
+ *	Set UDMA mode for device, in host controller PCI config space.
  *
  *	LOCKING:
- *
+ *	None (inherited from caller).
  */
 
 static void piix_set_udmamode (struct ata_port *ap, struct ata_device *adev,
@@ -320,9 +495,15 @@ static void piix_set_udmamode (struct ata_port *ap, struct ata_device *adev,
 }
 
 /**
- *	piix_probe_combined - 
+ *	piix_probe_combined - Determine if PATA and SATA are combined
+ *	@pdev: PCI device to examine
+ *	@mask: (output) zero, %PIIX_COMB_PRI or %PIIX_COMB_SEC
+ *
+ *	Determine if BIOS has secretly stuffed a PATA port into our
+ *	otherwise-beautiful SATA PCI device.
  *
  *	LOCKING:
+ *	Inherited from PCI layer (may sleep).
  */
 static void piix_probe_combined (struct pci_dev *pdev, unsigned int *mask)
 {
@@ -339,22 +520,25 @@ static void piix_probe_combined (struct pci_dev *pdev, unsigned int *mask)
 }
 
 /**
- *	piix_init_one - 
- *	@pdev:
- *	@ent:
+ *	piix_init_one - Register PIIX ATA PCI device with kernel services
+ *	@pdev: PCI device to register
+ *	@ent: Entry in piix_pci_tbl matching with @pdev
+ *
+ *	Called from kernel PCI layer.  We probe for combined mode (sigh),
+ *	and then hand over control to libata, for it to do the rest.
  *
  *	LOCKING:
+ *	Inherited from PCI layer (may sleep).
  *
  *	RETURNS:
- *
+ *	Zero on success, or -ERRNO value.
  */
 
-static int __devinit piix_init_one (struct pci_dev *pdev,
-				    const struct pci_device_id *ent)
+static int piix_init_one (struct pci_dev *pdev, const struct pci_device_id *ent)
 {
 	static int printed_version;
-	struct ata_board *boards[2];
-	unsigned int combined = 0, n_boards = 1;
+	struct ata_port_info *port_info[2];
+	unsigned int combined = 0, n_ports = 1;
 	unsigned int pata_comb = 0, sata_comb = 0;
 
 	if (!printed_version++)
@@ -364,9 +548,9 @@ static int __devinit piix_init_one (struct pci_dev *pdev,
 	if (!in_module_init)
 		return -ENODEV;
 
-	boards[0] = &ata_board_tbl[ent->driver_data];
-	boards[1] = NULL;
-	if (boards[0]->host_flags & PIIX_FLAG_COMBINED)
+	port_info[0] = &piix_port_info[ent->driver_data];
+	port_info[1] = NULL;
+	if (port_info[0]->host_flags & PIIX_FLAG_COMBINED)
 		piix_probe_combined(pdev, &combined);
 
 	if (combined & PIIX_COMB_PRI)
@@ -375,19 +559,19 @@ static int __devinit piix_init_one (struct pci_dev *pdev,
 		pata_comb = 1;
 
 	if (pata_comb || sata_comb) {
-		boards[sata_comb] = &ata_board_tbl[ent->driver_data];
-		boards[sata_comb]->host_flags |= ATA_FLAG_SLAVE_POSS; /* sigh */
-		boards[pata_comb] = &ata_board_tbl[ich5_pata]; /*ich5-specific*/
-		n_boards++;
+		port_info[sata_comb] = &piix_port_info[ent->driver_data];
+		port_info[sata_comb]->host_flags |= ATA_FLAG_SLAVE_POSS; /* sigh */
+		port_info[pata_comb] = &piix_port_info[ich5_pata]; /*ich5-specific*/
+		n_ports++;
 
 		printk(KERN_WARNING DRV_NAME ": combined mode detected\n");
 	}
 
-	return ata_pci_init_one(pdev, boards, n_boards);
+	return ata_pci_init_one(pdev, port_info, n_ports);
 }
 
 /**
- *	piix_init - 
+ *	piix_init -
  *
  *	LOCKING:
  *
@@ -407,7 +591,7 @@ static int __init piix_init(void)
 	in_module_init = 0;
 
 	DPRINTK("scsi_register_host\n");
-	rc = scsi_register_host(&piix_sht);
+	rc = scsi_register_module(MODULE_SCSI_HA, &piix_sht);
 	if (rc) {
 		rc = -ENODEV;
 		goto err_out;
@@ -422,7 +606,7 @@ err_out:
 }
 
 /**
- *	piix_exit - 
+ *	piix_exit -
  *
  *	LOCKING:
  *
@@ -430,7 +614,7 @@ err_out:
 
 static void __exit piix_exit(void)
 {
-	scsi_unregister_host(&piix_sht);
+	scsi_unregister_module(MODULE_SCSI_HA, &piix_sht);
 	pci_unregister_driver(&piix_pci_driver);
 }
 

@@ -147,7 +147,7 @@ start_ap:
 	cmp4.ne isAP,isBP=r3,r0
 	;;			// RAW on r2
 	extr r3=r2,0,61		// r3 == phys addr of task struct
-	mov r16=KERNEL_TR_PAGE_NUM
+	mov r16=(KERNEL_START - PAGE_OFFSET) / IA64_GRANULE_SIZE
 	;;
 
 	// load the "current" pointer (r13) and ar.k6 with the current task

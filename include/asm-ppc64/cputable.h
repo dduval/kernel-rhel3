@@ -142,10 +142,24 @@ extern firmware_feature_t firmware_features_table[];
 	.llong 99b;	 		        \
 	.previous
 
-#define END_FTR_SECTION_IFSET(msk)	END_FTR_SECTION((msk), (msk))
-#define END_FTR_SECTION_IFCLR(msk)	END_FTR_SECTION((msk), 0)
+#else
+
+#define BEGIN_FTR_SECTION		"98:\n"
+#define END_FTR_SECTION(msk, val)		\
+"99:\n"						\
+"	.section __ftr_fixup,\"a\";\n"		\
+"	.align 3;\n"				\
+"	.llong "#msk";\n"			\
+"	.llong "#val";\n"			\
+"	.llong 98b;\n"			        \
+"	.llong 99b;\n"	 		        \
+"	.previous\n"
 
 #endif /* __ASSEMBLY__ */
+
+
+#define END_FTR_SECTION_IFSET(msk)	END_FTR_SECTION((msk), (msk))
+#define END_FTR_SECTION_IFCLR(msk)	END_FTR_SECTION((msk), 0)
 
 #endif /* __ASM_PPC_CPUTABLE_H */
 #endif /* __KERNEL__ */

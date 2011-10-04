@@ -38,6 +38,7 @@
 #define BLIST_ISROM     	0x200	/* Treat as (removable) CD-ROM */
 #define BLIST_LARGELUN		0x400	/* LUNs larger than 7 despite reporting as SCSI 2 */
 #define BLIST_NOSTARTONADD	0x800	/* do not do automatic start on add */
+#define BLIST_RETRY_ABORTED_CMD	0x1000  /* infinite retries of ABORTED_CMD writes */
 
 static void print_inquiry(unsigned char *data);
 static int scan_scsis_single(unsigned int channel, unsigned int dev,
@@ -165,6 +166,7 @@ static struct dev_info device_list[] =
 	{"EMC", "SYMMETRIX", "*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_FORCELUN},
 	{"HP", "A6189A", "*", BLIST_SPARSELUN |  BLIST_LARGELUN}, // HP VA7400, by Alar Aun
 	{"HP", "OPEN-", "*", BLIST_SPARSELUN | BLIST_LARGELUN},	/* HP XP Arrays */
+	{"HITACHI", "DISK-SUBSYSTEM", "*", BLIST_SPARSELUN |BLIST_LARGELUN},  /* HITACHI 9960 */
 	{"CMD", "CRA-7280", "*", BLIST_SPARSELUN | BLIST_LARGELUN},   // CMD RAID Controller
 	{"CNSI", "G7324", "*", BLIST_SPARSELUN | BLIST_LARGELUN},     // Chaparral G7324 RAID
 	{"CNSi", "G8324", "*", BLIST_SPARSELUN | BLIST_LARGELUN},     // Chaparral G8324 RAID
@@ -182,11 +184,25 @@ static struct dev_info device_list[] =
 	{"IBM", "AuSaV1S2", "*", BLIST_FORCELUN},
 	{"FSC", "CentricStor", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
 	{"DDN", "SAN DataDirector", "*", BLIST_SPARSELUN},
-	{"HITACHI", "DF400", "*", BLIST_SPARSELUN},
-	{"HITACHI", "DF500", "*", BLIST_SPARSELUN},
-	{"HITACHI", "DF600", "*", BLIST_SPARSELUN},
+	{"HITACHI", "DF400", "*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_RETRY_ABORTED_CMD },
+	{"HITACHI", "DF500", "*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_RETRY_ABORTED_CMD },
+	{"HITACHI", "DF600", "*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_RETRY_ABORTED_CMD },
+	{"HITACHI", "OPEN-", "*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_RETRY_ABORTED_CMD },  /* HITACHI XP Arrays */
+	{"HITACHI", "OP-C-", "*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_RETRY_ABORTED_CMD },  /* HITACHI XP Arrays */
+	{"HITACHI", "3380-K", "*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_RETRY_ABORTED_CMD },  /* HITACHI XP Arrays */
+	{"HITACHI", "3390-3", "*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_RETRY_ABORTED_CMD },  /* HITACHI XP Arrays */
+	{"HITACHI", "6586-K", "*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_RETRY_ABORTED_CMD },  /* HITACHI XP Arrays */
+	{"HITACHI", "6588-3", "*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_RETRY_ABORTED_CMD },  /* HITACHI XP Arrays */
+	{"HP", "DF400", "*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_RETRY_ABORTED_CMD },
+	{"HP", "DF500", "*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_RETRY_ABORTED_CMD },
+	{"HP", "DF600", "*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_RETRY_ABORTED_CMD },
+	{"HP", "OPEN-", "*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_RETRY_ABORTED_CMD },  /* HP rebadged HITACHI XP Arrays */
+	{"HP", "OP-C-", "*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_RETRY_ABORTED_CMD },  /* HP rebadged HITACHI XP Arrays */
+	{"HP", "3380-K", "*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_RETRY_ABORTED_CMD },  /* HP rebadged HITACHI XP Arrays */
+	{"HP", "3390-3", "*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_RETRY_ABORTED_CMD },  /* HP rebadged HITACHI XP Arrays */
+	{"HP", "6586-K", "*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_RETRY_ABORTED_CMD },  /* HP rebadged HITACHI XP Arrays */
+	{"HP", "6588-3", "*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_RETRY_ABORTED_CMD },  /* HP rebadged HITACHI XP Arrays */
 	{"IBM", "ProFibre 4000R", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
-	{"HITACHI", "OPEN-", "*", BLIST_SPARSELUN | BLIST_LARGELUN},  /* HITACHI XP Arrays */
 	{"WINSYS","FLASHDISK", "*", BLIST_SPARSELUN},
 	{"WINSYS","Flashdisk", "*", BLIST_SPARSELUN},
 	{"DotHill","SANnet", "*", BLIST_SPARSELUN},	
@@ -209,6 +225,17 @@ static struct dev_info device_list[] =
 	{"CNSi", "JSS122", "*", BLIST_SPARSELUN}, 		// Chaparral SR0812 SR1422
 	{"CNSi", "JSS224", "*", BLIST_SPARSELUN}, 		// Chaparral FR1422
 	{"NEC","iStorage","*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_FORCELUN}, // NEC iStorage
+	{"CLOVERLF", "CLOVERLEAF", "*", BLIST_SPARSELUN},
+	{"ADIC", "Pathlight 5000", "*", BLIST_SPARSELUN},
+	{"PATHLGHT", "SAN Router", "*", BLIST_SPARSELUN},
+	{"Crossrds", "4150", "*", BLIST_SPARSELUN},
+	{"Crossrds", "4250", "*", BLIST_SPARSELUN},
+	{"Crossrds", "4450", "*", BLIST_SPARSELUN},
+ 	{"HP", "C1553A", "*", BLIST_FORCELUN},			/* HP SureStore DAT8x6 */ 
+ 	{"HP", "C5713A", "*", BLIST_FORCELUN},			/* HP SureStore DAT40x6 */
+	{"HP", "DAT72X6", "*", BLIST_FORCELUN},			/* HP StorageWorks DAT72x6 */
+	{"HP", "UHDL", "*", BLIST_FORCELUN},			/* HP StorageWorks SSL1016 */
+	{"APPLE", "Xserve", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
 
 	/*
 	 * Must be at end of list...
@@ -231,7 +258,7 @@ static unsigned int scsi_allow_ghost_devices = 0;
 MODULE_PARM(max_scsi_luns, "i");
 MODULE_PARM_DESC(max_scsi_luns, "last scsi LUN (should be between 1 and 2^32-1)");
 MODULE_PARM(scsi_allow_ghost_devices, "i");
-MODULE_PARM_DESC(scsi_allow_ghost_devices, "allow devices marked as being offline to be accessed anyway (0 = off, else allow ghosts on lun 0 through allow_ghost_devices - 1");
+MODULE_PARM_DESC(scsi_allow_ghost_devices, "allow devices marked as being offline to be accessed anyway (0 = off, else allow ghosts on lun 0 through scsi_allow_ghost_devices - 1");
 
 #else
 
@@ -809,6 +836,15 @@ static int scan_scsis_single(unsigned int channel, unsigned int dev,
 	 */
 	if (bflags & BLIST_SINGLELUN)
 		SDpnt->single_lun = 1;
+
+	/*
+	 * Some devices will return write commands uncompleted with a sense
+	 * key of ABORTED_CMD.  On these devices, the condition that caused
+	 * the command to be aborted is temporary (like you might expect
+	 * from a BUSY status message) and should be retried infinitely.
+	 */
+	if (bflags & BLIST_RETRY_ABORTED_CMD)
+		SDpnt->retry_aborted_cmd = 1;
 
 	/*
 	 * These devices need this "key" to unlock the devices so we can use it

@@ -128,10 +128,8 @@ struct file_operations socket_file_ops = {
 	readv:		sock_readv,
 	writev:		sock_writev,
 	sendpage:	sock_sendpage,
-#if SOCK_AIO_WORKS
 	aio_read:	generic_sock_aio_read,
 	aio_write:	generic_file_aio_write,
-#endif
 	kvec_read:	sock_kvec_read,
 	kvec_write:	sock_kvec_write,
 };

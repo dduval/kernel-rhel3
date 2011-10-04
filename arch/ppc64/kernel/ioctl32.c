@@ -4671,7 +4671,7 @@ asmlinkage int sys32_ioctl(unsigned int fd, unsigned int cmd, unsigned long arg)
 		handler = (void *)t->handler;
 		error = handler(fd, cmd, arg, filp);
 	} else
-		error = -ENOTSUPP;
+		error = -EINVAL;
 out:
 	fput(filp);
 out2:

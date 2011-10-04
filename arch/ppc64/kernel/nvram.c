@@ -90,7 +90,7 @@ static ssize_t dev_ppc64_read_nvram(struct file *file, char *buf,
 	}
 
 	len = read_nvram(tmp_buffer, count, ppos);
-	if ((long)len <= 0) {
+	if (len <= 0) {
 		kfree(tmp_buffer);
 		return len;
 	}
@@ -108,7 +108,7 @@ static ssize_t dev_ppc64_read_nvram(struct file *file, char *buf,
 static ssize_t dev_ppc64_write_nvram(struct file *file, const char *buf,
 			   size_t count, loff_t *ppos)
 {
-	unsigned long len;
+	ssize_t len;
 	char * tmp_buffer;
 
 	if (verify_area(VERIFY_READ, buf, count))

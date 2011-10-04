@@ -24,19 +24,14 @@
 #ifdef __IN_PCMCIA_PACKAGE__
 #include <pcmcia/k_compat.h>
 #endif
-
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
-
-#include <linux/sched.h>
 #include <linux/ptrace.h>
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/timer.h>
 #include <linux/netdevice.h>
-#include <asm/io.h>
-#include <asm/system.h>
 
 #include <pcmcia/version.h>
 #include <pcmcia/cs_types.h>
@@ -44,6 +39,9 @@
 #include <pcmcia/cistpl.h>
 #include <pcmcia/cisreg.h>
 #include <pcmcia/ds.h>
+
+#include <asm/io.h>
+#include <asm/system.h>
 
 /*
    All the PCMCIA modules use PCMCIA_DEBUG to control debugging.  If
@@ -96,7 +94,7 @@ void stop_airo_card( struct net_device *, int );
 int reset_airo_card( struct net_device * );
 
 static void airo_config(dev_link_t *link);
-static void airo_release(u_long arg);
+static void airo_release(dev_link_t *link);
 static int airo_event(event_t event, int priority,
 		       event_callback_args_t *args);
 
@@ -173,24 +171,6 @@ static void cs_error(client_handle_t handle, int func, int ret)
 
 /*======================================================================
   
-  This bit of code is used to avoid unregistering network devices
-  at inappropriate times.  2.2 and later kernels are fairly picky
-  about when this can happen.
-  
-  ======================================================================*/
-
-static void flush_stale_links(void)
-{
-	dev_link_t *link, *next;
-	for (link = dev_list; link; link = next) {
-		next = link->next;
-		if (link->state & DEV_STALE_LINK)
-			airo_detach(link);
-	}
-}
- 
-/*======================================================================
-  
   airo_attach() creates an "instance" of the driver, allocating
   local data structures for one device.  The device is registered
   with Card Services.
@@ -209,8 +189,7 @@ static dev_link_t *airo_attach(void)
 	int ret, i;
 	
 	DEBUG(0, "airo_attach()\n");
-	flush_stale_links();
-	
+
 	/* Initialize the dev_link_t structure */
 	link = kmalloc(sizeof(struct dev_link_t), GFP_KERNEL);
 	if (!link) {
@@ -218,8 +197,6 @@ static dev_link_t *airo_attach(void)
 		return NULL;
 	}
 	memset(link, 0, sizeof(struct dev_link_t));
-	link->release.function = &airo_release;
-	link->release.data = (u_long)link;
 	
 	/* Interrupt setup */
 	link->irq.Attributes = IRQ_TYPE_EXCLUSIVE;
@@ -264,7 +241,7 @@ static dev_link_t *airo_attach(void)
 	client_reg.event_handler = &airo_event;
 	client_reg.Version = 0x0210;
 	client_reg.event_callback_args.client_data = link;
-	ret = CardServices(RegisterClient, &link->handle, &client_reg);
+	ret = pcmcia_register_client(&link->handle, &client_reg);
 	if (ret != 0) {
 		cs_error(link->handle, RegisterClient, ret);
 		airo_detach(link);
@@ -295,13 +272,10 @@ static void airo_detach(dev_link_t *link)
 	if (*linkp == NULL)
 		return;
 	
-	del_timer(&link->release);
-	if ( link->state & DEV_CONFIG ) {
-		airo_release( (int)link );
-		if ( link->state & DEV_STALE_CONFIG ) {
-			link->state |= DEV_STALE_LINK;
+	if (link->state & DEV_CONFIG) {
+		airo_release(link);
+		if (link->state & DEV_STALE_CONFIG)
 			return;
-		}
 	}
 	
 	if ( ((local_info_t*)link->priv)->eth_dev ) {
@@ -311,7 +285,7 @@ static void airo_detach(dev_link_t *link)
 	
 	/* Break the link with Card Services */
 	if (link->handle)
-		CardServices(DeregisterClient, link->handle);
+		pcmcia_deregister_client(link->handle);
 	
 	
 	
@@ -332,11 +306,8 @@ static void airo_detach(dev_link_t *link)
   
   ======================================================================*/
 
-#define CS_CHECK(fn, args...) \
-while ((last_ret=CardServices(last_fn=(fn),args))!=0) goto cs_failed
-
-#define CFG_CHECK(fn, args...) \
-if (CardServices(fn, args) != 0) goto next_entry
+#define CS_CHECK(fn, ret) \
+do { last_fn = (fn); if ((last_ret = (ret)) != 0) goto cs_failed; } while (0)
 
 static void airo_config(dev_link_t *link)
 {
@@ -363,9 +334,9 @@ static void airo_config(dev_link_t *link)
 	tuple.TupleData = buf;
 	tuple.TupleDataMax = sizeof(buf);
 	tuple.TupleOffset = 0;
-	CS_CHECK(GetFirstTuple, handle, &tuple);
-	CS_CHECK(GetTupleData, handle, &tuple);
-	CS_CHECK(ParseTuple, handle, &tuple, &parse);
+	CS_CHECK(GetFirstTuple, pcmcia_get_first_tuple(handle, &tuple));
+	CS_CHECK(GetTupleData, pcmcia_get_tuple_data(handle, &tuple));
+	CS_CHECK(ParseTuple, pcmcia_parse_tuple(handle, &tuple, &parse));
 	link->conf.ConfigBase = parse.config.base;
 	link->conf.Present = parse.config.rmask[0];
 	
@@ -385,12 +356,13 @@ static void airo_config(dev_link_t *link)
 	  will only use the CIS to fill in implementation-defined details.
 	*/
 	tuple.DesiredTuple = CISTPL_CFTABLE_ENTRY;
-	CS_CHECK(GetFirstTuple, handle, &tuple);
+	CS_CHECK(GetFirstTuple, pcmcia_get_first_tuple(handle, &tuple));
 	while (1) {
 		cistpl_cftable_entry_t dflt = { 0 };
 		cistpl_cftable_entry_t *cfg = &(parse.cftable_entry);
-		CFG_CHECK(GetTupleData, handle, &tuple);
-		CFG_CHECK(ParseTuple, handle, &tuple, &parse);
+		if (pcmcia_get_tuple_data(handle, &tuple) != 0 ||
+				pcmcia_parse_tuple(handle, &tuple, &parse) != 0)
+			goto next_entry;
 		
 		if (cfg->flags & CISTPL_CFTABLE_DEFAULT) dflt = *cfg;
 		if (cfg->index == 0) goto next_entry;
@@ -439,7 +411,8 @@ static void airo_config(dev_link_t *link)
 		}
 		
 		/* This reserves IO space but doesn't actually enable it */
-		CFG_CHECK(RequestIO, link->handle, &link->io); 
+		if (pcmcia_request_io(link->handle, &link->io) != 0)
+			goto next_entry;
 		
 		/*
 		  Now set up a common memory window, if needed.  There is room
@@ -459,16 +432,17 @@ static void airo_config(dev_link_t *link)
 			req.Base = mem->win[0].host_addr;
 			req.Size = mem->win[0].len;
 			req.AccessSpeed = 0;
-			link->win = (window_handle_t)link->handle;
-			CFG_CHECK(RequestWindow, &link->win, &req);
+			if (pcmcia_request_window(&link->handle, &req, &link->win) != 0)
+				goto next_entry;
 			map.Page = 0; map.CardOffset = mem->win[0].card_addr;
-			CFG_CHECK(MapMemPage, link->win, &map);
+			if (pcmcia_map_mem_page(link->win, &map) != 0)
+				goto next_entry;
 		}
 		/* If we got this far, we're cool! */
 		break;
 		
 	next_entry:
-		CS_CHECK(GetNextTuple, handle, &tuple);
+		CS_CHECK(GetNextTuple, pcmcia_get_next_tuple(handle, &tuple));
 	}
 	
     /*
@@ -477,14 +451,14 @@ static void airo_config(dev_link_t *link)
       irq structure is initialized.
     */
 	if (link->conf.Attributes & CONF_ENABLE_IRQ)
-		CS_CHECK(RequestIRQ, link->handle, &link->irq);
+		CS_CHECK(RequestIRQ, pcmcia_request_irq(link->handle, &link->irq));
 	
 	/*
 	  This actually configures the PCMCIA socket -- setting up
 	  the I/O windows and the interrupt mapping, and putting the
 	  card and host interface into "Memory and IO" mode.
 	*/
-	CS_CHECK(RequestConfiguration, link->handle, &link->conf);
+	CS_CHECK(RequestConfiguration, pcmcia_request_configuration(link->handle, &link->conf));
 	((local_info_t*)link->priv)->eth_dev = 
 		init_airo_card( link->irq.AssignedIRQ,
 				link->io.BasePort1, 1 );
@@ -522,7 +496,7 @@ static void airo_config(dev_link_t *link)
 	
  cs_failed:
 	cs_error(link->handle, last_fn, last_ret);
-	airo_release((u_long)link);
+	airo_release(link);
 	
 } /* airo_config */
 
@@ -534,10 +508,8 @@ static void airo_config(dev_link_t *link)
   
   ======================================================================*/
 
-static void airo_release(u_long arg)
+static void airo_release(dev_link_t *link)
 {
-	dev_link_t *link = (dev_link_t *)arg;
-	
 	DEBUG(0, "airo_release(0x%p)\n", link);
 	
 	/*
@@ -562,15 +534,17 @@ static void airo_release(u_long arg)
 	
 	/* Don't bother checking to see if these succeed or not */
 	if (link->win)
-		CardServices(ReleaseWindow, link->win);
-	CardServices(ReleaseConfiguration, link->handle);
+		pcmcia_release_window(link->win);
+	pcmcia_release_configuration(link->handle);
 	if (link->io.NumPorts1)
-		CardServices(ReleaseIO, link->handle, &link->io);
+		pcmcia_release_io(link->handle, &link->io);
 	if (link->irq.AssignedIRQ)
-		CardServices(ReleaseIRQ, link->handle, &link->irq);
+		pcmcia_release_irq(link->handle, &link->irq);
 	link->state &= ~DEV_CONFIG;
-	
-} /* airo_release */
+
+	if (link->state & DEV_STALE_CONFIG)
+		airo_detach(link);
+}
 
 /*======================================================================
   
@@ -597,7 +571,7 @@ static int airo_event(event_t event, int priority,
 		link->state &= ~DEV_PRESENT;
 		if (link->state & DEV_CONFIG) {
 			netif_device_detach(local->eth_dev);
-			mod_timer(&link->release, jiffies + HZ/20);
+			airo_release(link);
 		}
 		break;
 	case CS_EVENT_CARD_INSERTION:
@@ -610,7 +584,7 @@ static int airo_event(event_t event, int priority,
 	case CS_EVENT_RESET_PHYSICAL:
 		if (link->state & DEV_CONFIG) {
 			netif_device_detach(local->eth_dev);
-			CardServices(ReleaseConfiguration, link->handle);
+			pcmcia_release_configuration(link->handle);
 		}
 		break;
 	case CS_EVENT_PM_RESUME:
@@ -618,7 +592,7 @@ static int airo_event(event_t event, int priority,
 		/* Fall through... */
 	case CS_EVENT_CARD_RESET:
 		if (link->state & DEV_CONFIG) {
-			CardServices(RequestConfiguration, link->handle, &link->conf);
+			pcmcia_request_configuration(link->handle, &link->conf);
 			reset_airo_card(local->eth_dev);
 			netif_device_attach(local->eth_dev);
 		}
@@ -627,29 +601,19 @@ static int airo_event(event_t event, int priority,
 	return 0;
 } /* airo_event */
 
-/*====================================================================*/
-
 static int airo_cs_init(void)
 {
-	servinfo_t serv;
-	DEBUG(0, "%s\n", version);
-	CardServices(GetCardServicesInfo, &serv);
-	if (serv.Revision != CS_RELEASE_CODE) {
-		printk(KERN_NOTICE "airo_cs: Card Services release "
-		       "does not match!\n");
-		return -1;
-	}
-	register_pcmcia_driver(&dev_info, &airo_attach, &airo_detach);
-	return 0;
+	return register_pcmcia_driver(&dev_info, &airo_attach, &airo_detach);
 }
 
 static void airo_cs_cleanup(void)
 {
-	DEBUG(0, "airo_cs: unloading\n");
 	unregister_pcmcia_driver(&dev_info);
+
+	/* XXX: this really needs to move into generic code.. */
 	while (dev_list != NULL) {
 		if (dev_list->state & DEV_CONFIG)
-			airo_release((u_long)dev_list);
+			airo_release(dev_list);
 		airo_detach(dev_list);
 	}
 }

@@ -535,7 +535,10 @@ int smp_call_function (void (*func) (void *info), void *info, int nonatomic,
  * <func> The function to run. This must be fast and non-blocking.
  * <info> An arbitrary pointer to pass to the function.
  * <nonatomic> currently unused.
- * <wait> If true, wait (atomically) until function has completed on other CPUs.
+ * <wait> If 1, wait (atomically) until function has complete on other CPUs.
+ *        If 0, wait for the IPI to be received by other CPUs, but do not wait
+ *        for the completion of the IPI on each CPU.  If -1, do not wait for
+ *        other CPUs to receive IPI.
  * [RETURNS] 0 on success, else a negative status code. Does not return until
  * remote CPUs are nearly ready to execute <<func>> or are or have executed.
  *
@@ -552,8 +555,8 @@ int smp_call_function (void (*func) (void *info), void *info, int nonatomic,
 	data.func = func;
 	data.info = info;
 	atomic_set(&data.started, 0);
-	data.wait = wait;
-	if (wait)
+	data.wait = wait > 0 ? wait : 0;
+	if (wait > 0)
 		atomic_set(&data.finished, 0);
 
 	spin_lock(&call_lock);
@@ -563,10 +566,11 @@ int smp_call_function (void (*func) (void *info), void *info, int nonatomic,
 	send_IPI_allbutself(CALL_FUNCTION_VECTOR);
 
 	/* Wait for response */
-	while (atomic_read(&data.started) != cpus)
-		barrier();
+	if (wait >= 0)
+		while (atomic_read(&data.started) != cpus)
+			barrier();
 
-	if (wait)
+	if (wait > 0)
 		while (atomic_read(&data.finished) != cpus)
 			barrier();
 	spin_unlock(&call_lock);

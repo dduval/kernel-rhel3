@@ -35,6 +35,7 @@ typedef __s64	Elf64_Sxword;
 #define PT_LOPROC  0x70000000
 #define PT_HIPROC  0x7fffffff
 #define PT_GNU_EH_FRAME		0x6474e550
+#define PT_GNU_STACK		0x6474e551
 #define PT_MIPS_REGINFO		0x70000000
 
 /* Flags in the e_flags field of the header */

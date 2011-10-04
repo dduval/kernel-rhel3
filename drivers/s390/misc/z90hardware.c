@@ -2,11 +2,11 @@
  *
  *  linux/drivers/s390/misc/z90hardware.c
  *
- *  z90crypt 1.1.2
+ *  z90crypt 1.1.4
  *
  *    (C) COPYRIGHT IBM CORP. 2001, 2003
- *    Author(s): Robert Burroughs (burrough us ibm com)
- *               Eric Rossman (edrossma us ibm com)
+ *    Author(s): Robert Burroughs (burrough@us.ibm.com)
+ *               Eric Rossman (edrossma@us.ibm.com)
  *
  *    Support for S390 Crypto Devices
  *
@@ -34,7 +34,7 @@
 #include <linux/config.h>
 #include <linux/list.h>
 
-#define VERSION_Z90HARDWARE_C "$Revision: 1.7.6.2 $"
+#define VERSION_Z90HARDWARE_C "$Revision: 1.7.6.4 $"
 static const char version[] =
 	"z90crypt.o: z90hardware.o ("
 	"z90hardware.c " VERSION_Z90HARDWARE_C "/"
@@ -914,10 +914,15 @@ HDSTAT query_on_line (int deviceNr, int cdx, int resetNr, int *q_depth,
     }
     switch(ccode) {
       case(0):
-	stat = HD_ONLINE;
 	break_out = TRUE;
+	stat = HD_ONLINE;
 	*q_depth = t_depth + 1;
         switch (t_dev_type) {
+          case PCIXCC_HW:
+          case OTHER_HW:
+            stat = HD_NOT_THERE;
+            *dev_type = NILDEV;
+            break;
           case LEEDSLITE_HW:
             *dev_type = LEEDSLITE;
             break;

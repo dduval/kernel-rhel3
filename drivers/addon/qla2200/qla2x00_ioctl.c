@@ -2,7 +2,7 @@
  *                  QLOGIC LINUX SOFTWARE
  *
  * QLogic ISP2x00 device driver for Linux 2.4.x
- * Copyright (C) 2003 Qlogic Corporation
+ * Copyright (C) 2003 QLogic Corporation
  * (www.qlogic.com)
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -18,9 +18,8 @@
  ******************************************************************************/
 
 
-#define	QLA_PT_CMD_TOV			(60) /* firmware timeout */
-#define QLA_PT_CMD_DRV_TOV		(QLA_PT_CMD_TOV + 1) /* drvr timeout */
-#define QLA_IOCTL_ACCESS_WAIT_TIME	(QLA_PT_CMD_DRV_TOV + 2) /* wait_q tov */
+#define QLA_PT_CMD_DRV_TOV		(ql2xioctltimeout + 1) /* drvr timeout */
+#define QLA_IOCTL_ACCESS_WAIT_TIME	(ql2xioctltimeout + 2) /* wait_q tov */
 #define QLA_INITIAL_IOCTLMEM_SIZE	(2 * PAGE_SIZE)
 #define QLA_IOCTL_SCRAP_SIZE		2048 /* scrap memory for local use. */
 
@@ -208,6 +207,7 @@ qla2x00_scsi_pt_done(Scsi_Cmnd *pscsi_cmd)
 	/* save detail status for IOCTL reporting */
 	ha->ioctl->SCSIPT_InProgress = 0;
 	ha->ioctl->ioctl_tov = 0;
+	ha->ioctl_err_cmd = NULL;
 
 	up(&ha->ioctl->cmpl_sem);
 
@@ -340,10 +340,10 @@ qla2x00_ioctl(Scsi_Device *dev, int cmd, void *arg)
 		DEBUG9_10(printk("%s: signature did not match. "
 		    "cmd=%x arg=%p.\n", __func__, cmd, arg);)
 		pext->Status = EXT_STATUS_INVALID_PARAM;
-		copy_to_user((void *)arg, (void *)pext, sizeof(EXT_IOCTL));
+		ret = copy_to_user((void *)arg, (void *)pext, sizeof(EXT_IOCTL));
 
 		KMEM_FREE(pext, sizeof(EXT_IOCTL));
-		return (-EINVAL);
+		return (ret);
 	}
 
 	/* check version of this ioctl */
@@ -352,10 +352,10 @@ qla2x00_ioctl(Scsi_Device *dev, int cmd, void *arg)
 		    "qla2x00: ioctl interface version not supported = %d.\n",
 		    pext->Version);
 		pext->Status = EXT_STATUS_UNSUPPORTED_VERSION;
-		copy_to_user((void *)arg, (void *)pext, sizeof(EXT_IOCTL));
+		ret = copy_to_user((void *)arg, (void *)pext, sizeof(EXT_IOCTL));
 
 		KMEM_FREE(pext, sizeof(EXT_IOCTL));
-		return (-EINVAL);
+		return (ret);
 	}
 
 	/* check for special cmds used during application's setup time. */
@@ -454,10 +454,10 @@ qla2x00_ioctl(Scsi_Device *dev, int cmd, void *arg)
 			    __func__, apiHBAInstance);)
 
 			pext->Status = EXT_STATUS_DEV_NOT_FOUND;
-			copy_to_user(arg, pext, sizeof(EXT_IOCTL));
+			ret = copy_to_user(arg, pext, sizeof(EXT_IOCTL));
 
 			KMEM_FREE(pext, sizeof(EXT_IOCTL));
-			return (-EINVAL);
+			return (ret);
 		}
 
 		DEBUG9(printk("%s: active apiHBAInstance=%d host_no=%ld "
@@ -475,10 +475,10 @@ qla2x00_ioctl(Scsi_Device *dev, int cmd, void *arg)
 			    __func__, pext->HbaSelect);)
 
 			pext->Status = EXT_STATUS_DEV_NOT_FOUND;
-			copy_to_user(arg, pext, sizeof(EXT_IOCTL));
+			ret = copy_to_user(arg, pext, sizeof(EXT_IOCTL));
 
 			KMEM_FREE(pext, sizeof(EXT_IOCTL));
-			return (-EINVAL);
+			return (ret);
 		}
 
 		DEBUG9(printk("%s: active host_inst=%ld CC=%x SC=%x.\n",
@@ -495,15 +495,15 @@ qla2x00_ioctl(Scsi_Device *dev, int cmd, void *arg)
 		    "access. host no=%d.\n", __func__, pext->HbaSelect);)
 
 		pext->Status = EXT_STATUS_BUSY;
-		copy_to_user(arg, pext, sizeof(EXT_IOCTL));
+		ret = copy_to_user(arg, pext, sizeof(EXT_IOCTL));
 
 		KMEM_FREE(pext, sizeof(EXT_IOCTL));
-		return (-EBUSY);
+		return (ret);
 	}
 
 
 	while (test_bit(CFG_ACTIVE, &ha->cfg_flags) || ha->dpc_active) {
-		if( signal_pending(current) )
+		if (signal_pending(current))
 			break;   /* get out */
 
 		set_current_state(TASK_INTERRUPTIBLE);
@@ -1282,9 +1282,10 @@ qla2x00_aen_get(scsi_qla_host_t *ha, EXT_IOCTL *cmd, int mode)
 	if (request_cnt < EXT_DEF_MAX_AEN_QUEUE) {
 		/* We require caller to alloc for the maximum request count */
 		cmd->Status       = EXT_STATUS_BUFFER_TOO_SMALL;
-		DEBUG9_10(printk("%s(%ld): inst=%ld Buffer too small. "
+		DEBUG9_10(printk("%s(%ld): inst=%ld Buffer size %ld too small. "
 		    "Exiting normally.",
-		    __func__, ha->host_no, ha->instance);)
+		    __func__, ha->host_no, ha->instance,
+		    (ulong)cmd->ResponseLen);)
 
 		return (rval);
 	}
@@ -1569,7 +1570,7 @@ qla2x00_query_hba_node(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	for (i = 0; i < 8 ; i++)
 		ptmp_hba_node->WWNN[i] = ha->node_name[i];
 
-	sprintf((char *)(ptmp_hba_node->Manufacturer),"Qlogic Corp.");
+	sprintf((char *)(ptmp_hba_node->Manufacturer), QLOGIC_COMPANY_NAME);
 	sprintf((char *)(ptmp_hba_node->Model),ha->model_number);
 
 	ptmp_hba_node->SerialNum[0] = ha->serial0;
@@ -1700,9 +1701,17 @@ qla2x00_query_hba_port(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		/* if removed or missing */
 		if (atomic_read(&fcport->state) != FC_ONLINE) {
 			DEBUG9_10(printk(
-			    "%s(%ld): inst=%ld port %06x not online\n",
+			    "%s(%ld): inst=%ld port %02x%02x%02x%02x"
+			    "%02x%02x%02x%02x not online\n",
 			    __func__, ha->host_no, ha->instance,
-			    fcport->d_id.b24);)
+			    fcport->port_name[0],
+			    fcport->port_name[1],
+			    fcport->port_name[2],
+			    fcport->port_name[3],
+			    fcport->port_name[4],
+			    fcport->port_name[5],
+			    fcport->port_name[6],
+			    fcport->port_name[7]);)
 			continue;
 		}
 		port_cnt++;
@@ -1728,11 +1737,11 @@ qla2x00_query_hba_port(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	ptmp_hba_port->DiscPortCount   = port_cnt;
 	ptmp_hba_port->DiscTargetCount = tgt_cnt;
 
-	if (ha->loop_state == LOOP_DOWN) {
+	if (atomic_read(&ha->loop_state) == LOOP_DOWN) {
 
 		ptmp_hba_port->State = EXT_DEF_HBA_LOOP_DOWN;
 
-	} else if (ha->loop_state != LOOP_READY ||
+	} else if (atomic_read(&ha->loop_state) != LOOP_READY ||
 	    test_bit(ABORT_ISP_ACTIVE, &ha->dpc_flags) ||
 	    test_bit(CFG_ACTIVE, &ha->cfg_flags) || ABORTS_ACTIVE) {
 
@@ -1844,9 +1853,18 @@ qla2x00_query_disc_port(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	for (fcport = ha->fcport; fcport != NULL; fcport = fcport->next) {
 		if (atomic_read(&fcport->state) != FC_ONLINE) {
 			/* port does not exist anymore */
-			DEBUG9(printk("%s(%ld): fcport marked lost. "
-			    "d_id=%06x loop_id=%02x not online.\n",
-			    __func__, ha->host_no, fcport->d_id.b24,
+			DEBUG9_10(printk("%s(%ld): fcport marked lost. "
+			    "port=%02x%02x%02x%02x%02x%02x%02x%02x "
+			    "loop_id=%02x not online.\n",
+			    __func__, ha->host_no,
+			    fcport->port_name[0],
+			    fcport->port_name[1],
+			    fcport->port_name[2],
+			    fcport->port_name[3],
+			    fcport->port_name[4],
+			    fcport->port_name[5],
+			    fcport->port_name[6],
+			    fcport->port_name[7],
 			    fcport->loop_id);)
 
 			continue;
@@ -2039,7 +2057,17 @@ qla2x00_query_disc_tgt(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	}
 
 	tgt_fcport = tq->vis_port;
-	memcpy(ptmp_disc_target->WWNN, tgt_fcport->node_name, WWN_SIZE);
+
+	if (tgt_fcport->flags & FC_XP_DEVICE) {
+		memcpy(ptmp_disc_target->WWNN, tq->node_name, WWN_SIZE);
+	DEBUG9(printk("%s(%ld): inst=%ld using 1 target node name.\n",
+	    __func__, ha->host_no, ha->instance);)
+	} else {
+		memcpy(ptmp_disc_target->WWNN, tgt_fcport->node_name, WWN_SIZE);
+	DEBUG9(printk("%s(%ld): inst=%ld using 1 fcport node name.\n",
+	    __func__, ha->host_no, ha->instance);)
+	}
+
 	memcpy(ptmp_disc_target->WWPN, tgt_fcport->port_name, WWN_SIZE);
 
 	ptmp_disc_target->Id[0] = 0;
@@ -2061,7 +2089,15 @@ qla2x00_query_disc_tgt(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	}
 
 	ptmp_disc_target->LoopID   = tgt_fcport->loop_id;
+
 	ptmp_disc_target->Status   = 0;
+	if (atomic_read(&tq->vis_port->state) != FC_ONLINE) {
+		ptmp_disc_target->Status |= EXT_DEF_TGTSTAT_OFFLINE;
+	}
+	if (qla2x00_is_fcport_in_config(ha, tq->vis_port)) {
+		ptmp_disc_target->Status |= EXT_DEF_TGTSTAT_IN_CFG;
+	}
+
 	ptmp_disc_target->Bus      = 0;
 	ptmp_disc_target->TargetId = tgt;
 
@@ -2323,7 +2359,7 @@ qla2x00_get_statistics(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	}
 
 	/* check on loop down */
-	if (ha->loop_state != LOOP_READY || 
+	if (atomic_read(&ha->loop_state) != LOOP_READY || 
 	    test_bit(CFG_ACTIVE, &ha->cfg_flags) ||
 	    (test_bit(ABORT_ISP_ACTIVE, &ha->dpc_flags)) ||
 	    ABORTS_ACTIVE || ha->dpc_active) {
@@ -2378,12 +2414,38 @@ qla2x00_get_statistics(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	   ptmp_stat->TotalInterrupts        =  ha->total_isr_cnt;
 	 */
 
+	ptmp_stat->InputRequestCount = ha->total_input_cnt;
+	ptmp_stat->OutputRequestCount = ha->total_output_cnt;
+	ptmp_stat->ControlRequestCount = ha->total_ctrl_cnt;
+	/* convert to MB */
+	ptmp_stat->InputMBytes = ha->total_input_bytes >> 20;
+	ptmp_stat->OutputMBytes = ha->total_output_bytes >> 20;
+
 	ptmp_stat->TotalLinkFailures               = stat_buf.link_fail_cnt;
 	ptmp_stat->TotalLossOfSync                 = stat_buf.loss_sync_cnt;
 	ptmp_stat->TotalLossOfSignals              = stat_buf.loss_sig_cnt;
 	ptmp_stat->PrimitiveSeqProtocolErrorCount  = stat_buf.prim_seq_err_cnt;
 	ptmp_stat->InvalidTransmissionWordCount    = stat_buf.inval_xmit_word_cnt;
 	ptmp_stat->InvalidCRCCount                 = stat_buf.inval_crc_cnt;
+
+	DEBUG9(printk("%s(%ld): inst=%ld Got following HBA statistics:\n"
+	    "isp_aborts=%d device_err=%d total_io=%d total MB=%d LIP "
+	    "resets=%d\n"
+	    "input cnt=%lld MB=%lld output cnt=%lld MB=%lld ctrl cnt=%lld\n"
+	    "link failure=%d loss sync=%d loss signal=%d prim seq err=%d "
+	    "invalid word %d invalid CRC=%d.\n",
+	    __func__, ha->host_no, ha->instance,
+	    ptmp_stat->ControllerErrorCount, ptmp_stat->DeviceErrorCount,
+	    ptmp_stat->TotalIoCount, ptmp_stat->TotalMBytes,
+	    ptmp_stat->TotalLipResets,
+	    ptmp_stat->InputRequestCount, ptmp_stat->InputMBytes,
+	    ptmp_stat->OutputRequestCount, ptmp_stat->OutputMBytes,
+	    ptmp_stat->ControlRequestCount,
+	    ptmp_stat->TotalLinkFailures, ptmp_stat->TotalLossOfSync,
+	    ptmp_stat->TotalLossOfSignals,
+	    ptmp_stat->PrimitiveSeqProtocolErrorCount,
+	    ptmp_stat->InvalidTransmissionWordCount,
+	    ptmp_stat->InvalidCRCCount);)
 
 	/* now copy up the STATISTICS to user */
 	if (pext->ResponseLen < sizeof(EXT_HBA_PORT_STAT))
@@ -2531,7 +2593,7 @@ qla2x00_get_fc_statistics(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	 */
 
 	/* check on loop down */
-	if (ha->loop_state != LOOP_READY ||
+	if (atomic_read(&ha->loop_state) != LOOP_READY ||
 	    test_bit(CFG_ACTIVE, &ha->cfg_flags) ||
 	    (test_bit(ABORT_ISP_ACTIVE, &ha->dpc_flags)) ||
 	    ABORTS_ACTIVE || ha->dpc_active) {
@@ -2654,9 +2716,9 @@ qla2x00_get_port_summary(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		/* not enough memory */
 		pext->Status = EXT_STATUS_NO_MEMORY;
 		DEBUG9_10(printk("%s(%ld): inst=%ld scrap not big enough. "
-		    "pdevicedata requested=%d.\n",
+		    "pdevicedata requested=%ld.\n",
 		    __func__, ha->host_no, ha->instance,
-		    sizeof(EXT_DEVICEDATA));)
+		    (ulong)sizeof(EXT_DEVICEDATA));)
 		return (ret);
 	}
 
@@ -2665,9 +2727,9 @@ qla2x00_get_port_summary(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		/* not enough memory */
 		pext->Status = EXT_STATUS_NO_MEMORY;
 		DEBUG9_10(printk("%s(%ld): inst=%ld scrap not big enough. "
-		    "pdd_entry requested=%d.\n",
+		    "pdd_entry requested=%ld.\n",
 		    __func__, ha->host_no, ha->instance,
-		    sizeof(EXT_DEVICEDATAENTRY));)
+		    (ulong)sizeof(EXT_DEVICEDATAENTRY));)
 		qla2x00_free_ioctl_scrap_mem(ha);
 		return (ret);
 	}
@@ -2799,17 +2861,33 @@ qla2x00_get_fcport_summary(scsi_qla_host_t *ha, EXT_DEVICEDATAENTRY *pdd_entry,
 	uint32_t	transfer_size;
 	fc_port_t	*fcport;
 	os_tgt_t	*tq;
+	mp_host_t	*host = NULL;
+	uint16_t	idx;
+	mp_device_t	*tmp_dp = NULL;
 
 	DEBUG9(printk("%s(%ld): inst=%ld entered.\n",
 	    __func__, ha->host_no, ha->instance);)
 
 	for (fcport = ha->fcport; fcport && *pentry_cnt < max_entries;
-	    *pentry_cnt+=1, fcport = fcport->next) {
+	    fcport = fcport->next) {
+
+		if ((atomic_read(&fcport->state) != FC_ONLINE) &&
+		    !qla2x00_is_fcport_in_config(ha, fcport)) {
+			/* no need to report */
+			DEBUG2_9_10(printk("%s(%ld): not reporting "
+			    "fcport %02x%02x%02x%02x%02x%02x%02x%02x. "
+			    "state=%i, flags=%02x.\n",
+			    __func__, ha->host_no, fcport->port_name[0],
+			    fcport->port_name[1], fcport->port_name[2],
+			    fcport->port_name[3], fcport->port_name[4],
+			    fcport->port_name[5], fcport->port_name[6],
+			    fcport->port_name[7],
+			    atomic_read(&fcport->state),
+			    fcport->flags);)
+			continue;
+		}
 
 		/* copy from fcport to dd_entry */
-
-		memcpy(pdd_entry->NodeWWN, fcport->node_name, WWN_SIZE);
-		memcpy(pdd_entry->PortWWN, fcport->port_name, WWN_SIZE);
 
 		for (b = 0; b < 3 ; b++)
 			pdd_entry->PortID[b] = fcport->d_id.r.d_id[2-b];
@@ -2832,14 +2910,53 @@ qla2x00_get_fcport_summary(scsi_qla_host_t *ha, EXT_DEVICEDATAENTRY *pdd_entry,
 
 			if (memcmp(fcport->port_name, tq->vis_port->port_name,
 			    EXT_DEF_WWN_NAME_SIZE) == 0) {
+
 				pdd_entry->TargetAddress.Target = tgt;
+
+				if (fcport->flags & FC_XP_DEVICE) {
+					memcpy(pdd_entry->NodeWWN,
+					    tq->node_name, WWN_SIZE);
+				} else {
+					memcpy(pdd_entry->NodeWWN,
+					    fcport->node_name, WWN_SIZE);
+				}
+
 				break;
 			}
 		}
+
+		if (tgt == MAX_TARGETS) {
+			/* did not bind to a target */
+/*
+				memcpy(pdd_entry->NodeWWN,
+				    tq->node_name, WWN_SIZE);
+*/
+			if (((host = qla2x00_cfg_find_host(ha)) != NULL) &&
+				 (fcport->flags & FC_XP_DEVICE)) {
+				if((tmp_dp = qla2x00_find_mp_dev_by_portname(
+					host, fcport->port_name, &idx)) != NULL)
+				memcpy(pdd_entry->NodeWWN,
+				    		tmp_dp->nodename, WWN_SIZE);
+			} else {
+				memcpy(pdd_entry->NodeWWN,
+				    fcport->node_name, WWN_SIZE);
+			}
+		}
+
+		memcpy(pdd_entry->PortWWN, fcport->port_name, WWN_SIZE);
+
 		pdd_entry->TargetAddress.Lun    = 0;
 		pdd_entry->DeviceFlags          = 0;
 		pdd_entry->LoopID               = fcport->loop_id;
 		pdd_entry->BaseLunNumber        = 0;
+
+		DEBUG9_10(printk("%s(%ld): reporting "
+		    "fcport %02x%02x%02x%02x%02x%02x%02x%02x.\n",
+		    __func__, ha->host_no, fcport->port_name[0],
+		    fcport->port_name[1], fcport->port_name[2],
+		    fcport->port_name[3], fcport->port_name[4],
+		    fcport->port_name[5], fcport->port_name[6],
+		    fcport->port_name[7]);)
 
 		current_offset = *pentry_cnt * sizeof(EXT_DEVICEDATAENTRY);
 
@@ -2868,6 +2985,8 @@ qla2x00_get_fcport_summary(scsi_qla_host_t *ha, EXT_DEVICEDATAENTRY *pdd_entry,
 			    __func__, ha->host_no, ha->instance);)
 			return (ret);
 		}
+
+		*pentry_cnt += 1;
 
 	} /* for number_of_entries */
 
@@ -3401,7 +3520,7 @@ qla2x00_send_els_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 	    __func__, ha->host_no, ha->instance);)
 	
 	/* check on loop down (1) */
-	if (ha->loop_state != LOOP_READY || 
+	if (atomic_read(&ha->loop_state) != LOOP_READY || 
 	    test_bit(CFG_ACTIVE, &ha->cfg_flags) ||
 	    (test_bit(ABORT_ISP_ACTIVE, &ha->dpc_flags)) || ABORTS_ACTIVE) {
 
@@ -3689,8 +3808,6 @@ qla2x00_send_fcct(scsi_qla_host_t *ha, EXT_IOCTL *pext,
     int mode)
 {
 	int		ret = 0;
-	int		tmp_rval = 0;
-	uint16_t	mb[MAILBOX_REGISTER_COUNT];
 
 
 	DEBUG9(printk("%s(%ld): inst=%ld entered.\n",
@@ -3719,24 +3836,15 @@ qla2x00_send_fcct(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 	DEBUG9(printk("%s(%ld): inst=%ld after copy request.\n",
 	    __func__, ha->host_no, ha->instance);)
 
-	/* check on management server login status */
-	if (ha->flags.management_server_logged_in == 0) {
-		/* login to management server device */
+	/* login to management server device */
+	if (qla2x00_mgmt_svr_login(ha) != QL_STATUS_SUCCESS) {
+		pext->Status = EXT_STATUS_DEV_NOT_FOUND;
 
-		tmp_rval = qla2x00_login_fabric(ha, MANAGEMENT_SERVER,
-		    0xff, 0xff, 0xfa, &mb[0], BIT_1);
+		DEBUG9_10(printk(
+		    "%s(%ld): inst=%ld mgmt_svr_login failed.\n",
+		    __func__, ha->host_no, ha->instance);)
 
-		if (tmp_rval != 0 || mb[0] != 0x4000) {
-			pext->Status = EXT_STATUS_DEV_NOT_FOUND;
-
-	 		DEBUG9_10(printk(
-			    "%s(%ld): inst=%ld ERROR login to MS.\n",
-			    __func__, ha->host_no, ha->instance);)
-
-			return (ret);
-		}
-
-		ha->flags.management_server_logged_in = 1;
+		return (ret);
 	}
 
 	DEBUG9(printk("%s(%ld): success login to MS.\n",
@@ -3828,7 +3936,7 @@ qla2x00_ioctl_ms_queuecommand(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 	pscsi_cmd->scsi_done = qla2x00_msiocb_done;
 
 	/* check on loop down (2)- check again just before sending cmd out. */
-	if (ha->loop_state != LOOP_READY || 
+	if (atomic_read(&ha->loop_state) != LOOP_READY || 
 	    test_bit(CFG_ACTIVE, &ha->cfg_flags) ||
 	    (test_bit(ABORT_ISP_ACTIVE, &ha->dpc_flags)) ||
 	    ABORTS_ACTIVE) {
@@ -3919,8 +4027,12 @@ qla2x00_start_ms_cmd(scsi_qla_host_t *ha, EXT_IOCTL *pext, srb_t *sp,
 		usr_req_len = pext->RequestLen - sizeof(EXT_ELS_PT_REQ);
 		usr_resp_len = pext->ResponseLen - sizeof(EXT_ELS_PT_REQ);
 	
-		pkt->control_flags = BIT_15; /* ELS passthru enabled */
+		pkt->control_flags = __constant_cpu_to_le16(CF_ELS_PASSTHRU);
+#if defined(EXTENDED_IDS)
+		pkt->loop_id = __constant_cpu_to_le16(pels_pt_req->Lid);
+#else
 		pkt->loop_id = pels_pt_req->Lid;
+#endif
 		pkt->type    = 1; /* ELS frame */
 		
 		if (pext->ResponseLen != 0) {
@@ -3933,7 +4045,11 @@ qla2x00_start_ms_cmd(scsi_qla_host_t *ha, EXT_IOCTL *pext, srb_t *sp,
 	} else {
 		usr_req_len = pext->RequestLen;
 		usr_resp_len = pext->ResponseLen;
-		pkt->loop_id     = MANAGEMENT_SERVER;
+#if defined(EXTENDED_IDS)
+		pkt->loop_id = __constant_cpu_to_le16(MANAGEMENT_SERVER);
+#else
+		pkt->loop_id = MANAGEMENT_SERVER;
+#endif
 	}
 
 	DEBUG9_10(printk("%s(%ld): inst=%ld using loop_id=%02x req_len=%d, "
@@ -3941,22 +4057,22 @@ qla2x00_start_ms_cmd(scsi_qla_host_t *ha, EXT_IOCTL *pext, srb_t *sp,
 	    __func__, ha->host_no, ha->instance,
 	    pkt->loop_id, usr_req_len, usr_resp_len);)
 
-	pkt->timeout = QLA_PT_CMD_TOV;
-	pkt->cmd_dsd_count = 1;
-	pkt->total_dsd_count = 2; /* no continuation */
-	pkt->rsp_bytecount = usr_resp_len;
-	pkt->req_bytecount = usr_req_len;
+	pkt->timeout = cpu_to_le16(ql2xioctltimeout);
+	pkt->cmd_dsd_count = __constant_cpu_to_le16(1);
+	pkt->total_dsd_count = __constant_cpu_to_le16(2); /* no continuation */
+	pkt->rsp_bytecount = cpu_to_le32(usr_resp_len);
+	pkt->req_bytecount = cpu_to_le32(usr_req_len);
 
 	/* loading command payload address. user request is assumed
 	 * to have been copied to ioctl_mem.
 	 */
-	pkt->dseg_req_address[0] = LS_64BITS(ha->ioctl_mem_phys);
-	pkt->dseg_req_address[1] = MS_64BITS(ha->ioctl_mem_phys);
+	pkt->dseg_req_address[0] = cpu_to_le32(LS_64BITS(ha->ioctl_mem_phys));
+	pkt->dseg_req_address[1] = cpu_to_le32(MS_64BITS(ha->ioctl_mem_phys));
 	pkt->dseg_req_length = usr_req_len;
 
 	/* loading response payload address */
-	pkt->dseg_rsp_address[0] = LS_64BITS(ha->ioctl_mem_phys);
-	pkt->dseg_rsp_address[1] = MS_64BITS(ha->ioctl_mem_phys);
+	pkt->dseg_rsp_address[0] = cpu_to_le32(LS_64BITS(ha->ioctl_mem_phys));
+	pkt->dseg_rsp_address[1] = cpu_to_le32(MS_64BITS(ha->ioctl_mem_phys));
 	pkt->dseg_rsp_length = usr_resp_len;
 
 	/* set flag to indicate IOCTL MSIOCB cmd in progress */
@@ -4216,12 +4332,16 @@ qla2x00_scsi_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	return (ret);
 }
 
+/* Returns either QL_STATUS_SUCCESS or QL_STATUS_ERROR or other driver
+ * specific return values.
+ */
 STATIC int
 qla2x00_ioctl_scsi_queuecommand(scsi_qla_host_t *ha, EXT_IOCTL *pext,
     Scsi_Cmnd *pscsi_cmd, Scsi_Device *pscsi_dev, fc_port_t *pfcport,
     fc_lun_t *pfclun, uint8_t *pmore_cdb)
 {
-	int		ret = 0;
+	int		ret = QL_STATUS_SUCCESS;
+	int		ret2 = QL_STATUS_SUCCESS;
 	uint8_t		*usr_temp, *kernel_tmp;
 	uint32_t	lun = 0, tgt = 0;
 #if defined(QL_DEBUG_LEVEL_9)
@@ -4241,7 +4361,7 @@ qla2x00_ioctl_scsi_queuecommand(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 		    __func__, ha->host_no, ha->instance);)
 
 		pext->Status = EXT_STATUS_NO_MEMORY;
-		return (ret);
+		return (QL_STATUS_ERROR);
 	}
 
 	switch(pext->SubCode) {
@@ -4262,7 +4382,7 @@ qla2x00_ioctl_scsi_queuecommand(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 			    __func__, ha->host_no, ha->instance, pfcport, pfclun);)
 			atomic_set(&sp->ref_count, 0);
 			add_to_free_queue (ha, sp);
-			return (ret);
+			return (QL_STATUS_ERROR);
 		}
 
 		if (pscsi_cmd->cmd_len == 6 || pscsi_cmd->cmd_len == 0x0A ||
@@ -4277,7 +4397,7 @@ qla2x00_ioctl_scsi_queuecommand(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 			pext->Status = EXT_STATUS_INVALID_PARAM;
 			atomic_set(&sp->ref_count, 0);
 			add_to_free_queue (ha, sp);
-			return (ret);
+			return (QL_STATUS_ERROR);
 		}
 		tq = ha->ioctl->ioctl_tq;
 		lq = ha->ioctl->ioctl_lq;
@@ -4291,7 +4411,7 @@ qla2x00_ioctl_scsi_queuecommand(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 			    __func__, ha->host_no, ha->instance, pfcport, pfclun);)
 			atomic_set(&sp->ref_count, 0);
 			add_to_free_queue (ha, sp);
-			return (ret);
+			return (QL_STATUS_ERROR);
 		}
 
 		sp->cmd_length = pscsi_cmd->cmd_len;
@@ -4332,7 +4452,7 @@ qla2x00_ioctl_scsi_queuecommand(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 			atomic_set(&sp->ref_count, 0);
 			add_to_free_queue (ha, sp);
 
-			return (ret);
+			return (QL_STATUS_ERROR);
 		}
 
 		usr_temp   = (uint8_t *)pext->ResponseAdr;
@@ -4346,7 +4466,7 @@ qla2x00_ioctl_scsi_queuecommand(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 			atomic_set(&sp->ref_count, 0);
 			add_to_free_queue (ha, sp);
 
-			return (ret);
+			return (QL_STATUS_ERROR);
 		}
 	}
 
@@ -4361,7 +4481,8 @@ qla2x00_ioctl_scsi_queuecommand(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 	pscsi_cmd->use_sg               = 0; /* no ScatterGather */
 	pscsi_cmd->request_bufflen      = pext->ResponseLen;
 	pscsi_cmd->request_buffer       = ha->ioctl_mem;
-	pscsi_cmd->timeout_per_command  = QLA_PT_CMD_TOV * HZ;
+	if (pscsi_cmd->timeout_per_command == 0)
+		pscsi_cmd->timeout_per_command = ql2xioctltimeout * HZ;
 
 	if (tq && lq) {
 		if (pext->SubCode == EXT_SC_SEND_SCSI_PASSTHRU) {
@@ -4376,7 +4497,7 @@ qla2x00_ioctl_scsi_queuecommand(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 				    pfcport, pfclun);)
 				atomic_set(&sp->ref_count, 0);
 				add_to_free_queue (ha, sp);
-				return (ret);
+				return (QL_STATUS_ERROR);
 			}
 
 		} else {
@@ -4424,17 +4545,22 @@ qla2x00_ioctl_scsi_queuecommand(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 			pext->Status = EXT_STATUS_DEV_NOT_FOUND;
 			atomic_set(&sp->ref_count, 0);
 			add_to_free_queue (ha, sp);
-			return (ret);
+			return (QL_STATUS_ERROR);
 		}
 	} else {
-		if (qla2x00_check_port_status(ha, pfcport)) {
+		ret2 = qla2x00_check_port_status(ha, pfcport);
+		if (ret2 != QL_STATUS_SUCCESS) {
 			DEBUG9_10(printk("%s(%ld): inst=%ld check_port_status "
 			    "failed.\n",
 			    __func__, ha->host_no, ha->instance);)
-			pext->Status = EXT_STATUS_DEV_NOT_FOUND;
+			if (ret2 == QL_STATUS_BUSY)
+				pext->Status = EXT_STATUS_BUSY;
+			else
+				pext->Status = EXT_STATUS_ERR;
+
 			atomic_set(&sp->ref_count, 0);
 			add_to_free_queue (ha, sp);
-			return (ret);
+			return (ret2);
 		}
 	}
 
@@ -4450,12 +4576,20 @@ qla2x00_ioctl_scsi_queuecommand(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 	DEBUG9(printk("%s(%ld): inst=%ld sending command.\n",
 	    __func__, ha->host_no, ha->instance);)
 
+	/* Time the command via our standard driver-timer */
+	if ((CMD_TIMEOUT(pscsi_cmd)/HZ) > QLA_CMD_TIMER_DELTA)
+		qla2x00_add_timer_to_cmd(sp,
+			(CMD_TIMEOUT(pscsi_cmd)/HZ) - QLA_CMD_TIMER_DELTA);
+	else
+		qla2x00_add_timer_to_cmd(sp, (CMD_TIMEOUT(pscsi_cmd)/HZ));
+
 	add_to_pending_queue(ha, sp);
 
 	qla2x00_next(ha);
 
 	DEBUG9(printk("%s(%ld): exiting.\n",
 	    __func__, ha->host_no);)
+
 	return (ret);
 }
 
@@ -4490,6 +4624,17 @@ qla2x00_sc_scsi_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 
 	DEBUG9(printk("%s(%ld): inst=%ld entered.\n",
 	    __func__, ha->host_no, ha->instance);)
+
+	if (test_bit(FAILOVER_EVENT_NEEDED, &ha->dpc_flags) ||
+	    test_bit(FAILOVER_EVENT, &ha->dpc_flags) ||
+	    test_bit(FAILOVER_NEEDED, &ha->dpc_flags)) {
+		/* Stall intrusive passthru commands until failover complete */
+		DEBUG9_10(printk("%s(%ld): inst=%ld failover in progress -- "
+		    "returning busy.\n",
+		    __func__, ha->host_no, ha->instance);)
+		pext->Status = EXT_STATUS_BUSY;
+		return (ret);
+	}
 
 	ret = verify_area(VERIFY_READ, (void *)pext->RequestAdr,
 	    sizeof(EXT_SCSI_PASSTHRU));
@@ -4589,20 +4734,16 @@ qla2x00_sc_scsi_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 	DEBUG9(printk("%s(%ld): inst=%ld sending command.\n",
 	    __func__, ha->host_no, ha->instance);)
 
-	if ((ret = qla2x00_ioctl_scsi_queuecommand(ha, pext, pscsi_cmd,
-	    pscsi_device, NULL, NULL, NULL))) {
+	if (qla2x00_ioctl_scsi_queuecommand(ha, pext, pscsi_cmd,
+	    pscsi_device, NULL, NULL, NULL)) {
 		return (ret);
 	}
-
-	ha->ioctl->cmpl_timer.expires = jiffies + ha->ioctl->ioctl_tov * HZ;
-	add_timer(&ha->ioctl->cmpl_timer);
 
 	DEBUG9(printk("%s(%ld): inst=%ld waiting for completion.\n",
 	    __func__, ha->host_no, ha->instance);)
 
+	/* Wait for completion */
 	down(&ha->ioctl->cmpl_sem);
-
-	del_timer(&ha->ioctl->cmpl_timer);
 
 	DEBUG9(printk("%s(%ld): inst=%ld completed.\n",
 	    __func__, ha->host_no, ha->instance);)
@@ -4810,6 +4951,17 @@ qla2x00_sc_fc_scsi_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 		}
 	)
 
+	if (test_bit(FAILOVER_EVENT_NEEDED, &ha->dpc_flags) ||
+	    test_bit(FAILOVER_EVENT, &ha->dpc_flags) ||
+	    test_bit(FAILOVER_NEEDED, &ha->dpc_flags)) {
+		/* Stall intrusive passthru commands until failover complete */
+		DEBUG9_10(printk("%s(%ld): inst=%ld failover in progress -- "
+		    "returning busy.\n",
+		    __func__, ha->host_no, ha->instance);)
+		pext->Status = EXT_STATUS_BUSY;
+		return (ret);
+	}
+
 	if (qla2x00_get_ioctl_scrap_mem(ha, (void **)&pfc_scsi_pass,
 	    sizeof(EXT_FC_SCSI_PASSTHRU))) {
 		/* not enough memory */
@@ -4969,18 +5121,16 @@ qla2x00_sc_fc_scsi_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 	DEBUG9(printk("%s(%ld): inst=%ld queuing command.\n",
 	    __func__, ha->host_no, ha->instance);)
 
-	if ((ret = qla2x00_ioctl_scsi_queuecommand(ha, pext, pfc_scsi_cmd,
-	    pfc_scsi_device, fcport, fclun, pmore_cdb))) {
+	if (qla2x00_ioctl_scsi_queuecommand(ha, pext, pfc_scsi_cmd,
+	    pfc_scsi_device, fcport, fclun, pmore_cdb)) {
 		return (ret);
 	}
 
-	/* Wait for comletion */
-	ha->ioctl->cmpl_timer.expires = jiffies + ha->ioctl->ioctl_tov * HZ;
-	add_timer(&ha->ioctl->cmpl_timer);
+	DEBUG9(printk("%s(%ld): inst=%ld waiting for completion.\n",
+	    __func__, ha->host_no, ha->instance);)
 
+	/* Wait for completion */
 	down(&ha->ioctl->cmpl_sem);
-
-	del_timer(&ha->ioctl->cmpl_timer);
 
 	if (ha->ioctl->SCSIPT_InProgress == 1) {
 
@@ -4998,6 +5148,21 @@ qla2x00_sc_fc_scsi_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 		    __func__, ha->host_no, ha->instance);)
 
 		pext->Status = EXT_STATUS_ERR;
+		return (ret);
+	}
+
+	switch (CMD_COMPL_STATUS(pfc_scsi_cmd)) {
+	case CS_INCOMPLETE:
+	case CS_ABORTED:
+	case CS_PORT_UNAVAILABLE:
+	case CS_PORT_LOGGED_OUT:
+	case CS_PORT_CONFIG_CHG:
+	case CS_PORT_BUSY:
+		DEBUG9_10(printk("%s(%ld): inst=%ld cs err = %x.\n",
+		    __func__, ha->host_no, ha->instance,
+		    CMD_COMPL_STATUS(pfc_scsi_cmd));)
+		pext->Status = EXT_STATUS_BUSY;
+
 		return (ret);
 	}
 
@@ -5161,6 +5326,17 @@ qla2x00_sc_scsi3_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 		}
 	)
 
+	if (test_bit(FAILOVER_EVENT_NEEDED, &ha->dpc_flags) ||
+	    test_bit(FAILOVER_EVENT, &ha->dpc_flags) ||
+	    test_bit(FAILOVER_NEEDED, &ha->dpc_flags)) {
+		/* Stall intrusive passthru commands until failover complete */
+		DEBUG9_10(printk("%s(%ld): inst=%ld failover in progress -- "
+		    "returning busy.\n",
+		    __func__, ha->host_no, ha->instance);)
+		pext->Status = EXT_STATUS_BUSY;
+		return (ret);
+	}
+
 	if (qla2x00_get_ioctl_scrap_mem(ha, (void **)&pscsi3_pass,
 	    sizeof(EXT_FC_SCSI_PASSTHRU))) {
 		/* not enough memory */
@@ -5306,23 +5482,20 @@ qla2x00_sc_scsi3_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 	} else {
 		pscsi3_cmd->sc_data_direction = SCSI_DATA_READ;
 	}
+ 	if (pscsi3_pass->Timeout)
+		pscsi3_cmd->timeout_per_command = pscsi3_pass->Timeout * HZ;
 
 	/* send command to adapter */
 	DEBUG9(printk("%s(%ld): inst=%ld queuing command.\n",
 	    __func__, ha->host_no, ha->instance);)
 
-	if ((ret = qla2x00_ioctl_scsi_queuecommand(ha, pext, pscsi3_cmd,
-	    pscsi3_device, fcport, fclun, pmore_cdb))) {
+	if (qla2x00_ioctl_scsi_queuecommand(ha, pext, pscsi3_cmd,
+	    pscsi3_device, fcport, fclun, pmore_cdb)) {
 		return (ret);
 	}
 
-	/* Wait for comletion */
-	ha->ioctl->cmpl_timer.expires = jiffies + ha->ioctl->ioctl_tov * HZ;
-	add_timer(&ha->ioctl->cmpl_timer);
-
+	/* Wait for completion */
 	down(&ha->ioctl->cmpl_sem);
-
-	del_timer(&ha->ioctl->cmpl_timer);
 
 	if (ha->ioctl->SCSIPT_InProgress == 1) {
 
@@ -5754,7 +5927,7 @@ qla2x00_send_els_rnid(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	}
 
 	/* check on loop down */
-	if (ha->loop_state != LOOP_READY || 
+	if (atomic_read(&ha->loop_state) != LOOP_READY || 
 	    test_bit(CFG_ACTIVE, &ha->cfg_flags) ||
 	    (test_bit(ABORT_ISP_ACTIVE, &ha->dpc_flags)) ||
 	    ABORTS_ACTIVE || ha->dpc_active) {
@@ -5966,7 +6139,7 @@ qla2x00_get_rnid_params(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	    __func__, ha->host_no, ha->instance);)
 
 	/* check on loop down */
-	if (ha->loop_state != LOOP_READY || 
+	if (atomic_read(&ha->loop_state) != LOOP_READY || 
 	    test_bit(CFG_ACTIVE, &ha->cfg_flags) ||
 	    (test_bit(ABORT_ISP_ACTIVE, &ha->dpc_flags)) ||
 	    ABORTS_ACTIVE || ha->dpc_active) {
@@ -6178,7 +6351,7 @@ qla2x00_set_rnid_params(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	    __func__, ha->host_no, ha->instance);)
 
 	/* check on loop down */
-	if (ha->loop_state != LOOP_READY || 
+	if (atomic_read(&ha->loop_state) != LOOP_READY || 
 	    test_bit(CFG_ACTIVE, &ha->cfg_flags) ||
 	    (test_bit(ABORT_ISP_ACTIVE, &ha->dpc_flags)) ||
 	    ABORTS_ACTIVE || ha->dpc_active) {

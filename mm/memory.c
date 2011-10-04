@@ -1135,7 +1135,7 @@ static inline void zeromap_pte_range(struct vm_area_struct *vma,
 	if (end > PMD_SIZE)
 		end = PMD_SIZE;
 	do {
-		pte_t zero_pte = pte_wrprotect(mk_pte(ZERO_PAGE(address), prot));
+		pte_t zero_pte = pte_wrprotect(mk_pte(ZERO_PAGE(address + start), prot));
 		pte_t oldpage = vm_ptep_get_and_clear(vma, address + start, pte);
 		vm_set_pte(vma, address + start, pte, zero_pte);
 		forget_pte(oldpage);

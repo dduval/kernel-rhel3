@@ -1,5 +1,5 @@
 /* 
- * $Id: iucv.c,v 1.39 2003/02/14 15:45:15 felfert Exp $
+ * $Id: iucv.c,v 1.40.2.2 2003/11/20 19:35:14 felfert Exp $
  *
  * IUCV network driver
  *
@@ -29,7 +29,7 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  *
- * RELEASE-TAG: IUCV lowlevel driver $Revision: 1.39 $
+ * RELEASE-TAG: IUCV lowlevel driver $Revision: 1.40.2.2 $
  *
  */
 
@@ -88,6 +88,8 @@ static iucv_GeneralInterrupt *iucv_external_int_buffer;
 /* Spin Lock declaration */
 
 static spinlock_t iucv_lock = SPIN_LOCK_UNLOCKED;
+
+static int messagesDisabled = 0;
 
 /***************INTERRUPT HANDLING ***************/
 
@@ -338,7 +340,7 @@ do { \
 static void
 iucv_banner(void)
 {
-	char vbuf[] = "$Revision: 1.39 $";
+	char vbuf[] = "$Revision: 1.40.2.2 $";
 	char *version = vbuf;
 
 	if ((version = strchr(version, ':'))) {
@@ -413,9 +415,12 @@ iucv_init(void)
  *
  * Frees everything allocated from iucv_init.
  */
+static int iucv_retrieve_buffer (void);
+
 static void
 iucv_exit(void)
 {
+	iucv_retrieve_buffer();
 	if (iucv_external_int_buffer)
 		kfree(iucv_external_int_buffer);
 	if (iucv_param_pool)
@@ -610,7 +615,7 @@ iucv_declare_buffer_cpu0 (void *result)
  * Unregister IUCV usage at VM. This is always executed on CPU 0.
  * Called from iucv_retrieve_buffer().
  */
-void
+static void
 iucv_retrieve_buffer_cpu0 (void *result)
 {
 	iparml_control *parm;
@@ -652,7 +657,7 @@ iucv_declare_buffer (void)
  * Terminates all use of IUCV.
  * Returns: return code from CP
  */
-int
+static int
 iucv_retrieve_buffer (void)
 {
 	iucv_debug(1, "entering");
@@ -686,7 +691,6 @@ iucv_remove_handler(handler *handler)
 	spin_lock_irqsave (&iucv_lock, flags);
 	list_del(&handler->list);
 	if (list_empty(&iucv_handler_table)) {
-		iucv_retrieve_buffer();
 		if (register_flag) {
 			unregister_external_interrupt(0x4000, iucv_irq_handler);
 			register_flag = 0;
@@ -1128,7 +1132,8 @@ iucv_connect (__u16 *pathid, __u16 msglim_reqstd,
 	 */
 
 	/* Enable everything but IUCV Control messages */
-	iucv_setmask(~(IUCVControlInterruptsFlag));
+	iucv_setmask(~(AllInterrupts));
+	messagesDisabled = 1;
 
 	parm->ipflags1 = (__u8)flags1;
 	b2f0_result = b2f0(CONNECT, parm);
@@ -1138,6 +1143,7 @@ iucv_connect (__u16 *pathid, __u16 msglim_reqstd,
 
 	if (b2f0_result) {
 		iucv_setmask(~0);
+		messagesDisabled = 0;
 		return b2f0_result;
 	}
 
@@ -1145,7 +1151,7 @@ iucv_connect (__u16 *pathid, __u16 msglim_reqstd,
 	*pathid = parm->ippathid;
 
 	/* Enable everything again */
-	iucv_setmask(~0);
+	iucv_setmask(IUCVControlInterruptsFlag);
 
 	if (msglim)
 		*msglim = parm->ipmsglim;
@@ -2305,6 +2311,10 @@ iucv_do_int(iucv_GeneralInterrupt * int_buf)
 	/* end of if statement */
 	switch (int_buf->iptype) {
 		case 0x01:		/* connection pending */
+			if (messagesDisabled) {
+			    iucv_setmask(~0);
+			    messagesDisabled = 0;
+			}
 			spin_lock_irqsave(&iucv_lock, flags);
 			list_for_each(lh, &iucv_handler_table) {
 				h = list_entry(lh, handler, list);
@@ -2353,6 +2363,10 @@ iucv_do_int(iucv_GeneralInterrupt * int_buf)
 			break;
 			
 		case 0x02:		/*connection complete */
+			if (messagesDisabled) {
+			    iucv_setmask(~0);
+			    messagesDisabled = 0;
+			}
 			if (h) {
 				if (interrupt->ConnectionComplete)
 				{
@@ -2368,6 +2382,10 @@ iucv_do_int(iucv_GeneralInterrupt * int_buf)
 			break;
 			
 		case 0x03:		/* connection severed */
+			if (messagesDisabled) {
+			    iucv_setmask(~0);
+			    messagesDisabled = 0;
+			}
 			if (h) {
 				if (interrupt->ConnectionSevered)
 					interrupt->ConnectionSevered(
@@ -2381,6 +2399,10 @@ iucv_do_int(iucv_GeneralInterrupt * int_buf)
 			break;
 			
 		case 0x04:		/* connection quiesced */
+			if (messagesDisabled) {
+			    iucv_setmask(~0);
+			    messagesDisabled = 0;
+			}
 			if (h) {
 				if (interrupt->ConnectionQuiesced)
 					interrupt->ConnectionQuiesced(
@@ -2393,6 +2415,10 @@ iucv_do_int(iucv_GeneralInterrupt * int_buf)
 			break;
 			
 		case 0x05:		/* connection resumed */
+			if (messagesDisabled) {
+			    iucv_setmask(~0);
+			    messagesDisabled = 0;
+			}
 			if (h) {
 				if (interrupt->ConnectionResumed)
 					interrupt->ConnectionResumed(

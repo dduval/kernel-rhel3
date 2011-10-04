@@ -31,6 +31,9 @@
 #include <asm/system.h>
 #include <asm/uaccess.h>
 #include <asm/tlb.h>
+#ifdef CONFIG_IA32_SUPPORT
+#include <asm/ia32.h>
+#endif
 
 mmu_gather_t mmu_gathers[NR_CPUS];
 
@@ -724,6 +727,6 @@ mem_init (void)
 	put_gate_page(virt_to_page(__start_gate_section), GATE_ADDR);
 
 #ifdef CONFIG_IA32_SUPPORT
-	ia32_gdt_init();
+	ia32_boot_gdt_init();
 #endif
 }

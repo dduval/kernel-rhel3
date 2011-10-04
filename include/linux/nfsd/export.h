@@ -96,7 +96,7 @@ struct svc_export {
  * not use the NFSv3 ACCESS RPC. This option should always be set for NFSv2
  * clients.
  */
-#define EX_ACL(exp)        (!((exp)->ex_flags & NFSEXP_NOACL))
+#define EX_NOACL(exp)		((exp)->ex_flags & NFSEXP_NOACL)
 
 /*
  * Function declarations

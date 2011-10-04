@@ -2,11 +2,11 @@
  *
  *  linux/drivers/s390/misc/z90main.c
  *
- *  z90crypt 1.1.2
+ *  z90crypt 1.1.4
  *
  *    (C) COPYRIGHT IBM CORP. 2001, 2003
- *    Author(s): Robert Burroughs (burrough us ibm com)
- *               Eric Rossman (edrossma us ibm com)
+ *    Author(s): Robert Burroughs (burrough@us.ibm.com)
+ *               Eric Rossman (edrossma@us.ibm.com)
  *
  *    Support for S390 Crypto Devices
  *
@@ -57,7 +57,7 @@
 #include <linux/errno.h>   /* error codes */
 #include <linux/proc_fs.h>
 
-#define VERSION_Z90MAIN_C "$Revision: 1.9.4.2 $"
+#define VERSION_Z90MAIN_C "$Revision: 1.9.4.4 $"
 static const char version[] =
 	"z90crypt.o: z90main.o ("
 	"z90main.c "   VERSION_Z90MAIN_C   "/"
@@ -606,6 +606,10 @@ int init_module(void)
 	PRINTK("No devices at startup\n");
 	}
 
+	// generate hotplug event for device node generation
+
+	z90crypt_hotplug_event(z90crypt_major, 0, Z90CRYPT_HOTPLUG_ADD);
+
 	//
 	// Initialize the config lock, the request queue, pending queue, reader
 	// timer, configuration timer, cleanup timer, and boolean indicating that
@@ -688,6 +692,10 @@ void cleanup_module(void)
 	PDEBUG("cleanup_module -> PID %d\n", PID());
 
 	remove_proc_entry("driver/z90crypt", NULL);
+
+	// generate hotplug event for device node removal
+
+	z90crypt_hotplug_event(z90crypt_major, 0, Z90CRYPT_HOTPLUG_REMOVE);
 
 	if ((nresult = unregister_chrdev(z90crypt_major, REG_NAME))) {
 		PRINTK("unregister_chrdev failed with %d.\n", nresult);
@@ -4234,3 +4242,45 @@ int isPKCS1_2padded (unsigned char * buff, int bufflen)
   return (rv);
 
 } // end isPKCS1_2padded
+
+
+
+/*--------------------------------------------------------------------------*/
+/* Issue a hotplug event                                                    */
+/*--------------------------------------------------------------------------*/
+
+void z90crypt_hotplug_event(int devmaj, int devmin, int action)
+{
+#ifdef CONFIG_HOTPLUG
+	char *argv[3];
+	char *envp[6];
+	char  major[20];
+	char  minor[20];
+
+	sprintf(major, "MAJOR=%d", devmaj);
+	sprintf(minor, "MINOR=%d", devmin);
+
+	argv[0] = hotplug_path;
+	argv[1] = "z90crypt";
+	argv[2] = NULL;
+
+	envp[0] = "HOME=/";
+	envp[1] = "PATH=/sbin:/bin:/usr/sbin:/usr/bin";
+
+	switch (action) {
+		case Z90CRYPT_HOTPLUG_ADD:
+			envp[2] = "ACTION=add";
+			break;
+		case Z90CRYPT_HOTPLUG_REMOVE:
+			envp[2] = "ACTION=remove";
+			break;
+		default:
+			BUG();
+	}
+	envp[3] = major;
+	envp[4] = minor;
+	envp[5] = NULL;
+
+	call_usermodehelper(argv[0], argv, envp);
+#endif
+}

@@ -49,6 +49,7 @@ struct ethtool_ops;
 
 #define HAVE_ALLOC_NETDEV		/* feature macro: alloc_xxxdev
 					   functions are available. */
+#define HAVE_FREE_NETDEV
 
 #define NET_XMIT_SUCCESS	0
 #define NET_XMIT_DROP		1	/* skb dropped			*/
@@ -496,6 +497,9 @@ extern int		dev_alloc_name(struct net_device *dev, const char *name);
 extern int		dev_open(struct net_device *dev);
 extern int		dev_close(struct net_device *dev);
 extern int		dev_queue_xmit(struct sk_buff *skb);
+/* Support for loadable net-drivers */
+extern struct net_device *alloc_netdev(int sizeof_priv, const char *name,
+				       void (*setup)(struct net_device *));
 extern int		register_netdevice(struct net_device *dev);
 extern int		unregister_netdevice(struct net_device *dev);
 extern void		synchronize_net(void);
@@ -852,6 +856,10 @@ extern int		netdev_fastroute_obstacles;
 extern void		dev_clear_fastroute(struct net_device *dev);
 #endif
 
+static inline void free_netdev(struct net_device *dev)
+{
+	kfree(dev);
+}
 
 #endif /* __KERNEL__ */
 

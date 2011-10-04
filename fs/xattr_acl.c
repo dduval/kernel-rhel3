@@ -29,7 +29,7 @@ posix_acl_from_xattr(const void *value, size_t size)
 	if (size < sizeof(xattr_acl_header))
 		 return ERR_PTR(-EINVAL);
 	if (header->a_version != cpu_to_le32(XATTR_ACL_VERSION))
-		return ERR_PTR(-EINVAL);
+		return ERR_PTR(-EOPNOTSUPP);
 
 	count = xattr_acl_count(size);
 	if (count < 0)

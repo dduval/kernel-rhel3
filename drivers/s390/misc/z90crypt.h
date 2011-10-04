@@ -1,11 +1,11 @@
 /*
  *  linux/drivers/s390/misc/z90crypt.h
  *
- *  z90crypt 1.1.2
+ *  z90crypt 1.1.4
  *
  *  Copyright (C)  2001-2002 IBM Corporation
- *    Author(s): Robert Burroughs (burrough us ibm com)
- *               Eric Rossman (edrossma us ibm com)
+ *    Author(s): Robert Burroughs (burrough@us.ibm.com)
+ *               Eric Rossman (edrossma@us.ibm.com)
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -27,7 +27,7 @@
 
 #include <linux/config.h>
 
-#define VERSION_Z90CRYPT_H "$Revision: 1.3.4.1 $"
+#define VERSION_Z90CRYPT_H "$Revision: 1.3.4.3 $"
 
 enum _sizelimits {
   ICA_DES_DATALENGTH_MIN = 8,
@@ -49,7 +49,7 @@ typedef struct _ica_rng_rec {
 #define z90crypt_VERSION 1
 #define z90crypt_RELEASE 1           // added version.release.variant
                                      // added get_zeroed_page
-#define z90crypt_VARIANT 2
+#define z90crypt_VARIANT 4
 #ifndef _PAD_RULES_DEF_
 #define PCI_FUNC_KEY_DECRYPT 0x5044
 #define PCI_FUNC_KEY_ENCRYPT 0x504B
@@ -260,6 +260,13 @@ typedef struct ica_worker {
 
 extern int ica_register_worker(int partitionnum, ica_worker_t *device);
 extern int ica_unregister_worker(int partitionnum, ica_worker_t *device);
+
+/* Event types for hotplug */
+
+#define Z90CRYPT_HOTPLUG_ADD     1
+#define Z90CRYPT_HOTPLUG_REMOVE  2
+
+void z90crypt_hotplug_event(int, int, int);
 
 #endif //__KERNEL__
 

@@ -331,6 +331,12 @@ UNUSUAL_DEV(  0x09bc, 0x0003, 0x0000, 0x9999,
 		US_FL_START_STOP ),
 
 #ifdef CONFIG_USB_STORAGE_ISD200
+UNUSUAL_DEV(  0x05ab, 0x0030, 0x0100, 0x0110,
+                "In-System",
+                "USB/IDE Bridge (ATA/ATAPI)",
+                US_SC_ISD200, US_PR_BULK, isd200_Initialization,
+                0 ),
+
 UNUSUAL_DEV(  0x05ab, 0x0031, 0x0100, 0x0110,
                 "In-System",
                 "USB/IDE Bridge (ATA/ATAPI)",

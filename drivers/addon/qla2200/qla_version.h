@@ -2,7 +2,7 @@
  *                  QLOGIC LINUX SOFTWARE
  *
  * QLogic ISP2x00 device driver for Linux 2.4.x
- * Copyright (C) 2003 Qlogic Corporation
+ * Copyright (C) 2003 QLogic Corporation
  * (www.qlogic.com)
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -19,9 +19,9 @@
 /*
  * Driver version 
  */
-#define QLA2100_VERSION      "6.06.00b11"
+#define QLA2100_VERSION      "6.07.02-RH2"
 
 #define QLA_DRIVER_MAJOR_VER	6
-#define QLA_DRIVER_MINOR_VER	6
-#define QLA_DRIVER_PATCH_VER	0
-#define QLA_DRIVER_BETA_VER	11
+#define QLA_DRIVER_MINOR_VER	7
+#define QLA_DRIVER_PATCH_VER	2
+#define QLA_DRIVER_BETA_VER	00

@@ -15,6 +15,7 @@
 #include <linux/tty.h>
 #include <linux/namespace.h>
 #include <linux/acct.h>
+#include <linux/audit.h>
 #include <linux/file.h>
 #include <linux/binfmts.h>
 #include <linux/ptrace.h>
@@ -49,6 +50,7 @@ static void __unhash_process(struct task_struct *p)
 
 void release_task(struct task_struct * p)
 {
+	int zap_leader;
 	task_t *leader;
 	struct kernel_timeval sum;
  
@@ -68,10 +70,22 @@ void release_task(struct task_struct * p)
 	 * group, and the leader is zombie, then notify the
 	 * group leader's parent process. (if it wants notification.)
 	 */
+	zap_leader = 0;
 	leader = p->group_leader;
 	if (leader != p && thread_group_empty(leader) &&
-		    leader->state == TASK_ZOMBIE && leader->exit_signal != -1)
+		    leader->state == TASK_ZOMBIE && leader->exit_signal != -1) {
 		do_notify_parent(leader, leader->exit_signal);
+		/*
+		 * If we were the last child thread and the leader has
+		 * exited already, and the leader's parent ignores SIGCHLD,
+		 * then we are the one who should release the leader.
+		 *
+		 * do_notify_parent() will have marked it self-reaping in
+		 * that case.
+		 */
+		if (leader->exit_signal == -1)
+			zap_leader = 1;
+	}
 
 	kernel_timeval_add(&sum, &p->utime, &p->cutime);
 	kernel_timeval_addto(&p->parent->cutime, &sum);
@@ -87,6 +101,13 @@ void release_task(struct task_struct * p)
 
 	release_thread(p);
 	put_task_struct(p);
+
+	/*
+	 * Do this outside the tasklist lock. The reference to the
+	 * leader is safe.
+	 */
+	if (zap_leader)
+		release_task(leader);
 }
 
 /* we are using it only for SMP init */
@@ -420,19 +441,23 @@ static inline void __exit_mm(struct task_struct * tsk)
 	/*
 	 * Serialize with any possible pending coredump:
 	 */
+	down_read(&mm->mmap_sem);
 	if (mm->core_waiters) {
+		up_read(&mm->mmap_sem);
 		down_write(&mm->mmap_sem);
 		if (!--mm->core_waiters)
 			complete(mm->core_startup_done);
 		up_write(&mm->mmap_sem);
 
 		wait_for_completion(&mm->core_done);
+		down_read(&mm->mmap_sem);
 	}
 	atomic_inc(&mm->mm_count);
 	if (mm != tsk->active_mm) BUG();
 	/* more a memory barrier than a real lock */
 	task_lock(tsk);
 	tsk->mm = NULL;
+	up_read(&mm->mmap_sem);
 	enter_lazy_tlb(mm, current, smp_processor_id());
 	task_unlock(tsk);
 	mmput(mm);
@@ -477,7 +502,7 @@ static inline void reparent_thread(task_t *p, task_t *father, int traced)
 		/* If this child is being traced, then we're the one tracing it
 		 * anyway, so let go of it.
 		 */
-		p->ptrace = 0;
+		p->ptrace &= PT_AUDITED;
 		list_del_init(&p->sibling);
 		p->parent = p->real_parent;
 		list_add_tail(&p->sibling, &p->parent->children);
@@ -677,6 +702,8 @@ NORET_TYPE void do_exit(long code)
 	if (current->tux_info)
 		current->tux_exit();
 	acct_process(code);
+	if (isaudit(tsk))
+		audit_exit(tsk, code);
 	__exit_mm(tsk);
 
 	sem_exit();

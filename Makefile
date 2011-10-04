@@ -169,6 +169,9 @@ DRIVERS-$(CONFIG_PPC_ISERIES) += drivers/iseries/iseries.o
 ifneq ($(CONFIG_CD_NO_IDESCSI)$(CONFIG_BLK_DEV_IDECD)$(CONFIG_BLK_DEV_SR)$(CONFIG_PARIDE_PCD),)
 DRIVERS-y += drivers/cdrom/driver.o
 endif
+ifneq ($(CONFIG_AUDIT),)
+DRIVERS-y += drivers/audit/audit-stubs.o
+endif
 
 DRIVERS-$(CONFIG_SOUND) += drivers/sound/sounddrivers.o
 DRIVERS-$(CONFIG_PCI) += drivers/pci/driver.o

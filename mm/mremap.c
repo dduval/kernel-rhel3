@@ -144,8 +144,10 @@ static int move_one_page(struct vm_area_struct *vma, unsigned long old_addr, uns
 		dst = alloc_one_pte_map(mm, new_addr);
 		if (src == NULL)
 			src = get_one_pte_map_nested(mm, old_addr);
-		error = copy_one_pte(vma, src, dst, old_addr, new_addr, &pte_chain);
-		pte_unmap_nested(src);
+		if (src) {
+			error = copy_one_pte(vma, src, dst, old_addr, new_addr, &pte_chain);
+			pte_unmap_nested(src);
+		}
 		pte_unmap(dst);
 	}
 	flush_tlb_page(vma, old_addr);

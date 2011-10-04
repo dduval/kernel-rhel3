@@ -63,6 +63,7 @@
 #define Nonpriority_MessageCompletionInterruptsFlag      0x20
 #define Priority_MessageCompletionInterruptsFlag         0x10
 #define IUCVControlInterruptsFlag                        0x08
+#define AllInterrupts                                    0xf8
 
 /*
  * Mapping of external interrupt buffers should be used with the corresponding

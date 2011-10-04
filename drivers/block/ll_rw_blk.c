@@ -188,9 +188,6 @@ void blk_cleanup_queue(request_queue_t * q)
 
 	if (count)
 		printk("blk_cleanup_queue: leaked requests (%d)\n", count);
-		
-	if (q->need_plug_timer)
-		del_timer_sync(&q->plug_timer);
 
 	memset(q, 0, sizeof(*q));
 }
@@ -378,9 +375,8 @@ static void generic_plug_device(request_queue_t *q, kdev_t dev)
 	 */
 	if (!list_empty(&q->queue_head) || q->plugged)
 		return;
+
 	q->plugged = 1;
-	if (!q->head_active)
-		return;
 	queue_task(&q->plug_tq, &tq_disk);
 }
 
@@ -389,18 +385,14 @@ static void generic_plug_device(request_queue_t *q, kdev_t dev)
  */
 static inline void __generic_unplug_device(request_queue_t *q)
 {
-	if (q->plugged)
+	if (q->plugged) {
 		q->plugged = 0;
-	if (!list_empty(&q->queue_head)) {
- 		if (q->last_request ==
-				blkdev_entry_next_request(&q->queue_head))
-			q->last_request = NULL;
-			
-		if (q->prefered_cpu_mask && (*(q->prefered_cpu_mask) + 1) 
-			&& (q->effective_cpu_mask != *(q->prefered_cpu_mask)))
-			q->effective_cpu_mask = *(q->prefered_cpu_mask);
-		if (q->effective_cpu_mask & (1<<smp_processor_id()))
+		if (!list_empty(&q->queue_head)) {
+			if (q->last_request ==
+			    blkdev_entry_next_request(&q->queue_head))
+				q->last_request = NULL;
 			q->request_fn(q);
+		}
 	}
 }
 
@@ -409,8 +401,6 @@ void generic_unplug_device(void *data)
 	request_queue_t *q = (request_queue_t *) data;
 	unsigned long flags;
 
-	if (!q->head_active)
-		return;
 	spin_lock_irqsave(q->queue_lock, flags);
 	__generic_unplug_device(q);
 	spin_unlock_irqrestore(q->queue_lock, flags);
@@ -545,47 +535,12 @@ void blk_init_queue(request_queue_t * q, request_fn_proc * rfn)
 	q->head_active    	= 1;
 	q->superbh_queue	= 0;
 	q->max_segments		= MAX_SEGMENTS;
-	q->prefered_cpu_mask	= NULL;
-	q->effective_cpu_mask	= ~0;
-	q->need_plug_timer	= 0;
 
 	blk_queue_bounce_limit(q, BLK_BOUNCE_HIGH);
 }
 
-static void blk_plug_timer(unsigned long v)
-{
-	request_queue_t *q = (request_queue_t*)v;
-	unsigned long flags;
-	
-	if (!q->prefered_cpu_mask)
-		return;
-
-	if (!list_empty(&q->queue_head)) {	
-		spin_lock_irqsave(q->queue_lock, flags);
-	
-	 	if (q->last_request == blkdev_entry_next_request(&q->queue_head))
-			q->last_request = NULL;
-			
-		if (q->effective_cpu_mask != *(q->prefered_cpu_mask))
-			q->effective_cpu_mask = *(q->prefered_cpu_mask);
-			
-		q->request_fn(q);
-		spin_unlock_irqrestore(q->queue_lock, flags);
-	}
-	q->plug_timer.expires = jiffies + HZ/50;
-	add_timer(&q->plug_timer);
-}
-
 void blk_start_queue_timer(request_queue_t * q)
 {
-	init_timer(&q->plug_timer);
-	if (!q->need_plug_timer)
-		return;
-	printk("initializing plug timer for queue %p\n", q);
-	q->plug_timer.data = (unsigned long)q;
-	q->plug_timer.function = blk_plug_timer;
-	q->plug_timer.expires = jiffies + HZ/50;
-	add_timer(&q->plug_timer);
 }
 
 #define blkdev_free_rq(list) list_entry((list)->next, struct request, queue);
@@ -678,7 +633,7 @@ static struct request *__get_request_wait(request_queue_t *q, int rw)
 	add_wait_queue(&q->wait_for_requests[rw], &wait);
 	do {
 		set_current_state(TASK_UNINTERRUPTIBLE);
-		__generic_unplug_device(q);
+		generic_unplug_device(q);
 		if (q->rq[rw].count == 0) {
 			/*
 			 * All we care about is not to stall if any request
@@ -687,11 +642,12 @@ static struct request *__get_request_wait(request_queue_t *q, int rw)
 			 * in case we hit the race and we can get the request
 			 * without waiting.
 			 */
-			spin_unlock_irq(q->queue_lock);
+			generic_unplug_device(q);
 			io_schedule_timeout(HZ);
-			spin_lock_irq(q->queue_lock);
 		}
+		spin_lock_irq(q->queue_lock);
 		rq = get_request(q, rw);
+		spin_unlock_irq(q->queue_lock);
 	} while (rq == NULL);
 	remove_wait_queue(&q->wait_for_requests[rw], &wait);
 	current->state = TASK_RUNNING;
@@ -1069,6 +1025,7 @@ static int __make_request(request_queue_t *q, int rw, struct buffer_head *bh)
 	 */
 	max_sectors = get_max_sectors(bh->b_rdev);
 
+again:
 	req = NULL;
 	head = &q->queue_head;
 	/*
@@ -1076,7 +1033,6 @@ static int __make_request(request_queue_t *q, int rw, struct buffer_head *bh)
 	 * not to schedule or do something nonatomic
 	 */
 	spin_lock_irq(q->queue_lock);
-again:
 
 	insert_here = head->prev;
 	if (list_empty(head)) {
@@ -1172,9 +1128,8 @@ get_rq:
 		} else {
 			req = get_request(q, rw);
 			if (req == NULL) {
+				spin_unlock_irq(q->queue_lock);
 				freereq = __get_request_wait(q, rw);
-				req = NULL;
-				head = &q->queue_head;
 				goto again;
 			}
 		}
@@ -1198,19 +1153,6 @@ get_rq:
 out:
 	if (freereq)
 		blkdev_release_request(freereq);
-	if (q->plugged) {
-		q->plugged = 0;
-		if (!list_empty(&q->queue_head)) {
-			if (q->last_request ==
-				blkdev_entry_next_request(&q->queue_head))
-				q->last_request = NULL;
-			if (q->prefered_cpu_mask && (*(q->prefered_cpu_mask) + 1) 
-				&& (q->effective_cpu_mask != *(q->prefered_cpu_mask)))
-				q->effective_cpu_mask = *(q->prefered_cpu_mask);
-			if (q->effective_cpu_mask & (1<<smp_processor_id()))
-				q->request_fn(q);
-		}
-	}
 	spin_unlock_irq(q->queue_lock);
 	return 0;
 end_io:

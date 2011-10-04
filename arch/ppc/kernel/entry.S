@@ -85,7 +85,7 @@ _GLOBAL(DoSyscall)
 	cmpi    0,r0,0x6666     /* Special case for 'sys_rt_sigreturn' */
 	beq-    16f
 	lwz	r10,TASK_PTRACE(r2)
-	andi.	r10,r10,PT_TRACESYS
+	andi.	r10,r10,PT_TRACESYS|PT_AUDITED
 	bne-	50f
 	cmpli	0,r0,NR_syscalls
 	bge-	66f
@@ -140,7 +140,8 @@ ret_from_syscall_1:
 	bge	ret_from_except
 	b	20b
 /* Traced system call support */
-50:	bl	syscall_trace
+50:	addi	r3,r1,STACK_FRAME_OVERHEAD
+	bl	syscall_trace_enter
 	lwz	r0,GPR0(r1)	/* Restore original registers */
 	lwz	r3,GPR3(r1)
 	lwz	r4,GPR4(r1)
@@ -174,7 +175,8 @@ ret_from_syscall_2:
 	oris	r10,r10,0x1000
 	stw	r10,_CCR(r1)
 60:	stw	r3,GPR3(r1)	/* Update return value */
-	bl	syscall_trace
+	addi    r3,r1,STACK_FRAME_OVERHEAD
+	bl	syscall_trace_leave
 	b	ret_from_except
 66:	li	r3,ENOSYS
 	b	52b
@@ -264,8 +266,9 @@ ret_from_fork:
 	bl	schedule_tail
 #endif	
 	lwz	r0,TASK_PTRACE(r2)
-	andi.	r0,r0,PT_TRACESYS
-	bnel-	syscall_trace
+	andi.	r0,r0,PT_TRACESYS|PT_AUDITED
+	addi	r3,r1,STACK_FRAME_OVERHEAD
+	bnel-	syscall_trace_leave
 	b	ret_from_except
 
 	.globl	ret_from_intercept

@@ -784,10 +784,27 @@ iosapic_fixup_pci_interrupt (struct pci_dev *dev)
 		}
 
 		if (vector >= 0) {
+			int trigger = ACPI_LEVEL_SENSITIVE;
+			int polarity = ACPI_ACTIVE_LOW;
+
 			dev->irq = vector;
 
 			irq_type = &irq_type_iosapic_level;
 			idesc = ia64_irq_desc(vector);
+
+			/* 
+			 * Convert PCI interrupt to level-low, iff
+			 * there is no PCI link device entry that
+			 * specifies otherwise.
+			 */
+			if (acpi_get_pci_link_irq_params(dev, pci_pin, &trigger, &polarity)) {
+				iosapic_intr_info[vector].polarity = polarity;
+				iosapic_intr_info[vector].trigger = trigger;
+				if (polarity == ACPI_ACTIVE_HIGH)
+					printk("%s: changing vector 0x%2x polarity from low to high\n", __FUNCTION__, vector);
+				if (trigger == ACPI_EDGE_SENSITIVE)
+					irq_type = &irq_type_iosapic_edge;
+			}
 			if (idesc->handler != irq_type) {
 				if (idesc->handler != &no_irq_type)
 					printk("%s: changing vector %d from %s to %s\n",

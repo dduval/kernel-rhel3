@@ -171,6 +171,9 @@ static void oom_kill(void)
 	struct task_struct *g, *p, *q;
 	extern wait_queue_head_t kswapd_done;
 
+	/* print the memory stats whenever we OOM kill */
+	show_mem();
+
 	read_lock(&tasklist_lock);
 	p = select_bad_process();
 

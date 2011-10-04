@@ -82,16 +82,6 @@ static struct inet6_protocol icmpv6_protocol = {
 	.flags		=	INET6_PROTO_FINAL,
 };
 
-struct icmpv6_msg {
-	struct icmp6hdr		icmph;
-	struct sk_buff		*skb;
-	int			offset;
-	struct in6_addr		*daddr;
-	int			len;
-	__u32			csum;
-};
-
-
 static int icmpv6_xmit_lock(void)
 {
 	local_bh_disable();
@@ -254,11 +244,19 @@ out:
 	return err;
 }
 
+struct icmpv6_msg {
+	struct sk_buff	*skb;
+	int		offset;
+};
+
 static int icmpv6_getfrag(void *from, char *to, int offset, int len, int odd, struct sk_buff *skb)
 {
-	struct sk_buff *org_skb = (struct sk_buff *)from;
+	struct icmpv6_msg *msg = (struct icmpv6_msg *) from;
+	struct sk_buff *org_skb = msg->skb;
 	__u32 csum = 0;
-	csum = skb_copy_and_csum_bits(org_skb, offset, to, len, csum);
+
+	csum = skb_copy_and_csum_bits(org_skb, msg->offset + offset,
+				      to, len, csum);
 	skb->csum = csum_block_add(skb->csum, csum, odd);
 	return 0;
 }
@@ -276,9 +274,10 @@ void icmpv6_send(struct sk_buff *skb, int type, int code, __u32 info,
 	struct dst_entry *dst;
 	struct icmp6hdr tmp_hdr;
 	struct flowi fl;
+	struct icmpv6_msg msg;
 	int iif = 0;
 	int addr_type = 0;
-	int len, plen;
+	int len;
 	int hlimit = -1;
 	int err = 0;
 
@@ -374,25 +373,27 @@ void icmpv6_send(struct sk_buff *skb, int type, int code, __u32 info,
 			hlimit = dst_metric(dst, RTAX_HOPLIMIT);
 	}
 
-	plen = skb->nh.raw - skb->data;
-	__skb_pull(skb, plen);
-	len = skb->len;
+	msg.skb = skb;
+	msg.offset = skb->nh.raw - skb->data;
+
+	len = skb->len - msg.offset;
 	len = min_t(unsigned int, len, IPV6_MIN_MTU - sizeof(struct ipv6hdr) -sizeof(struct icmp6hdr));
 	if (len < 0) {
 		if (net_ratelimit())
 			printk(KERN_DEBUG "icmp: len problem\n");
-		__skb_push(skb, plen);
 		goto out_dst_release;
 	}
 
-	err = ip6_append_data(sk, icmpv6_getfrag, skb, len + sizeof(struct icmp6hdr), sizeof(struct icmp6hdr),
-				hlimit, NULL, &fl, (struct rt6_info*)dst, MSG_DONTWAIT);
+	err = ip6_append_data(sk, icmpv6_getfrag, &msg,
+			      len + sizeof(struct icmp6hdr),
+			      sizeof(struct icmp6hdr),
+			      hlimit, NULL, &fl, (struct rt6_info*)dst,
+			      MSG_DONTWAIT);
 	if (err) {
 		ip6_flush_pending_frames(sk);
 		goto out_dst_release;
 	}
 	err = icmpv6_push_pending_frames(sk, &fl, &tmp_hdr, len + sizeof(struct icmp6hdr));
-	__skb_push(skb, plen);
 
 	if (type >= ICMPV6_DEST_UNREACH && type <= ICMPV6_PARAMPROB)
 		(&(icmpv6_statistics[smp_processor_id()*2].Icmp6OutDestUnreachs))[type-1]++;
@@ -411,6 +412,7 @@ static void icmpv6_echo_reply(struct sk_buff *skb)
 	struct icmp6hdr *icmph = (struct icmp6hdr *) skb->h.raw;
 	struct icmp6hdr tmp_hdr;
 	struct flowi fl;
+	struct icmpv6_msg msg;
 	struct dst_entry *dst;
 	int err = 0;
 	int hlimit = -1;
@@ -450,7 +452,10 @@ static void icmpv6_echo_reply(struct sk_buff *skb)
 			hlimit = dst_metric(dst, RTAX_HOPLIMIT);
 	}
 
-	err = ip6_append_data(sk, icmpv6_getfrag, skb, skb->len + sizeof(struct icmp6hdr),
+	msg.skb = skb;
+	msg.offset = 0;
+
+	err = ip6_append_data(sk, icmpv6_getfrag, &msg, skb->len + sizeof(struct icmp6hdr),
 				sizeof(struct icmp6hdr), hlimit, NULL, &fl,
 				(struct rt6_info*)dst, MSG_DONTWAIT);
   

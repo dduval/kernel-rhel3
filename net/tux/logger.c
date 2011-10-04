@@ -112,7 +112,7 @@ static void __throttle_logging (void)
 			printk(KERN_NOTICE "TUX: log buffer overflow, have to throttle TUX thread!\n");
 		}
 
-		current->state = TASK_INTERRUPTIBLE;
+		set_current_state(TASK_INTERRUPTIBLE);
 
 		spin_lock(&log_lock);
 		pending = log_head-log_tail;
@@ -665,7 +665,7 @@ static unsigned int writeout_log (void)
 				tux_logfile);
 			warn_once = 0;
 		}
-		__set_current_state(TASK_INTERRUPTIBLE);
+		set_current_state(TASK_INTERRUPTIBLE);
 		schedule_timeout(HZ);
 		return 0;
 	}
@@ -775,7 +775,7 @@ static int logger_thread (void *data)
 			/* nothing */;
 
 		Dprintk("logger does sleep - stop:%d.\n", stop_logger);
-		__set_current_state(TASK_INTERRUPTIBLE);
+		set_current_state(TASK_INTERRUPTIBLE);
 		if (log_head != log_tail) {
 			__set_current_state(TASK_RUNNING);
 			continue;

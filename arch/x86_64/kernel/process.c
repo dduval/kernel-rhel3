@@ -150,11 +150,53 @@ void cpu_idle (void)
 	}
 }
 
+/*
+ * This is a kind of hybrid between poll and halt idle routines. This uses new
+ * Monitor/Mwait instructions on P4 processors with PNI. We Monitor 
+ * need_resched and go to optimized wait state through Mwait. 
+ * Whenever someone changes need_resched, we would be woken up from Mwait 
+ * (without an IPI).
+ */
+static void mwait_idle (void)
+{
+	int oldval;
+
+	__sti();
+	/* Setting need_resched to -1 skips sending IPI during idle resched */
+	oldval = xchg(&current->need_resched, -1);
+	if (!oldval) {
+		do {
+			__monitor((void *)&current->need_resched, 0, 0);
+			if (current->need_resched != -1)
+				break;
+			__mwait(0, 0);
+		} while (current->need_resched == -1);
+	}
+}
+
+int __init select_idle_routine(struct cpuinfo_x86 *c)
+{
+#ifdef CONFIG_IA32E
+	if (cpu_has(c, X86_FEATURE_MWAIT)) {
+		printk("Monitor/Mwait feature present.\n");
+		if (!pm_idle) {
+			pm_idle = mwait_idle;
+		}
+		return 1;
+	}
+#endif
+	pm_idle = default_idle;
+	return 1;
+}
+
 static int __init idle_setup (char *str)
 {
 	if (!strncmp(str, "poll", 4)) {
 		printk("using polling idle threads.\n");
 		pm_idle = poll_idle;
+	} else if (!strncmp(str, "halt", 4)) {
+		printk("using halt in idle threads.\n");
+                pm_idle = default_idle;
 	}
 
 	return 1;
@@ -753,6 +795,21 @@ asmlinkage long sys_vfork(struct pt_regs regs)
 {
 	return do_fork(CLONE_VFORK | CLONE_VM | SIGCHLD, regs.rsp, &regs, 0, 
 		       NULL, NULL);
+}
+
+static inline unsigned int get_random_int(void)
+{
+	unsigned int jitter;
+	/*
+	 * This is a pretty fast call, so no performance worries:
+	 */
+	get_random_bytes(&jitter, sizeof(jitter));
+	return jitter;
+}
+
+unsigned long arch_align_stack(unsigned long sp)
+{
+	return sp - ((get_random_int() % 65536) << 4);
 }
 
 /*

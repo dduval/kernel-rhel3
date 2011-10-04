@@ -60,6 +60,13 @@ static int cpu_mask = -1;
 /* Total count of live CPUs */
 int smp_num_cpus = 1;
 
+/* Number of siblings per CPU package */
+int smp_num_siblings = 1;
+int phys_proc_id[NR_CPUS]; /* Package ID of each logical CPU */
+int cpu_sibling_map[NR_CPUS] __cacheline_aligned;
+
+static int test_ht;
+
 /* Bitmask of currently online CPUs */
 unsigned long cpu_online_map;
 
@@ -78,6 +85,14 @@ struct cpuinfo_x86 cpu_data[NR_CPUS] __cacheline_aligned;
 int smp_threads_ready;
 
 extern void time_init_smp(void);
+
+static int __init ht_setup(char *str)
+{
+	test_ht = 1;
+	return 1;
+}
+
+__setup("test_ht", ht_setup);
 
 /*
  * Setup routine for controlling SMP activation
@@ -989,6 +1004,70 @@ void __init smp_boot_cpus(void)
 
 	Dprintk("Boot done.\n");
 
+	/*
+	 * If Hyper-Threading is avaialble, construct cpu_sibling_map[], so
+	 * that we can tell the sibling CPU efficiently.
+	 */
+	if (test_bit(X86_FEATURE_HT, boot_cpu_data.x86_capability)
+	    && smp_num_siblings > 1) {
+		for (cpu = 0; cpu < NR_CPUS; cpu++)
+			cpu_sibling_map[cpu] = NO_PROC_ID;
+		
+		for (cpu = 0; cpu < smp_num_cpus; cpu++) {
+			int 	i;
+			
+			for (i = 0; i < smp_num_cpus; i++) {
+				if (i == cpu)
+					continue;
+				if (phys_proc_id[cpu] == phys_proc_id[i]) {
+					cpu_sibling_map[cpu] = i;
+					printk("cpu_sibling_map[%d] = %d\n", cpu, cpu_sibling_map[cpu]);
+					break;
+				}
+			}
+			if (cpu_sibling_map[cpu] == NO_PROC_ID) {
+				smp_num_siblings = 1;
+				printk(KERN_WARNING "WARNING: No sibling found for CPU %d.\n", cpu);
+			}
+		}
+#if CONFIG_SHARE_RUNQUEUE
+		/*
+		 * At this point APs would have synchronised TSC and
+		 * waiting for smp_commenced, with their APIC timer
+		 * disabled. So BP can go ahead do some initialization
+		 * for Hyper-Threading (if needed).
+		 */
+		for (cpu = 0; cpu < NR_CPUS; cpu++) {
+			int i;
+			i = cpu_sibling_map[cpu];
+			
+			/* no sibbling? nothing to do */
+			if (i == NO_PROC_ID)
+				continue;
+			
+			/* both cpus need to be online */
+			if (!test_bit(cpu, &cpu_online_map))
+				continue;
+			if (!test_bit(i, &cpu_online_map))
+				continue;
+				
+			/* set this up once for the pair of cpus */	
+			if (i <= cpu)
+				continue;
+  
+			/*
+			 * merge runqueues, resulting in one
+			 * runqueue per package:
+			 */
+			sched_map_runqueue(cpu, i);
+		}
+#endif
+	}
+#if CONFIG_SHARE_RUNQUEUE
+	if (smp_num_siblings == 1 && test_ht)
+		sched_map_runqueue(0, 1);
+#endif
+	     
 	/*
 	 * Here we can be sure that there is an IO-APIC in the system. Let's
 	 * go and set it up:

@@ -1981,7 +1981,8 @@ struct ccb {
 
 	u_char		target;
 	u_char		lun;
-	u_short		queued;
+	u_char		queued;
+	u_char		odd_byte_adjustment;
 	ccb_p		link_ccb;	/* Host adapter CCB chain	*/
 	ccb_p		link_ccbh;	/* Host adapter CCB hash chain	*/
 	XPT_QUEHEAD	link_ccbq;	/* Link to unit CCB queue	*/
@@ -10690,6 +10691,8 @@ static int ncr_compute_residual(ncb_p np, ccb_p cp)
 		resid += (tmp & 0xffffff);
 	}
 
+	resid -= cp->odd_byte_adjustment;
+
 	/*
 	**	Hopefully, the result is not too wrong.
 	*/
@@ -11655,7 +11658,7 @@ static	ccb_p ncr_get_ccb (ncb_p np, u_char tn, u_char ln)
 	/*
 	**	Remember all informations needed to free this CCB.
 	*/
-	cp->to_abort = 0;
+	cp->to_abort = cp->odd_byte_adjustment = 0;
 	cp->tag	   = tag;
 	cp->target = tn;
 	cp->lun    = ln;
@@ -12094,13 +12097,21 @@ static	int ncr_scatter_no_sglist(ncb_p np, ccb_p cp, Scsi_Cmnd *cmd)
 {
 	struct scr_tblmove *data = &cp->phys.data[MAX_SCATTER-1];
 	int segment;
+	unsigned int len = cmd->request_bufflen;
 
-	cp->data_len = cmd->request_bufflen;
-
-	if (cmd->request_bufflen) {
+	if (len) {
 		dma_addr_t baddr = map_scsi_single_data(np, cmd);
 
-		SCATTER_ONE(data, baddr, cmd->request_bufflen);
+		if ( len & 0x01 )  /* odd # of bytes? */
+		{
+			tcb_p tp = &np->target[cp->target];
+			if (tp->wval & EWS)  /* negotiated wide? */
+			{
+				len++;
+				cp->odd_byte_adjustment++;
+			}
+		}
+		SCATTER_ONE(data, baddr, len);
 		if (CROSS_16MB(baddr, cmd->request_bufflen)) {
 			cp->host_flags |= HF_PM_TO_C;
 #ifdef DEBUG_896R1
@@ -12112,6 +12123,8 @@ printk("He! we are crossing a 16 MB boundary (0x%lx, 0x%x)\n",
 	}
 	else
 		segment = 0;
+
+	cp->data_len = len;
 
 	return segment;
 }
@@ -12151,6 +12164,15 @@ static int ncr_scatter_896R1(ncb_p np, ccb_p cp, Scsi_Cmnd *cmd)
 		for (segn = 0; segn < use_sg; segn++) {
 			dma_addr_t baddr = scsi_sg_dma_address(&scatter[segn]);
 			unsigned int len = scsi_sg_dma_len(&scatter[segn]);
+			if ( len & 0x01 )  /* odd # of bytes? */
+			{
+				tcb_p tp = &np->target[cp->target];
+				if (tp->wval & EWS)  /* negotiated wide? */
+				{
+					len++;
+					cp->odd_byte_adjustment++;
+				}
+			}
 
 			SCATTER_ONE(&data[segn],
 				    baddr,
@@ -12190,6 +12212,16 @@ static int ncr_scatter(ncb_p np, ccb_p cp, Scsi_Cmnd *cmd)
 		for (segment = 0; segment < use_sg; segment++) {
 			dma_addr_t baddr = scsi_sg_dma_address(&scatter[segment]);
 			unsigned int len = scsi_sg_dma_len(&scatter[segment]);
+			if ( len & 0x01 )  /* odd # of bytes? */
+			{
+				tcb_p tp = &np->target[cp->target];
+				if (tp->wval & EWS)  /* negotiated wide? */
+				{
+					len++;
+					cp->odd_byte_adjustment++;
+				}
+			}
+
 
 			SCATTER_ONE(&data[segment],
 				    baddr,

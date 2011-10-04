@@ -512,6 +512,79 @@ repeat:
 	spin_unlock_irq(&base->lock);
 }
 
+#ifdef CONFIG_NO_IDLE_HZ
+
+/*
+ * Find out when the next timer event is due to happen. This
+ * is used on S/390 to stop all activity when all cpus are idle.
+ * This is called with all locks relevant to stop_hz_timer taken
+ * and interrupts closed, but it has to take locks in tvecs.
+ *
+ * Scan first 256 jiffies on all CPUs, then next 63*256 jiffies, etc.
+ */
+unsigned long next_timer_event(void)
+{
+	tvec_base_t *base;
+	struct list_head *list;
+	struct timer_list *nte;
+	unsigned long expires;
+	tvec_t *varray[4];
+	int i, j;
+
+	base = tvec_bases + smp_processor_id();
+	spin_lock(&base->lock);
+	expires = base->timer_jiffies + (LONG_MAX >> 1);
+	list = 0;
+	
+	/* Look for timer events in tv1. */
+	j = base->timer_jiffies & TVR_MASK;
+	do {
+		list_for_each_entry(nte, base->tv1.vec + j, entry) {
+			expires = nte->expires;
+			if (j < (base->timer_jiffies & TVR_MASK))
+				list = base->tv2.vec + (INDEX(0));
+			goto found;
+		}
+		j = (j + 1) & TVR_MASK;
+	} while (j != (base->timer_jiffies & TVR_MASK));
+	
+	/* Check tv2-tv5. */
+	varray[0] = &base->tv2;
+	varray[1] = &base->tv3;
+	varray[2] = &base->tv4;
+	varray[3] = &base->tv5;
+	for (i = 0; i < 4; i++) {
+		j = INDEX(i);
+		do {
+			if (list_empty(varray[i]->vec + j)) {
+				j = (j + 1) & TVN_MASK;
+				continue;
+			}
+			list_for_each_entry(nte, varray[i]->vec + j, entry)
+				if (time_before(nte->expires, expires))
+					expires = nte->expires;
+			if (j < (INDEX(i)) && i < 3)
+				list = varray[i + 1]->vec + (INDEX(i + 1));
+			goto found;
+		} while (j != (INDEX(i)));
+	}
+found:
+	if (list) {
+		/*
+		 * The search wrapped. We need to look at the next list
+		 * from next tv element that would cascade into tv element
+		 * where we found the timer element.
+		 */
+		list_for_each_entry(nte, list, entry) {
+			if (time_before(nte->expires, expires))
+				expires = nte->expires;
+		}
+	}
+	spin_unlock(&base->lock);
+	return expires;
+}
+#endif
+
 spinlock_t tqueue_lock = SPIN_LOCK_UNLOCKED;
 
 void tqueue_bh(void)
@@ -700,7 +773,7 @@ static void update_wall_time(unsigned long ticks)
 		update_wall_time_one_tick();
 	} while (ticks);
 
-	if (xtime.tv_usec >= 1000000) {
+	while (xtime.tv_usec >= 1000000) {
 	    xtime.tv_usec -= 1000000;
 	    xtime.tv_sec++;
 	    second_overflow();
@@ -916,6 +989,32 @@ void update_process_times(int user_mode)
 }
 
 /*
+ * Called from the timer interrupt handler to charge a couple of ticks
+ * to the current process.
+ */
+void update_process_times_us(int user_ticks, int system_ticks)
+{
+	struct kernel_stat_tick_times time;
+	struct task_struct *p = current;
+	int cpu = smp_processor_id();
+
+	/*
+	 * Making a terribe hash out of accounting here. XXX
+	 * Ticks are fractional these days, but oh well...
+	 */
+	memset(&time, 0, sizeof(struct kernel_stat_tick_times));
+	if (task_nice(p) > 0)
+		time.n_usec = user_ticks*(1000000/HZ);
+	else
+		time.u_usec = user_ticks*(1000000/HZ);
+	time.s_usec = system_ticks*(1000000/HZ);
+	update_one_process(p, &time, cpu);
+
+	update_kstatpercpu(p, &time);
+	scheduler_tick(1);
+}
+
+/*
  * Nr of active tasks - counted in fixed-point numbers
  */
 static unsigned long count_active_tasks(void)
@@ -937,7 +1036,7 @@ static inline void calc_load(unsigned long ticks)
 	static int count = LOAD_FREQ;
 
 	count -= ticks;
-	if (count < 0) {
+	while (count < 0) {
 		count += LOAD_FREQ;
 		active_tasks = count_active_tasks();
 		CALC_LOAD(avenrun[0], EXP_1, active_tasks);
@@ -958,6 +1057,14 @@ void do_timer(struct pt_regs *regs)
 
 	update_process_times(user_mode(regs));
 #endif
+	mark_bh(TIMER_BH);
+	if (TQ_ACTIVE(tq_timer))
+		mark_bh(TQUEUE_BH);
+}
+
+void do_timer_ticks(int ticks)
+{
+	(*(unsigned long *)&jiffies) += ticks;
 	mark_bh(TIMER_BH);
 	if (TQ_ACTIVE(tq_timer))
 		mark_bh(TQUEUE_BH);

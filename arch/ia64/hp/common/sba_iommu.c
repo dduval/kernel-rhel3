@@ -1709,112 +1709,6 @@ ioc_init(u64 hpa, void *handle)
 **
 **************************************************************************/
 
-#ifdef CONFIG_PROC_FS
-static int
-sba_proc_info_one(char *buf, struct ioc *ioc)
-{
-	int total_pages = (int) (ioc->res_size << 3); /* 8 bits per byte */
-	unsigned long i = 0, avg = 0, min, max;
-
-	sprintf(buf, "Hewlett Packard %s IOC rev %d.%d\n",
-		ioc->name, ((ioc->rev >> 4) & 0xF), (ioc->rev & 0xF));
-	sprintf(buf, "%sIO PDIR size    : %d bytes (%d entries)\n",
-		buf,
-		(int) ((ioc->res_size << 3) * sizeof(u64)), /* 8 bits/byte */
-		total_pages);
-
-	sprintf(buf, "%sIO PDIR entries : %ld free  %ld used (%d%%)\n", buf,
-		total_pages - ioc->used_pages, ioc->used_pages,
-		(int) (ioc->used_pages * 100 / total_pages));
-	
-	sprintf(buf, "%sResource bitmap : %d bytes (%d pages)\n", 
-		buf, ioc->res_size, ioc->res_size << 3);   /* 8 bits per byte */
-
-	min = max = ioc->avg_search[0];
-	for (i = 0; i < SBA_SEARCH_SAMPLE; i++) {
-		avg += ioc->avg_search[i];
-		if (ioc->avg_search[i] > max) max = ioc->avg_search[i];
-		if (ioc->avg_search[i] < min) min = ioc->avg_search[i];
-	}
-	avg /= SBA_SEARCH_SAMPLE;
-	sprintf(buf, "%s  Bitmap search : %ld/%ld/%ld (min/avg/max CPU Cycles)\n",
-		buf, min, avg, max);
-
-	sprintf(buf, "%spci_map_single(): %12ld calls  %12ld pages (avg %d/1000)\n",
-		buf, ioc->msingle_calls, ioc->msingle_pages,
-		(int) ((ioc->msingle_pages * 1000)/ioc->msingle_calls));
-#ifdef ALLOW_IOV_BYPASS
-	sprintf(buf, "%spci_map_single(): %12ld bypasses\n",
-	        buf, ioc->msingle_bypass);
-#endif
-
-	sprintf(buf, "%spci_unmap_single: %12ld calls  %12ld pages (avg %d/1000)\n",
-		buf, ioc->usingle_calls, ioc->usingle_pages,
-		(int) ((ioc->usingle_pages * 1000)/ioc->usingle_calls));
-#ifdef ALLOW_IOV_BYPASS
-	sprintf(buf, "%spci_unmap_single: %12ld bypasses\n",
-	        buf, ioc->usingle_bypass);
-#endif
-
-	sprintf(buf, "%spci_map_sg()    : %12ld calls  %12ld pages (avg %d/1000)\n",
-		buf, ioc->msg_calls, ioc->msg_pages,
-		(int) ((ioc->msg_pages * 1000)/ioc->msg_calls));
-#ifdef ALLOW_IOV_BYPASS
-	sprintf(buf, "%spci_map_sg()    : %12ld bypasses\n",
-	        buf, ioc->msg_bypass);
-#endif
-
-	sprintf(buf, "%spci_unmap_sg()  : %12ld calls  %12ld pages (avg %d/1000)\n",
-		buf, ioc->usg_calls, ioc->usg_pages,
-		(int) ((ioc->usg_pages * 1000)/ioc->usg_calls));
-
-	return strlen(buf);
-}
-
-static int
-sba_proc_info(char *buf, char **start, off_t offset, int len)
-{
-	struct ioc *ioc;
-	char *base = buf;
-
-	for (ioc = ioc_list; ioc; ioc = ioc->next) {
-		buf += sba_proc_info_one(buf, ioc);
-	}
-
-	return strlen(base);
-}
-
-static int
-sba_resource_map_one(char *buf, struct ioc *ioc)
-{
-	unsigned int *res_ptr = (unsigned int *)ioc->res_map;
-	int i;
-
-	buf[0] = '\0';
-	for(i = 0; i < (ioc->res_size / sizeof(unsigned int)); ++i, ++res_ptr) {
-		if ((i & 7) == 0)
-		    strcat(buf,"\n   ");
-		sprintf(buf, "%s %08x", buf, *res_ptr);
-	}
-	strcat(buf, "\n");
-
-	return strlen(buf);
-}
-
-static int
-sba_resource_map(char *buf, char **start, off_t offset, int len)
-{
-	struct ioc *ioc;
-	char *base = buf;
-
-	for (ioc = ioc_list; ioc; ioc = ioc->next) {
-		buf += sba_resource_map_one(buf, ioc);
-	}
-
-	return strlen(base);
-}
-#endif
-
 void
 sba_enable_device(struct pci_dev *dev)
 {
@@ -1906,19 +1800,18 @@ ioc_acpi_init(void)
 	acpi_bus_register_driver(&acpi_ioc_driver);
 }
 
+#ifdef CONFIG_PROC_FS
+static void __init ioc_proc_init(void);
+#endif
+
 void __init
 sba_init(void)
 {
 	ioc_acpi_init();
 
 #ifdef CONFIG_PROC_FS
-	if (ioc_list) {
-		struct proc_dir_entry * proc_mckinley_root;
-
-		proc_mckinley_root = proc_mkdir("bus/mckinley",0);
-		create_proc_info_entry(ioc_list->name, 0, proc_mckinley_root, sba_proc_info);
-		create_proc_info_entry("bitmap", 0, proc_mckinley_root, sba_resource_map);
-	}
+	if (ioc_list)
+		ioc_proc_init();
 #endif
 }
 
@@ -1939,3 +1832,112 @@ EXPORT_SYMBOL(sba_unmap_sg);
 EXPORT_SYMBOL(sba_dma_supported);
 EXPORT_SYMBOL(sba_alloc_consistent);
 EXPORT_SYMBOL(sba_free_consistent);
+
+#ifdef CONFIG_PROC_FS
+
+/*
+ * The following includes must occur *after* the EXPORT_SYMBOL(sba_*)
+ * invocations above to prevent an obscure KMI compatibility problem!
+ */
+#include <linux/seq_file.h>
+#include <asm/bitops.h>
+
+static void *
+ioc_start(struct seq_file *s, loff_t *pos)
+{
+	struct ioc *ioc;
+	loff_t n = *pos;
+
+	for (ioc = ioc_list; ioc; ioc = ioc->next)
+		if (!n--)
+			return ioc;
+
+	return NULL;
+}
+
+static void *
+ioc_next(struct seq_file *s, void *v, loff_t *pos)
+{
+	struct ioc *ioc = v;
+
+	++*pos;
+	return ioc->next;
+}
+
+static void
+ioc_stop(struct seq_file *s, void *v)
+{
+}
+
+static int
+ioc_show(struct seq_file *s, void *v)
+{
+	struct ioc *ioc = v;
+	unsigned long *res_ptr = (unsigned long *)ioc->res_map;
+	int i, used = 0;
+
+	seq_printf(s, "Hewlett Packard %s IOC rev %d.%d\n",
+		ioc->name, ((ioc->rev >> 4) & 0xF), (ioc->rev & 0xF));
+	seq_printf(s, "IOVA size       : %d MB\n", ioc->iov_size/(1024*1024));
+	seq_printf(s, "IOVA page size  : %ld kb\n", PAGE_SIZE/1024);
+
+	for (i = 0; i < (ioc->res_size / sizeof(unsigned long)); ++i, ++res_ptr)
+		used += hweight64(*res_ptr);
+
+	seq_printf(s, "PDIR size       : %d entries\n", ioc->res_size << 3);
+	seq_printf(s, "PDIR used       : %d entries\n", used);
+
+	{
+	  	unsigned long i = 0, avg = 0, min, max;
+		min = max = ioc->avg_search[0];
+		for (i = 0; i < SBA_SEARCH_SAMPLE; i++) {
+			avg += ioc->avg_search[i];
+			if (ioc->avg_search[i] > max) max = ioc->avg_search[i];
+			if (ioc->avg_search[i] < min) min = ioc->avg_search[i];
+		}
+		avg /= SBA_SEARCH_SAMPLE;
+		seq_printf(s, "Bitmap search   : %ld/%ld/%ld (min/avg/max CPU Cycles)\n",
+			   min, avg, max);
+	}
+
+#ifndef ALLOW_IOV_BYPASS
+	 seq_printf(s, "IOVA bypass disabled\n");
+#endif
+	return 0;
+}
+
+static struct seq_operations ioc_seq_ops = {
+	.start = ioc_start,
+	.next  = ioc_next,
+	.stop  = ioc_stop,
+	.show  = ioc_show
+};
+
+static int
+ioc_open(struct inode *inode, struct file *file)
+{
+	return seq_open(file, &ioc_seq_ops);
+}
+
+static struct file_operations ioc_fops = {
+	.open    = ioc_open,
+	.read    = seq_read,
+	.llseek  = seq_lseek,
+	.release = seq_release
+};
+
+static void __init
+ioc_proc_init(void)
+{
+	struct proc_dir_entry *dir, *entry;
+
+	dir = proc_mkdir("bus/mckinley", 0);
+	if (!dir)
+		return;
+
+	entry = create_proc_entry(ioc_list->name, 0, dir);
+	if (entry)
+		entry->proc_fops = &ioc_fops;
+}
+
+#endif /* CONFIG_PROC_FS */

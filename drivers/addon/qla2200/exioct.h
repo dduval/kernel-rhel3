@@ -2,7 +2,7 @@
  *                  QLOGIC LINUX SOFTWARE
  *
  * QLogic ISP2x00 device driver for Linux 2.4.x
- * Copyright (C) 2003 Qlogic Corporation
+ * Copyright (C) 2003 QLogic Corporation
  * (www.qlogic.com)
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -195,6 +195,8 @@
  *        EXT_SC_GET_BEACON_STATE,EXT_SC_SET_BEACON_STATE for the
  *        led blinking feature.
  *
+ * Rev. 5.30     July 21, 2003
+ * RL	- Added new statistics fields in HBA_PORT_STAT struct.
  */
 
 #ifndef	_EXIOCT_H
@@ -651,6 +653,7 @@ typedef struct _EXT_DEST_ADDR {
 #define	EXT_DEF_DESTTYPE_SCSI			5
 
 /* Statistic */
+#if defined(linux)					/* Linux */
 typedef struct _EXT_HBA_PORT_STAT {
 	UINT32    ControllerErrorCount;		/* 4 */
 	UINT32    DeviceErrorCount;		/* 4 */
@@ -664,8 +667,35 @@ typedef struct _EXT_HBA_PORT_STAT {
 	UINT32    PrimitiveSeqProtocolErrorCount;/* 4 */
 	UINT32    InvalidTransmissionWordCount;	/* 4 */
 	UINT32    InvalidCRCCount;		/* 4 */
-	UINT32    Reserved[16];			/* 64 */
+	uint64_t  InputRequestCount;		/* 8 */
+	uint64_t  OutputRequestCount;		/* 8 */
+	uint64_t  ControlRequestCount;		/* 8 */
+	uint64_t  InputMBytes;			/* 8 */
+	uint64_t  OutputMBytes;			/* 8 */
+	UINT32    Reserved[6];			/* 24 */
 } EXT_HBA_PORT_STAT, *PEXT_HBA_PORT_STAT;	/* 112 */
+#else
+typedef struct _EXT_HBA_PORT_STAT {
+	UINT32    ControllerErrorCount;		/* 4 */
+	UINT32    DeviceErrorCount;		/* 4 */
+	UINT32    TotalIoCount;			/* 4 */
+	UINT32    TotalMBytes;			/* 4; MB of data processed */
+	UINT32    TotalLipResets;		/* 4; Total no. of LIP Reset */
+	UINT32    Reserved2;			/* 4 */
+	UINT32    TotalLinkFailures;		/* 4 */
+	UINT32    TotalLossOfSync;		/* 4 */
+	UINT32    TotalLossOfSignals;		/* 4 */
+	UINT32    PrimitiveSeqProtocolErrorCount;/* 4 */
+	UINT32    InvalidTransmissionWordCount;	/* 4 */
+	UINT32    InvalidCRCCount;		/* 4 */
+	UINT64    InputRequestCount;		/* 8 */
+	UINT64    OutputRequestCount;		/* 8 */
+	UINT64    ControlRequestCount;		/* 8 */
+	UINT64    InputMBytes;			/* 8 */
+	UINT64    OutputMBytes;			/* 8 */
+	UINT32    Reserved[6];			/* 24 */
+} EXT_HBA_PORT_STAT, *PEXT_HBA_PORT_STAT;	/* 112 */
+#endif
 
 
 /* Driver property */
@@ -757,7 +787,8 @@ typedef struct _EXT_SCSI_PASSTHRU {
 	UINT8           Direction;
 	UINT8           CdbLength;
 	UINT8           Cdb[EXT_DEF_SCSI_PASSTHRU_CDB_LENGTH];
-        UINT32          Reserved[14];
+        UINT32          Timeout;
+        UINT32          Reserved[13];
         UINT16          Reserved2;
         UINT16          SenseLength;
 	UINT8           SenseData[256];
@@ -769,7 +800,8 @@ typedef struct _EXT_FC_SCSI_PASSTHRU {
 	UINT8           Direction;
 	UINT8           CdbLength;
 	UINT8           Cdb[EXT_DEF_SCSI_PASSTHRU_CDB_LENGTH];
-        UINT32          Reserved[14];
+        UINT32          Timeout;
+        UINT32          Reserved[13];
         UINT16          Reserved2;
         UINT16          SenseLength;
 	UINT8           SenseData[256];

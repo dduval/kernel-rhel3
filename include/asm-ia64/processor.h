@@ -252,6 +252,25 @@ typedef struct {
 
 struct siginfo;
 
+#ifdef CONFIG_IA32_SUPPORT
+struct desc_struct {
+	unsigned int a,b;
+};
+
+#define desc_empty(desc) \
+		(!((desc)->a + (desc)->b))
+
+#define desc_equal(desc1, desc2) \
+		(((desc1)->a == (desc2)->a) && ((desc1)->b == (desc2)->b))
+
+#define GDT_ENTRY_TLS_ENTRIES	3
+#define GDT_ENTRY_TLS_MIN	6
+#define GDT_ENTRY_TLS_MAX 	(GDT_ENTRY_TLS_MIN + GDT_ENTRY_TLS_ENTRIES - 1)
+
+#define TLS_SIZE (GDT_ENTRY_TLS_ENTRIES * 8)
+
+#endif
+
 struct thread_struct {
 	__u64 ksp;			/* kernel stack pointer */
 	unsigned long flags;		/* various flags */
@@ -920,24 +939,13 @@ ia64_get_dbr (__u64 regnum)
 	return retval;
 }
 
-/* XXX remove the handcoded version once we have a sufficiently clever compiler... */
-#ifdef SMART_COMPILER
-# define ia64_rotr(w,n)				\
-  ({						\
-	__u64 _w = (w), _n = (n);		\
-						\
-	(_w >> _n) | (_w << (64 - _n));		\
-  })
-#else
-# define ia64_rotr(w,n)							\
-  ({									\
-	__u64 result;							\
-	asm ("shrp %0=%1,%1,%2" : "=r"(result) : "r"(w), "i"(n));	\
-	result;								\
-  })
-#endif
+static inline __u64
+ia64_rotr (__u64 w, __u64 n)
+{
+	return (w >> n) | (w << (64 - n));
+}
 
-#define ia64_rotl(w,n)	ia64_rotr((w),(64)-(n))
+#define ia64_rotl(w,n)	ia64_rotr((w), (64) - (n))
 
 static inline __u64
 ia64_thash (__u64 addr)

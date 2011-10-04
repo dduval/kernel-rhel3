@@ -57,6 +57,9 @@ extern pgm_check_handler_t do_protection_exception;
 extern pgm_check_handler_t do_segment_exception;
 extern pgm_check_handler_t do_region_exception;
 extern pgm_check_handler_t do_page_exception;
+#ifdef CONFIG_NO_IDLE_HZ
+extern pgm_check_handler_t do_monitor_call;
+#endif
 #ifdef CONFIG_PFAULT
 extern int pfault_init(void);
 extern void pfault_fini(void);
@@ -577,6 +580,9 @@ void __init trap_init(void)
         pgm_check_table[0x1C] = &privileged_op;
         pgm_check_table[0x38] = &addressing_exception;
         pgm_check_table[0x3B] = &do_region_exception;
+#ifdef CONFIG_NO_IDLE_HZ
+	pgm_check_table[0x40] = &do_monitor_call;
+#endif
 #ifdef CONFIG_PFAULT
 	if (MACHINE_IS_VM) {
 		/* request the 0x2603 external interrupt */

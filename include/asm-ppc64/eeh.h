@@ -25,6 +25,10 @@
 #ifndef _EEH_H
 #define _EEH_H
 
+#ifdef CONFIG_JS20
+#include <asm/system.h>
+#endif
+
 struct pci_dev;
 
 /* I/O addresses are converted to EEH "tokens" such that a driver will cause
@@ -169,11 +173,27 @@ static inline void eeh_memcpy_toio(void *dest, void *src, unsigned long n) {
 	memcpy(vdest, src, n);
 }
 
-/* The I/O macros must handle ISA ports as well as PCI I/O bars.
+/* 
+ * The I/O macros must handle ISA ports as well as PCI I/O bars.
  * ISA does not implement EEH and ISA may not exist in the system.
- * For PCI we check for EEH failures.
+ * If ISA does not exist in the system and an ISA port is specified,
+ * the macros below will not do the I/O.
+ * 
+ * The only exception to this is for the JS20 which must use the
+ * legacy I/O ports for some devices (IDE in particular). However,
+ * JS20 systems do not think they have an ISA bus and thus the
+ * macros below would not permit the I/O without some adjustment. 
+ * Hence the ISA check is relaxed for the JS20 to treat as ISA 
+ * only those devices at addresses below the IDE controller port 
+ * address (0x6c00).
+ *
+ * For PCI devices, EEH failures are checked.
  */
+#ifdef CONFIG_JS20
+#define _IO_IS_ISA(port) ((is_js20) ? ((port) < 0x6c00) : ((port) < 0x10000))
+#else
 #define _IO_IS_ISA(port) ((port) < 0x10000)
+#endif
 #define _IO_HAS_ISA_BUS	(isa_io_base != 0)
 
 static inline u8 eeh_inb(unsigned long port) {

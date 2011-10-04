@@ -73,7 +73,7 @@ ENTRY(ret_from_fork)
 	movq %rax,%rdi		/* return value of __switch_to -> prev task */
 	call schedule_tail
 	GET_CURRENT(%rcx)
-	testb $PT_TRACESYS,tsk_ptrace(%rcx)
+	testw $PT_TRACESYS|PT_AUDITED,tsk_ptrace(%rcx)
 	jnz 2f
 1:
 	RESTORE_REST
@@ -85,7 +85,7 @@ ENTRY(ret_from_fork)
 	jmp ret_from_sys_call
 2:
 	movq %rsp,%rdi	
-	call syscall_trace
+	call syscall_trace_leave
 	GET_CURRENT(%rcx)
 	jmp 1b
 
@@ -123,7 +123,7 @@ ENTRY(system_call)
 	movq  %rax,ORIG_RAX-ARGOFFSET(%rsp) 
 	movq  %rcx,RIP-ARGOFFSET(%rsp)	
 	GET_CURRENT(%rcx)
-	testl $PT_TRACESYS,tsk_ptrace(%rcx)
+	testl $PT_TRACESYS|PT_AUDITED,tsk_ptrace(%rcx)
 	jne tracesys
 	cmpq $__NR_syscall_max,%rax
 	ja badsys
@@ -171,7 +171,7 @@ tracesys:
 	movq $-ENOSYS,RAX(%rsp)
 	FIXUP_TOP_OF_STACK %rdi
 	movq %rsp,%rdi
-	call syscall_trace
+	call syscall_trace_enter
 	LOAD_ARGS ARGOFFSET  /* reload args from stack in case ptrace changed it */
 	RESTORE_REST
 	cmpq $__NR_syscall_max,%rax
@@ -183,7 +183,7 @@ tracesys_call:		/* backtrace marker */
 tracesys_done:		/* backtrace marker */	
 	SAVE_REST
 	movq %rsp,%rdi
-	call syscall_trace
+	call syscall_trace_leave
 	RESTORE_TOP_OF_STACK %rbx
 	RESTORE_REST
 	jmp ret_from_sys_call

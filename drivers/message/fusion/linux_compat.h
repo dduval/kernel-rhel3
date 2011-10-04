@@ -11,6 +11,11 @@
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
 
+
+#if (defined(__sparc__) && defined(__sparc_v9__)) || defined(__x86_64__)
+#define MPT_CONFIG_COMPAT
+#endif
+
 #ifndef rwlock_init
 #define rwlock_init(x) do { *(x) = RW_LOCK_UNLOCKED; } while(0)
 #endif
@@ -93,7 +98,7 @@ typedef void (*__cleanup_module_func_t)(void);
  * Used prior to schedule_timeout calls..
  */
 #define __set_current_state(state_value)	do { current->state = state_value; } while (0)
-#ifdef __SMP__
+#ifdef CONFIG_SMP
 #define set_current_state(state_value)		do { __set_current_state(state_value); mb(); } while (0)
 #else
 #define set_current_state(state_value)		__set_current_state(state_value)
@@ -247,6 +252,8 @@ static __inline__ int __get_order(unsigned long size)
 
 /*
  *  We use our new error handling code if the kernel version is 2.4.18 or newer.
+ *  Remark: 5/5/03 use old EH code with 2.4 kernels as it runs in a background thread
+ *  2.4 kernels choke on a call to schedule via eh thread.
  */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,1)
         #define MPT_SCSI_USE_NEW_EH
@@ -265,9 +272,9 @@ static __inline__ int __get_order(unsigned long size)
 #endif
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,28)
-#define mptscsih_sync_irq(_irq) synchronize_irq(_irq)
+#define mpt_sync_irq(_irq) synchronize_irq(_irq)
 #else
-#define mptscsih_sync_irq(_irq) synchronize_irq()
+#define mpt_sync_irq(_irq) synchronize_irq()
 #endif
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,58)

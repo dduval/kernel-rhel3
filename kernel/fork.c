@@ -39,6 +39,8 @@
 extern int copy_semundo(unsigned long clone_flags, struct task_struct *tsk);
 extern void exit_semundo(struct task_struct *tsk);
 
+#include <linux/audit.h>
+
 /* The idle threads do not count.. */
 int nr_threads;
 
@@ -693,7 +695,7 @@ static inline void copy_flags(unsigned long clone_flags, struct task_struct *p)
 	new_flags &= ~(PF_SUPERPRIV | PF_USEDFPU);
 	new_flags |= PF_FORKNOEXEC;
 	if (!(clone_flags & CLONE_PTRACE))
-		p->ptrace = 0;
+		p->ptrace &= PT_AUDITED;
 	p->flags = new_flags;
 }
 
@@ -705,7 +707,7 @@ long kernel_thread(int (*fn)(void *), void * arg, unsigned long flags)
 
 	/* lock out any potential ptracer */
 	task_lock(task);
-	if (task->ptrace) {
+	if (task->ptrace & ~PT_AUDITED) {
 		task_unlock(task);
 		return -EPERM;
 	}
@@ -769,12 +771,17 @@ struct task_struct *copy_process(unsigned long clone_flags,
 	p->tux_info = NULL;
 
 	retval = -EAGAIN;
+
+	/*
+	 * Increment user->__count before the rlimit test so that it would
+	 * be correct if we take the bad_fork_free failure path.
+	 */
+	atomic_inc(&p->user->__count);
 	if (atomic_read(&p->user->processes) >= p->rlim[RLIMIT_NPROC].rlim_cur) {
 		if (!capable(CAP_SYS_ADMIN) && !capable(CAP_SYS_RESOURCE))
 			goto bad_fork_free;
 	}
 
-	atomic_inc(&p->user->__count);
 	atomic_inc(&p->user->processes);
 
 	/*
@@ -1018,9 +1025,9 @@ bad_fork_cleanup:
 		__MOD_DEC_USE_COUNT(p->binfmt->module);
 bad_fork_cleanup_count:
 	atomic_dec(&p->user->processes);
-	free_uid(p->user);
 bad_fork_free:
 	p->state = TASK_ZOMBIE; /* debug */
+	atomic_dec(&p->usage);
 	put_task_struct(p);
 	goto fork_out;
 }
@@ -1090,6 +1097,9 @@ int do_fork(unsigned long clone_flags,
 			sigaddset(&p->pending.signal, SIGSTOP);
 			p->sigpending = 1;
 		}
+
+		if (isaudit(current))
+			audit_fork(current, p);
 
 		/*
 		 * The task is in TASK_UNINTERRUPTIBLE right now, no-one

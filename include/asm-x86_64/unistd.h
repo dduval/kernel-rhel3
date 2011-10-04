@@ -423,8 +423,16 @@ __SYSCALL(__NR_putpmsg, sys_ni_syscall)
 #define __NR_afs_syscall                       183
 __SYSCALL(__NR_afs_syscall, sys_ni_syscall)
 
-#define __NR_tuxcall      		184 /* reserved for tux */
+#define __NR_tuxcall			184 /* reserved for tux */
+#ifdef CONFIG_TUX
+__SYSCALL(__NR_tuxcall, __sys_tux)
+#else
+# ifdef CONFIG_TUX_MODULE
+__SYSCALL(__NR_tuxcall, sys_tux)
+# else
 __SYSCALL(__NR_tuxcall, sys_ni_syscall)
+# endif
+#endif
 
 #define __NR_security			185 /* reserved for security */
 __SYSCALL(__NR_security, sys_ni_syscall)

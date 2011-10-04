@@ -55,7 +55,7 @@ static void __init copy_bootdata(char *real_mode_data)
 
 static void __init setup_boot_cpu_data(void)
 {
-	int dummy, eax;
+	int dummy, eax, extra;
 
 	/* get vendor info */
 	cpuid(0, &boot_cpu_data.cpuid_level,
@@ -64,7 +64,10 @@ static void __init setup_boot_cpu_data(void)
 	      (int *)&boot_cpu_data.x86_vendor_id[4]);
 
 	/* get cpu type */
-	cpuid(1, &eax, &dummy, &dummy, (int *) &boot_cpu_data.x86_capability);
+	cpuid(1, &eax, &dummy, &extra, (int *)&boot_cpu_data.x86_capability[0]);
+#ifdef CONFIG_IA32E
+	boot_cpu_data.x86_capability[4] = extra;
+#endif
 	boot_cpu_data.x86 = (eax >> 8) & 0xf;
 	boot_cpu_data.x86_model = (eax >> 4) & 0xf;
 	boot_cpu_data.x86_mask = eax & 0xf;

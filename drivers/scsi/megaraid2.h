@@ -6,7 +6,7 @@
 
 
 #define MEGARAID_VERSION	\
-	"v2.00.9 (Release Date: Thu Sep  4 17:49:42 EDT 2003)\n"
+	"v2.10.1.1 (Release Date: Fri Jan 16 14:47:19 EST 2004)\n"
 
 /*
  * Driver features - change the values to enable or disable features in the
@@ -44,8 +44,6 @@
  */
 #define MEGA_HAVE_ENH_PROC	1
 
-#define MAX_DEV_TYPE	32
-
 #ifndef PCI_VENDOR_ID_LSI_LOGIC
 #define PCI_VENDOR_ID_LSI_LOGIC		0x1000
 #endif
@@ -77,6 +75,9 @@
 #define PCI_DEVICE_ID_DISCOVERY		0x000E
 #define PCI_DEVICE_ID_PERC4_DI		0x000F
 #define PCI_DEVICE_ID_PERC4_QC_VERDE	0x0407
+#define PCI_DEVICE_ID_PERC4E_SI_DI	0x0013
+#define PCI_DEVICE_ID_PERC4E_DC_SC	0x0408
+#define PCI_DEVICE_ID_LSI_SATA_PCIX	0x0409
 
 /* Sub-System Vendor IDs */
 #define	AMI_SUBSYS_VID			0x101E
@@ -521,10 +522,10 @@ typedef struct {
 
 typedef struct  {
 	unsigned char	channel;
-	unsigned char	target; 
+	unsigned char	target;
 }__attribute__ ((packed)) device_t;
 
-typedef struct { 
+typedef struct {
 	unsigned long	start_blk;
 	unsigned long	total_blks;
 	device_t	device[ MAX_STRIPES ];
@@ -538,38 +539,38 @@ typedef struct {
 	unsigned long	size;
 }__attribute__ ((packed)) phydrv_t;
 
-typedef struct { 
+typedef struct {
 	unsigned char	span_depth;
 	unsigned char	raid;
-	unsigned char	read_ahead;	/* 0=No rdahead,1=RDAHEAD,2=adaptive */ 
+	unsigned char	read_ahead;	/* 0=No rdahead,1=RDAHEAD,2=adaptive */
 	unsigned char	stripe_sz;
 	unsigned char	status;
-	unsigned char	write_policy;	/* 0=wrthru,1=wrbak */ 
-	unsigned char	direct_io;   	/* 1=directio,0=cached */ 
+	unsigned char	write_policy;	/* 0=wrthru,1=wrbak */
+	unsigned char	direct_io;   	/* 1=directio,0=cached */
 	unsigned char	no_stripes;
 	span_t		span[ SPAN4_DEPTH ];
 }__attribute__ ((packed)) ld_span4_t;
 
-typedef struct { 
+typedef struct {
 	unsigned char	span_depth;
 	unsigned char	raid;
-	unsigned char	read_ahead;	/* 0=No rdahead,1=RDAHEAD,2=adaptive */ 
+	unsigned char	read_ahead;	/* 0=No rdahead,1=RDAHEAD,2=adaptive */
 	unsigned char	stripe_sz;
 	unsigned char	status;
-	unsigned char	write_policy;	/* 0=wrthru,1=wrbak */ 
-	unsigned char	direct_io;   	/* 1=directio,0=cached */ 
+	unsigned char	write_policy;	/* 0=wrthru,1=wrbak */
+	unsigned char	direct_io;   	/* 1=directio,0=cached */
 	unsigned char	no_stripes;
 	span_t		span[ SPAN8_DEPTH ];
 }__attribute__ ((packed)) ld_span8_t;
 
-typedef struct { 
+typedef struct {
 	unsigned char	no_log_drives;
 	unsigned char	pad[3];
 	ld_span4_t	log_drv[ MAX_LOGICAL_DRIVES_8LD ];
 	phydrv_t	phys_drv[ MAX_PHYDRVS ];
 }__attribute__ ((packed)) diskarray_span4_t;
 
-typedef struct { 
+typedef struct {
 	unsigned char	no_log_drives;
 	unsigned char	pad[3];
 	ld_span8_t	log_drv[ MAX_LOGICAL_DRIVES_8LD ];
@@ -895,9 +896,7 @@ typedef struct {
 	volatile mbox64_t	*mbox64;/* ptr to 64-bit mailbox */
 	volatile mbox_t		*mbox;	/* ptr to standard mailbox */
 	dma_addr_t		mbox_dma;
-
-	struct pci_dev	*dev;
-	struct pci_dev	*ipdev;		/* for internal allocation */
+	struct pci_dev		*dev;
 
 	struct list_head	free_list;
 	struct list_head	pending_list;

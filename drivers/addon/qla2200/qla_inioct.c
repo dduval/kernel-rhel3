@@ -2,7 +2,7 @@
  *                  QLOGIC LINUX SOFTWARE
  *
  * QLogic ISP2x00 device driver for Linux 2.4.x
- * Copyright (C) 2003 Qlogic Corporation
+ * Copyright (C) 2003 QLogic Corporation
  * (www.qlogic.com)
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -37,13 +37,13 @@ qla2x00_read_nvram(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 
 #if defined(ISP2300)
 	device_reg_t	*reg = ha->iobase;
+	uint16_t	data;
 #endif
 #if defined(ISP2100)
 	uint32_t	nvram_size = sizeof(nvram21_t);
 #else
 	uint32_t	nvram_size = sizeof(nvram22_t);
 #endif
-	uint16_t	data;
 	uint16_t	cnt, base;
  	uint16_t	*wptr;
 	uint32_t	transfer_size;
@@ -190,16 +190,14 @@ qla2x00_update_nvram(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	kernel_tmp = (uint8_t *)pnew_nv;
 	usr_tmp = (uint8_t *)pext->RequestAdr;
 
-	ret = verify_area(VERIFY_READ, (void *)usr_tmp, transfer_size);
+	ret = copy_from_user(kernel_tmp, usr_tmp, transfer_size);
 	if (ret) {
 		DEBUG9_10(printk(
-		    "qla2x00_update_nvram: ERROR in buffer verify READ. "
+		    "qla2x00_update_nvram: ERROR in buffer copy READ. "
 		    "RequestAdr=%p\n", pext->RequestAdr);)
 		qla2x00_free_ioctl_scrap_mem(ha);
 		return ret;
 	}
-
-	copy_from_user(kernel_tmp, usr_tmp, transfer_size);
 
 	kernel_tmp = (uint8_t *)pnew_nv;
 
@@ -373,29 +371,21 @@ qla2x00_send_loopback(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		return pext->Status;
 	}
 
-	status = verify_area(VERIFY_READ, (void *)pext->RequestAdr,
-	    pext->RequestLen);
+	status = copy_from_user(&req, pext->RequestAdr, pext->RequestLen);
 	if (status) {
 		pext->Status = EXT_STATUS_COPY_ERR;
-		DEBUG9_10(printk("qla2x00_send_loopback: ERROR verify read of "
+		DEBUG9_10(printk("qla2x00_send_loopback: ERROR copy read of "
 		    "request buffer.\n");)
 		return pext->Status;
 	}
 
-	copy_from_user((uint8_t *)&req, (uint8_t *)pext->RequestAdr,
-	    pext->RequestLen);
-
-	status = verify_area(VERIFY_READ, (void *)pext->ResponseAdr,
-	    pext->ResponseLen);
+	status = copy_from_user(&rsp, pext->ResponseAdr, pext->ResponseLen);
 	if (status) {
 		pext->Status = EXT_STATUS_COPY_ERR;
-		DEBUG9_10(printk("qla2x00_send_loopback: ERROR verify read of "
+		DEBUG9_10(printk("qla2x00_send_loopback: ERROR copy read of "
 		    "response buffer.\n");)
 		return pext->Status;
 	}
-
-	copy_from_user((uint8_t *)&rsp, (uint8_t *)pext->ResponseAdr,
-	    pext->ResponseLen);
 
 	if (req.TransferCount > req.BufferLength ||
 	    req.TransferCount > rsp.BufferLength) {
@@ -411,17 +401,14 @@ qla2x00_send_loopback(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		return pext->Status;
 	}
 
-	status = verify_area(VERIFY_READ, (void *)req.BufferAddress,
+	status = copy_from_user(ha->ioctl_mem, req.BufferAddress,
 	    req.TransferCount);
 	if (status) {
 		pext->Status = EXT_STATUS_COPY_ERR;
-		DEBUG9_10(printk("qla2x00_send_loopback: ERROR verify read of "
+		DEBUG9_10(printk("qla2x00_send_loopback: ERROR copy read of "
 		    "user loopback data buffer.\n");)
 		return pext->Status;
 	}
-
-	copy_from_user((uint8_t *)ha->ioctl_mem, (uint8_t *)req.BufferAddress,
-	    req.TransferCount);
 
 	DEBUG9(printk("qla2x00_send_loopback: req -- bufadr=%p, buflen=%x, "
 	    "xfrcnt=%x, rsp -- bufadr=%p, buflen=%x.\n",
@@ -473,21 +460,18 @@ qla2x00_send_loopback(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		}
 	}
 
-	status = verify_area(VERIFY_WRITE, (void *)rsp.BufferAddress,
+	DEBUG9(printk("qla2x00_send_loopback: loopback mbx cmd ok. "
+	    "copying data.\n");)
+
+	/* put loopback return data in user buffer */
+	status = copy_to_user(rsp.BufferAddress, ha->ioctl_mem,
 	    req.TransferCount);
 	if (status) {
 		pext->Status = EXT_STATUS_COPY_ERR;
 		DEBUG9_10(printk("qla2x00_send_loopback: ERROR verify "
 		    "write of return data buffer.\n");)
-		return status ;
+		return (status);
 	}
-
-	DEBUG9(printk("qla2x00_send_loopback: loopback mbx cmd ok. "
-	    "copying data.\n");)
-
-	/* put loopback return data in user buffer */
-	copy_to_user((uint8_t *)rsp.BufferAddress,
-	    (uint8_t *)ha->ioctl_mem, req.TransferCount);
 
 	rsp.CompletionStatus = ret_mb[0];
 
@@ -504,17 +488,13 @@ qla2x00_send_loopback(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		}
 	}
 
-	status = verify_area(VERIFY_WRITE, (void *)pext->ResponseAdr,
-	    pext->ResponseLen);
+	status = copy_to_user(pext->ResponseAdr, &rsp, pext->ResponseLen);
 	if (status) {
 		pext->Status = EXT_STATUS_COPY_ERR;
-		DEBUG9_10(printk("qla2x00_send_loopback: ERROR verify "
+		DEBUG9_10(printk("qla2x00_send_loopback: ERROR copy "
 		    "write of response buffer.\n");)
 		return pext->Status;
 	}
-
-	copy_to_user((uint8_t *)pext->ResponseAdr, (uint8_t *)&rsp,
-	    pext->ResponseLen);
 
 	pext->Status       = EXT_STATUS_OK;
 	pext->DetailStatus = EXT_STATUS_OK;
@@ -555,6 +535,8 @@ int qla2x00_read_option_rom(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 			WRT_REG_WORD(&reg->nvram, NV_SELECT);
 
 		data = qla2x00_read_flash_byte(ha, addr);
+		if (addr % 100)
+			udelay(10);
 		__put_user(data, usr_tmp);
 	}
 	qla2x00_flash_disable(ha);
@@ -588,14 +570,6 @@ int qla2x00_update_option_rom(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 
 	/* Read from user buffer */
 	usr_tmp = (uint8_t *)pext->RequestAdr;
-	ret = verify_area(VERIFY_READ, (void *)usr_tmp, FLASH_IMAGE_SIZE);
-	if (ret) {
-		pext->Status = EXT_STATUS_COPY_ERR;
-		DEBUG9_10(printk("%s: ERROR in buffer verify READ. "
-				"RequestAdr=%p\n",
-				__func__, pext->RequestAdr);)
-		return (ret);
-	}
 
 	kern_tmp = (uint8_t *)KMEM_ZALLOC(FLASH_IMAGE_SIZE, 30);
 	if (kern_tmp == NULL) {
@@ -604,12 +578,24 @@ int qla2x00_update_option_rom(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 			"%s: ERROR in flash allocation.\n", __func__);
 		return (1);
 	}
-	copy_from_user(kern_tmp, usr_tmp, FLASH_IMAGE_SIZE);
+	ret = copy_from_user(kern_tmp, usr_tmp, FLASH_IMAGE_SIZE);
+	if (ret) {
+		KMEM_FREE(kern_tmp, FLASH_IMAGE_SIZE);
+		pext->Status = EXT_STATUS_COPY_ERR;
+		DEBUG9_10(printk("%s: ERROR in buffer copy READ. "
+				"RequestAdr=%p\n",
+				__func__, pext->RequestAdr);)
+		return (ret);
+	}
 
 	/* Go with update */
 	spin_lock_irqsave(&ha->hardware_lock, cpu_flags);
 	status = qla2x00_set_flash_image(ha, kern_tmp);
 	spin_unlock_irqrestore(&ha->hardware_lock, cpu_flags);
+
+	/* Schedule DPC to restart the RISC */
+	set_bit(ISP_ABORT_NEEDED, &ha->dpc_flags);
+	up(ha->dpc_wait);
 
 	KMEM_FREE(kern_tmp, FLASH_IMAGE_SIZE);
 

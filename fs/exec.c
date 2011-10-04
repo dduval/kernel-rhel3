@@ -317,7 +317,7 @@ void new_put_dirty_page(struct task_struct *tsk, struct vm_area_struct *vma, str
 	lru_cache_add(page);
 	flush_dcache_page(page);
 	flush_page_to_ram(page);
-	vm_set_pte(vma, address, pte, pte_mkdirty(pte_mkwrite(mk_pte(page, PAGE_COPY))));
+	vm_set_pte(vma, address, pte, pte_mkdirty(pte_mkwrite(mk_pte(page, vma->vm_page_prot))));
 	pte_chain = page_add_rmap(page, pte, pte_chain);
 	tsk->mm->rss++;
 	pte_unmap(pte);
@@ -367,7 +367,11 @@ int setup_arg_pages(struct linux_binprm *bprm, int executable_stack)
 		mpnt->vm_mm = current->mm;
 		mpnt->vm_start = PAGE_MASK & (unsigned long) bprm->p;
 		mpnt->vm_end = STACK_TOP;
+#ifdef PAGE_COPY_EXEC
+		mpnt->vm_page_prot = executable_stack ? PAGE_COPY_EXEC : PAGE_COPY;
+#else
 		mpnt->vm_page_prot = PAGE_COPY;
+#endif
 		if (executable_stack)
 			mpnt->vm_flags = VM_STACK_FLAGS | VM_MAYEXEC | VM_EXEC;
 		else

@@ -30,8 +30,10 @@ extern void __setup_cpu_power4(unsigned long offset, int cpu_nr, struct cpu_spec
  */
 #ifdef CONFIG_ALTIVEC
 #define CPU_FTR_ALTIVEC_COMP	CPU_FTR_ALTIVEC
+#define PPC_FEATURE_HAS_ALTIVEC_COMP PPC_FEATURE_HAS_ALTIVEC
 #else
 #define CPU_FTR_ALTIVEC_COMP	0
+#define PPC_FEATURE_HAS_ALTIVEC_COMP    0
 #endif
 
 struct cpu_spec	cpu_specs[] = {
@@ -100,6 +102,24 @@ struct cpu_spec	cpu_specs[] = {
 	    128, 128,
 	    __setup_cpu_power4,
 	    COMMON_PPC64_FW
+    },
+    {	/* PPC970 */
+	    0xffff0000, 0x00390000, "PPC970",
+	    CPU_FTR_SPLIT_ID_CACHE | CPU_FTR_USE_TB | CPU_FTR_HPTE_TABLE |
+	    CPU_FTR_PPCAS_ARCH_V2 | CPU_FTR_ALTIVEC_COMP,
+	    COMMON_USER_PPC64 | PPC_FEATURE_HAS_ALTIVEC_COMP,
+	    128, 128,
+	    __setup_cpu_power4,
+	    COMMON_PPC64_FW
+    },
+    {	 /* PPC970+ */
+	     0xffff0000, 0x003c0000, "PPC970+",
+	     CPU_FTR_SPLIT_ID_CACHE | CPU_FTR_USE_TB | CPU_FTR_HPTE_TABLE |
+	     CPU_FTR_PPCAS_ARCH_V2 | CPU_FTR_ALTIVEC_COMP,
+	     COMMON_USER_PPC64 | PPC_FEATURE_HAS_ALTIVEC_COMP,
+	     128, 128,
+	     __setup_cpu_power4,
+	     COMMON_PPC64_FW
     },
     {	/* default match */
 	    0x00000000, 0x00000000, "(Power4-Compatible)",

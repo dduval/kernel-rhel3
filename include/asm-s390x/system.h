@@ -280,6 +280,10 @@ extern void (*_machine_restart)(char *command);
 extern void (*_machine_halt)(void);
 extern void (*_machine_power_off)(void);
 
+#ifdef CONFIG_NO_IDLE_HZ
+extern void stop_hz_timer(void);
+#endif
+
 #endif
 
 #endif

@@ -352,7 +352,7 @@ struct svc_stat nfsd_acl_svcstats = { &nfsd_acl_program, };
 struct svc_program		nfsd_acl_program = {
 	NULL,			/* last registered program */
 	NFS3_ACL_PROGRAM,	/* program number */
-	2, NFSD_ACL_NRVERS-1,	/* version range */
+	3, NFSD_ACL_NRVERS-1,	/* version range */
 	NFSD_ACL_NRVERS,	/* nr of entries in nfsd_acl_version */
 	nfsd_acl_version,	/* version table */
 	"nfsd",			/* program name */

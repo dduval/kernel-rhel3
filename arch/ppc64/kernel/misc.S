@@ -507,6 +507,9 @@ _GLOBAL(identify_cpu)
  * r3 = data offset (not changed)
  */
 _GLOBAL(do_cpu_ftr_fixups)
+/* Dummy feature section to make sure section exists */	
+BEGIN_FTR_SECTION
+END_FTR_SECTION(0,0)
 	/* Get CPU 0 features */
 	LOADADDR(r6,cur_cpu_spec)
 	sub	r6,r6,r3
@@ -861,7 +864,12 @@ _GLOBAL(sys_call_table32)
  	.llong .sys_ni_syscall
  	.llong .sys_ni_syscall
  	.llong .sys_tgkill		/* 250 */
-	.rept NR_syscalls-251
+ 	.llong .sys_ni_syscall
+ 	.llong .sys_ni_syscall
+ 	.llong .sys_ni_syscall
+ 	.llong .sys_ni_syscall
+ 	.llong .ppc64_rtas		/* 255 */
+	.rept NR_syscalls-256
 	.llong .sys_ni_syscall
 	.endr
 #endif
@@ -1126,6 +1134,11 @@ _GLOBAL(sys_call_table)
  	.llong .sys_ni_syscall
  	.llong .sys_ni_syscall
 	.llong .sys_tgkill		/* 250 */
-	.rept NR_syscalls-251
+ 	.llong .sys_ni_syscall
+ 	.llong .sys_ni_syscall
+ 	.llong .sys_ni_syscall
+ 	.llong .sys_ni_syscall
+ 	.llong .ppc64_rtas		/* 255 */
+	.rept NR_syscalls-256
 	.llong .sys_ni_syscall
 	.endr

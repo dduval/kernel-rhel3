@@ -275,6 +275,9 @@ static int check_sense(Scsi_Cmnd * SCpnt)
 		return SUGGEST_IS_OK;
 
 	case ABORTED_COMMAND:
+		if (SCpnt->device->retry_aborted_cmd &&
+		    SCpnt->sc_data_direction == SCSI_DATA_WRITE)
+			return SUGGEST_DELAYED_RETRY;
 		return SUGGEST_RETRY;
 	case NOT_READY:
 	case UNIT_ATTENTION:
@@ -443,6 +446,9 @@ void scsi_old_done(Scsi_Cmnd * SCpnt)
 							status = MAYREDO;
 							exit = DRIVER_SENSE | SUGGEST_RETRY;
 							break;
+						case SUGGEST_DELAYED_RETRY:
+							status = DELAYED_REDO;
+							break;
 						case SUGGEST_ABORT:
 #ifdef DEBUG
 							printk("SENSE SUGGEST ABORT - status = CMD_FINISHED");
@@ -480,6 +486,9 @@ void scsi_old_done(Scsi_Cmnd * SCpnt)
 					case SUGGEST_RETRY:
 						status = MAYREDO;
 						exit = DRIVER_SENSE | SUGGEST_RETRY;
+						break;
+					case SUGGEST_DELAYED_RETRY:
+						status = DELAYED_REDO;
 						break;
 					case SUGGEST_ABORT:
 						status = CMD_FINISHED;
@@ -598,6 +607,9 @@ void scsi_old_done(Scsi_Cmnd * SCpnt)
 			case SUGGEST_RETRY:
 				status = MAYREDO;
 				exit = DRIVER_SENSE | SUGGEST_RETRY;
+				break;
+			case SUGGEST_DELAYED_RETRY:
+				status = DELAYED_REDO;
 				break;
 			case SUGGEST_ABORT:
 				status = CMD_FINISHED;

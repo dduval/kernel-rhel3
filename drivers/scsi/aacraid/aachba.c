@@ -158,6 +158,17 @@
 #define BYTE2(x) (unsigned char)((x) >> 16)
 #define BYTE3(x) (unsigned char)((x) >> 24)
 
+/* compatibility */
+#ifndef SAM_STAT_CHECK_CONDITION
+# define SAM_STAT_CHECK_CONDITION	(CHECK_CONDITION << 1)
+#endif
+#ifndef SAM_STAT_GOOD
+# define SAM_STAT_GOOD			(GOOD << 1)
+#endif
+#ifndef SAM_STAT_TASK_SET_FULL
+# define SAM_STAT_TASK_SET_FULL		(QUEUE_FULL << 1)
+#endif
+
 /*------------------------------------------------------------------------------
  *              S T R U C T S / T Y P E D E F S
  *----------------------------------------------------------------------------*/
@@ -614,15 +625,19 @@ static void read_callback(void *context, struct fib * fibptr)
 				 scsi_to_pci_dma_dir(scsicmd->sc_data_direction));
 	readreply = (struct aac_read_reply *)fib_data(fibptr);
 	if (le32_to_cpu(readreply->status) == ST_OK)
-		scsicmd->result = DID_OK << 16 | COMMAND_COMPLETE << 8 | GOOD;
+		scsicmd->result = DID_OK << 16 | COMMAND_COMPLETE << 8 | SAM_STAT_GOOD;
 	else {
 		printk(KERN_WARNING "read_callback: read failed, status = %d\n", readreply->status);
-		scsicmd->result = DID_OK << 16 | COMMAND_COMPLETE << 8 | CHECK_CONDITION;
+		scsicmd->result = DID_OK << 16 | COMMAND_COMPLETE << 8 | SAM_STAT_CHECK_CONDITION;
 		set_sense((u8 *) &sense_data[cid],
 				    SENKEY_HW_ERR,
 				    SENCODE_INTERNAL_TARGET_FAILURE,
 				    ASENCODE_INTERNAL_TARGET_FAILURE, 0, 0,
 				    0, 0);
+		memcpy(scsicmd->sense_buffer, &sense_data[cid],
+		  (sizeof(sense_data[cid]) > sizeof(scsicmd->sense_buffer))
+		    ? sizeof(scsicmd->sense_buffer)
+		    : sizeof(sense_data[cid]));
 	}
 	fib_complete(fibptr);
 	fib_free(fibptr);
@@ -659,15 +674,19 @@ static void write_callback(void *context, struct fib * fibptr)
 
 	writereply = (struct aac_write_reply *) fib_data(fibptr);
 	if (le32_to_cpu(writereply->status) == ST_OK)
-		scsicmd->result = DID_OK << 16 | COMMAND_COMPLETE << 8 | GOOD;
+		scsicmd->result = DID_OK << 16 | COMMAND_COMPLETE << 8 | SAM_STAT_GOOD;
 	else {
 		printk(KERN_WARNING "write_callback: write failed, status = %d\n", writereply->status);
-		scsicmd->result = DID_OK << 16 | COMMAND_COMPLETE << 8 | CHECK_CONDITION;
+		scsicmd->result = DID_OK << 16 | COMMAND_COMPLETE << 8 | SAM_STAT_CHECK_CONDITION;
 		set_sense((u8 *) &sense_data[cid],
 				    SENKEY_HW_ERR,
 				    SENCODE_INTERNAL_TARGET_FAILURE,
 				    ASENCODE_INTERNAL_TARGET_FAILURE, 0, 0,
 				    0, 0);
+		memcpy(scsicmd->sense_buffer, &sense_data[cid],
+		  (sizeof(sense_data[cid]) > sizeof(scsicmd->sense_buffer))
+		    ? sizeof(scsicmd->sense_buffer)
+		    : sizeof(sense_data[cid]));
 	}
 
 	fib_complete(fibptr);
@@ -709,9 +728,7 @@ int aac_read(Scsi_Cmnd * scsicmd, int cid)
 	 *	Alocate and initialize a Fib
 	 */
 	if (!(cmd_fibcontext = fib_alloc(dev))) {
-		scsicmd->result = DID_ERROR << 16;
-		aac_io_done(scsicmd);
-		return (-1);
+		return -1;
 	}
 
 	fib_init(cmd_fibcontext);
@@ -775,11 +792,6 @@ int aac_read(Scsi_Cmnd * scsicmd, int cid)
 		return 0;
 		
 	printk(KERN_WARNING "aac_read: fib_send failed with status: %d.\n", status);
-	/*
-	 *	For some reason, the Fib didn't queue, return QUEUE_FULL
-	 */
-	scsicmd->result = DID_OK << 16 | COMMAND_COMPLETE << 8 | QUEUE_FULL;
-	aac_io_done(scsicmd);
 	fib_complete(cmd_fibcontext);
 	fib_free(cmd_fibcontext);
 	return -1;
@@ -814,8 +826,6 @@ static int aac_write(Scsi_Cmnd * scsicmd, int cid)
 	 *	Allocate and initialize a Fib then setup a BlockWrite command
 	 */
 	if (!(cmd_fibcontext = fib_alloc(dev))) {
-		scsicmd->result = DID_ERROR << 16;
-		aac_io_done(scsicmd);
 		return -1;
 	}
 	fib_init(cmd_fibcontext);
@@ -882,12 +892,6 @@ static int aac_write(Scsi_Cmnd * scsicmd, int cid)
 		return 0;
 
 	printk(KERN_WARNING "aac_write: fib_send failed with status: %d\n", status);
-	/*
-	 *	For some reason, the Fib didn't queue, return QUEUE_FULL
-	 */
-	scsicmd->result = DID_OK << 16 | COMMAND_COMPLETE << 8 | QUEUE_FULL;
-	aac_io_done(scsicmd);
-
 	fib_complete(cmd_fibcontext);
 	fib_free(cmd_fibcontext);
 	return -1;
@@ -957,7 +961,7 @@ int aac_scsi_cmd(Scsi_Cmnd * scsicmd)
 			if (fsa_dev_ptr->valid[cid] == 0) {
 				scsicmd->result = DID_BAD_TARGET << 16;
 				__aac_io_done(scsicmd);
-				return -1;
+				return 0;
 			}
 		} else {  /* check for physical non-dasd devices */
 			if(dev->nondasd_support == 1){
@@ -976,13 +980,17 @@ int aac_scsi_cmd(Scsi_Cmnd * scsicmd)
 		(scsicmd->cmnd[0] != SS_TEST)) 
 	{
 		dprintk((KERN_WARNING "Only INQUIRY & TUR command supported for controller, rcvd = 0x%x.\n", scsicmd->cmnd[0]));
-		scsicmd->result = DID_OK << 16 | COMMAND_COMPLETE << 8 | CHECK_CONDITION;
+		scsicmd->result = DID_OK << 16 | COMMAND_COMPLETE << 8 | SAM_STAT_CHECK_CONDITION;
 		set_sense((u8 *) &sense_data[cid],
 			    SENKEY_ILLEGAL,
 			    SENCODE_INVALID_COMMAND,
 			    ASENCODE_INVALID_COMMAND, 0, 0, 0, 0);
+		memcpy(scsicmd->sense_buffer, &sense_data[cid],
+		  (sizeof(sense_data[cid]) > sizeof(scsicmd->sense_buffer))
+		    ? sizeof(scsicmd->sense_buffer)
+		    : sizeof(sense_data[cid]));
 		__aac_io_done(scsicmd);
-		return -1;
+		return 0;
 	}
 
 
@@ -1011,7 +1019,7 @@ int aac_scsi_cmd(Scsi_Cmnd * scsicmd)
 			inq_data_ptr->inqd_pdt = INQD_PDT_PROC;	/* Processor device */
 		else
 			inq_data_ptr->inqd_pdt = INQD_PDT_DA;	/* Direct/random access device */
-		scsicmd->result = DID_OK << 16 | COMMAND_COMPLETE << 8 | GOOD;
+		scsicmd->result = DID_OK << 16 | COMMAND_COMPLETE << 8 | SAM_STAT_GOOD;
 		__aac_io_done(scsicmd);
 		return 0;
 	}
@@ -1032,7 +1040,7 @@ int aac_scsi_cmd(Scsi_Cmnd * scsicmd)
 		cp[6] = 2;
 		cp[7] = 0;
 
-		scsicmd->result = DID_OK << 16 | COMMAND_COMPLETE << 8 | GOOD;
+		scsicmd->result = DID_OK << 16 | COMMAND_COMPLETE << 8 | SAM_STAT_GOOD;
 		__aac_io_done(scsicmd);
 
 		return 0;
@@ -1053,7 +1061,7 @@ int aac_scsi_cmd(Scsi_Cmnd * scsicmd)
 		mode_buf[6] = 0;	/* Block descriptor length (MSB) */
 		mode_buf[7] = 0;	/* Block descriptor length (LSB) */
 
-		scsicmd->result = DID_OK << 16 | COMMAND_COMPLETE << 8 | GOOD;
+		scsicmd->result = DID_OK << 16 | COMMAND_COMPLETE << 8 | SAM_STAT_GOOD;
 		__aac_io_done(scsicmd);
 
 		return 0;
@@ -1062,9 +1070,9 @@ int aac_scsi_cmd(Scsi_Cmnd * scsicmd)
 		dprintk((KERN_DEBUG "REQUEST SENSE command.\n"));
 		memcpy(scsicmd->sense_buffer, &sense_data[cid], sizeof (struct sense_data));
 		memset(&sense_data[cid], 0, sizeof (struct sense_data));
-		scsicmd->result = DID_OK << 16 | COMMAND_COMPLETE << 8 | GOOD;
+		scsicmd->result = DID_OK << 16 | COMMAND_COMPLETE << 8 | SAM_STAT_GOOD;
 		__aac_io_done(scsicmd);
-		return (0);
+		return 0;
 
 	case SS_LOCK:
 		dprintk((KERN_DEBUG "LOCK command.\n"));
@@ -1073,7 +1081,7 @@ int aac_scsi_cmd(Scsi_Cmnd * scsicmd)
 		else
 			fsa_dev_ptr->locked[cid] = 0;
 
-		scsicmd->result = DID_OK << 16 | COMMAND_COMPLETE << 8 | GOOD;
+		scsicmd->result = DID_OK << 16 | COMMAND_COMPLETE << 8 | SAM_STAT_GOOD;
 		__aac_io_done(scsicmd);
 		return 0;
 	/*
@@ -1086,9 +1094,9 @@ int aac_scsi_cmd(Scsi_Cmnd * scsicmd)
 	case SS_REASGN:
 	case SS_SEEK:
 	case SS_ST_SP:
-		scsicmd->result = DID_OK << 16 | COMMAND_COMPLETE << 8 | GOOD;
+		scsicmd->result = DID_OK << 16 | COMMAND_COMPLETE << 8 | SAM_STAT_GOOD;
 		__aac_io_done(scsicmd);
-		return (0);
+		return 0;
 	}
 
 	switch (scsicmd->cmnd[0]) 
@@ -1118,12 +1126,16 @@ int aac_scsi_cmd(Scsi_Cmnd * scsicmd)
 			 *	Unhandled commands
 			 */
 			printk(KERN_WARNING "Unhandled SCSI Command: 0x%x.\n", scsicmd->cmnd[0]);
-			scsicmd->result = DID_OK << 16 | COMMAND_COMPLETE << 8 | CHECK_CONDITION;
+			scsicmd->result = DID_OK << 16 | COMMAND_COMPLETE << 8 | SAM_STAT_CHECK_CONDITION;
 			set_sense((u8 *) &sense_data[cid],
 				SENKEY_ILLEGAL, SENCODE_INVALID_COMMAND,
 			ASENCODE_INVALID_COMMAND, 0, 0, 0, 0);
+			memcpy(scsicmd->sense_buffer, &sense_data[cid],
+			  (sizeof(sense_data[cid]) > sizeof(scsicmd->sense_buffer))
+			    ? sizeof(scsicmd->sense_buffer)
+			    : sizeof(sense_data[cid]));
 			__aac_io_done(scsicmd);
-			return -1;
+			return 0;
 	}
 }
 
@@ -1298,7 +1310,7 @@ static void aac_srb_callback(void *context, struct fib * fibptr)
 		printk(KERN_WARNING "aac_srb_callback: srb failed, status = %d\n", le32_to_cpu(srbreply->status));
 		len = (srbreply->sense_data_size > sizeof(scsicmd->sense_buffer))?
 				sizeof(scsicmd->sense_buffer):srbreply->sense_data_size;
-		scsicmd->result = DID_ERROR << 16 | COMMAND_COMPLETE << 8 | CHECK_CONDITION;
+		scsicmd->result = DID_ERROR << 16 | COMMAND_COMPLETE << 8 | SAM_STAT_CHECK_CONDITION;
 		memcpy(scsicmd->sense_buffer, srbreply->sense_data, len);
 	}
 
@@ -1433,7 +1445,7 @@ static void aac_srb_callback(void *context, struct fib * fibptr)
 	}
 	if (le32_to_cpu(srbreply->scsi_status) == 0x02 ){  // Check Condition
 		int len;
-		scsicmd->result |= CHECK_CONDITION;
+		scsicmd->result |= SAM_STAT_CHECK_CONDITION;
 		len = (srbreply->sense_data_size > sizeof(scsicmd->sense_buffer))?
 				sizeof(scsicmd->sense_buffer):srbreply->sense_data_size;
 		printk(KERN_WARNING "aac_srb_callback: check condition, status = %d len=%d\n", le32_to_cpu(srbreply->status), len);
@@ -1496,8 +1508,6 @@ static int aac_send_srb_fib(Scsi_Cmnd* scsicmd)
 	 *	Allocate and initialize a Fib then setup a BlockWrite command
 	 */
 	if (!(cmd_fibcontext = fib_alloc(dev))) {
-		scsicmd->result = DID_ERROR << 16;
-		__aac_io_done(scsicmd);
 		return -1;
 	}
 	fib_init(cmd_fibcontext);
@@ -1557,11 +1567,6 @@ static int aac_send_srb_fib(Scsi_Cmnd* scsicmd)
 	}
 
 	printk(KERN_WARNING "aac_srb: fib_send failed with status: %d\n", status);
-	/*
-	 *	For some reason, the Fib didn't queue, return QUEUE_FULL
-	 */
-	scsicmd->result = DID_OK << 16 | COMMAND_COMPLETE << 8 | QUEUE_FULL;
-	__aac_io_done(scsicmd);
 
 	fib_complete(cmd_fibcontext);
 	fib_free(cmd_fibcontext);

@@ -94,8 +94,16 @@ typedef struct { unsigned long pgprot; } pgprot_t;
 # define __PAGE_OFFSET		(0x02000000)
 # define __PAGE_OFFSET_USER	(0xff000000)
 #else
-# define __PAGE_OFFSET		(0xc0000000)
-# define __PAGE_OFFSET_USER	(0xc0000000)
+# if defined(CONFIG_3GB)
+#  define __PAGE_OFFSET		(0xc0000000)
+#  define __PAGE_OFFSET_USER	(0xc0000000)
+# elif defined(CONFIG_2GB)
+#  define __PAGE_OFFSET		(0x80000000)
+#  define __PAGE_OFFSET_USER	(0x80000000)
+# elif defined(CONFIG_1GB)
+#  define __PAGE_OFFSET		(0x40000000)
+#  define __PAGE_OFFSET_USER	(0x40000000)
+# endif
 #endif
 
 /*

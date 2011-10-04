@@ -12,7 +12,13 @@ SECTIONS
 #if CONFIG_X86_4G_VM_LAYOUT
   . = 0x02000000 + 0x100000;
 #else
+# if defined(CONFIG_3GB)
   . = 0xc0000000 + 0x100000;
+# elif defined(CONFIG_2GB)
+  . = 0x80000000 + 0x100000;
+# elif defined(CONFIG_1GB)
+  . = 0x40000000 + 0x100000;
+# endif
 #endif
   _text = .;			/* Text and read-only data */
   .text : {

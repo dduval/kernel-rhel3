@@ -112,6 +112,7 @@ extern int leases_enable, dir_notify_enable, lease_break_time;
 #define MS_REC		16384
 #define MS_VERBOSE	32768
 #define MS_POSIXACL	65536	/* VFS does not apply the umask */
+#define MS_SENDFILE_FOP (1<<29)
 #define MS_ACTIVE	(1<<30)
 #define MS_NOUSER	(1<<31)
 
@@ -163,6 +164,7 @@ extern int leases_enable, dir_notify_enable, lease_break_time;
 #define IS_NOATIME(inode)	(__IS_FLG(inode, MS_NOATIME) || ((inode)->i_flags & S_NOATIME))
 #define IS_NODIRATIME(inode)	__IS_FLG(inode, MS_NODIRATIME)
 #define IS_POSIXACL(inode)	__IS_FLG(inode, MS_POSIXACL)
+#define IS_SENDFILE_FOP(inode)	__IS_FLG(inode, MS_SENDFILE_FOP)
 
 #define IS_DEADDIR(inode)	((inode)->i_flags & S_DEAD)
 
@@ -918,6 +920,11 @@ struct file_operations {
 	ssize_t (*aio_fsync)(struct file *, struct kiocb *, struct iocb *);
 };
 
+struct file_operations_ext {
+	struct file_operations f_op_orig;
+	ssize_t (*sendfile)(struct file *, struct file *, size_t, loff_t *);
+};
+
 struct inode_operations {
 	int (*create) (struct inode *,struct dentry *,int);
 	struct dentry * (*lookup) (struct inode *,struct dentry *);
@@ -1582,6 +1589,7 @@ extern int writeout_one_page(struct page *);
 
 extern int generic_file_mmap(struct file *, struct vm_area_struct *);
 extern int file_read_actor(read_descriptor_t * desc, struct page *page, unsigned long offset, unsigned long size);
+extern int file_send_actor(read_descriptor_t * desc, struct page *page, unsigned long offset, unsigned long size);
 extern ssize_t generic_file_read(struct file *, char *, size_t, loff_t *);
 extern ssize_t generic_file_write(struct file *, const char *, size_t, loff_t *);
 extern void do_generic_file_read(struct file *, loff_t *, read_descriptor_t *, read_actor_t, int);

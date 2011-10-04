@@ -23,12 +23,14 @@
 #include <asm/system.h>
 #include <asm/processor.h>
 #include <asm/ia32.h>
+#include <asm/uaccess.h>
 
 extern void die_if_kernel (char *str, struct pt_regs *regs, long err);
 
 struct exec_domain ia32_exec_domain;
-struct page *ia32_shared_page[(2*IA32_PAGE_SIZE + PAGE_SIZE - 1)/PAGE_SIZE];
-unsigned long *ia32_gdt;
+struct page *ia32_shared_page[(PAGE_ALIGN(IA32_PAGE_SIZE)/PAGE_SIZE) * NR_CPUS];
+unsigned long *ia32_boot_gdt;
+unsigned long *cpu_gdt_table[NR_CPUS];
 
 static unsigned long
 load_desc (u16 selector)
@@ -41,8 +43,8 @@ load_desc (u16 selector)
 		table = (unsigned long *) IA32_LDT_OFFSET;
 		limit = IA32_LDT_ENTRIES;
 	} else {
-		table = ia32_gdt;
-		limit = IA32_PAGE_SIZE / sizeof(ia32_gdt[0]);
+		table = cpu_gdt_table[smp_processor_id()];
+		limit = IA32_PAGE_SIZE / sizeof(ia32_boot_gdt[0]);
 	}
 	index = selector >> IA32_SEGSEL_INDEX_SHIFT;
 	if (index >= limit)
@@ -62,6 +64,33 @@ ia32_load_segment_descriptors (struct task_struct *task)
 	regs->r29 = load_desc(regs->r16 >> 48);		/* GSD */
 	task->thread.csd = load_desc(regs->r17 >>  0);	/* CSD */
 	task->thread.ssd = load_desc(regs->r17 >> 16);	/* SSD */
+}
+
+void
+ia32_clone_tls(struct task_struct *child, struct pt_regs *childregs)
+{
+	struct desc_struct *desc;
+	struct ia32_user_desc info;
+	int idx;
+
+	if (copy_from_user(&info, (void *)(childregs->r14 & 0xffffffff),
+			   sizeof(info)))
+		return -EFAULT;
+	if (LDT_empty(&info))
+		return -EINVAL;
+
+	idx = info.entry_number;
+	if (idx < GDT_ENTRY_TLS_MIN || idx > GDT_ENTRY_TLS_MAX)
+		return -EINVAL;
+
+	desc = child->tls_array + idx - GDT_ENTRY_TLS_MIN;
+	desc->a = LDT_entry_a(&info);
+	desc->b = LDT_entry_b(&info);
+
+	/* XXX: can this be done in a cleaner way ? */
+	load_TLS(child, smp_processor_id());
+	ia32_load_segment_descriptors(child);
+	load_TLS(current, smp_processor_id());
 }
 
 void
@@ -86,6 +115,7 @@ ia32_save_state (struct task_struct *t)
 	t->thread.ssd = ssd;
 	ia64_set_kr(IA64_KR_IO_BASE, t->thread.old_iob);
 	ia64_set_kr(IA64_KR_TSSD, t->thread.old_k1);
+
 }
 
 void
@@ -93,7 +123,6 @@ ia32_load_state (struct task_struct *t)
 {
 	unsigned long eflag, fsr, fcr, fir, fdr, csd, ssd, tssd;
 	struct pt_regs *regs = ia64_task_regs(t);
-	int nr = smp_processor_id();	/* LDT and TSS depend on CPU number: */
 
 	eflag = t->thread.eflag;
 	fsr = t->thread.fsr;
@@ -102,7 +131,7 @@ ia32_load_state (struct task_struct *t)
 	fdr = t->thread.fdr;
 	csd = t->thread.csd;
 	ssd = t->thread.ssd;
-	tssd = load_desc(_TSS(nr));					/* TSSD */
+	tssd = load_desc(_TSS);					/* TSSD */
 
 	asm volatile ("mov ar.eflag=%0;"
 		      "mov ar.fsr=%1;"
@@ -117,8 +146,10 @@ ia32_load_state (struct task_struct *t)
 	ia64_set_kr(IA64_KR_IO_BASE, IA32_IOBASE);
 	ia64_set_kr(IA64_KR_TSSD, tssd);
 
-	regs->r17 = (_TSS(nr) << 48) | (_LDT(nr) << 32) | (__u32) regs->r17;
-	regs->r30 = load_desc(_LDT(nr));				/* LDTD */
+	regs->r17 = (_TSS << 48) | (_LDT << 32) | (__u32) regs->r17;
+	regs->r30 = load_desc(_LDT);				/* LDTD */
+	load_TLS(t, smp_processor_id());
+
 }
 
 /*
@@ -127,37 +158,45 @@ ia32_load_state (struct task_struct *t)
 void
 ia32_gdt_init (void)
 {
-	unsigned long *tss;
+	int cpu = smp_processor_id();
+
+	ia32_shared_page[cpu] = alloc_page(GFP_KERNEL);
+	cpu_gdt_table[cpu] = page_address(ia32_shared_page[cpu]);
+
+	printk("allocating GDT on cpu: %d\n", cpu);
+
+	/* Copy from the boot cpu's GDT */
+	memcpy(cpu_gdt_table[cpu], ia32_boot_gdt, PAGE_SIZE);
+}
+
+
+/*
+ * Setup IA32 GDT and TSS
+ */
+void
+ia32_boot_gdt_init (void)
+{
 	unsigned long ldt_size;
-	int nr;
 
 	ia32_shared_page[0] = alloc_page(GFP_KERNEL);
-	ia32_gdt = page_address(ia32_shared_page[0]);
-	tss = ia32_gdt + IA32_PAGE_SIZE/sizeof(ia32_gdt[0]);
-
-	if (IA32_PAGE_SIZE == PAGE_SIZE) {
-		ia32_shared_page[1] = alloc_page(GFP_KERNEL);
-		tss = page_address(ia32_shared_page[1]);
-	}
+	ia32_boot_gdt = page_address(ia32_shared_page[0]);
+	cpu_gdt_table[0] = ia32_boot_gdt;
 
 	/* CS descriptor in IA-32 (scrambled) format */
-	ia32_gdt[__USER_CS >> 3] = IA32_SEG_DESCRIPTOR(0, (IA32_PAGE_OFFSET-1) >> IA32_PAGE_SHIFT,
+	ia32_boot_gdt[__USER_CS >> 3] = IA32_SEG_DESCRIPTOR(0, (IA32_PAGE_OFFSET-1) >> IA32_PAGE_SHIFT,
 						       0xb, 1, 3, 1, 1, 1, 1);
 
 	/* DS descriptor in IA-32 (scrambled) format */
-	ia32_gdt[__USER_DS >> 3] = IA32_SEG_DESCRIPTOR(0, (IA32_PAGE_OFFSET-1) >> IA32_PAGE_SHIFT,
+	ia32_boot_gdt[__USER_DS >> 3] = IA32_SEG_DESCRIPTOR(0, (IA32_PAGE_OFFSET-1) >> IA32_PAGE_SHIFT,
 						       0x3, 1, 3, 1, 1, 1, 1);
 
-	/* We never change the TSS and LDT descriptors, so we can share them across all CPUs.  */
 	ldt_size = PAGE_ALIGN(IA32_LDT_ENTRIES*IA32_LDT_ENTRY_SIZE);
-	for (nr = 0; nr < NR_CPUS; ++nr) {
-		ia32_gdt[_TSS(nr) >> IA32_SEGSEL_INDEX_SHIFT]
-			= IA32_SEG_DESCRIPTOR(IA32_TSS_OFFSET, 235,
-					      0xb, 0, 3, 1, 1, 1, 0);
-		ia32_gdt[_LDT(nr) >> IA32_SEGSEL_INDEX_SHIFT]
-			= IA32_SEG_DESCRIPTOR(IA32_LDT_OFFSET, ldt_size - 1,
-					      0x2, 0, 3, 1, 1, 1, 0);
-	}
+	ia32_boot_gdt[TSS_ENTRY]
+		= IA32_SEG_DESCRIPTOR(IA32_TSS_OFFSET, 235,
+				      0xb, 0, 3, 1, 1, 1, 0);
+	ia32_boot_gdt[LDT_ENTRY]
+		= IA32_SEG_DESCRIPTOR(IA32_LDT_OFFSET, ldt_size - 1,
+				      0x2, 0, 3, 1, 1, 1, 0);
 }
 
 /*

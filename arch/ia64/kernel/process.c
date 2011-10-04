@@ -298,7 +298,7 @@ copy_thread (int nr, unsigned long clone_flags,
 	memcpy((void *) child_rbs, (void *) rbs, rbs_size);
 
 	if (user_mode(child_ptregs)) {
-		if (clone_flags & CLONE_SETTLS)
+		if ((clone_flags & CLONE_SETTLS) && (!IS_IA32_PROCESS(regs)))
 			child_ptregs->r13 = regs->r16;  /* see sys_clone2() in entry.S */
 		if (user_stack_base) {
 			child_ptregs->r12 = user_stack_base + user_stack_size - 16;
@@ -355,8 +355,11 @@ copy_thread (int nr, unsigned long clone_flags,
 	 * If we're cloning an IA32 task then save the IA32 extra
 	 * state from the current task to the new task
 	 */
-	if (IS_IA32_PROCESS(ia64_task_regs(current)))
+	if (IS_IA32_PROCESS(ia64_task_regs(current))) {
 		ia32_save_state(p);
+		if (clone_flags & CLONE_SETTLS)
+			ia32_clone_tls(p, child_ptregs);
+	}
 #endif
 
 #ifdef CONFIG_PERFMON

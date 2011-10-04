@@ -632,6 +632,7 @@ enum ch_states {
 	CH_STATE_TERM,
 	CH_STATE_DTERM,
 	CH_STATE_NOTOP,
+	CH_STATE_TERMBUSY,
 
 	/**
 	 * MUST be always the last element!!
@@ -656,6 +657,7 @@ static const char *ch_state_names[] = {
 	"Terminating",
 	"Restarting",
 	"Not operational",
+	"TermBusy",
 };
 
 
@@ -1608,8 +1610,9 @@ static void ch_action_restart(fsm_instance *fi, int event, void *arg)
 	net_device *dev = ch->netdev;
 
 	ch_deltimer(ch);
-	printk(KERN_DEBUG "%s: %s channel restart\n", dev->name,
-	       (CHANNEL_DIRECTION(ch->flags) == READ) ? "RX" : "TX");
+	printk(KERN_DEBUG "%s: %s channel restart from state %s\n", dev->name,
+	    (CHANNEL_DIRECTION(ch->flags) == READ) ? "RX" : "TX",
+	    fsm_getstate_str(fi));
 	ch_addtimer(ch, CTC_TIMEOUT_5SEC);
 	oldstate = fsm_getstate(fi);
 	fsm_newstate(fi, CH_STATE_STARTWAIT);
@@ -1620,6 +1623,8 @@ static void ch_action_restart(fsm_instance *fi, int event, void *arg)
 		s390irq_spin_unlock_irqrestore(ch->irq, saveflags);
 	if (rc != 0) {
 		ch_deltimer(ch);
+		if (event == CH_EVENT_START)
+			oldstate = CH_STATE_TERMBUSY;
 		fsm_newstate(fi, oldstate);
 		ccw_check_return_code(ch, rc);
 	}
@@ -1927,6 +1932,13 @@ static const fsm_node ch_fsm[] = {
 	{ CH_STATE_TXERR,      CH_EVENT_STOP,       ch_action_haltio     },
 	{ CH_STATE_TXERR,      CH_EVENT_MC_FAIL,    ch_action_fail       },
 	{ CH_STATE_RXERR,      CH_EVENT_MC_FAIL,    ch_action_fail       },
+
+	{ CH_STATE_TERMBUSY,   CH_EVENT_STOP,       ch_action_haltio     },
+	{ CH_STATE_TERMBUSY,   CH_EVENT_START,      ch_action_restart    },
+	{ CH_STATE_TERMBUSY,   CH_EVENT_FINSTAT,    ch_action_restart    },
+	{ CH_STATE_TERMBUSY,   CH_EVENT_UC_RCRESET, ch_action_restart    },
+	{ CH_STATE_TERMBUSY,   CH_EVENT_UC_RSRESET, ch_action_restart    },
+	{ CH_STATE_TERMBUSY,   CH_EVENT_MC_FAIL,    ch_action_fail       },
 };
 
 static const int CH_FSM_LEN = sizeof(ch_fsm) / sizeof(fsm_node);
@@ -2402,8 +2414,7 @@ static void dev_action_restart(fsm_instance *fi, int event, void *arg)
 
     printk(KERN_DEBUG "%s: Restarting\n", dev->name);
     dev_action_stop(fi, event, arg);
-    fsm_event(privptr->fsm, DEV_EVENT_STOP, dev);
-    ctc_add_rst_timer(dev, CTC_TIMEOUT_5SEC, DEV_EVENT_START);
+    ctc_add_rst_timer(dev, 5000, DEV_EVENT_START);
 }
 
 /**

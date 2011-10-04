@@ -20,6 +20,7 @@ extern unsigned int pcibios_assign_all_busses(void);
 #else
 #define pcibios_assign_all_busses()	0
 #endif
+#define pcibios_scan_all_fns()		0
 
 extern unsigned long pci_mem_start;
 #define PCIBIOS_MIN_IO		0x1000
@@ -70,6 +71,18 @@ extern void *pci_alloc_consistent(struct pci_dev *hwdev, size_t size,
 extern void pci_free_consistent(struct pci_dev *hwdev, size_t size,
 				void *vaddr, dma_addr_t dma_handle);
 
+#ifdef CONFIG_SWIOTLB
+extern int swiotlb;
+extern dma_addr_t swiotlb_map_single (struct pci_dev *hwdev, void *ptr, size_t size,
+                                     int dir);
+extern void swiotlb_unmap_single (struct pci_dev *hwdev, dma_addr_t dev_addr,
+                                 size_t size, int dir);
+extern void swiotlb_sync_single (struct pci_dev *hwdev, dma_addr_t dev_addr,
+                                size_t size, int dir);
+extern void swiotlb_sync_sg (struct pci_dev *hwdev, struct scatterlist *sg, int nelems,
+                            int dir);
+#endif
+
 #ifdef CONFIG_GART_IOMMU
 
 /* Map a single buffer of the indicated size for DMA in streaming mode.
@@ -110,6 +123,10 @@ static inline void pci_dma_sync_single(struct pci_dev *hwdev,
 				       dma_addr_t dma_handle,
 				       size_t size, int direction)
 {
+#ifdef CONFIG_SWIOTLB
+	if (swiotlb)
+		return swiotlb_sync_single(hwdev,dma_handle,size,direction);
+#endif
 	BUG_ON(direction == PCI_DMA_NONE); 
 } 
 
@@ -117,6 +134,10 @@ static inline void pci_dma_sync_sg(struct pci_dev *hwdev,
 				   struct scatterlist *sg,
 				   int nelems, int direction)
 { 
+#ifdef CONFIG_SWIOTLB
+	if (swiotlb)
+		return swiotlb_sync_sg(hwdev,sg,nelems,direction);
+#endif
 	BUG_ON(direction == PCI_DMA_NONE); 
 } 
 

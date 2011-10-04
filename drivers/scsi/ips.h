@@ -725,7 +725,6 @@ typedef struct {
    volatile PIPS_STATUS p_status_tail;
    volatile uint32_t    hw_status_start;
    volatile uint32_t    hw_status_tail;
-   IPS_LD_INFO          logical_drive_info;
 } IPS_ADAPTER, *PIPS_ADAPTER;
 
 typedef struct {
@@ -1083,6 +1082,8 @@ typedef struct ips_ha {
    ips_scb_queue_t    scb_activelist;     /* Active SCB list            */
    IPS_IO_CMD        *dummy;              /* dummy command              */
    IPS_ADAPTER       *adapt;              /* Adapter status area        */
+   IPS_LD_INFO       *logical_drive_info; /* Logical Drive Info         */
+   dma_addr_t         logical_drive_info_dma_addr; /* Logical Drive Info DMA Address */
    IPS_ENQ           *enq;                /* Adapter Enquiry data       */
    IPS_CONF          *conf;               /* Adapter config data        */
    IPS_NVRAM_P5      *nvram;              /* NVRAM page 5 data          */
@@ -1130,8 +1131,8 @@ typedef struct ips_scb {
    uint8_t           bus;
    uint8_t           lun;
    uint8_t           cdb[12];
-   uint32_t          scb_busaddr;
-   uint32_t          data_busaddr;
+   uint32_t          scb_busaddr;      
+   uint32_t          old_data_busaddr;         // Obsolete field left in to not break utilities
    uint32_t          timeout;
    uint8_t           basic_status;
    uint8_t           extended_status;
@@ -1147,6 +1148,7 @@ typedef struct ips_scb {
    ips_scb_callback  callback;
    uint32_t          sg_busaddr;
    int               sg_count;
+   dma_addr_t        data_busaddr;
 } ips_scb_t;
 
 typedef struct ips_scb_pt {
@@ -1202,13 +1204,13 @@ typedef struct {
 
 #define IPS_VER_MAJOR 6
 #define IPS_VER_MAJOR_STRING "6"
-#define IPS_VER_MINOR 10
-#define IPS_VER_MINOR_STRING "10"
-#define IPS_VER_BUILD 52
-#define IPS_VER_BUILD_STRING "52"
-#define IPS_VER_STRING "6.10.52"
-#define IPS_RELEASE_ID 0x00010000
-#define IPS_BUILD_IDENT 563
+#define IPS_VER_MINOR 11
+#define IPS_VER_MINOR_STRING "11"
+#define IPS_VER_BUILD 07
+#define IPS_VER_BUILD_STRING "07"
+#define IPS_VER_STRING "6.11.07"
+#define IPS_RELEASE_ID 0x00010001
+#define IPS_BUILD_IDENT 2224
 #define IPS_LEGALCOPYRIGHT_STRING "(C) Copyright IBM Corp. 1994, 2003. All Rights Reserved."
 #define IPS_ADAPTECCOPYRIGHT_STRING "(c) Copyright Adaptec, Inc. 2002 to present. All Rights Reserved."
 #define IPS_NT_LEGALCOPYRIGHT_STRING "(C) Copyright IBM Corp. 1994, 2003."
@@ -1217,12 +1219,12 @@ typedef struct {
 #define IPS_VER_SERVERAID1 "2.25.01"
 #define IPS_VER_SERVERAID2 "2.88.13"
 #define IPS_VER_NAVAJO "2.88.13"
-#define IPS_VER_SERVERAID3 "6.10.52"
-#define IPS_VER_SERVERAID4H "6.10.52"
-#define IPS_VER_SERVERAID4MLx "6.10.52"
-#define IPS_VER_SARASOTA "6.10.52"
-#define IPS_VER_MARCO "6.10.52"
-#define IPS_VER_SEBRING "6.10.52"
+#define IPS_VER_SERVERAID3 "6.10.24"
+#define IPS_VER_SERVERAID4H "6.11.07"
+#define IPS_VER_SERVERAID4MLx "6.11.07"
+#define IPS_VER_SARASOTA "6.11.07"
+#define IPS_VER_MARCO "6.11.07"
+#define IPS_VER_SEBRING "6.11.07"
 
 /* Compatability IDs for various adapters */
 #define IPS_COMPAT_UNKNOWN ""

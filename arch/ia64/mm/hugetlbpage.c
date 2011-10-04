@@ -155,6 +155,58 @@ int is_hugepage_only_range(unsigned long addr, unsigned long len)
 	return 0;
 }
 
+/*
+ * Same as generic free_pgtables(), except constant PGDIR_* and pgd_offset
+ * are hugetlb region specific.
+ */
+void hugetlb_free_pgtables(struct mm_struct * mm, struct vm_area_struct *prev,
+	unsigned long start, unsigned long end)
+{
+	unsigned long first = start & HUGETLB_PGDIR_MASK;
+	unsigned long last = end + HUGETLB_PGDIR_SIZE - 1;
+	unsigned long start_index, end_index;
+
+	if (!prev) {
+		prev = mm->mmap;
+		if (!prev)
+			goto no_mmaps;
+		if (prev->vm_end > start) {
+			if (last > prev->vm_start)
+				last = prev->vm_start;
+			goto no_mmaps;
+		}
+	}
+	for (;;) {
+		struct vm_area_struct *next = prev->vm_next;
+
+		if (next) {
+			if (next->vm_start < start) {
+				prev = next;
+				continue;
+			}
+			if (last > next->vm_start)
+				last = next->vm_start;
+		}
+		if (prev->vm_end > first)
+			first = prev->vm_end + HUGETLB_PGDIR_SIZE - 1;
+		break;
+	}
+no_mmaps:
+	if (last < first)
+		return;
+	/*
+	 * If the PGD bits are not consecutive in the virtual address, the
+	 * old method of shifting the VA >> by PGDIR_SHIFT doesn't work.
+	 */
+	start_index = pgd_index(htlbpage_to_page(first));
+	end_index = pgd_index(htlbpage_to_page(last));
+	if (end_index > start_index) {
+		clear_page_tables(mm, start_index, end_index - start_index);
+		flush_tlb_pgtables(mm, first & HUGETLB_PGDIR_MASK,
+				   last & HUGETLB_PGDIR_MASK);
+	}
+}
+
 int copy_hugetlb_page_range(struct mm_struct *dst, struct mm_struct *src,
 			struct vm_area_struct *vma)
 {

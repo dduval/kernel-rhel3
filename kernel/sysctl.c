@@ -46,6 +46,7 @@ int sercons_escape_char = -1;
 /* External variables not in a header file. */
 extern int panic_timeout;
 extern int dcache_priority;
+extern unsigned int stack_defer_threshold;
 extern int C_A_D;
 extern int bdf_prm[], bdflush_min[], bdflush_max[];
 extern int sysctl_overcommit_memory;
@@ -102,6 +103,9 @@ extern int unaligned_enabled;
 extern int sysctl_ieee_emulation_warnings;
 #endif
 extern int sysctl_userprocess_debug;
+#ifdef CONFIG_NO_IDLE_HZ
+extern int sysctl_hz_timer;
+#endif
 #endif
 
 #ifdef CONFIG_IA64
@@ -303,6 +307,10 @@ static ctl_table kern_table[] = {
 #endif
 	{KERN_S390_USER_DEBUG_LOGGING,"userprocess_debug",
 	 &sysctl_userprocess_debug,sizeof(int),0644,NULL,&proc_dointvec},
+#ifdef CONFIG_NO_IDLE_HZ
+	{KERN_S390_HZ_TIMER,"hz_timer",
+	 &sysctl_hz_timer,sizeof(int),0644,NULL,&proc_dointvec},
+#endif
 #endif
 #ifdef CONFIG_SERIAL_CONSOLE
 	{KERN_SERCONS_ESC, "sercons_esc", &sercons_escape_char,
@@ -347,6 +355,9 @@ static ctl_table vm_table[] = {
 	 sizeof(dcache_priority), 0644, NULL, &proc_dointvec},
 	{VM_INACTIVE_CLEAN_PERCENT, "inactive_clean_percent",
 		&inactive_clean_percent, sizeof(inactive_clean_percent),
+		0644, NULL, &proc_dointvec},
+	{VM_STACK_DEFER_THRESHOLD, "stack_defer_threshold",
+		&stack_defer_threshold, sizeof(stack_defer_threshold),
 		0644, NULL, &proc_dointvec},
 	{0}
 };

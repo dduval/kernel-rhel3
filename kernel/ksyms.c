@@ -111,6 +111,7 @@ EXPORT_SYMBOL(exit_files);
 EXPORT_SYMBOL(exit_fs);
 EXPORT_SYMBOL(exit_sighand);
 EXPORT_SYMBOL(unshare_files);
+EXPORT_SYMBOL(mmput);
 
 /* internal kernel memory management */
 EXPORT_SYMBOL(_alloc_pages);
@@ -260,6 +261,7 @@ EXPORT_SYMBOL(cont_prepare_write);
 EXPORT_SYMBOL(generic_commit_write);
 EXPORT_SYMBOL(block_truncate_page);
 EXPORT_SYMBOL(generic_block_bmap);
+EXPORT_SYMBOL_GPL(file_send_actor);
 EXPORT_SYMBOL(generic_file_read);
 EXPORT_SYMBOL(do_generic_file_read);
 EXPORT_SYMBOL(generic_file_write);
@@ -484,7 +486,7 @@ EXPORT_SYMBOL(enable_hlt);
 #endif
 
 /* resource handling */
-EXPORT_SYMBOL_GPL(____request_resource);
+EXPORT_SYMBOL_GPL(____request_resource); /* may disappear in a few months */
 EXPORT_SYMBOL(request_resource);
 EXPORT_SYMBOL(release_resource);
 EXPORT_SYMBOL(allocate_resource);

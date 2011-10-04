@@ -31,6 +31,7 @@
 #include <linux/errno.h>
 #include <linux/ptrace.h>
 #include <linux/user.h>
+#include <linux/audit.h>
 
 #include <asm/segment.h>
 #include <asm/page.h>
@@ -592,12 +593,9 @@ asmlinkage int sys_ptrace(long request, long pid, long addr, long data)
 
 
 
-asmlinkage void syscall_trace(void)
+static void syscall_ptrace(void)
 {
 	lock_kernel();
-	if ((current->ptrace & (PT_PTRACED|PT_TRACESYS))
-	    != (PT_PTRACED|PT_TRACESYS))
-		goto out;
 	current->exit_code = SIGTRAP;
 	set_current_state(TASK_STOPPED);
 	notify_parent(current, SIGCHLD);
@@ -612,6 +610,24 @@ asmlinkage void syscall_trace(void)
 		current->exit_code = 0;
 	}
 	recalc_sigpending();
- out:
 	unlock_kernel();
 }
+
+asmlinkage void syscall_trace_enter(struct pt_regs *regs)
+{
+	if ((current->ptrace & (PT_PTRACED|PT_TRACESYS)) ==
+		(PT_PTRACED|PT_TRACESYS))
+		syscall_ptrace();
+	if (isaudit(current) && (current->ptrace & PT_AUDITED))
+		audit_intercept(regs);
+}
+
+asmlinkage void syscall_trace_exit(struct pt_regs *regs)
+{
+	if (isaudit(current) && (current->ptrace & PT_AUDITED))
+		audit_result(regs);
+	if ((current->ptrace & (PT_PTRACED|PT_TRACESYS)) ==
+		(PT_PTRACED|PT_TRACESYS))
+		syscall_ptrace();
+}
+

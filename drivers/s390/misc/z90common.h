@@ -1,11 +1,11 @@
 /*
  *  linux/drivers/s390/misc/z90common.h
  *
- *  z90crypt 1.1.2
+ *  z90crypt 1.1.4
  *
  *  Copyright (C)  2001, 2003 IBM Corporation
- *  Author(s): Robert Burroughs (burrough us ibm com)
- *             Eric Rossman (edrossma us ibm com)
+ *  Author(s): Robert Burroughs (burrough@us.ibm.com)
+ *             Eric Rossman (edrossma@us.ibm.com)
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -24,7 +24,7 @@
 #ifndef _Z90COMMON_
 #define _Z90COMMON_
 
-#define VERSION_Z90COMMON_H "$Revision: 1.4.6.2 $"
+#define VERSION_Z90COMMON_H "$Revision: 1.4.6.4 $"
 
 #ifndef _TYPES_
 #define _TYPES_
@@ -105,7 +105,9 @@ typedef enum
 #define LEEDS2    1
 #define NILDEV    -1
 typedef int CDEVICE_TYPE;
-typedef enum {NIL0DEV, NIL1DEV, NIL2DEV, LEEDS2_HW, LEEDSLITE_HW} HDEVICE_TYPE;
+typedef enum {NIL0DEV, NIL1DEV, NIL2DEV,
+              LEEDS2_HW, LEEDSLITE_HW,
+              PCIXCC_HW, OTHER_HW} HDEVICE_TYPE;
 typedef struct z90crypt_x_status_t {
   int totalcount;
   int leedslitecount;

@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   
-  Copyright(c) 1999 - 2003 Intel Corporation. All rights reserved.
+  Copyright(c) 1999 - 2004 Intel Corporation. All rights reserved.
   
   This program is free software; you can redistribute it and/or modify it 
   under the terms of the GNU General Public License as published by the Free 
@@ -291,7 +291,7 @@ int32_t e1000_read_mac_addr(struct e1000_hw * hw);
 
 /* Filters (multicast, vlan, receive) */
 void e1000_init_rx_addrs(struct e1000_hw *hw);
-void e1000_mc_addr_list_update(struct e1000_hw *hw, uint8_t * mc_addr_list, uint32_t mc_addr_count, uint32_t pad);
+void e1000_mc_addr_list_update(struct e1000_hw *hw, uint8_t * mc_addr_list, uint32_t mc_addr_count, uint32_t pad, uint32_t rar_used_count);
 uint32_t e1000_hash_mc_addr(struct e1000_hw *hw, uint8_t * mc_addr);
 void e1000_mta_set(struct e1000_hw *hw, uint32_t hash_value);
 void e1000_rar_set(struct e1000_hw *hw, uint8_t * mc_addr, uint32_t rar_index);
@@ -1021,6 +1021,7 @@ struct e1000_hw {
     boolean_t speed_downgraded;
     e1000_dsp_config dsp_config_state;
     boolean_t get_link_status;
+    boolean_t serdes_link_down;
     boolean_t tbi_compatibility_en;
     boolean_t tbi_compatibility_on;
     boolean_t phy_reset_disable;
@@ -1310,6 +1311,7 @@ struct e1000_hw {
 #define E1000_RCTL_DPF            0x00400000    /* discard pause frames */
 #define E1000_RCTL_PMCF           0x00800000    /* pass MAC control frames */
 #define E1000_RCTL_BSEX           0x02000000    /* Buffer size extension */
+#define E1000_RCTL_SECRC          0x04000000    /* Strip Ethernet CRC */
 
 /* Receive Descriptor */
 #define E1000_RDT_DELAY 0x0000ffff      /* Delay timer (1=1024us) */

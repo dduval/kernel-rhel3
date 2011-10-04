@@ -345,6 +345,7 @@ extern const char *const scsi_device_types[MAX_SCSI_DEVICE_CODE];
 #define SUGGEST_ABORT       0x20
 #define SUGGEST_REMAP       0x30
 #define SUGGEST_DIE         0x40
+#define SUGGEST_DELAYED_RETRY 0x50
 #define SUGGEST_SENSE       0x80
 #define SUGGEST_IS_OK       0xff
 
@@ -617,6 +618,8 @@ struct scsi_device {
 	unsigned no_start_on_add:1;	/* do not issue start on add */
 	unsigned unblock_timer_active:1; /* we've set a timer on this device
 					    to unblock it */
+	unsigned retry_aborted_cmd:1;	/* retry write commands that fail with
+					sense code of ABORTED_CMD infinitely */
 #endif
 
 	// Flag to allow revalidate to succeed in sd_open

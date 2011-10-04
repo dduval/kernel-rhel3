@@ -202,14 +202,9 @@ void  scsi_initialize_queue(Scsi_Device * SDpnt, struct Scsi_Host * SHpnt)
 	spin_lock_init(&SDpnt->device_lock);
 	q->queue_lock = &SDpnt->device_lock;
 	q->queuedata = (void *) SDpnt;
-	q->prefered_cpu_mask = &(SHpnt->can_queue_mask);
-	q->need_plug_timer = SHpnt->hostt->need_plug_timer;
+
 	q->max_segments = SHpnt->sg_tablesize;
-	
 	blk_queue_superbh(q, SHpnt->max_sectors);
-	blk_start_queue_timer(q);
-	
-	printk("Starting timer : %i %i\n",q->need_plug_timer, SHpnt->hostt->need_plug_timer);
 }
 
 #ifdef MODULE

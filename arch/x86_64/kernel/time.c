@@ -473,14 +473,18 @@ static int __init time_setup(char *str)
 }
 
 /* Only used on SMP */
-static int notsc __initdata = 0; 
-
-static int __init notsc_setup(char *str)
-{ 
 #ifdef CONFIG_SMP
-	printk(KERN_INFO "notsc ignored on non SMP kernel\n"); 
+static int notsc __initdata = 1; 
+#else
+static int notsc __initdata = 0; 
 #endif
-	notsc = 1;
+
+static int __init tsc_setup(char *str)
+{ 
+#ifndef CONFIG_SMP
+	printk(KERN_INFO "tsc redundant on non-SMP kernel\n");
+#endif
+	notsc = 0;
 	return 1;
 } 
 
@@ -561,6 +565,6 @@ void __init time_init_smp(void)
 	printk(KERN_INFO "time.c: Using %s based timekeeping.\n", timetype);
 }
 
-__setup("notsc", notsc_setup);
+__setup("tsc", tsc_setup);
 __setup("report_lost_ticks", time_setup);
 

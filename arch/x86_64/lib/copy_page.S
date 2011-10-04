@@ -8,6 +8,7 @@
 	.globl copy_page
 	.p2align 4
 copy_page:
+#ifdef CONFIG_PREFETCH
 	prefetch (%rsi) 
 	prefetch 1*64(%rsi)
 	prefetch 2*64(%rsi)
@@ -18,7 +19,13 @@ copy_page:
 	prefetchw 2*64(%rdi) 
 	prefetchw 3*64(%rdi)
 	prefetchw 4*64(%rdi)
-
+#else
+	prefetchnta (%rsi)
+	prefetchnta 1*64(%rsi)
+	prefetchnta 2*64(%rsi)
+	prefetchnta 3*64(%rsi)
+	prefetchnta 4*64(%rsi)
+#endif
 	subq	$3*8,%rsp
 	movq	%rbx,(%rsp)
 	movq	%r12,1*8(%rsp)
@@ -37,9 +44,11 @@ copy_page:
 	movq     40 (%rsi), %r10
 	movq     48 (%rsi), %r11
 	movq     56 (%rsi), %r12
-
+#ifdef CONFIG_PREFETCH
 	prefetch 5*64(%rsi)
-
+#else
+	prefetchnta 5*64(%rsi)
+#endif
 	movq     %rax,    (%rdi)
 	movq     %rbx,  8 (%rdi)
 	movq     %rdx, 16 (%rdi)
@@ -48,9 +57,9 @@ copy_page:
 	movq     %r10, 40 (%rdi)
 	movq     %r11, 48 (%rdi)
 	movq     %r12, 56 (%rdi)
-
+#ifdef CONFIG_PREFETCH
 	prefetchw 5*64(%rdi)
-
+#endif
 	leaq    64 (%rsi), %rsi
 	leaq    64 (%rdi), %rdi
 

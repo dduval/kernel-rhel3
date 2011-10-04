@@ -2,7 +2,7 @@
  *                  QLOGIC LINUX SOFTWARE
  *
  * QLogic ISP2x00 device driver for Linux 2.4.x
- * Copyright (C) 2003 Qlogic Corporation
+ * Copyright (C) 2003 QLogic Corporation
  * (www.qlogic.com)
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -78,7 +78,7 @@ extern "C"
  */
 typedef struct _mp_lun_data {
 	uint8_t 	data[MAX_LUNS];
-#define LUN_DATA_ENABLED		BIT_7
+#define LUN_DATA_ENABLED		BIT_7 /* Lun Masking */
 #define LUN_DATA_PREFERRED_PATH		BIT_6
 }
 mp_lun_data_t;
@@ -112,14 +112,41 @@ typedef struct _failover_notify_srb {
 }
 failover_notify_srb_t;
 
+#define	WWULN_SIZE		32
+typedef struct _mp_lun {
+   	struct _mp_lun   	*next;
+	struct _mp_device	*dp; 				/* Multipath device */
+	int			number;				/* actual lun number */
+	fc_lun_t	*paths[MAX_PATHS_PER_DEVICE];		/* list of fcluns */
+	struct list_head	ports_list;
+	int			path_cnt;			/* Must be > 1 for fo device  */
+	int			siz;				/* Size of wwuln  */
+	uint8_t		wwuln[WWULN_SIZE];			/* lun id from inquiry page 83. */
+}
+mp_lun_t;
+
+typedef struct _mp_port {
+    	struct list_head   list;
+	uint8_t		portname[WWN_SIZE];
+	uint8_t		path_list[ MAX_HOSTS ]; /* path index for a given HBA */
+	scsi_qla_host_t	*hba_list[ MAX_HOSTS ];
+	int		cnt;
+	ulong 	total_blks;	/* blocks transferred on this port */
+}
+mp_port_t;
+
 /*
  * Per-device multipath control data.
  */
 typedef struct _mp_device {
 	mp_path_list_t	*path_list;		/* Path list for device.  */
-	int				dev_id;
-	int			use_cnt;	/* number of users */
-	uint8_t         nodename[WWN_SIZE];	/* World-wide node name. */
+	int		dev_id;
+	int		use_cnt;	/* number of users */
+    	struct _mp_lun   *luns;			/* list of luns */
+	uint8_t         nodename[WWN_SIZE];	/* World-wide node name for device. */
+
+	/* World-wide node names. */
+	uint8_t         nodenames[MAX_PATHS_PER_DEVICE][WWN_SIZE];
 	/* World-wide port names. */
 	uint8_t         portnames[MAX_PATHS_PER_DEVICE][WWN_SIZE];
 }
@@ -179,4 +206,7 @@ typedef struct failover_notify_entry {
 }
 failover_notify_t;
 
+extern mp_device_t *qla2x00_find_mp_dev_by_portname(mp_host_t *, uint8_t *,
+    uint16_t *);
+extern mp_host_t * qla2x00_cfg_find_host(scsi_qla_host_t *);
 #endif /* _QLA_CFG_H */

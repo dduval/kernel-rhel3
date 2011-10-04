@@ -128,6 +128,7 @@ main(void)
 	DEFINE(LAST_SYSCALL, offsetof(struct thread_struct, last_syscall));
 	DEFINE(PT_REGS, offsetof(struct thread_struct, regs));
 	DEFINE(PT_TRACESYS, PT_TRACESYS);
+	DEFINE(PT_AUDITED, PT_AUDITED);
 	DEFINE(TASK_PTRACE, offsetof(struct task_struct, ptrace));
 	DEFINE(NEED_RESCHED, offsetof(struct task_struct, need_resched));
 	DEFINE(THREAD_FPR0, offsetof(struct thread_struct, fpr[0]));
@@ -181,6 +182,13 @@ main(void)
 	DEFINE(TRAP, STACK_FRAME_OVERHEAD+offsetof(struct pt_regs, trap));
 	DEFINE(SOFTE, STACK_FRAME_OVERHEAD+offsetof(struct pt_regs, softe));
 
+#ifdef CONFIG_ALTIVEC
+	DEFINE(VMX_REGS, offsetof(struct thread_struct, vmx_regs));
+	DEFINE(_VR0, offsetof(struct altivec_regs, vr[0]));
+	DEFINE(_VRSAVE, offsetof(struct altivec_regs, vrsave));
+	DEFINE(_VSCR, offsetof(struct altivec_regs, vscr));
+#endif /* CONFIG_ALTIVEC */
+
 	/*
 	 * These _only_ to be used with {PROM,RTAS}_FRAME_SIZE!!!
 	 */
@@ -188,6 +196,13 @@ main(void)
 	DEFINE(_SRR1, STACK_FRAME_OVERHEAD+sizeof(struct pt_regs)+8);
 
 	DEFINE(CLONE_VM, CLONE_VM);
+
+	/* About the CPU features table */
+	DEFINE(CPU_SPEC_ENTRY_SIZE, sizeof(struct cpu_spec));
+	DEFINE(CPU_SPEC_PVR_MASK, offsetof(struct cpu_spec, pvr_mask));
+	DEFINE(CPU_SPEC_PVR_VALUE, offsetof(struct cpu_spec, pvr_value));
+	DEFINE(CPU_SPEC_FEATURES, offsetof(struct cpu_spec, cpu_features));
+	DEFINE(CPU_SPEC_SETUP, offsetof(struct cpu_spec, cpu_setup));
 
 	/* About the CPU features table */
 	DEFINE(CPU_SPEC_ENTRY_SIZE, sizeof(struct cpu_spec));

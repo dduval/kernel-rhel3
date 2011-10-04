@@ -39,6 +39,7 @@
 #include <linux/smb_mount.h>
 #include <linux/ncp_fs.h>
 #include <linux/quota.h>
+#include <linux/quotacompat.h>
 #include <linux/module.h>
 #include <linux/sunrpc/svc.h>
 #include <linux/nfsd/nfsd.h>
@@ -54,6 +55,9 @@
 #include <linux/mman.h>
 #include <linux/sysctl.h>
 #include <linux/compat.h>
+#include <linux/netfilter_ipv4/ip_tables.h>
+#include <linux/netfilter_ipv4/ipt_limit.h>
+#include <linux/icmpv6.h>
 
 #include <asm/types.h>
 #include <asm/ipc.h>
@@ -485,70 +489,96 @@ out:
 	return err;
 }
 
-struct dqblk32 {
-    __u32 dqb_bhardlimit;
-    __u32 dqb_bsoftlimit;
-    __u32 dqb_curblocks;
-    __u32 dqb_ihardlimit;
-    __u32 dqb_isoftlimit;
-    __u32 dqb_curinodes;
-    __kernel_time_t32 dqb_btime;
-    __kernel_time_t32 dqb_itime;
+extern asmlinkage long sys_quotactl(unsigned int cmd, const char *special, qid_t id, caddr_t addr);
+
+#ifdef CONFIG_QIFACE_COMPAT
+#ifdef CONFIG_QIFACE_V1
+struct user_dqblk32 {
+	__u32 dqb_bhardlimit;
+	__u32 dqb_bsoftlimit;
+	__u32 dqb_curblocks;
+	__u32 dqb_ihardlimit;
+	__u32 dqb_isoftlimit;
+	__u32 dqb_curinodes;
+	__kernel_time_t32 dqb_btime;
+	__kernel_time_t32 dqb_itime;
 };
-                                
+typedef struct v1c_mem_dqblk comp_dqblk_t;
 
-extern asmlinkage long sys_quotactl(int cmd, const char *special, int id, caddr_t addr);
+#define Q_COMP_GETQUOTA Q_V1_GETQUOTA
+#define Q_COMP_SETQUOTA Q_V1_SETQUOTA
+#define Q_COMP_SETQLIM Q_V1_SETQLIM
+#define Q_COMP_SETUSE Q_V1_SETUSE
+#else
+struct user_dqblk32 {
+	__u32 dqb_ihardlimit;
+	__u32 dqb_isoftlimit;
+	__u32 dqb_curinodes;
+	__u32 dqb_bhardlimit;
+	__u32 dqb_bsoftlimit;
+	__u64 dqb_curspace;
+	__kernel_time_t32 dqb_btime;
+	__kernel_time_t32 dqb_itime;
+};
+typedef struct v2c_mem_dqblk comp_dqblk_t;
 
-/* Note: it is necessary to treat cmd and id as unsigned ints, 
- * with the corresponding cast to a signed int to insure that the 
- * proper conversion (sign extension) between the register representation of a signed int (msr in 32-bit mode)
- * and the register representation of a signed int (msr in 64-bit mode) is performed.
- */
-asmlinkage long sys32_quotactl(u32 cmd_parm, const char *special, u32 id_parm, unsigned long addr)
+#define Q_COMP_GETQUOTA Q_V2_GETQUOTA
+#define Q_COMP_SETQUOTA Q_V2_SETQUOTA
+#define Q_COMP_SETQLIM Q_V2_SETQLIM
+#define Q_COMP_SETUSE Q_V2_SETUSE
+#endif
+
+asmlinkage int sys32_quotactl(int cmd, const char *special, int id, caddr_t addr)
 {
-  int cmd = (int)cmd_parm;
-  int id  = (int)id_parm;
 	int cmds = cmd >> SUBCMDSHIFT;
 	int err;
-	struct mem_dqblk d;
+	comp_dqblk_t d;
 	mm_segment_t old_fs;
 	char *spec;
 	
-	PPCDBG(PPCDBG_SYS32, "sys32_quotactl - entered - pid=%ld current=%lx comm=%s \n",
-		    current->pid, current, current->comm);
-
 	switch (cmds) {
-	case Q_GETQUOTA:
-		break;
-	case Q_SETQUOTA:
+		case Q_COMP_GETQUOTA:
+			break;
+		case Q_COMP_SETQUOTA:
+		case Q_COMP_SETUSE:
+		case Q_COMP_SETQLIM:
+			if (copy_from_user(&d, (struct user_dqblk32 *)addr,
+					    sizeof (struct user_dqblk32)))
+				return -EFAULT;
+			d.dqb_itime = ((struct user_dqblk32 *)&d)->dqb_itime;
+			d.dqb_btime = ((struct user_dqblk32 *)&d)->dqb_btime;
+			break;
 	default:
-		return sys_quotactl(cmd, special,
-				    id, (caddr_t)addr);
+		return sys_quotactl(cmd, special, id, (__kernel_caddr_t)addr);
 	}
 	spec = getname (special);
 	err = PTR_ERR(spec);
 	if (IS_ERR(spec)) return err;
-	old_fs = get_fs ();
+	old_fs = get_fs();
 	set_fs (KERNEL_DS);
-	err = sys_quotactl(cmd, (const char *)spec, id, (caddr_t)&d);
+	err = sys_quotactl(cmd, (const char *)spec, id, (__kernel_caddr_t)&d);
 	set_fs (old_fs);
 	putname (spec);
-	if (cmds == Q_GETQUOTA) {
+	if (err)
+		return err;
+	if (cmds == Q_COMP_GETQUOTA) {
 		__kernel_time_t b = d.dqb_btime, i = d.dqb_itime;
-		((struct dqblk32 *)&d)->dqb_itime = i;
-		((struct dqblk32 *)&d)->dqb_btime = b;
-		if (copy_to_user ((struct dqblk32 *)addr, &d,
-				  sizeof (struct dqblk32)))
+		((struct user_dqblk32 *)&d)->dqb_itime = i;
+		((struct user_dqblk32 *)&d)->dqb_btime = b;
+		if (copy_to_user ((struct user_dqblk32 *)addr, &d,
+				  sizeof (struct user_dqblk32)))
 			return -EFAULT;
 	}
-	
-	PPCDBG(PPCDBG_SYS32, "sys32_quotactl - exited - pid=%ld current=%lx comm=%s \n",
-		    current->pid, current, current->comm);
-
-	return err;
+	return 0;
 }
 
-
+#else
+/* No conversion needed for new interface */
+asmlinkage int sys32_quotactl(int cmd, const char *special, int id, caddr_t addr)
+{
+	return sys_quotactl(cmd, special, id, addr);
+}
+#endif
 
 /* readdir & getdents */
 #define NAME_OFFSET(de) ((int) ((de)->d_name - (char *) (de)))
@@ -3224,39 +3254,359 @@ asmlinkage long sys32_sendfile(u32 out_fd, u32 in_fd, __kernel_off_t32* offset, 
 
 extern asmlinkage int sys_setsockopt(int fd, int level, int optname, char *optval, int optlen);
 
-asmlinkage long sys32_setsockopt(int fd, int level, int optname, char* optval, int optlen)
+struct ipt_rateinfo32 {
+	u_int32_t avg; 
+	u_int32_t burst; 
+	u_int32_t prev;
+	u_int32_t credit;
+	u_int32_t credit_cap;
+	u_int32_t cost;
+	__kernel_caddr_t32 master;
+};
+
+static __inline__ int check_match(struct ipt_entry_match *match, 
+				  struct ipt_entry_match **retm)
 {
-	
-	PPCDBG(PPCDBG_SYS32,"sys32_setsockopt - running - pid=%ld, comm=%s\n", current->pid, current->comm);
-
-	if (optname == SO_ATTACH_FILTER) {
-		struct sock_fprog32 {
-			__u16 len;
-			__u32 filter;
-		} *fprog32 = (struct sock_fprog32 *)optval;
-		struct sock_fprog kfprog;
-		unsigned int fsize;
-		mm_segment_t old_fs;
-		__u32 uptr;
-		int ret;
-
-		if (get_user(kfprog.len, &fprog32->len) ||
-		    __get_user(uptr, &fprog32->filter))
-			return -EFAULT;
-		kfprog.filter = (struct sock_filter *)A(uptr);
-		if (verify_area(VERIFY_WRITE, kfprog.filter, kfprog.len*sizeof(struct sock_filter)))
-			return -EFAULT;
-		old_fs = get_fs();
-		set_fs(KERNEL_DS);
-		ret = sys_setsockopt(fd, level, optname,
-				     (char *)&kfprog, sizeof(kfprog));
-		set_fs(old_fs);
-		return ret;
+	if (strcmp(match->u.user.name, "limit") == 0) {
+		*retm = match;
+		return 1;
 	}
-	return sys_setsockopt(fd, level, optname, optval, optlen);
+	else {
+		*retm = NULL;
+		return 0;
+	}
+}
+
+static __inline__ int check_entry(struct ipt_entry *entry, 
+				  struct ipt_entry **ret_e,
+				  struct ipt_entry_match **ret_m)
+{
+	*ret_e = entry;
+	return IPT_MATCH_ITERATE(entry, check_match, ret_m);
+}
+
+/*
+ * The following routine works around a problem when a 32-bit iptables
+ * application is run on a 64-bit kernel. The problem is with the "limit"
+ * extended packet matching module. The data associated with the limit
+ * filter is passed in via the ipt_rateinfo structure. This structure has
+ * a different size in the kernel than in user space and the real handler
+ * for this packet filter (ipt_limit) cares about this.
+ *
+ * Since the filter match information is embedded in the ipt_replace 
+ * structure, we'll need to replace the entire ipt_replace structure with 
+ * a slightly larger one that includes the properly sized ipt_rateinfo 
+ * structure. This size change necessitates some offset adjustments as 
+ * well, making for a truly horrible workaround.
+ */
+
+static int nf_limit_check(struct ipt_replace **krepl, unsigned int *kreplsize)
+{
+	struct ipt_replace *repl, *newrepl;
+	struct ipt_entry *e, *new_e;
+	struct ipt_entry_match *m, *new_m;
+	unsigned int origsize;
+	int diff = IPT_ALIGN(sizeof(struct ipt_rateinfo)) - 
+		   IPT_ALIGN(sizeof(struct ipt_rateinfo32));
+	int found;
+	unsigned long off;
+	int i;
+
+	repl = *krepl;
+	origsize = *kreplsize;
+
+	/*
+	 * Look to see if the user specified the "limit" module. If found, 
+	 * we'll need to allocate a new, larger ipt_replace structure 
+	 * (see comments above).
+	 */
+	found = IPT_ENTRY_ITERATE(repl->entries, repl->size, check_entry, 
+				  &e, &m);
+	if (!found)
+		return 0;
+
+	/*
+	 * At this point, "m" contains the address of the ipt_entry_match 
+	 * structure we care about and "e" contains the address of the 
+	 * ipt_entry that had the match within it.
+	 */
+	newrepl = (struct ipt_replace *)kmalloc(origsize + diff, GFP_KERNEL);
+	if (newrepl == NULL) {
+		kfree(repl->counters);
+		kfree(repl);
+		return -ENOMEM;
+	}
+
+	/* 
+    	 * Locate the entry and match structures within the newly allocated 
+	 * ipt_replace structure that correspond to the ones just located
+	 * in the original structure.
+	 */
+	off = e - repl->entries;
+	new_e = newrepl->entries + off;
+	off = (void *)m - (void *)repl;
+	new_m = (struct ipt_entry_match *)((void*)newrepl + off);
+
+	/* Copy everything up to the rateinfo structure */
+	memcpy(newrepl, repl, (void *)m->data - (void *)repl);
+	
+	/* 
+	 * Now set up the new rateinfo structure. Since only the first 
+	 * two fields are used by the user, clear the rest of the structure.
+	 */
+	memset(new_m->data, 0, sizeof(struct ipt_rateinfo)); 
+	memcpy(new_m->data, m->data, sizeof(u_int32_t)+sizeof(u_int32_t));
+	
+	/* Adjust offsets and sizes in new structures */
+	new_e->target_offset = e->target_offset + diff;
+	new_e->next_offset = e->next_offset + diff;
+	new_m->u.user.match_size = m->u.user.match_size + diff;
+	newrepl->size = repl->size + diff;
+	newrepl->counters = repl->counters;
+
+	/* Adjust hook and underflow entries */
+	for (i=0; i < NF_IP_NUMHOOKS; i++) {
+		if (!(repl->valid_hooks & (1 << i)))
+			continue;
+		if (repl->hook_entry[i] >= e->next_offset)
+			newrepl->hook_entry[i] += diff;
+		if (repl->underflow[i] >= e->next_offset)
+			newrepl->underflow[i] += diff;
+	}
+	
+	/* Copy remainder of data */
+	memcpy((void *)new_m + new_m->u.user.match_size,
+	       (void *)m + m->u.user.match_size, 
+	       origsize - ((void *)m + m->u.user.match_size - (void *)repl));
+
+	/* Free the original ipt_replace structure and return the new */
+	kfree(repl);
+	*krepl = newrepl;
+	*kreplsize = origsize + diff;
+
+	return 0;
+}
+
+static int do_netfilter_replace(int fd, int level, int optname,
+				char *optval, int optlen)
+{
+	struct ipt_replace32 {
+		char name[IPT_TABLE_MAXNAMELEN];
+		__u32 valid_hooks;
+		__u32 num_entries;
+		__u32 size;
+		__u32 hook_entry[NF_IP_NUMHOOKS];
+		__u32 underflow[NF_IP_NUMHOOKS];
+		__u32 num_counters;
+		__u32 counters;
+		struct ipt_entry entries[0];
+	} *repl32 = (struct ipt_replace32 *)optval;
+	struct ipt_replace *krepl;
+	struct ipt_counters *counters32;
+	__u32 origsize;
+	unsigned int kreplsize, kcountersize;
+	mm_segment_t old_fs;
+	int ret;
+
+	if (optlen < sizeof(struct ipt_replace32))
+		return -EINVAL;
+
+	if (copy_from_user(&origsize,
+			&repl32->size,
+			sizeof(origsize)))
+		return -EFAULT;
+
+	kreplsize = sizeof(*krepl) + origsize;
+
+	/* Hack: Causes ipchains to give correct error msg --RR */
+	if (optlen != kreplsize)
+		return -ENOPROTOOPT;
+
+	krepl = (struct ipt_replace *)kmalloc(kreplsize, GFP_KERNEL);
+	if (krepl == NULL)
+		return -ENOMEM;
+
+	if (copy_from_user(krepl, optval, kreplsize)) {
+		kfree(krepl);
+		return -EFAULT;
+	}
+
+	counters32 = (struct ipt_counters *)AA(
+		((struct ipt_replace32 *)krepl)->counters);
+
+	kcountersize = krepl->num_counters * sizeof(struct ipt_counters);
+	krepl->counters = (struct ipt_counters *)kmalloc(
+					kcountersize, GFP_KERNEL);
+	if (krepl->counters == NULL) {
+		kfree(krepl);
+		return -ENOMEM;
+	}
+
+	/*
+	 * Before calling the real setsockopt system call handler, 
+	 * check to see if the "limit" match extension is used.
+	 */
+	ret = nf_limit_check(&krepl, &kreplsize);
+	if (ret)
+		return ret;
+
+	old_fs = get_fs();
+	set_fs(KERNEL_DS);
+	ret = sys_setsockopt(fd, level, optname,
+			     (char *)krepl, kreplsize);
+	set_fs(old_fs);
+
+	if (ret == 0 &&
+		copy_to_user(counters32, krepl->counters, kcountersize))
+			ret = -EFAULT;
+
+	kfree(krepl->counters);
+	kfree(krepl);
+
+	return ret;
+}
+
+static int do_set_attach_filter(int fd, int level, int optname,
+				char *optval, int optlen)
+{
+	struct sock_fprog32 {
+		__u16 len;
+		__u32 filter;
+	} *fprog32 = (struct sock_fprog32 *)optval;
+	struct sock_fprog kfprog;
+	struct sock_filter *kfilter;
+	unsigned int fsize;
+	mm_segment_t old_fs;
+	__u32 uptr;
+	int ret;
+
+	if (get_user(kfprog.len, &fprog32->len) ||
+	    __get_user(uptr, &fprog32->filter))
+		return -EFAULT;
+
+	kfprog.filter = (struct sock_filter *)A(uptr);
+	fsize = kfprog.len * sizeof(struct sock_filter);
+
+	kfilter = (struct sock_filter *)kmalloc(fsize, GFP_KERNEL);
+	if (kfilter == NULL)
+		return -ENOMEM;
+
+	if (copy_from_user(kfilter, kfprog.filter, fsize)) {
+		kfree(kfilter);
+		return -EFAULT;
+	}
+
+	kfprog.filter = kfilter;
+
+	old_fs = get_fs();
+	set_fs(KERNEL_DS);
+	ret = sys_setsockopt(fd, level, optname,
+			     (char *)&kfprog, sizeof(kfprog));
+	set_fs(old_fs);
+
+	kfree(kfilter);
+
+	return ret;
+}
+
+static int do_set_icmpv6_filter(int fd, int level, int optname,
+				char *optval, int optlen)
+{
+	struct icmp6_filter kfilter;
+	mm_segment_t old_fs;
+	int ret, i;
+
+	if (copy_from_user(&kfilter, optval, sizeof(kfilter)))
+		return -EFAULT;
+
+	for (i = 0; i < 8; i += 2) {
+		u32 tmp = kfilter.data[i];
+
+		kfilter.data[i] = kfilter.data[i + 1];
+		kfilter.data[i + 1] = tmp;
+	}
+
+	old_fs = get_fs();
+	set_fs(KERNEL_DS);
+	ret = sys_setsockopt(fd, level, optname,
+			     (char *) &kfilter, sizeof(kfilter));
+	set_fs(old_fs);
+
+	return ret;
+}
+
+static int do_set_sock_timeout(int fd, int level, int optname, char *optval, int optlen)
+{
+	struct timeval32 *up = (struct timeval32 *) optval;
+	struct timeval ktime;
+	mm_segment_t old_fs;
+	int err;
+
+	if (optlen < sizeof(*up))
+		return -EINVAL;
+	if (get_tv32(&ktime, (struct timeval32 *)optval ))
+		return -EFAULT;
+	old_fs = get_fs();
+	set_fs(KERNEL_DS);
+	err = sys_setsockopt(fd, level, optname, (char *)&ktime, sizeof(ktime));	set_fs(old_fs);
+
+	return err;
 }
 
 
+asmlinkage long sys32_setsockopt(int fd, int level, int optname, 
+				 char* optval, int optlen)
+{
+	if (optname == IPT_SO_SET_REPLACE)
+		return do_netfilter_replace(fd, level, optname,
+					    optval, optlen);
+	if (optname == SO_ATTACH_FILTER)
+		return do_set_attach_filter(fd, level, optname,
+					    optval, optlen);
+	if (level == SOL_ICMPV6 && optname == ICMPV6_FILTER)
+		return do_set_icmpv6_filter(fd, level, optname,
+					    optval, optlen);
+	if (optname == SO_SNDTIMEO || optname == SO_RCVTIMEO)
+		return do_set_sock_timeout(fd, level, optname, optval, optlen);
+
+	return sys_setsockopt(fd, level, optname, optval, optlen);
+}
+
+extern asmlinkage long sys_getsockopt(int fd, int level, int optname,
+				      char *optval, int *optlen);
+
+static int do_get_sock_timeout(int fd, int level, int optname, char *optval, int *optlen)
+{
+	struct timeval32 *up = (struct timeval32 *) optval;
+	struct timeval ktime;
+	mm_segment_t old_fs;
+	int len, err;
+
+	if (get_user(len, optlen))
+		return -EFAULT;
+	if (len < sizeof(*up))
+		return -EINVAL;
+	len = sizeof(ktime);
+	old_fs = get_fs();
+	set_fs(KERNEL_DS);
+	err = sys_getsockopt(fd, level, optname, (char *) &ktime, &len);
+	set_fs(old_fs);
+
+	if (!err) {
+		if (put_user(sizeof(*up), optlen) ||
+		    put_tv32(up, &ktime))
+			err = -EFAULT;
+	}
+	return err;
+}
+
+asmlinkage int sys32_getsockopt(int fd, int level, int optname,
+				char *optval, int *optlen)
+{
+	if (optname == SO_RCVTIMEO || optname == SO_SNDTIMEO)
+		return do_get_sock_timeout(fd, level, optname, optval, optlen);
+	return sys_getsockopt(fd, level, optname, optval, optlen);
+}
 
 
 #define MAX_SOCK_ADDR	128		/* 108 for Unix domain -  16 for IP, 16 for IPX, 24 for IPv6, about 80 for AX.25 */
@@ -4004,6 +4354,10 @@ asmlinkage long sys32_execve(unsigned long a0, unsigned long a1, unsigned long a
 		goto out;
 	if (regs->msr & MSR_FP)
 		giveup_fpu(current);
+#ifdef CONFIG_ALTIVEC
+        if (regs->msr & MSR_VEC)
+                giveup_altivec(current);
+#endif /* CONFIG_ALTIVEC */
 
 	error = do_execve32(filename, (u32*) a1, (u32*) a2, regs);
 
@@ -4024,8 +4378,13 @@ void start_thread32(struct pt_regs* regs, unsigned long nip, unsigned long sp)
 	regs->nip = nip;
 	regs->gpr[1] = sp;
 	regs->msr = MSR_USER32;
+#ifndef CONFIG_SMP
 	if (last_task_used_math == current)
 		last_task_used_math = 0;
+	if (last_task_used_altivec == current)
+		last_task_used_altivec = 0;
+#endif
+	memset(current->thread.fpr, 0, sizeof(current->thread.fpr));
 	current->thread.fpscr = 0;
 }
 

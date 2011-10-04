@@ -58,7 +58,7 @@
 csum_partial_copy_generic:
 	cmpl	 $3*64,%edx
 	jle	 .Lignore
-
+#ifdef CONFIG_PREFETCH
 	ignore
 	prefetch (%rdi)
 	ignore
@@ -79,7 +79,18 @@ csum_partial_copy_generic:
 	prefetchw 3*64(%rsi)
 	ignore
 	prefetchw 4*64(%rsi)
-
+#else
+	ignore
+	prefetchnta (%rdi)
+	ignore
+	prefetchnta 1*64(%rdi)
+	ignore
+	prefetchnta 2*64(%rdi)
+	ignore
+	prefetchnta 3*64(%rdi)
+	ignore
+	prefetchnta 4*64(%rdi)
+#endif
 .Lignore:		
 	subq  $7*8,%rsp
 	movq  %rbx,2*8(%rsp)
@@ -125,9 +136,13 @@ csum_partial_copy_generic:
 	movq  48(%rdi),%r14
 	source
 	movq  56(%rdi),%r13
-		
+#ifdef CONFIG_PREFETCH		
 	ignore 2f
 	prefetch 5*64(%rdi)
+#else
+	ignore 2f
+	prefetchnta 5*64(%rdi)
+#endif
 2:							
 	adcq  %rbx,%rax
 	adcq  %r8,%rax
@@ -157,11 +172,11 @@ csum_partial_copy_generic:
 	movq %r14,48(%rsi)
 	dest
 	movq %r13,56(%rsi)
-	
+#ifdef CONFIG_PREFETCH	
 	ignore 3f
 	prefetchw 5*64(%rsi)
 3:
-	
+#endif
 	leaq 64(%rdi),%rdi
 	leaq 64(%rsi),%rsi
 

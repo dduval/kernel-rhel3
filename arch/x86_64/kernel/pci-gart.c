@@ -205,7 +205,7 @@ void pci_free_consistent(struct pci_dev *hwdev, size_t size,
 	int order = get_order(size);
 
 	size = round_up(size, PAGE_SIZE); 
-	if (bus < iommu_bus_base || bus > iommu_bus_base + iommu_size) { 
+	if (bus < iommu_bus_base || bus >= iommu_bus_base + iommu_size) { 
 		free_pages((unsigned long)vaddr, order);
 		return;
 	} 
@@ -300,6 +300,11 @@ dma_addr_t __pci_map_single(struct pci_dev *dev, void *addr, size_t size,
 
 	BUG_ON(dir == PCI_DMA_NONE);
 
+#ifdef CONFIG_SWIOTLB
+	if (swiotlb)
+		return swiotlb_map_single(dev,addr,size,dir);
+#endif
+
 	phys_mem = virt_to_phys(addr); 
 	if (!need_iommu(dev, phys_mem, size))
 		return phys_mem; 
@@ -348,8 +353,16 @@ void pci_unmap_single(struct pci_dev *hwdev, dma_addr_t dma_addr,
 {
 	unsigned long iommu_page; 
 	int i, npages;
+
+#ifdef CONFIG_SWIOTLB
+	if (swiotlb) {
+		swiotlb_unmap_single(hwdev,dma_addr,size,direction);
+		return;
+	}
+#endif
+
 	if (dma_addr < iommu_bus_base + EMERGENCY_PAGES*PAGE_SIZE || 
-	    dma_addr > iommu_bus_base + iommu_size)
+	    dma_addr >= iommu_bus_base + iommu_size)
 		return;
 	iommu_page = (dma_addr - iommu_bus_base)>>PAGE_SHIFT;	
 	npages = round_up(size + (dma_addr & ~PAGE_MASK), PAGE_SIZE) >> PAGE_SHIFT;
@@ -483,7 +496,14 @@ void __init pci_iommu_init(void)
 	no_agp = no_agp || (agp_init() < 0) || (agp_copy_info(&info) < 0); 
 #endif	
 
-	if (no_iommu || (!force_mmu && end_pfn < 0xffffffff>>PAGE_SHIFT)) { 
+#ifdef CONFIG_SWIOTLB
+	if (swiotlb) {
+		no_iommu = 1;
+		printk(KERN_INFO "PCI-DMA: Using SWIOTLB\n");
+		return;
+	}
+#endif
+	if (no_iommu || (!force_mmu && end_pfn < 0xffffffff>>PAGE_SHIFT) || !iommu_aperture) {
 		printk(KERN_INFO "PCI-DMA: Disabling IOMMU.\n"); 
 		no_iommu = 1;
 		return;

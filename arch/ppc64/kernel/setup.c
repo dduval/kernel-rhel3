@@ -270,6 +270,9 @@ static int show_cpuinfo(struct seq_file *m, void *v)
 	case PV_POWER4p:
 		seq_printf(m, "POWER4+ (gq)\n");
 		break;
+	case PV_POWER4ul:
+		seq_printf(m, "POWER4+ (gpul)\n");
+		break;
 	default:
 		seq_printf(m, "Unknown (%08x)\n", pvr);
 		break;

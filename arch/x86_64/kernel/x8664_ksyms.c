@@ -107,6 +107,8 @@ EXPORT_SYMBOL(cpu_data);
 EXPORT_SYMBOL(kernel_flag_cacheline);
 EXPORT_SYMBOL(smp_num_cpus);
 EXPORT_SYMBOL(cpu_online_map);
+EXPORT_SYMBOL(smp_num_siblings);
+EXPORT_SYMBOL(cpu_sibling_map);
 extern void __read_lock_failed(void);
 extern void __write_lock_failed(void);
 EXPORT_SYMBOL_NOVERS(__write_lock_failed);
@@ -231,3 +233,6 @@ EXPORT_SYMBOL(fake_node);
 
 extern void int_ret_from_sys_call(void);
 EXPORT_SYMBOL(int_ret_from_sys_call); 
+
+extern int swiotlb;
+EXPORT_SYMBOL(swiotlb);

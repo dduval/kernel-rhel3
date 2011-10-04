@@ -2,7 +2,7 @@
  *                  QLOGIC LINUX SOFTWARE
  *
  * QLogic ISP2x00 device driver for Linux 2.4.x
- * Copyright (C) 2003 Qlogic Corporation
+ * Copyright (C) 2003 QLogic Corporation
  * (www.qlogic.com)
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -30,6 +30,31 @@
 	for( pos= (head)->next, n = pos->next; pos != (head); \
 		pos = n, n = pos->next )
 #endif
+
+/* Non-standard definitions. */
+static inline void __qla_list_splice(struct list_head *list,
+    struct list_head *head)
+{
+	struct list_head	*first = list->next;
+	struct	list_head	*last = list->prev;
+	struct	list_head	*at = head->next;
+
+	first->prev = head;
+	head->next = first;
+
+	last->next = at;
+	at->prev = last;
+
+}
+
+static inline void qla_list_splice_init(struct list_head *list,
+    struct list_head *head)
+{
+	if (!list_empty(list)) {
+		__qla_list_splice(list, head);
+		INIT_LIST_HEAD(list);
+	}
+}
 
 /* __add_to_done_queue()
  * 
@@ -96,7 +121,6 @@ __add_to_retry_queue(struct scsi_qla_host * ha, srb_t * sp)
         list_add_tail(&sp->list,&ha->retry_queue);
         ha->retry_q_cnt++;
         sp->flags |= SRB_WATCHDOG;
-        ha->flags.watchdog_enabled = TRUE;
         sp->state = SRB_RETRY_STATE;
 	sp->ha = ha;
 }
@@ -177,8 +201,6 @@ __del_from_retry_queue(struct scsi_qla_host * ha, srb_t * sp)
 {
         list_del_init(&sp->list);
 
-        if (list_empty(&ha->retry_queue))
-                ha->flags.watchdog_enabled = FALSE;
         sp->flags &= ~(SRB_WATCHDOG | SRB_BUSY);
         sp->state = SRB_NO_QUEUE_STATE;
         ha->retry_q_cnt--;

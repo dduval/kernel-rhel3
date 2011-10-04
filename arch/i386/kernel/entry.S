@@ -309,7 +309,7 @@ ENTRY(system_call)
 	pushl %eax			# save orig_eax
 	SAVE_ALL
 	GET_CURRENT(%ebx)
-	testb $0x02,tsk_ptrace(%ebx)	# PT_TRACESYS
+	testw $0x802,tsk_ptrace(%ebx)	# PT_TRACESYS|PT_AUDITED
 	jne tracesys
 	cmpl $(NR_syscalls),%eax
 	jae badsys
@@ -357,7 +357,10 @@ v86_signal_return:
 	ALIGN
 tracesys:
 	movl $-ENOSYS,EAX(%esp)
-	call_SYMBOL_NAME_ABS(syscall_trace)
+	movl %esp,%eax
+	pushl %eax
+	call_SYMBOL_NAME_ABS(syscall_trace_enter)
+	addl $4,%esp
 	movl ORIG_EAX(%esp),%eax
 	cmpl $(NR_syscalls),%eax
 	jae tracesys_exit
@@ -376,7 +379,10 @@ no_timing2:
 	call *SYMBOL_NAME(sys_call_table)(,%eax,4)
 	movl %eax,EAX(%esp)		# save the return value
 tracesys_exit:
-	call_SYMBOL_NAME_ABS(syscall_trace)
+	movl %esp,%eax
+	pushl %eax
+	call_SYMBOL_NAME_ABS(syscall_trace_leave)
+	addl $4,%esp
 	jmp ret_from_sys_call
 badsys:
 	movl $-ENOSYS,EAX(%esp)
@@ -402,7 +408,7 @@ ENTRY(ret_from_fork)
 	call_SYMBOL_NAME_ABS(schedule_tail)
 	addl $4, %esp
 	GET_CURRENT(%ebx)
-	testb $0x02,tsk_ptrace(%ebx)	# PT_TRACESYS
+	testw $0x802,tsk_ptrace(%ebx)	# PT_TRACESYS|PT_AUDITED
 	jne tracesys_exit
 	jmp	ret_from_sys_call
 

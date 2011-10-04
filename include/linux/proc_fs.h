@@ -143,6 +143,8 @@ extern struct proc_dir_entry *proc_symlink(const char *,
 extern struct proc_dir_entry *proc_mknod(const char *,mode_t,
 		struct proc_dir_entry *,kdev_t);
 extern struct proc_dir_entry *proc_mkdir(const char *,struct proc_dir_entry *);
+extern struct proc_dir_entry *proc_mkdir_mode(const char *, mode_t,
+		struct proc_dir_entry *);
 
 static inline struct proc_dir_entry *create_proc_read_entry(const char *name,
 	mode_t mode, struct proc_dir_entry *base, 
@@ -210,5 +212,10 @@ extern struct proc_dir_entry proc_root_driver;
 
 
 #endif /* CONFIG_PROC_FS */
+
+static inline struct proc_dir_entry *PDE(const struct inode *inode)
+{
+	return (struct proc_dir_entry *)inode->u.generic_ip;
+}
 
 #endif /* _LINUX_PROC_FS_H */

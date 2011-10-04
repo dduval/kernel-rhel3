@@ -237,7 +237,7 @@ static void __pminit setup_k7_watchdog(void)
 	wrmsr(MSR_K7_EVNTSEL0, evntsel, 0);
 }
 
-#ifndef CONFIG_MK8
+#ifdef CONFIG_IA32E
 static void __pminit setup_p6_watchdog(void)
 {
 	unsigned int evntsel;
@@ -301,7 +301,7 @@ void __pminit setup_apic_nmi_watchdog (void)
 			return;	    
 		setup_k7_watchdog();
 		break;
-#ifndef CONFIG_MK8
+#ifdef CONFIG_IA32E
 	case X86_VENDOR_INTEL:
 		switch (boot_cpu_data.x86) {
 		case 6:
@@ -403,7 +403,7 @@ void nmi_watchdog_tick (struct pt_regs * regs, unsigned reason)
 		alert_counter[cpu] = 0;
 	}
 	if (nmi_perfctr_msr) {
-#ifndef CONFIG_MK8
+#ifdef CONFIG_IA32E
 		if (nmi_perfctr_msr == MSR_P4_IQ_COUNTER0) {
 			/*
 			 * P4 quirks:

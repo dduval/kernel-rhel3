@@ -75,6 +75,7 @@
 #define OFFSET4K(a)		((a) & 0xfff)
 #define PAGE_START(addr)	((addr) & PAGE_MASK)
 #define PAGE_OFF(addr)		((addr) & ~PAGE_MASK)
+#define MINSIGSTKSZ_IA32	2048
 
 extern asmlinkage long sys_execve (char *, char **, char **, struct pt_regs *);
 extern asmlinkage long sys_mprotect (unsigned long, size_t, unsigned long);
@@ -2973,7 +2974,7 @@ get_fpreg (int regno, struct _fpreg_ia32 *reg, struct pt_regs *ptp, struct switc
 	return;
 }
 
-static int
+int
 save_ia32_fpstate (struct task_struct *tsk, struct ia32_user_i387_struct *save)
 {
 	struct switch_stack *swp;
@@ -3035,7 +3036,7 @@ restore_ia32_fpstate (struct task_struct *tsk, struct ia32_user_i387_struct *sav
 	return 0;
 }
 
-static int
+int
 save_ia32_fpxstate (struct task_struct *tsk, struct ia32_user_fxsr_struct *save)
 {
 	struct switch_stack *swp;
@@ -3429,10 +3430,18 @@ sys32_sigaltstack (ia32_stack_t *uss32, ia32_stack_t *uoss32,
 			return -EFAULT;
 	uss.ss_sp = (void *) (long) buf32.ss_sp;
 	uss.ss_flags = buf32.ss_flags;
-	uss.ss_size = buf32.ss_size;
+	/* MINSIGSTKSZ is different for ia32 vs ia64. We lie here to pass the 
+           check and set it to the user requested value later */
+	if ((buf32.ss_flags != SS_DISABLE) && (buf32.ss_size < MINSIGSTKSZ_IA32)) {
+		ret = -ENOMEM;
+		goto out;
+	}
+	uss.ss_size = MINSIGSTKSZ;
 	set_fs(KERNEL_DS);
 	ret = do_sigaltstack(uss32 ? &uss : NULL, &uoss, pt->r12);
+ 	current->sas_ss_size = buf32.ss_size;	
 	set_fs(old_fs);
+out:
 	if (ret < 0)
 		return(ret);
 	if (uoss32) {
@@ -4075,6 +4084,113 @@ out_error:
 	put_unused_fd(fd);
 	fd = error;
 	goto out;
+}
+
+/*
+ * Get a yet unused TLS descriptor index.
+ */
+static int get_free_idx(void)
+{
+	int idx;
+
+	for (idx = 0; idx < GDT_ENTRY_TLS_ENTRIES; idx++)
+		if (desc_empty(current->tls_array + idx))
+			return idx + GDT_ENTRY_TLS_MIN;
+	return -ESRCH;
+}
+
+/*
+ * Set a given TLS descriptor:
+ */
+asmlinkage int
+sys32_set_thread_area(struct ia32_user_desc *u_info)
+{
+	struct ia32_user_desc info;
+	struct desc_struct *desc;
+	int cpu, idx;
+
+	if (copy_from_user(&info, u_info, sizeof(info)))
+		return -EFAULT;
+	idx = info.entry_number;
+
+	/*
+	 * index -1 means the kernel should try to find and
+	 * allocate an empty descriptor:
+	 */
+	if (idx == -1) {
+		idx = get_free_idx();
+		if (idx < 0)
+			return idx;
+		if (put_user(idx, &u_info->entry_number))
+			return -EFAULT;
+	}
+
+	if (idx < GDT_ENTRY_TLS_MIN || idx > GDT_ENTRY_TLS_MAX)
+		return -EINVAL;
+
+	desc = current->tls_array + idx - GDT_ENTRY_TLS_MIN;
+
+	cpu = smp_processor_id();
+
+	if (LDT_empty(&info)) {
+		desc->a = 0;
+		desc->b = 0;
+	} else {
+		desc->a = LDT_entry_a(&info);
+		desc->b = LDT_entry_b(&info);
+	}
+	load_TLS(current, cpu);
+
+	return 0;
+}
+
+/*
+ * Get the current Thread-Local Storage area:
+ */
+
+#define GET_BASE(desc) ( \
+	(((desc)->a >> 16) & 0x0000ffff) | \
+	(((desc)->b << 16) & 0x00ff0000) | \
+	( (desc)->b        & 0xff000000)   )
+
+#define GET_LIMIT(desc) ( \
+	((desc)->a & 0x0ffff) | \
+	 ((desc)->b & 0xf0000) )
+
+#define GET_32BIT(desc)		(((desc)->b >> 23) & 1)
+#define GET_CONTENTS(desc)	(((desc)->b >> 10) & 3)
+#define GET_WRITABLE(desc)	(((desc)->b >>  9) & 1)
+#define GET_LIMIT_PAGES(desc)	(((desc)->b >> 23) & 1)
+#define GET_PRESENT(desc)	(((desc)->b >> 15) & 1)
+#define GET_USEABLE(desc)	(((desc)->b >> 20) & 1)
+
+asmlinkage int
+sys32_get_thread_area(struct ia32_user_desc *u_info)
+{
+	struct ia32_user_desc info;
+	struct desc_struct *desc;
+	int idx;
+
+	if (get_user(idx, &u_info->entry_number))
+		return -EFAULT;
+	if (idx < GDT_ENTRY_TLS_MIN || idx > GDT_ENTRY_TLS_MAX)
+		return -EINVAL;
+
+	desc = current->tls_array + idx - GDT_ENTRY_TLS_MIN;
+
+	info.entry_number = idx;
+	info.base_addr = GET_BASE(desc);
+	info.limit = GET_LIMIT(desc);
+	info.seg_32bit = GET_32BIT(desc);
+	info.contents = GET_CONTENTS(desc);
+	info.read_exec_only = !GET_WRITABLE(desc);
+	info.limit_in_pages = GET_LIMIT_PAGES(desc);
+	info.seg_not_present = !GET_PRESENT(desc);
+	info.useable = GET_USEABLE(desc);
+
+	if (copy_to_user(u_info, &info, sizeof(info)))
+		return -EFAULT;
+	return 0;
 }
 
 #ifdef	NOTYET  /* UNTESTED FOR IA64 FROM HERE DOWN */

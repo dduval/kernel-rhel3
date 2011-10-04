@@ -24,6 +24,7 @@
 #include <linux/errno.h>
 #include <linux/ptrace.h>
 #include <linux/user.h>
+#include <linux/audit.h>
 
 #include <asm/uaccess.h>
 #include <asm/page.h>
@@ -342,11 +343,8 @@ out:
 	return ret;
 }
 
-void syscall_trace(void)
+static void syscall_ptrace(void)
 {
-	if ((current->ptrace & (PT_PTRACED|PT_TRACESYS))
-			!= (PT_PTRACED|PT_TRACESYS))
-		return;
 	current->exit_code = SIGTRAP;
 	current->state = TASK_STOPPED;
 	notify_parent(current, SIGCHLD);
@@ -360,4 +358,22 @@ void syscall_trace(void)
 		send_sig(current->exit_code, current, 1);
 		current->exit_code = 0;
 	}
+}
+
+void syscall_trace_enter(struct pt_regs *regs)
+{
+	if ((current->ptrace & (PT_PTRACED|PT_TRACESYS)) == (PT_PTRACED|PT_TRACESYS))
+		syscall_ptrace();
+
+	if (isaudit(current) && (current->ptrace & PT_AUDITED))
+		audit_intercept(regs);
+}
+
+void syscall_trace_leave(struct pt_regs *regs)
+{
+	if (isaudit(current) && (current->ptrace & PT_AUDITED))
+		audit_result(regs);
+
+	if ((current->ptrace & (PT_PTRACED|PT_TRACESYS)) == (PT_PTRACED|PT_TRACESYS))
+		syscall_ptrace();
 }

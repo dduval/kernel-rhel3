@@ -141,5 +141,8 @@ struct pt_regs32 {
 #define PPC_PTRACE_PEEKUSR_3264   0x91  /* Read a register (specified by ADDR) out of the "user area" on a 64-bit process from a 32-bit process. */
 #define PPC_PTRACE_POKEUSR_3264   0x90  /* Write DATA into location ADDR within the "user area" on a 64-bit process from a 32-bit process. */
 
+/* Get/set all the altivec registers vr0..vr31, vscr, vrsave, in one go */
+#define PPC_PTRACE_GETVRREGS	18
+#define PPC_PTRACE_SETVRREGS	19
 
 #endif /* _PPC64_PTRACE_H */

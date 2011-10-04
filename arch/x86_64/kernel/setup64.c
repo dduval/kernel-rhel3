@@ -60,12 +60,14 @@ static int __init nonx_setup(char *str)
 		do_not_nx = 0; 
 		vm_data_default_flags &= ~VM_EXEC; 
 		vm_stack_flags &= ~VM_EXEC;  
+		exec_shield = 2;
 	} else if (!strncmp(str, "noforce",7) || !strncmp(str,"off",3)) { 
 		do_not_nx = (str[0] == 'o');
-		if (do_not_nx) 
+		if (do_not_nx)
 			__supported_pte_mask &= ~_PAGE_NX; 
 		vm_data_default_flags |= VM_EXEC; 
 		vm_stack_flags |= VM_EXEC;
+		exec_shield = do_not_nx ? 0 : 1;
 	}
 	return 1;
 } 
@@ -84,6 +86,9 @@ Valid options:
    compat    (default) Imply PROT_EXEC for PROT_READ
 
 */
+
+int exec_shield32 = 2;
+
 static int __init nonx32_setup(char *str)
 {
 	char *s;
@@ -91,16 +96,21 @@ static int __init nonx32_setup(char *str)
 		if (!strcmp(s, "all") || !strcmp(s,"on")) {
 			vm_data_default_flags32 &= ~VM_EXEC; 
 			vm_stack_flags32 &= ~VM_EXEC;  
+			exec_shield32 = 2;
 		} else if (!strcmp(s, "off")) { 
 			vm_data_default_flags32 |= VM_EXEC; 
 			vm_stack_flags32 |= VM_EXEC;  
+			exec_shield32 = 0;
 		} else if (!strcmp(s, "stack")) { 
 			vm_data_default_flags32 |= VM_EXEC; 
 			vm_stack_flags32 &= ~VM_EXEC;  		
+			exec_shield32 = 1;
 		} else if (!strcmp(s, "force")) { 
 			vm_force_exec32 = 0; 
+			exec_shield32 = 1;
 		} else if (!strcmp(s, "compat")) { 
 			vm_force_exec32 = PROT_EXEC;
+			exec_shield32 = 1;
 		} 
   	} 
   	return 1;

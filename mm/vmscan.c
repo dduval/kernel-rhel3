@@ -231,7 +231,7 @@ found_page:
 	return page;
 }
 
-int inactive_clean_percent = 5;
+int inactive_clean_percent = 30;
 
 /**
  * need_rebalance_dirty - do we need to write inactive stuff to disk?
@@ -797,7 +797,7 @@ int rebalance_laundry_zone(struct zone_struct * zone, int max_work, unsigned int
 				if (timed_out && PageInactiveLaundry(page)) {
 					unsigned char now;
 					now = (jiffies/HZ)&255;
-					if (now - page->age > 30) {
+					if ((unsigned char)(now - page->age) > 30) {
 						del_page_from_inactive_laundry_list(page);
 						add_page_to_inactive_dirty_list(page);
 					}

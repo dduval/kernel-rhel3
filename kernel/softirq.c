@@ -18,6 +18,12 @@
 #include <linux/tqueue.h>
 
 /*
+ * Defer softirqs to ksoftirqd if free stack less than this.
+ * defaults to 2048 bytes on 32-bit architectures.
+ */
+unsigned int stack_defer_threshold = 64 * BITS_PER_LONG;
+
+/*
    - No shared variables, all the data are CPU local.
    - If a softirq needs serialization, let it serialize itself
      by its own spinlocks.
@@ -85,6 +91,22 @@ asmlinkage void do_softirq()
 
 	if (pending) {
 		struct softirq_action *h;
+
+#if !defined(CONFIG_PARISC) && \
+    !defined(CONFIG_ARCH_S390) && !defined(CONFIG_X86_64)
+		{
+			unsigned long esp = (unsigned long)&esp;
+			unsigned long tsk = (unsigned long)current;
+
+			if (unlikely(esp < tsk + sizeof(struct task_struct) +
+			    stack_defer_threshold) && esp >= tsk &&
+			    tsk != (unsigned long)ksoftirqd_task(cpu)) {
+				wakeup_softirqd(cpu);
+				local_irq_restore(flags);
+				return;
+			}
+		}
+#endif /* !CONFIG_PARISC !CONFIG_ARCH_S390 !CONFIG_X86_64 */
 
 		local_bh_disable();
 restart:

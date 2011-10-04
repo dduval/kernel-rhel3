@@ -71,8 +71,8 @@
 */
 
 
-static struct net_device *alloc_netdev(int sizeof_priv, const char *mask,
-				       void (*setup)(struct net_device *))
+struct net_device *alloc_netdev(int sizeof_priv, const char *mask,
+			        void (*setup)(struct net_device *))
 {
 	struct net_device *dev;
 	int alloc_size;
@@ -97,6 +97,7 @@ static struct net_device *alloc_netdev(int sizeof_priv, const char *mask,
 
 	return dev;
 }
+EXPORT_SYMBOL(alloc_netdev);
 
 static struct net_device *init_alloc_dev(int sizeof_priv)
 {

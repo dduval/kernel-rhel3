@@ -33,6 +33,11 @@ strncpy:
 	cmpwi	0,r0,0
 	stbu	r0,1(r6)
 	bdnzf	2,1b		/* dec ctr, branch if ctr != 0 && !cr0.eq */
+	mfctr	r5
+	cmpwi	0,r5,0
+	beqlr			/* return if dest string exhausted */
+2:	stbu	r0,1(r6)	/* store null pad in dest string */
+	bdnz	2b
 	blr
 
 	.globl	strcat

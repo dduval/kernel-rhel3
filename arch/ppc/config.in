@@ -184,6 +184,8 @@ define_bool CONFIG_BINFMT_ELF y
 define_bool CONFIG_KERNEL_ELF y
 tristate 'Kernel support for MISC binaries' CONFIG_BINFMT_MISC
 
+tristate 'System call auditing' CONFIG_AUDIT
+
 source drivers/pci/Config.in
 
 bool 'Support for hot-pluggable devices' CONFIG_HOTPLUG

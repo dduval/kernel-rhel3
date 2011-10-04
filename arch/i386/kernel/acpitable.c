@@ -213,13 +213,15 @@ __va_range(unsigned long phys, unsigned long size)
 	return ((unsigned char *) base + offset);
 }
 
+static u8 __initdata saved_rsdt_area[4096];
+
 static int __init acpi_tables_init(void)
 {
 	int result = -ENODEV;
 	acpi_table_header *header = NULL;
 	struct acpi_table_rsdp *rsdp = NULL;
 	struct acpi_table_rsdt *rsdt = NULL;
-	struct acpi_table_rsdt saved_rsdt;
+	struct acpi_table_rsdt *saved_rsdt;
 	int tables = 0;
 	int type = 0;
 	int i = 0;
@@ -262,22 +264,24 @@ static int __init acpi_tables_init(void)
 	 */
 	tables = (header->length - sizeof(acpi_table_header)) / 4;
 		    
-	memcpy(&saved_rsdt, rsdt, sizeof(saved_rsdt));
+	saved_rsdt = (struct acpi_table_rsdt *)saved_rsdt_area;
 
-	if (saved_rsdt.header.length > sizeof(saved_rsdt)) {
-		printk(KERN_WARNING "ACPI: Too big length in RSDT: %d\n", saved_rsdt.header.length);
+	if (header->length > sizeof(saved_rsdt_area)) {
+		printk(KERN_WARNING "ACPI: Too big length in RSDT: %d\n", 
+								header->length);
 		return -ENODEV;
 	}
+	memcpy(saved_rsdt, rsdt, header->length);
 
 	for (i = 0; i < tables; i++) {
 		/* Map in header, then map in full table length. */
 		header = (acpi_table_header *)
-			    __va_range(saved_rsdt.entry[i],
+			    __va_range(saved_rsdt->entry[i],
 				       sizeof(acpi_table_header));
 		if (!header)
 			break;
 		header = (acpi_table_header *)
-			    __va_range(saved_rsdt.entry[i], header->length);
+			    __va_range(saved_rsdt->entry[i], header->length);
 		if (!header)
 			break;
 
@@ -305,7 +309,7 @@ static int __init acpi_tables_init(void)
 			continue;
 			
 		result = acpi_boot_ops[type] (header,
-						 (unsigned long) saved_rsdt.
+						 (unsigned long) saved_rsdt->
 						 entry[i]);
 	}
 

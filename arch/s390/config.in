@@ -59,6 +59,11 @@ tristate 'Kernel support for MISC binaries' CONFIG_BINFMT_MISC
 bool 'Show crashed user process info' CONFIG_PROCESS_DEBUG
 bool 'Pseudo page fault support' CONFIG_PFAULT
 bool 'VM shared kernel support' CONFIG_SHARED_KERNEL
+bool 'No HZ timer ticks in idle' CONFIG_NO_IDLE_HZ
+if [ "$CONFIG_NO_IDLE_HZ" = "y" ] ; then
+  bool '  Idle HZ timer on by default' CONFIG_NO_IDLE_HZ_INIT
+fi
+tristate 'System call auditing' CONFIG_AUDIT
 endmenu
 
 source drivers/s390/Config.in

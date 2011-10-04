@@ -278,6 +278,9 @@ static inline void clear_in_cr4 (unsigned long mask)
 #define TASK_UNMAPPED_BASE	\
 	((current->thread.flags & THREAD_IA32) ? TASK_UNMAPPED_32 : TASK_UNMAPPED_64)  
 
+#define __HAVE_ARCH_ALIGN_STACK
+extern unsigned long arch_align_stack(unsigned long);
+
 /*
  * Size of io_bitmap in longwords: 32 is ports 0-0x3ff.
  */
@@ -408,10 +411,65 @@ extern unsigned long get_wchan(struct task_struct *p);
 #define init_task	(init_task_union.task)
 #define init_stack	(init_task_union.stack)
 
+struct microcode_header {
+	unsigned int hdrver;
+	unsigned int rev;
+	unsigned int date;
+	unsigned int sig;
+	unsigned int cksum;
+	unsigned int ldrver;
+	unsigned int pf;
+	unsigned int datasize;
+	unsigned int totalsize;
+	unsigned int reserved[3];
+};
+
+struct microcode {
+	struct microcode_header hdr;
+	unsigned int bits[0];
+};
+
+typedef struct microcode microcode_t;
+typedef struct microcode_header microcode_header_t;
+
+/* microcode format is extended from prescott processors */
+struct extended_signature {
+	unsigned int sig;
+	unsigned int pf;
+	unsigned int cksum;
+};
+
+struct extended_sigtable {
+	unsigned int count;
+	unsigned int cksum;
+	unsigned int reserved[3];
+	struct extended_signature sigs[0];
+};
+
+/* '6' because it used to be for P6 only (but now covers Pentium 4 as well) */
+#define MICROCODE_IOCFREE	_IO('6',0)
+
 /* REP NOP (PAUSE) is a good thing to insert into busy-wait loops. */
 extern inline void rep_nop(void)
 {
 	__asm__ __volatile__("rep;nop" ::: "memory");
+}
+
+static __inline__ void __monitor(const void *eax, unsigned long ecx,
+               unsigned long edx)
+{
+       /* "monitor %eax,%ecx,%edx;" */
+       asm volatile(
+               ".byte 0x0f,0x01,0xc8;"
+               : :"a" (eax), "c" (ecx), "d"(edx));
+}
+
+static __inline__ void __mwait(unsigned long eax, unsigned long ecx)
+{
+       /* "mwait %eax,%ecx;" */
+       asm volatile(
+               ".byte 0x0f,0x01,0xc9;"
+               : :"a" (eax), "c" (ecx));
 }
 
 /* Avoid speculative execution by the CPU */

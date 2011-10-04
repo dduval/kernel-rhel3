@@ -155,7 +155,8 @@ extern __inline__ int get_order(unsigned long size)
 				 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
 
 #define VM_DATA_DEFAULT_FLAGS \
-	((current->thread.flags & THREAD_IA32) ? vm_data_default_flags32 : \
+	((current->thread.flags & THREAD_IA32) ? \
+	 (vm_data_default_flags32 & ~((current->flags & PF_RELOCEXEC) ? VM_EXEC : 0)): \
 	  vm_data_default_flags) 
 #define VM_STACK_FLAGS	vm_stack_flags
 

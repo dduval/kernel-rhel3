@@ -1289,7 +1289,11 @@ int do_munmap(struct mm_struct *mm, unsigned long addr, size_t len, int acct)
 	if (extra)
 		kmem_cache_free(vm_area_cachep, extra);
 
-	free_pgtables(mm, prev, addr, addr+len);
+	if (is_hugepage_only_range(addr, len))
+		hugetlb_free_pgtables(mm, prev, addr, addr+len);
+	else
+		free_pgtables(mm, prev, addr, addr+len);
+
 	if(acct) vm_validate_enough("exit -ok- do_munmap");
 
 	return 0;

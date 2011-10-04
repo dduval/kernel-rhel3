@@ -131,6 +131,8 @@
 /* 5.30.00  - use __devexit_p()                                              */
 /* 6.00.00  - Add 6x Adapters and Battery Flash                              */
 /* 6.10.00  - Remove 1G Addressing Limitations                               */
+/* 6.11.xx  - Get VersionInfo buffer off the stack !              DDTS 60401 */
+/* 6.11.xx  - Make Logical Drive Info structure safe for DMA      DDTS 60639 */
 /*****************************************************************************/
 
 /*
@@ -196,8 +198,8 @@ MODULE_PARM(ips, "s");
 /*
  * DRIVER_VER
  */
-#define IPS_VERSION_HIGH        "6.10"
-#define IPS_VERSION_LOW         ".52 "
+#define IPS_VERSION_HIGH        "6.11"
+#define IPS_VERSION_LOW         ".07 "
 
 #if !defined(__i386__) && !defined(__ia64__) && !defined(__x86_64__)
 #error "This driver has only been tested on the x86/ia64/x86_64 platforms"
@@ -469,8 +471,7 @@ int ips_proc_info(char *, char **, off_t, int, int, int);
 static int ips_host_info(ips_ha_t *, char *, off_t, int);
 static void copy_mem_info(IPS_INFOSTR *, char *, int);
 static int copy_info(IPS_INFOSTR *, char *, ...);
-static int ips_get_version_info(ips_ha_t * ha, IPS_VERSION_DATA * Buffer,
-				int intr);
+static int ips_get_version_info(ips_ha_t * ha, dma_addr_t, int intr);
 static void ips_version_check(ips_ha_t * ha, int intr);
 static int ips_abort_init(ips_ha_t * ha, int index);
 static int ips_init_phase2(int index);
@@ -2785,6 +2786,11 @@ ips_next(ips_ha_t * ha, int intr)
 		scb->dcdb.cmd_attribute =
 		    ips_command_direction[scb->scsi_cmd->cmnd[0]];
 
+        /* Allow a WRITE BUFFER Command to Have no Data */
+        /* This is Used by Tape Flash Utilites          */
+        if ((scb->scsi_cmd->cmnd[0] == WRITE_BUFFER) && (scb->data_len == 0)) 
+            scb->dcdb.cmd_attribute = 0;                  
+
 		if (!(scb->dcdb.cmd_attribute & 0x3))
 			scb->dcdb.transfer_length = 0;
 
@@ -3765,23 +3771,14 @@ ips_send_cmd(ips_ha_t * ha, ips_scb_t * scb)
 					scb->scsi_cmd->result = DID_OK << 16;
 				}
 			} else {
-				scb->cmd.logical_info.op_code =
-				    IPS_CMD_GET_LD_INFO;
-				scb->cmd.logical_info.command_id =
-				    IPS_COMMAND_ID(ha, scb);
+				scb->cmd.logical_info.op_code = IPS_CMD_GET_LD_INFO;
+				scb->cmd.logical_info.command_id = IPS_COMMAND_ID(ha, scb);
 				scb->cmd.logical_info.reserved = 0;
 				scb->cmd.logical_info.reserved2 = 0;
-				scb->data_len =
-				    sizeof (ha->adapt->logical_drive_info);
-				scb->data_busaddr =
-				    pci_map_single(ha->pcidev,
-						   &ha->adapt->
-						   logical_drive_info,
-						   scb->data_len,
-						   IPS_DMA_DIR(scb));
-				scb->flags |= IPS_SCB_MAP_SINGLE;
-				scb->cmd.logical_info.buffer_addr =
-				    scb->data_busaddr;
+				scb->data_len = sizeof (IPS_LD_INFO);
+				scb->data_busaddr = ha->logical_drive_info_dma_addr;
+				scb->flags = 0;
+				scb->cmd.logical_info.buffer_addr = scb->data_busaddr;
 				ret = IPS_SUCCESS;
 			}
 
@@ -3915,18 +3912,13 @@ ips_send_cmd(ips_ha_t * ha, ips_scb_t * scb)
 
 		case READ_CAPACITY:
 			scb->cmd.logical_info.op_code = IPS_CMD_GET_LD_INFO;
-			scb->cmd.logical_info.command_id =
-			    IPS_COMMAND_ID(ha, scb);
+			scb->cmd.logical_info.command_id = IPS_COMMAND_ID(ha, scb);
 			scb->cmd.logical_info.reserved = 0;
 			scb->cmd.logical_info.reserved2 = 0;
 			scb->cmd.logical_info.reserved3 = 0;
-			scb->data_len = sizeof (ha->adapt->logical_drive_info);
-			scb->data_busaddr = pci_map_single(ha->pcidev,
-							   &ha->adapt->
-							   logical_drive_info,
-							   scb->data_len,
-							   IPS_DMA_DIR(scb));
-			scb->flags |= IPS_SCB_MAP_SINGLE;
+			scb->data_len = sizeof (IPS_LD_INFO);
+            scb->data_busaddr = ha->logical_drive_info_dma_addr;
+			scb->flags = 0;
 			scb->cmd.logical_info.buffer_addr = scb->data_busaddr;
 			ret = IPS_SUCCESS;
 			break;
@@ -4250,19 +4242,17 @@ ips_online(ips_ha_t * ha, ips_scb_t * scb)
 		return (0);
 
 	if ((scb->basic_status & IPS_GSC_STATUS_MASK) > 1) {
-		memset(&ha->adapt->logical_drive_info, 0,
-		       sizeof (ha->adapt->logical_drive_info));
-
-		return (0);
+		memset(ha->logical_drive_info, 0, sizeof (IPS_LD_INFO));
+        return (0);
 	}
 
-	if (ha->adapt->logical_drive_info.drive_info[scb->target_id].state !=
+	if (ha->logical_drive_info->drive_info[scb->target_id].state !=
 	    IPS_LD_OFFLINE
-	    && ha->adapt->logical_drive_info.drive_info[scb->target_id].state !=
+	    && ha->logical_drive_info->drive_info[scb->target_id].state !=
 	    IPS_LD_FREE
-	    && ha->adapt->logical_drive_info.drive_info[scb->target_id].state !=
+	    && ha->logical_drive_info->drive_info[scb->target_id].state !=
 	    IPS_LD_CRS
-	    && ha->adapt->logical_drive_info.drive_info[scb->target_id].state !=
+	    && ha->logical_drive_info->drive_info[scb->target_id].state !=
 	    IPS_LD_SYS) return (1);
 	else
 		return (0);
@@ -4324,7 +4314,7 @@ ips_rdcap(ips_ha_t * ha, ips_scb_t * scb)
 
 	cap.lba =
 	    cpu_to_be32(le32_to_cpu
-			(ha->adapt->logical_drive_info.
+			(ha->logical_drive_info->
 			 drive_info[scb->target_id].sector_count) - 1);
 	cap.len = cpu_to_be32((uint32_t) IPS_BLKSIZE);
 
@@ -4479,6 +4469,14 @@ ips_free(ips_ha_t * ha)
 					    sizeof (IPS_IO_CMD), ha->adapt,
 					    ha->adapt->hw_status_start);
 			ha->adapt = NULL;
+		}  	
+        	
+        if (ha->logical_drive_info) {
+			pci_free_consistent(ha->pcidev,
+					    sizeof (IPS_LD_INFO),
+                        ha->logical_drive_info,
+					    ha->logical_drive_info_dma_addr);
+			ha->logical_drive_info = NULL;
 		}
 
 		if (ha->nvram) {
@@ -4670,6 +4668,7 @@ ips_getscb(ips_ha_t * ha)
 	}
 
 	ha->scb_freelist = scb->q_next;
+    scb->flags = 0;
 	scb->q_next = NULL;
 
 	ips_init_scb(ha, scb);
@@ -6719,15 +6718,17 @@ ips_verify_bios_memio(ips_ha_t * ha, char *buffer, uint32_t buffersize,
 static void
 ips_version_check(ips_ha_t * ha, int intr)
 {
-	IPS_VERSION_DATA VersionInfo;
+	IPS_VERSION_DATA *VersionInfo;
 	uint8_t FirmwareVersion[IPS_COMPAT_ID_LENGTH + 1];
 	uint8_t BiosVersion[IPS_COMPAT_ID_LENGTH + 1];
 	int MatchError;
-	int rc;
+	int  rc;
 	char BiosString[10];
 	char FirmwareString[10];
 
 	METHOD_TRACE("ips_version_check", 1);
+
+    VersionInfo = ( IPS_VERSION_DATA * ) ha->ioctl_data;
 
 	memset(FirmwareVersion, 0, IPS_COMPAT_ID_LENGTH + 1);
 	memset(BiosVersion, 0, IPS_COMPAT_ID_LENGTH + 1);
@@ -6738,10 +6739,11 @@ ips_version_check(ips_ha_t * ha, int intr)
 
 	rc = IPS_FAILURE;
 	if (ha->subsys->param[4] & IPS_GET_VERSION_SUPPORT) {	/* If Versioning is Supported */
+        memset( VersionInfo, 0, sizeof (IPS_VERSION_DATA));
 		/* Get the Version Info with a Get Version Command */
-		rc = ips_get_version_info(ha, &VersionInfo, intr);
+		rc = ips_get_version_info(ha, ha->ioctl_busaddr, intr);
 		if (rc == IPS_SUCCESS)
-			memcpy(FirmwareVersion, VersionInfo.compatibilityId,
+			memcpy(FirmwareVersion, VersionInfo->compatibilityId,
 			       IPS_COMPAT_ID_LENGTH);
 	}
 
@@ -6804,14 +6806,13 @@ ips_version_check(ips_ha_t * ha, int intr)
 /*     0 if Successful, else non-zero                                        */
 /*---------------------------------------------------------------------------*/
 static int
-ips_get_version_info(ips_ha_t * ha, IPS_VERSION_DATA * Buffer, int intr)
+ips_get_version_info(ips_ha_t * ha, dma_addr_t Buffer, int intr)
 {
 	ips_scb_t *scb;
 	int rc;
 
 	METHOD_TRACE("ips_get_version_info", 1);
 
-	memset(Buffer, 0, sizeof (IPS_VERSION_DATA));
 	scb = &ha->scbs[ha->max_cmds - 1];
 
 	ips_init_scb(ha, scb);
@@ -6823,11 +6824,10 @@ ips_get_version_info(ips_ha_t * ha, IPS_VERSION_DATA * Buffer, int intr)
 	scb->cmd.version_info.reserved = 0;
 	scb->cmd.version_info.count = sizeof (IPS_VERSION_DATA);
 	scb->cmd.version_info.reserved2 = 0;
-	scb->data_len = sizeof (*Buffer);
-	scb->data_busaddr = pci_map_single(ha->pcidev, Buffer,
-					   scb->data_len, IPS_DMA_DIR(scb));
-	scb->cmd.version_info.buffer_addr = scb->data_busaddr;
-	scb->flags |= IPS_SCB_MAP_SINGLE;
+	scb->data_len = sizeof (IPS_VERSION_DATA);
+    scb->data_busaddr = Buffer;
+	scb->cmd.version_info.buffer_addr = Buffer;
+	scb->flags = 0;
 
 	/* issue command */
 	rc = ips_send_wait(ha, scb, ips_cmd_timeout, intr);
@@ -7290,7 +7290,16 @@ ips_init_phase1(struct pci_dev *pci_dev, int *indexPtr)
 	}
 	ha->adapt->hw_status_start = dma_address;
 	ha->dummy = (void *) (ha->adapt + 1);
-
+    
+	ha->logical_drive_info = pci_alloc_consistent(pci_dev, sizeof (IPS_LD_INFO),
+                                                  &dma_address);
+	if (!ha->logical_drive_info) {
+		printk(KERN_WARNING
+		       "Unable to allocate host logical drive info structure\n");
+		return ips_abort_init(ha, index);
+	}
+	ha->logical_drive_info_dma_addr = dma_address;
+    
 	ha->conf = kmalloc(sizeof (IPS_CONF), GFP_KERNEL);
 
 	if (!ha->conf) {

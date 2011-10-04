@@ -63,10 +63,16 @@ extern long _get_L2CR(void);
 extern void _set_L2CR(unsigned long);
 extern void giveup_fpu(struct task_struct *);
 extern void enable_kernel_fp(void);
+extern void giveup_altivec(struct task_struct *);
+extern void load_up_altivec(struct task_struct *);
 extern void cvt_fd(float *from, double *to, unsigned long *fpscr);
 extern void cvt_df(double *from, float *to, unsigned long *fpscr);
 extern int abs(int);
 extern void cacheable_memzero(void *p, unsigned int nb);
+
+#ifdef CONFIG_JS20
+extern int is_js20;
+#endif
 
 struct device_node;
 

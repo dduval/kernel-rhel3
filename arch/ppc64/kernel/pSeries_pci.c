@@ -529,8 +529,20 @@ alloc_phb(struct device_node *dev, char *model, unsigned int addr_size_words)
 	***************************************************************/
 	} else { 
 		PPCDBG(PPCDBG_PHBINIT, "\tUnknown PHB Type!\n");
-		printk("PCI: Unknown Phb Type!\n");
-		return NULL;
+		if (systemcfg->platform == PLATFORM_PSERIES_LPAR) {
+
+			phb=pci_alloc_pci_controller("PHB UK",phb_type_unknown);
+			if (phb == NULL) return NULL;
+
+			phb->cfg_addr = NULL;
+			phb->cfg_data = NULL; 
+			phb->phb_regs = NULL;
+			phb->chip_regs = NULL;
+		} else {
+			printk("PCI: Unknown Phb Type!\n");
+			return NULL;
+		}
+ 
 	}
 
 	/* Add a linux,phbnum property to the device tree so user code

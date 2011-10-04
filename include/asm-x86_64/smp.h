@@ -36,6 +36,9 @@ extern unsigned long phys_cpu_present_map;
 extern unsigned long cpu_online_map;
 extern volatile unsigned long smp_invalidate_needed;
 extern int pic_mode;
+extern int smp_num_siblings;
+extern int cpu_sibling_map[];
+
 extern void smp_flush_tlb(void);
 extern void smp_message_irq(int cpl, void *dev_id, struct pt_regs *regs);
 extern void smp_send_reschedule(int cpu);
@@ -97,8 +100,13 @@ extern __inline int hard_smp_processor_id(void)
 
 extern int apic_disabled;
 extern int slow_smp_processor_id(void);
+#ifndef CONFIG_IA32E
 #define safe_smp_processor_id() \
 	(!apic_disabled ? hard_smp_processor_id() : slow_smp_processor_id())
+#else
+#define safe_smp_processor_id() \
+	(!apic_disabled ? x86_apicid_to_cpu[hard_smp_processor_id()] : 0)
+#endif
 
 #endif /* !ASSEMBLY */
 

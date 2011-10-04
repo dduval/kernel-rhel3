@@ -45,6 +45,7 @@ main(void)
 	DEFINE(LAST_SYSCALL, offsetof(struct thread_struct, last_syscall));
 	DEFINE(PT_REGS, offsetof(struct thread_struct, regs));
 	DEFINE(PT_TRACESYS, PT_TRACESYS);
+	DEFINE(PT_AUDITED, PT_AUDITED);
 	DEFINE(TASK_FLAGS, offsetof(struct task_struct, flags));
 	DEFINE(TASK_PTRACE, offsetof(struct task_struct, ptrace));
 	DEFINE(NEED_RESCHED, offsetof(struct task_struct, need_resched));

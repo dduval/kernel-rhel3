@@ -23,6 +23,9 @@ extern void iommu_hole_init(void);
 
 extern void do_softirq_thunk(void);
 
+extern void swiotlb_init(void);
+extern int setup_io_tlb_npages(char *);
+
 extern int setup_early_printk(char *); 
 extern void early_printk(const char *fmt, ...) __attribute__((format(printf,1,2)));
 
@@ -38,6 +41,8 @@ extern unsigned long start_pfn, end_pfn, end_pfn_map;
 
 extern void show_stack(unsigned long * rsp);
 extern void show_trace(unsigned long *stack);
+
+extern int iommu_aperture;
 
 long do_arch_prctl(struct task_struct *task, int code, unsigned long addr);
 

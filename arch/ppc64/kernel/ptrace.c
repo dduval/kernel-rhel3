@@ -25,6 +25,7 @@
 #include <linux/errno.h>
 #include <linux/ptrace.h>
 #include <linux/user.h>
+#include <linux/audit.h>
 
 #include <asm/uaccess.h>
 #include <asm/page.h>
@@ -66,6 +67,32 @@ static inline int put_reg(struct task_struct *task, int regno,
 	}
 	return -EIO;
 }
+
+#ifdef CONFIG_ALTIVEC
+/*
+ * Get contents of AltiVec register state in task TASK
+ */
+static inline int get_vrregs(unsigned long data, struct task_struct *task)
+{
+	if (!task->thread.vmx_regs)
+		return -EIO;
+
+	return (copy_to_user((void *)data, task->thread.vmx_regs,
+			sizeof(struct altivec_regs)) ? -EFAULT : 0 );
+}
+
+/*
+ * Write contents of AltiVec register state into task TASK.
+ */
+static inline int set_vrregs(struct task_struct *task, unsigned long data)
+{
+	if (!task->thread.vmx_regs)
+		return -EIO;
+
+	return (copy_from_user(task->thread.vmx_regs,(void *)data,
+			sizeof(struct altivec_regs)) ? -EFAULT : 0 );
+}
+#endif
 
 static inline void
 set_single_step(struct task_struct *task)
@@ -316,6 +343,23 @@ int sys_ptrace(long request, long pid, long addr, long data)
 		}
 		break;
 	}
+#ifdef CONFIG_ALTIVEC
+	case PPC_PTRACE_GETVRREGS:
+		/* Get the child altivec register state. */
+		if (child->thread.regs->msr & MSR_VEC)
+			giveup_altivec(child);
+		ret = get_vrregs(data, child);
+		break;
+
+	case PPC_PTRACE_SETVRREGS:
+		/* Set the child altivec register state. */
+		/* this is to clear the MSR_VEC bit to force a reload
+		 * of register state from memory */
+		if (child->thread.regs->msr & MSR_VEC)
+			giveup_altivec(child);
+		ret = set_vrregs(child,data);
+		break;
+#endif
 
 	default:
 		ret = -EIO;
@@ -328,11 +372,8 @@ out:
 	return ret;
 }
 
-void syscall_trace(void)
+static void syscall_ptrace(void)
 {
-  if ((current->ptrace & (PT_PTRACED|PT_TRACESYS))
-			!= (PT_PTRACED|PT_TRACESYS))
-		return;
 	current->exit_code = SIGTRAP;
 	current->state = TASK_STOPPED;
 	notify_parent(current, SIGCHLD);
@@ -347,4 +388,22 @@ void syscall_trace(void)
 		current->exit_code = 0;
 	}
 	recalc_sigpending();
+}
+
+void syscall_trace_enter(struct pt_regs *regs)
+{
+	if ((current->ptrace & (PT_PTRACED|PT_TRACESYS)) == (PT_PTRACED|PT_TRACESYS))
+		syscall_ptrace();
+
+	if (isaudit(current) && (current->ptrace & PT_AUDITED))
+		audit_intercept(regs);
+}
+
+void syscall_trace_leave(struct pt_regs *regs)
+{
+	if (isaudit(current) && (current->ptrace & PT_AUDITED))
+		audit_result(regs);
+
+	if ((current->ptrace & (PT_PTRACED|PT_TRACESYS)) == (PT_PTRACED|PT_TRACESYS))
+		syscall_ptrace();
 }

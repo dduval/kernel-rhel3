@@ -24,6 +24,12 @@
 #define MAX_ERRINJCT_TOKENS 8 /* Max # tokens. */
 #define WORKSPACE_SIZE 1024 
 
+/* Extended Delay Interrupted by Signal */
+#define RTAS_DELAY_INTR -1098
+
+/* Buffer size for ppc64_rtas system call. */
+#define RTAS_RMOBUF_MAX (64 * 1024)
+
 /*
  * In general to call RTAS use rtas_token("string") to lookup
  * an RTAS token for the given string (e.g. "event-scan").
@@ -182,6 +188,13 @@ extern int rtas_errinjct_close(unsigned int);
 extern struct proc_dir_entry *rtas_proc_dir;
 extern struct errinjct_token ei_token_list[MAX_ERRINJCT_TOKENS];
 
+/* Given an RTAS status code of 9900..9905 compute the hinted delay */
+extern int rtas_do_extended_delay(int status);
+static inline int rtas_is_extended_busy(int status)
+{
+	return status >= 9900 && status <= 9905;
+}
+
 extern void pSeries_log_error(char *buf, unsigned int err_type, int fatal);
 
 /* Error types logged.  */
@@ -214,5 +227,7 @@ extern void pSeries_log_error(char *buf, unsigned int err_type, int fatal);
 #define RTAS_DATA_BUF_SIZE 4096
 extern spinlock_t rtas_data_buf_lock;
 extern char rtas_data_buf[RTAS_DATA_BUF_SIZE];
+/* RMO buffer reserved for user-space RTAS use */
+extern unsigned long rtas_rmo_buf;
 
 #endif /* _PPC64_RTAS_H */

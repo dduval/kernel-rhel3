@@ -15,7 +15,7 @@ dep_tristate '   Experimental QLogic 2100 support' CONFIG_FC_QLA2100 $CONFIG_PCI
 dep_tristate '   Experimental QLogic 2200 support' CONFIG_FC_QLA2200 $CONFIG_PCI m
 dep_tristate '   Experimental QLogic 2300 support' CONFIG_FC_QLA2300 $CONFIG_PCI m
 dep_tristate '   iSCSI support (scsi-over-network)' CONFIG_SCSI_ISCSI $CONFIG_SCSI m
-dep_tristate '   IBM ServeRAID driver v6.00.26' CONFIG_SCSI_IPS_60026 $CONFIG_SCSI $CONFIG_PCI m
+dep_tristate '   IBM native DASD driver for iSeries, pSeries (ipr)' CONFIG_SCSI_IPR $CONFIG_SCSI $CONFIG_PCI m
 
 
 endmenu

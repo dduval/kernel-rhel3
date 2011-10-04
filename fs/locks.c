@@ -1361,6 +1361,41 @@ out_unlock:
 	return error;
 }
 
+/*
+ * Wrapper function around the file_operations lock routine when called for
+ * flock().  The lock routine is called for both fcntl() and flock(), so
+ * the flock parameters must be translated to an equivalent fcntl()-like
+ * lock.
+ */
+int flock_fs_file(struct file *filp, int type, unsigned int cmd)
+{
+	int error;
+	struct file_lock fl;
+
+	/*
+	 * Don't use locks_alloc_lock() (or flock_make_lock()) here, as
+	 * this is just a temporary lock structure.  We especially don't
+	 * want to fail because we couldn't allocate a lock structure if
+	 * this is an unlock operation.
+	 */
+	fl.fl_owner = NULL;
+	fl.fl_file = filp;
+	fl.fl_pid = current->pid;
+	fl.fl_flags = FL_FLOCK;
+	fl.fl_type = type;
+	fl.fl_start = 0;
+	fl.fl_end = OFFSET_MAX;
+	fl.fl_notify = NULL;
+	fl.fl_insert = NULL;
+	fl.fl_remove = NULL;
+
+	error = filp->f_op->lock(filp,
+				 (((cmd&LOCK_NB)==LOCK_NB)?F_SETLK:F_SETLKW),
+				 &fl);
+
+	return error;
+}
+
 /**
  *	sys_flock: - flock() system call.
  *	@fd: the file descriptor to lock.
@@ -1404,8 +1439,63 @@ asmlinkage long sys_flock(unsigned int fd, unsigned int cmd)
 		goto out_putf;
 
 	lock_kernel();
+
+	/*
+	 * Execute any filesystem-specific flock routines.  The filesystem may
+	 * maintain supplemental locks.  This code allows the supplemental locks
+	 * to be kept in sync with the vfs flock lock.  If flock() is called on
+	 * a lock already held for the given filp, the current flock lock is
+	 * dropped before obtaining the requested lock.  This unlock operation
+	 * must be completed for the any filesystem specific locks and the vfs
+	 * flock lock before proceeding with obtaining the requested lock.  When
+	 * the filesystem routine drops a lock for such a request, it must
+	 * return -EDEADLK, allowing the vfs lock to be dropped, and the
+	 * filesystem code is then re-executed to obtain the lock.
+	 *
+	 * A non-blocking request that returns EWOULDBLOCK also causes any vfs
+	 * flock lock to be released, but then returns the error to the caller.
+	 */
+	if (filp->f_op && filp->f_op->lock) {
+repeat:
+		error = flock_fs_file(filp, type, cmd);
+
+		if (error < 0) {
+			/*
+			 * We may have dropped a lock.  We need to
+			 * finish unlocking before returning or
+			 * continuing with lock acquisition.
+			 */
+			if (error != -ENOLCK)
+				flock_lock_file(filp, F_UNLCK, 0);
+
+			/*
+			 * We already held the lock in some mode, and
+			 * had to drop filesystem-specific locks before
+			 * proceeding.  We come back through this
+			 * routine to unlock the vfs flock lock.  Now go
+			 * back and try again.  Using EAGAIN as the
+			 * error here would be better, but the one valid
+			 * error value defined for flock(), EWOULDBLOCK,
+			 * is defined as EAGAIN.
+			 */
+			if (error == -EDEADLK)
+				goto repeat;
+
+			goto out_unlock_putf;
+		}
+	}
+
 	error = flock_lock_file(filp, type,
 				(cmd & (LOCK_UN | LOCK_NB)) ? 0 : 1);
+
+	/*
+	 * If we failed to get the vfs flock, we need to clean up any
+	 * filesystem-specific lock state that we previously obtained.
+	 */
+	if (error && filp->f_op && filp->f_op->lock)
+		flock_fs_file(filp, F_UNLCK, 0);	
+
+out_unlock_putf:
 	unlock_kernel();
 
 out_putf:
@@ -1766,6 +1856,7 @@ void locks_remove_flock(struct file *filp)
 	struct inode * inode = filp->f_dentry->d_inode; 
 	struct file_lock *fl;
 	struct file_lock **before;
+	struct file_lock file_lock;
 
 	if (!inode->i_flock)
 		return;
@@ -1776,7 +1867,13 @@ void locks_remove_flock(struct file *filp)
 	while ((fl = *before) != NULL) {
 		if (fl->fl_file == filp) {
 			if (fl->fl_flags & FL_FLOCK) {
+				if (filp->f_op && filp->f_op->lock) {
+					file_lock = *fl;
+					file_lock.fl_type = F_UNLCK;
+				}
 				locks_delete_lock(before, 0);
+				if (filp->f_op && filp->f_op->lock)
+					filp->f_op->lock(filp, F_SETLK, &file_lock);
 				continue;
 			}
 			if (fl->fl_flags & FL_LEASE) {

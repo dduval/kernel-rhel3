@@ -2,7 +2,7 @@
  *                  QLOGIC LINUX SOFTWARE
  *
  * QLogic ISP2x00 device driver for Linux 2.4.x
- * Copyright (C) 2003 Qlogic Corporation
+ * Copyright (C) 2003 QLogic Corporation
  * (www.qlogic.com)
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -82,6 +82,7 @@
 #define FO_NOTIFY_TYPE_CDB                    2
 #define FO_NOTIFY_TYPE_LOGOUT_OR_LUN_RESET    3
 #define FO_NOTIFY_TYPE_LOGOUT_OR_CDB          4
+#define FO_NOTIFY_TYPE_SPINUP		      5
 
 #define FO_NOTIFY_TYPE_MIN                FO_NOTIFY_TYPE_NONE
 #define FO_NOTIFY_TYPE_MAX                FO_NOTIFY_TYPE_LOGOUT_OR_CDB

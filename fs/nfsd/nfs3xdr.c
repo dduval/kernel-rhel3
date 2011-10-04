@@ -161,21 +161,11 @@ encode_fattr3(struct svc_rqst *rqstp, u32 *p, struct svc_fh *fhp)
 	struct inode	*inode = fhp->fh_dentry->d_inode;
 	mode_t		mode = inode->i_mode;
 
-	if (IS_POSIXACL(inode) && EX_ACL(fhp->fh_export)) {
+	if (IS_POSIXACL(inode) && EX_NOACL(fhp->fh_export)) {
 		struct posix_acl *acl = nfsd_get_posix_acl(fhp,ACL_TYPE_ACCESS);
-		/*
-		 * If IS_ERR(acl) is true, there is really not much that can
-		 * be done at this point since returning zero just causes
-		 * the client to retry (forever) and returning something
-		 * like EOPNOTSUPP for a getattr really doesn't make much
-		 * sense either. So if there is an error, its ignored
-		 * and things go on as if it never happen...
-		 */
 		if (!IS_ERR(acl) && acl) {
-			int error = posix_acl_masq_nfs_mode(acl, &mode);
+			posix_acl_masq_nfs_mode(acl, &mode);
 			posix_acl_release(acl);
-			if (error)
-				mode = inode->i_mode;
 		}
 	}
 

@@ -57,7 +57,8 @@
 /* Tell string.h we don't want memcpy etc. as cpp defines */
 #define EXPORT_SYMTAB_STROPS
 
-extern void syscall_trace(void);
+extern void syscall_trace_enter(void);
+extern void syscall_trace_leave(void);
 extern void do_IRQ(struct pt_regs *regs, int isfake);
 extern void SystemResetException(struct pt_regs *regs);
 extern void MachineCheckException(struct pt_regs *regs);
@@ -86,7 +87,10 @@ extern int shared_task_unmark();
 #endif
 
 EXPORT_SYMBOL(do_signal);
-EXPORT_SYMBOL(syscall_trace);
+#if !defined(CONFIG_AUDIT) && !defined(CONFIG_AUDIT_MODULE)
+EXPORT_SYMBOL(syscall_trace_enter);
+EXPORT_SYMBOL(syscall_trace_leave);
+#endif
 EXPORT_SYMBOL(do_IRQ);
 EXPORT_SYMBOL(SystemResetException);
 EXPORT_SYMBOL(MachineCheckException);
@@ -258,6 +262,9 @@ EXPORT_SYMBOL(device_is_compatible);
 EXPORT_SYMBOL(machine_is_compatible);
 EXPORT_SYMBOL(find_all_nodes);
 EXPORT_SYMBOL(get_property);
+#ifdef CONFIG_JS20
+EXPORT_SYMBOL(is_js20);
+#endif
 
 #ifdef CONFIG_PPC_PSERIES
 EXPORT_SYMBOL(rtas_proc_dir);
@@ -266,6 +273,7 @@ EXPORT_SYMBOL(rtas_token);
 EXPORT_SYMBOL(rtas_call);
 EXPORT_SYMBOL(rtas_data_buf);
 EXPORT_SYMBOL(rtas_data_buf_lock);
+EXPORT_SYMBOL(rtas_do_extended_delay);
 #endif
 
 #ifndef CONFIG_PPC_ISERIES

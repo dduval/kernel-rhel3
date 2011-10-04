@@ -50,21 +50,27 @@ asmlinkage void ret_from_fork(void) __asm__("ret_from_fork");
  * The idle loop on a S390...
  */
 
-int cpu_idle(void *unused)
+int cpu_idle(void)
 {
 	psw_t wait_psw;
 	unsigned long reg;
 
 	while (1) {
+		__cli();
 		if (current->need_resched) {
+			__sti();
 			schedule();
 			check_pgt_cache();
 			continue;
 		}
 
+#ifdef CONFIG_NO_IDLE_HZ
+		stop_hz_timer();
+#endif
+
 		/* 
 		 * Wait for external, I/O or machine check interrupt and
-		 * switch of machine check bit after the wait has ended.
+		 * switch off machine check bit after the wait has ended.
 		 */
 		wait_psw.mask = _WAIT_PSW_MASK;
 		asm volatile (
@@ -77,6 +83,10 @@ int cpu_idle(void *unused)
 			"    lpswe 0(%1)\n"
 			"1:"
 			: "=&a" (reg) : "a" (&wait_psw) : "memory", "cc" );
+		/*
+		 * start_hz_timer is called by monitor call in entry.S
+		 * if stop_hz_timer switched off the regular HZ interrupts
+		 */
 	}
 }
 

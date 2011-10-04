@@ -385,6 +385,11 @@ STATIC int scsi_eh_retry_command(Scsi_Cmnd * SCpnt)
 {
 	do {
 		scsi_setup_cmd_retry(SCpnt);
+        	/*
+        	 * Zero the sense information from the last time we tried
+        	 * this command.
+        	 */
+		memset((void *) SCpnt->sense_buffer, 0, sizeof SCpnt->sense_buffer);
 		scsi_send_eh_cmnd(SCpnt, SCpnt->timeout_per_command);
 	} while (SCpnt->eh_state == NEEDS_RETRY);
 
@@ -689,6 +694,10 @@ STATIC void scsi_send_eh_cmnd(Scsi_Cmnd * SCpnt, int timeout)
 		case NEEDS_RETRY:
 		case SUCCESS:
 			SCpnt->eh_state = ret;
+			break;
+		/* Error Handling commands are sync, so don't queue to MLQUEUE */
+		case ADD_TO_MLQUEUE:
+			SCpnt->eh_state = NEEDS_RETRY;
 			break;
 		}
 	} else {
@@ -1196,6 +1205,9 @@ STATIC int scsi_check_sense(Scsi_Cmnd * SCpnt)
 		return /* SOFT_ERROR */ SUCCESS;
 
 	case ABORTED_COMMAND:
+		if (SCpnt->device->retry_aborted_cmd &&
+		    SCpnt->sc_data_direction == SCSI_DATA_WRITE)
+			return ADD_TO_MLQUEUE;
 		return NEEDS_RETRY;
 	case NOT_READY:
 	case UNIT_ATTENTION:
@@ -1418,7 +1430,7 @@ STATIC int scsi_unjam_host(struct Scsi_Host *host)
 				SCpnt->host->host_failed--;
 				scsi_eh_finish_command(&SCdone, SCpnt);
 			}
-			if (result != NEEDS_RETRY) {
+			if (result != NEEDS_RETRY && result != ADD_TO_MLQUEUE) {
 				continue;
 			}
 			/* 

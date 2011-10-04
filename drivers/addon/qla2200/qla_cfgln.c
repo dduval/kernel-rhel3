@@ -2,7 +2,7 @@
  *                  QLOGIC LINUX SOFTWARE
  *
  * QLogic ISP2x00 device driver for Linux 2.4.x
- * Copyright (C) 2003 Qlogic Corporation
+ * Copyright (C) 2003 QLogic Corporation
  * (www.qlogic.com)
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -19,7 +19,7 @@
 
 /*
  * QLogic ISP2x00 Multi-path LUN Support Driver 
- * Solaris specific functions
+ * Linux specific functions
  *
  */
 
@@ -392,9 +392,36 @@ qla2x00_cfg_build_path_tree(scsi_qla_host_t *ha)
 				    port->port_name[4], port->port_name[5],
 				    port->port_name[6], port->port_name[7],
 				    tgt, port->mp_byte);)
+#if  0	/* not supported */
+				/* To do the lun binding: Create a fclun for each
+				 * lun the user has specified, so a mp_lun can be
+				 * created for each.
+				 */
+				for (lun = 0; lun < MAX_LUNS_PER_DEVICE && ; lun++) {
+					if( !ql2xdevflag ) 
+	 					sprintf(propbuf, "scsi-qla%ld-tgt-%d-lun-%d-lunid", 
+	 						ha->instance, tgt, lun); 
+					else 
+						sprintf(propbuf, "%ld-%d-%d-l", ha->instance, 
+							tgt, lun);
+
+					DEBUG(printk("build_tree: %s\n",propbuf);)
+
+					/* allocate space for mp_lun and fclun */
+
+					rval = qla2x00_get_prop_xstr(ha, propbuf,
+				    	mplun->wwuln, 32);
+					if (rval != 32)
+						continue;
+
+				}
+#endif
 
 				qla2x00_update_mp_device(host, port, tgt,
 				    dev_no);
+
+				/* free any mplun info */
+
 				qla2x00_set_lun_data_from_config(host,
 				    port, tgt, dev_no);
 			}
@@ -418,7 +445,7 @@ qla2x00_cfg_build_path_tree(scsi_qla_host_t *ha)
  * Returns:
  *      None.
  */
-void qla2x00_cfg_display_devices(void)
+void qla2x00_cfg_display_devices( int flag )
 {
 	mp_host_t     *host;
 	int     id;
@@ -430,6 +457,8 @@ void qla2x00_cfg_display_devices(void)
 	lun_bit_mask_t	lun_mask;
 	int	mask_set;
 	uint8_t	l;
+	mp_lun_t	*lun;
+	unsigned char 	tmp_buf[32];
 
 	printk("qla2x00_cfg_display_devices\n");
 	for (host = mp_hosts_base; (host); host = host->next) {
@@ -551,6 +580,21 @@ void qla2x00_cfg_display_devices(void)
 							*((uint32_t *) &lun_mask.mask[8]),
 							*((uint32_t *) &lun_mask.mask[4]),
 							*((uint32_t *) &lun_mask.mask[0]) );
+					}
+					/* display lun wwuln */
+					if( flag )
+					for (lun = dp->luns; lun != NULL ; lun = lun->next) {
+						printk(KERN_INFO
+							"scsi-qla%d-tgt-%d-lun-%d-lunid=",
+							instance,  id, lun->number);
+						for (i = 0 ; i < lun->siz ;
+							       	i++) {
+							sprintf(tmp_buf+i,
+								"%02x", 
+							  lun->wwuln[i]);
+						}
+						printk(KERN_INFO "%s:%02d;\n",
+							tmp_buf,lun->siz); 
 					}
 					dev_no++;
 				}

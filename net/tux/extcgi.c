@@ -54,9 +54,10 @@ static int handle_cgi_reply (tux_req_t *req)
 {
 	int first = 1;
 	int len, left, total;
-	char buf [CGI_CHUNK_SIZE+1], *tmp;
+	char *buf, *tmp;
 	mm_segment_t oldmm;
 
+	buf = tux_kmalloc(CGI_CHUNK_SIZE+1);
 	sys_close(3);
 	sys_close(4);
 	sys_close(5);
@@ -138,6 +139,8 @@ repeat_read:
 
 	req->status = 200;
 	add_req_to_workqueue(req);
+	kfree(buf);
+
 	return -1;
 }
 
@@ -147,11 +150,11 @@ static int exec_external_cgi (void *data)
 	tux_req_t *req = data;
 	char *envp[MAX_CGI_METAVARIABLES+1], **envp_p;
 	char *argv[] = { "extcgi", NULL};
-	char envstr[MAX_ENVLEN], *tmp;
+	char *envstr, *tmp;
 	unsigned int host;
 	struct k_sigaction *ka;
-	int in_pipe_fds[2], out_pipe_fds[2], err_pipe_fds[2], len;
-	char command [MAX_CGI_COMMAND_LEN];
+	int in_pipe_fds[2], out_pipe_fds[2], err_pipe_fds[2], len, err;
+	char *command;
 	pid_t pid;
 
 	len = strlen(tux_common_docroot);
@@ -159,6 +162,9 @@ static int exec_external_cgi (void *data)
 		return -ENOMEM;
 	sprintf(current->comm,"cgimain - %d", current->pid);
 	host = req->sock->sk->daddr;
+
+	envstr = tux_kmalloc(MAX_ENVLEN);
+	command = tux_kmalloc(MAX_CGI_COMMAND_LEN);
 
 	tmp = envstr;
 	envp_p = envp;
@@ -177,8 +183,9 @@ static int exec_external_cgi (void *data)
 		int offset;					\
 								\
 		offset = sizeof(str)-1;				\
+		err = -EFAULT;					\
 		if (tmp - envstr + offset + len >= MAX_ENVLEN)	\
-			return -EFAULT;				\
+			goto out;				\
 		if (envp_p >= envp + MAX_CGI_METAVARIABLES) 	\
 			TUX_BUG(); 				\
 		memcpy(tmp, str, offset);			\
@@ -238,12 +245,13 @@ static int exec_external_cgi (void *data)
 	out_pipe_fds[0] = out_pipe_fds[1] = -1;
 	err_pipe_fds[0] = err_pipe_fds[1] = -1;
 
+	err = -ENFILE;
 	if (do_pipe(in_pipe_fds))
-		return -ENFILE;
+		goto out;
 	if (do_pipe(out_pipe_fds))
-		return -ENFILE;
+		goto out;
 	if (do_pipe(err_pipe_fds))
-		return -ENFILE;
+		goto out;
 
 	if (in_pipe_fds[0] != 0) TUX_BUG();
 	if (in_pipe_fds[1] != 1) TUX_BUG();
@@ -277,8 +285,13 @@ static int exec_external_cgi (void *data)
 	sys_close(1);
 
 	handle_cgi_reply(req);
+	err = 0;
 
-	return 0;
+out:
+	kfree(envstr);
+	kfree(command);
+
+	return err;
 }
 
 void start_external_cgi (tux_req_t *req)

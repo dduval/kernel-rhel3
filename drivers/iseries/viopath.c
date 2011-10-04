@@ -114,7 +114,7 @@ HvLpIndex viopath_ourLp = 0xff;
  */
 static vio_event_handler_t *vio_handler[VIO_MAX_SUBTYPES];
 
-static unsigned char e2a(unsigned char x)
+unsigned char e2a(unsigned char x)
 {
 	switch (x) {
 	case 0xF0:

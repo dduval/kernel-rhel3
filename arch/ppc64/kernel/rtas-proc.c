@@ -175,6 +175,8 @@ static ssize_t ppc_rtas_errinjct_write(struct file * file, const char * buf,
 				   size_t count, loff_t *ppos);
 static ssize_t ppc_rtas_errinjct_read(struct file *file, char *buf,
 				      size_t count, loff_t *ppos);
+static ssize_t ppc_rtas_rmo_buf_read(struct file *file, char *buf,
+				    size_t count, loff_t *ppos);
 
 struct file_operations ppc_rtas_poweron_operations = {
 	.read =		ppc_rtas_poweron_read,
@@ -204,6 +206,10 @@ struct file_operations ppc_rtas_errinjct_operations = {
     .read = 		ppc_rtas_errinjct_read,
     .write = 		ppc_rtas_errinjct_write,
     .release = 		ppc_rtas_errinjct_release
+};
+
+static struct file_operations ppc_rtas_rmo_buf_ops = {
+	.read =		ppc_rtas_rmo_buf_read
 };
 
 int ppc_rtas_find_all_sensors (void);
@@ -293,7 +299,9 @@ void proc_rtas_init(void)
  		if (entry) entry->proc_fops = &ppc_rtas_errinjct_operations;
 	}
 #endif
-
+	
+ 	entry = create_proc_entry("rmo_buffer",S_IRUSR,rtas_proc_dir);
+ 	if (entry) entry->proc_fops = &ppc_rtas_rmo_buf_ops;
 }
 
 /* ****************************************************************** */
@@ -1074,4 +1082,26 @@ static ssize_t ppc_rtas_errinjct_read(struct file *file, char *buf,
 
 	kfree(buffer);
 	return n;
+}
+
+#define RMO_READ_BUF_MAX 30
+
+/* RTAS Userspace access */
+static ssize_t ppc_rtas_rmo_buf_read(struct file *file, char *buf,
+				    size_t count, loff_t *ppos)
+{
+	char kbuf[RMO_READ_BUF_MAX];
+	int n;
+
+	n = sprintf(kbuf, "%016lx %x\n", rtas_rmo_buf, RTAS_RMOBUF_MAX);
+
+	if (*ppos >= n)
+		return 0;
+	n -= *ppos;
+	if (n > count)
+		n = count;
+	if (copy_to_user(buf, kbuf + *ppos, n))
+		return -EFAULT;
+	*ppos += n;
+ 	return n;
 }

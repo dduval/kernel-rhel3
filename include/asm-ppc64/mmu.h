@@ -180,7 +180,7 @@ typedef struct {
 extern HTAB htab_data;
 
 #include <linux/cache.h>
-#include <asm/spinlock.h>
+#include <linux/spinlock.h>
 typedef struct {
 	spinlock_t lock;
 } ____cacheline_aligned hash_table_lock_t;

@@ -46,13 +46,13 @@
 #include <linux/genhd.h>
 
 #define CCISS_DRIVER_VERSION(maj,min,submin) ((maj<<16)|(min<<8)|(submin))
-#define DRIVER_NAME "HP CISS Driver (v 2.4.47.RH1)"
-#define DRIVER_VERSION CCISS_DRIVER_VERSION(2,4,47)
+#define DRIVER_NAME "HP CISS Driver (v 2.4.50.RH1)"
+#define DRIVER_VERSION CCISS_DRIVER_VERSION(2,4,50)
 
 /* Embedded module documentation macros - see modules.h */
-MODULE_AUTHOR("Charles M. White III - Hewlett-Packard Company");
-MODULE_DESCRIPTION("Driver for HP SA5xxx SA6xxx Controllers version 2.4.47.RH1");
-MODULE_SUPPORTED_DEVICE("HP SA5i SA5i+ SA532 SA5300 SA5312 SA641 SA642 SA6400"); 
+MODULE_AUTHOR("Hewlett-Packard Company");
+MODULE_DESCRIPTION("Driver for HP SA5xxx SA6xxx Controllers version 2.4.50.RH1");
+MODULE_SUPPORTED_DEVICE("HP SA5i SA5i+ SA532 SA5300 SA5312 SA641 SA642 SA6400 SA6i"); 
 MODULE_LICENSE("GPL");
 
 #include "cciss_cmd.h"
@@ -77,6 +77,8 @@ const struct pci_device_id cciss_pci_device_id[] = {
                         0x0E11, 0x409C, 0, 0, 0},
 	{ PCI_VENDOR_ID_COMPAQ, PCI_DEVICE_ID_COMPAQ_CISSC,
                         0x0E11, 0x409D, 0, 0, 0},
+	{ PCI_VENDOR_ID_COMPAQ, PCI_DEVICE_ID_COMPAQ_CISSC,
+                        0x0E11, 0x4091, 0, 0, 0},
 	{0,}
 };
 MODULE_DEVICE_TABLE(pci, cciss_pci_device_id);
@@ -96,6 +98,7 @@ static struct board_type products[] = {
 	{ 0x409B0E11, "Smart Array 642", &SA5_access},
 	{ 0x409C0E11, "Smart Array 6400", &SA5_access},
 	{ 0x409D0E11, "Smart Array 6400 EM", &SA5_access},
+	{ 0x40910E11, "Smart Array 6i", &SA5_access},
 };
 
 /* How long to wait (in millesconds) for board to go into simple mode */
@@ -504,10 +507,8 @@ static int cciss_ioctl(struct inode *inode, struct file *filep,
 			driver_geo.sectors = hba[ctlr]->drv[dsk].sectors;
 			driver_geo.cylinders = hba[ctlr]->drv[dsk].cylinders;
 		} else {
-			driver_geo.heads = 0xff;
-			driver_geo.sectors = 0x3f;
-			driver_geo.cylinders = 
-				hba[ctlr]->drv[dsk].nr_blocks / (0xff*0x3f);
+			printk(KERN_DEBUG "cciss: No such device\n");
+			return -ENXIO;
 		}
 		driver_geo.start=
 			hba[ctlr]->hd[MINOR(inode->i_rdev)].start_sect;
@@ -524,10 +525,8 @@ static int cciss_ioctl(struct inode *inode, struct file *filep,
 			driver_geo.sectors = hba[ctlr]->drv[dsk].sectors;
 			driver_geo.cylinders = hba[ctlr]->drv[dsk].cylinders;
 		} else {
-			driver_geo.heads = 0xff;
-			driver_geo.sectors = 0x3f;
-			driver_geo.cylinders = 
-				hba[ctlr]->drv[dsk].nr_blocks / (0xff*0x3f);
+			printk(KERN_DEBUG "cciss: No such device\n");
+			return -ENXIO;
 		}
 		driver_geo.start= 
 		hba[ctlr]->hd[MINOR(inode->i_rdev)].start_sect;
@@ -1527,7 +1526,7 @@ static int register_new_disk(int ctlr, int opened_vol, __u64 requested_lun)
 		total_size = 0;
 		block_size = BLOCK_SIZE;
 	}
-	printk(KERN_INFO "      blocks= %d block_size= %d\n",
+	printk(KERN_INFO "      blocks= %u block_size= %d\n",
 					total_size, block_size);
 	/* Execute the command to read the disk geometry */
 	memset(inq_buff, 0, sizeof(InquiryData_struct));
@@ -1664,7 +1663,7 @@ static int cciss_rescan_disk(int ctlr, int logvol)
 		printk(KERN_WARNING "cciss: read capacity failed\n");
 		total_size = block_size = 0;
 	}
-	printk(KERN_INFO "      blocks= %d block_size= %d\n",
+	printk(KERN_INFO "      blocks= %u block_size= %d\n",
 					total_size, block_size);
 	/* Execute the command to read the disk geometry */
 	memset(inq_buff, 0, sizeof(InquiryData_struct));
@@ -2396,7 +2395,7 @@ static void do_cciss_intr(int irq, void *dev_id, struct pt_regs *regs)
 
 
 	/* Is this interrupt for us? */
-	if (h->access.intr_pending(h) == 0)
+	if ((h->access.intr_pending(h) == 0) || (h->interrupts_enabled == 0))
 		return;
 
 	/*
@@ -2530,8 +2529,8 @@ static int find_PCI_BAR_index(struct pci_dev *pdev,
 static int cciss_pci_init(ctlr_info_t *c, struct pci_dev *pdev)
 {
 	ushort subsystem_vendor_id, subsystem_device_id, command;
-	unchar irq = pdev->irq;
-	__u32 board_id;
+	unchar irq = pdev->irq, ready = 0;
+	__u32 board_id, scratchpad;
 	__u64 cfg_offset;
 	__u32 cfg_base_addr;
 	__u64 cfg_base_addr_index;
@@ -2602,10 +2601,24 @@ static int cciss_pci_init(ctlr_info_t *c, struct pci_dev *pdev)
 	printk("address 0 = %x\n", c->paddr);
 #endif /* CCISS_DEBUG */ 
 	c->vaddr = remap_pci_mem(c->paddr, 200);
+	/* Wait for the board to become ready.  (PCI hotplug needs this.)
+	 * We poll for up to 120 secs, once per 100ms. */
+	for (i=0; i < 1200; i++) {
+		scratchpad = readl(c->vaddr + SA5_SCRATCHPAD_OFFSET);
+		if (scratchpad == 0xffff0000) {
+			ready = 1;
+			break;
+		}
+		set_current_state(TASK_UNINTERRUPTIBLE);
+		schedule_timeout(HZ / 10); /* wait 100ms */
+	}
+	if (!ready) {
+		printk(KERN_WARNING "cciss: Board not ready.  Timed out.\n");
+		return -1;
+	}
 
 	/* get the address index number */
 	cfg_base_addr = readl(c->vaddr + SA5_CTCFG_OFFSET);
-	/* I am not prepared to deal with a 64 bit address value */
 	cfg_base_addr &= (__u32) 0x0000ffff;
 #ifdef CCISS_DEBUG
 	printk("cfg base address = %x\n", cfg_base_addr);
@@ -2617,7 +2630,7 @@ static int cciss_pci_init(ctlr_info_t *c, struct pci_dev *pdev)
 #endif /* CCISS_DEBUG */
 	if (cfg_base_addr_index == -1) {
 		printk(KERN_WARNING "cciss: Cannot find cfg_base_addr_index\n");
-		release_io_mem(hba[i]);
+		release_io_mem(c);
 		return -1;
 	}
 
@@ -2654,6 +2667,21 @@ static int cciss_pci_init(ctlr_info_t *c, struct pci_dev *pdev)
 		printk("Does not appear to be a valid CISS config table\n");
 		return -1;
 	}
+
+#ifdef CONFIG_X86
+{
+	/* SCSI prefetch is now disabled in firmware on the 6400 controller 
+	 * to workaround a hardware bug. The bug affects systems which have 
+	 * non-contiguous memory layouts, e.g., holes in memory, primarily 
+	 * IPF and Alpha. x86 is not affected. */
+
+	__u32 prefetch;
+	prefetch = readl(&(c->cfgtable->SCSI_Prefetch));
+	prefetch |= 0x100;
+	writel(prefetch, &(c->cfgtable->SCSI_Prefetch));
+}
+#endif
+
 #ifdef CCISS_DEBUG
 	printk("Trying to put board into Simple mode\n");
 #endif /* CCISS_DEBUG */ 
@@ -2806,7 +2834,7 @@ static void cciss_getgeometry(int cntl_num)
 			printk(KERN_WARNING "cciss: read capacity failed\n");
 			total_size = block_size = 0; 
 		}	
-		printk(KERN_INFO "      blocks= %d block_size= %d\n", 
+		printk(KERN_INFO "      blocks= %u block_size= %d\n", 
 					total_size, block_size);
 
 		/* Execute the command to read the disk geometry */
@@ -3011,12 +3039,12 @@ static int start_monitor_thread(ctlr_info_t *h, unsigned char *cmd,
 	unsigned int new_period, old_period, new_deadline, old_deadline;
 
 	if (strncmp("monitor", cmd, 7) == 0) {
-		new_period = simple_strtol(cmd + 7, NULL, 10);
+		new_period = simple_strtol(cmd + 8, NULL, 10);
 		spin_lock_irqsave(&io_request_lock, flags);
 		new_deadline = h->monitor_deadline;
 		spin_unlock_irqrestore(&io_request_lock, flags);
 	} else if (strncmp("deadline", cmd, 8) == 0) {
-		new_deadline = simple_strtol(cmd + 8, NULL, 10);
+		new_deadline = simple_strtol(cmd + 9, NULL, 10);
 		spin_lock_irqsave(&io_request_lock, flags);
 		new_period = h->monitor_period;
 		spin_unlock_irqrestore(&io_request_lock, flags);

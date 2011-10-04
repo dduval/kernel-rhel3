@@ -2,7 +2,7 @@
  *                  QLOGIC LINUX SOFTWARE
  *
  * QLogic ISP2x00 device driver for Linux 2.4.x
- * Copyright (C) 2003 Qlogic Corporation
+ * Copyright (C) 2003 QLogic Corporation
  * (www.qlogic.com)
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -57,11 +57,13 @@
 #define DEBUG2_3_11(x)  if (extended_error_logging != 0) { do {x;} while (0); }
 #define DEBUG2_9_10(x)  if (extended_error_logging != 0) { do {x;} while (0); }
 #define DEBUG2_11(x)    if (extended_error_logging != 0) { do {x;} while (0); }
+#define DEBUG2_13(x)    if (extended_error_logging != 0) { do {x;} while (0); }
 #else
 #define DEBUG2(x)	do {} while (0);
 #define DEBUG2_3(x)     do {} while (0); 
 #define DEBUG2_3_11(x)  do {} while (0); 
 #define DEBUG2_9_10(x)  do {} while (0); 
+#define DEBUG2_13(x)	do {} while (0); 
 #endif
 
 #if defined(QL_DEBUG_LEVEL_3)
@@ -123,3 +125,16 @@
 #else
 #define DEBUG12(x)	do {} while (0);
 #endif
+
+#if defined(QL_DEBUG_LEVEL_13)
+#define DEBUG13(x)      do {x;} while (0);
+  #if !defined(DEBUG2_13)
+  #define DEBUG2_13(x)      do {x;} while (0);
+  #endif
+#else
+#define DEBUG13(x)	do {} while (0);
+  #if !defined(DEBUG2_13)
+  #define DEBUG2_13(x)      do {} while (0);
+  #endif
+#endif
+

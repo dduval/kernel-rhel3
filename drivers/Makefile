@@ -8,7 +8,7 @@
 
 mod-subdirs :=	addon hil dio mtd sbus video macintosh usb input telephony sgi ide \
 		message/i2o message/fusion scsi md ieee1394 pnp isdn atm \
-		fc4 net/hamradio i2c acpi bluetooth iseries sensors
+		fc4 audit net/hamradio i2c acpi bluetooth iseries sensors
 
 subdir-y :=	addon parport char block net sound misc media cdrom hotplug
 subdir-m :=	$(subdir-y)
@@ -42,6 +42,10 @@ subdir-$(CONFIG_PNP)		+= pnp
 subdir-$(CONFIG_ISDN_BOOL)	+= isdn
 subdir-$(CONFIG_ATM)		+= atm
 subdir-$(CONFIG_FC4)		+= fc4
+subdir-$(CONFIG_AUDIT)		+= audit
+ifeq ($(CONFIG_AUDIT),m)
+subdir-y			+= audit
+endif
 
 # CONFIG_HAMRADIO can be set without CONFIG_NETDEVICE being set  -- ch
 subdir-$(CONFIG_HAMRADIO)	+= net/hamradio

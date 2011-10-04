@@ -246,6 +246,7 @@
 #define __NR_exit_group		234
 #define __NR_lookup_dcookie	235
 #define __NR_tgkill		250
+#define __NR_rtas		255
 
 #define __NR(n)	#n
 

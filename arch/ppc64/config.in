@@ -26,7 +26,7 @@ define_bool CONFIG_SERIAL_CONSOLE y
 choice 'Machine Type'	\
 	"pSeries       		CONFIG_PPC_PSERIES \
 	 iSeries                CONFIG_PPC_ISERIES" CONFIG_PPC_PSERIES
-
+bool 'VMX ( AltiVec ) Support' CONFIG_ALTIVEC
 bool 'Symmetric multi-processing support' CONFIG_SMP
 if [ "$CONFIG_SMP" = "y" ]; then
   bool '  Distribute interrupts on all CPUs by default' CONFIG_IRQ_ALL_CPUS
@@ -46,7 +46,13 @@ bool 'Support for RTAS (RunTime Abstraction Services) in /proc' CONFIG_PPC_RTAS
      fi
 fi
 
+if [ "$CONFIG_PPC_PSERIES" = "y" ]; then
+   bool 'JS20' CONFIG_JS20
+fi
+
 bool 'Shared kernel/user space addressing' CONFIG_SHARED_MEMORY_ADDRESSING
+
+bool 'LPAR Configuration Data' CONFIG_LPARCFG
 
 if [ "$CONFIG_PPC_ISERIES" = "y" -a "$CONFIG_SMP" = "y" ]; then
    choice 'HMT Support' \
@@ -95,6 +101,8 @@ bool 'Kernel support for 64 bit ELF binaries' CONFIG_BINFMT_ELF
 tristate 'Kernel support for 32 bit ELF binaries' CONFIG_BINFMT_ELF32
 
 tristate 'Kernel support for MISC binaries' CONFIG_BINFMT_MISC
+
+tristate 'System call auditing' CONFIG_AUDIT
 
 source drivers/pci/Config.in
 

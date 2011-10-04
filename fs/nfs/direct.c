@@ -352,10 +352,14 @@ nfs_direct_IO(int rw, struct file *file, struct kiobuf *iobuf,
 	unsigned long blocknr, int blocksize)
 {
 	int result = -EINVAL;
+	unsigned int o_append = file->f_flags & O_APPEND;
 	size_t count = iobuf->length;
 	struct dentry *dentry = file->f_dentry;
 	struct inode *inode = dentry->d_inode;
 	loff_t offset = (loff_t) blocknr << inode->i_blkbits;
+
+	if (!o_append)
+		up(&inode->i_sem);
 
 	switch (rw) {
 	case READ:
@@ -377,6 +381,9 @@ nfs_direct_IO(int rw, struct file *file, struct kiobuf *iobuf,
 	default:
 		break;
 	}
+
+	if (!o_append)
+		down(&inode->i_sem);
 
 	dfprintk(VFS, "NFS: direct_IO result = %d\n", result);
 	return result;

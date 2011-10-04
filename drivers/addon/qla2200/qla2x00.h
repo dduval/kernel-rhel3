@@ -2,7 +2,7 @@
 *                  QLOGIC LINUX SOFTWARE
 *
 * QLogic ISP2x00 device driver for Linux 2.4.x
-* Copyright (C) 2003 Qlogic Corporation
+* Copyright (C) 2003 QLogic Corporation
 * (www.qlogic.com)
 *
 * This program is free software; you can redistribute it and/or modify it
@@ -45,11 +45,14 @@ extern "C" {
 /* #define QL_DEBUG_LEVEL_10 */ /* Output IOCTL error msgs */
 /* #define QL_DEBUG_LEVEL_11 */ /* Output Mbx Cmd trace msgs */
 /* #define QL_DEBUG_LEVEL_12 */ /* Output IP trace msgs */
+/* #define QL_DEBUG_LEVEL_13 */ /* Output fdmi function trace msgs */
 
 #define QL_DEBUG_CONSOLE            /* Output to console */
 
 #include <asm/bitops.h>
 #include <asm/semaphore.h>
+
+#define QLOGIC_COMPANY_NAME	"QLogic Corporation"
 
 /*
  * Data bit definitions.
@@ -243,7 +246,7 @@ typedef char BOOL;
 #define SGDATA_PER_REQUEST	2 
 #define SGDATA_PER_CONT		7
 
-#define SG_SEGMENTS 	(SGDATA_PER_REQUEST + (SGDATA_PER_CONT * REQUEST_ENTRY_CNT - 2))     
+//#define SG_SEGMENTS 	(SGDATA_PER_REQUEST + (SGDATA_PER_CONT * REQUEST_ENTRY_CNT - 2))     
 
 /*
  * SCSI Request Block 
@@ -290,6 +293,9 @@ typedef struct srb
 	/* Raw completion info for use by failover ? */
     uint8_t	fo_retry_cnt;	/* Retry count this request */
     uint8_t	err_id;		/* error id */
+#define SRB_ERR_PORT       1    /* Request failed because "port down" */
+#define SRB_ERR_LOOP       2    /* Request failed because "loop down" */
+
     uint8_t	cmd_length;		/* command length */
     uint8_t	qfull_retry_count;
 
@@ -327,6 +333,7 @@ typedef struct srb
 #define	SRB_ISP_STARTED	     BIT_11	/* Command sent to ISP. */
 
 #define	SRB_ISP_COMPLETED    BIT_12	/* ISP finished with command */
+#define	SRB_FDMI_CMD	     BIT_13	/* MSIOCB/non-ioctl command. */
 
 
 /*
@@ -609,6 +616,8 @@ typedef struct {
 #define QL_STATUS_LOOP_ID_IN_USE    4
 #define QL_STATUS_NO_DATA           5
 #define QL_STATUS_TIMEOUT           6
+#define QL_STATUS_BUSY		    7
+
 /*
  * ISP mailbox asynchronous event status codes
  */
@@ -1205,9 +1214,11 @@ struct qla2x00_hba_features
 /* For future QLA2XXX */
 #define NVRAM_MOD_OFFSET        200 /* Model Number offset: 200-215 */
 #define BINZERO                 "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"
-#define NVRAM_MODEL_SIZE        16 /* 16 bytes reserved for model_num string*/
 
 #endif
+
+#define NVRAM_HW_ID_SIZE        16 /* 16 bytes reserved for hw_id string*/
+#define NVRAM_MODEL_SIZE        16 /* 16 bytes reserved for model_num string*/
 
 #if !defined(ISP2100)
 
@@ -1285,7 +1296,10 @@ typedef struct
     uint8_t    link_down_timeout;		
 
     /* Offset 112 */
-    uint8_t    reserved_7_2[38];
+    uint8_t    hw_id[16];
+
+    /* Offset 128 */
+    uint8_t    reserved_7_2[22];
 
     /* Offset 150 */
     uint16_t    reserved_8[25];
@@ -1889,6 +1903,7 @@ typedef struct
     uint8_t  loop_id;
     uint16_t status;
     uint16_t control_flags;             /* Control flags. */
+#define CF_ELS_PASSTHRU		BIT_15
     uint16_t reserved2;
     uint16_t timeout;
     uint16_t cmd_dsd_count;
@@ -2065,6 +2080,26 @@ typedef struct {
 	uint8_t inq[INQ_DATA_SIZE];
 } inq_cmd_rsp_t;
 
+#define VITAL_PRODUCT_DATA_SIZE 32
+#define INQ_EVPD_SET	1
+#define INQ_DEV_IDEN_PAGE  0x83  	
+#define WWLUN_SIZE	32	
+
+typedef struct {
+	union {
+		cmd_a64_entry_t cmd;
+		sts_entry_t rsp;
+	} p;
+	uint8_t inq[VITAL_PRODUCT_DATA_SIZE];
+} evpd_inq_cmd_rsp_t;
+
+typedef struct {
+	union {
+		cmd_a64_entry_t cmd;
+		sts_entry_t rsp;
+	} p;
+} tur_cmd_rsp_t;
+
 /*
  * Report LUN command structure.
  */
@@ -2119,7 +2154,7 @@ typedef struct os_tgt {
 	atomic_t	q_timer;  	/* suspend timer */
 	unsigned long	q_flags;	   /* suspend flags */
 #define	TGT_SUSPENDED		1
-#define	TGT_UNSUSPENDED		2
+#define	TGT_RETRY_CMDS		2
 } os_tgt_t;
 
 /*
@@ -2186,14 +2221,15 @@ typedef struct fc_port {
 	uint8_t			mp_byte;	/* multi-path byte */
     	uint8_t			cur_path;	/* current path id */
 	int			port_login_retry_count;
-	int		login_retry;
+	int			login_retry;
 	atomic_t		state;		/* port state */
-#define FC_DEVICE_DEAD		1
-#define FC_DEVICE_LOST		2
-#define FC_ONLINE		3
+#define FC_DEVICE_DEAD		1		/* Device has been missing for the expired time */
+									/* "port timeout" */
+#define FC_DEVICE_LOST		2		/* Device is missing */
+#define FC_ONLINE		3		/* Device is ready and online */
 #define FC_LOGIN_NEEDED		4
 
-	uint8_t			flags;
+	uint16_t		flags;
 #define	FC_FABRIC_DEVICE	BIT_0
 #define	FC_TAPE_DEVICE		BIT_1
 #define	FC_INITIATOR_DEVICE	BIT_2
@@ -2201,7 +2237,19 @@ typedef struct fc_port {
 #define	FC_VSA			BIT_4
 #define	FC_HD_DEVICE		BIT_5
 #define	FC_SUPPORT_RPT_LUNS	BIT_6
-	atomic_t	port_down_timer;
+#define FC_XP_DEVICE            BIT_7
+#define FC_CONFIG_DEVICE        BIT_8
+#define FC_MSA_DEVICE            BIT_9
+#define FC_MSA_PORT_ACTIVE     BIT_10
+#define FC_FAILBACK_DISABLE    	BIT_11
+	int16_t		 	cfg_id;		/* index into cfg device table */
+	uint16_t	notify_type;
+	atomic_t		port_down_timer;
+	int	(*fo_combine)(void *, uint16_t, 
+		struct fc_port *, uint16_t );
+	int	(*fo_detect)(void);
+	int	(*fo_notify)(void);
+	int	(*fo_select)(void);
 	lun_bit_mask_t	lun_mask;
 } fc_port_t;
 
@@ -2215,7 +2263,12 @@ typedef struct fc_lun {
 	uint8_t			max_path_retries;
 	uint8_t			flags;
 #define	FC_DISCON_LUN		BIT_0
+#define	FC_VISIBLE_LUN		BIT_2
+	uint8_t			inq0;
 	u_long			kbytes;
+	void			*mplun;	
+	void			*mpbuf;	/* ptr to buffer use by multi-path driver */
+	int			mplen;
 } fc_lun_t;
 
 typedef struct
@@ -2634,6 +2687,13 @@ typedef struct scsi_qla_host
 	uint32_t	total_dev_errs;		/* device error cnt */
 	uint32_t	total_ios;		/* IO cnt */
 	uint64_t	total_bytes;		/* xfr byte cnt */
+
+	uint64_t	total_input_cnt;	/* input request cnt */
+	uint64_t	total_output_cnt;	/* output request cnt */
+	uint64_t	total_ctrl_cnt;		/* control request cnt */
+	uint64_t	total_input_bytes;	/* input xfr bytes cnt */
+	uint64_t	total_output_bytes;	/* output xfr bytes cnt */
+
 	uint32_t	total_mbx_timeout;	/* mailbox timeout cnt */
 	uint32_t 	total_loop_resync; 	/* loop resyn cnt */
 
@@ -2853,7 +2913,7 @@ typedef struct scsi_qla_host
 
 		uint32_t     port_name_used          :1;   /* 4 */
 		uint32_t     failover_enabled        :1;   /* 5 */
-		uint32_t     watchdog_enabled        :1;   /* 6 */
+		uint32_t     failback_disabled	     :1;   /* 6 */
 		uint32_t     cfg_suspended   	     :1;   /* 7 */
 
 		uint32_t     disable_host_adapter    :1;   /* 8 */
@@ -2938,6 +2998,7 @@ typedef struct scsi_qla_host
 #define ISP_ABORT_RETRY         27      /* ISP aborted. */
 
 #define PORT_SCAN_NEEDED      28      /* */
+#define IOCTL_ERROR_RECOVERY	29      
 
 
 /* macro for timer to start dpc for handling mailbox commands */
@@ -2952,7 +3013,7 @@ typedef struct scsi_qla_host
 	uint8_t		interrupts_on;
 	uint8_t		init_done;
 
-	volatile uint16_t loop_state;
+	atomic_t 	loop_state;
 #define LOOP_TIMEOUT 0x01
 #define LOOP_DOWN    0x02
 #define LOOP_UP      0x04
@@ -2989,7 +3050,7 @@ typedef struct scsi_qla_host
 	uint8_t     serial1;
 	uint8_t     serial2;
 
-	/* Offset 200-215 : Model Number */
+	/* NVRAM Offset 200-215 : Model Number */
 	uint8_t    model_number[16];
 
 	/* oem related items */
@@ -3036,12 +3097,21 @@ typedef struct scsi_qla_host
 #endif
 	ms_iocb_entry_t         *ms_iocb;
 	dma_addr_t              ms_iocb_dma;
-	struct ct_sns_pkt       *ct_sns;
-	dma_addr_t              ct_sns_dma;
-	
-	/* Scsi midlayer lock */
-	spinlock_t		host_lock ____cacheline_aligned;
+	void			*ct_iu;
+	dma_addr_t		ct_iu_dma;
 
+	Scsi_Cmnd	*ioctl_err_cmd;	 
+
+	unsigned long 	fdmi_flags;
+#define FDMI_REGISTER_NEEDED	0 /* bit 0 */
+
+	/* Hardware ID/version string from NVRAM */
+	uint8_t		hw_id_version[16];
+	/* Model description string from our table based on NVRAM spec */
+	uint8_t		model_desc[80];
+#if LINUX_VERSION_CODE > KERNEL_VERSION(2,5,0)  || defined(SCSI_HAS_HOST_LOCK)
+ 	spinlock_t		host_lock ____cacheline_aligned;
+#endif
 } scsi_qla_host_t;
 
 #if defined(__BIG_ENDIAN)
@@ -3109,11 +3179,6 @@ typedef struct scsi_qla_host
 void qla2x00_device_queue_depth(scsi_qla_host_t *, Scsi_Device *);
 #endif
 
-#if defined(__386__)
-#  define QLA2100_BIOSPARAM  qla2x00_biosparam
-#else
-#  define QLA2100_BIOSPARAM  NULL
-#endif
 
 /*
  *  Linux - SCSI Driver Interface Function Prototypes.
@@ -3142,28 +3207,24 @@ void qla2x00_setup(char *s);
 
 /* Kernel version specific template additions */
 
+/* Number of segments 1 - 65535 */
+#define SG_SEGMENTS     32             /* Cmd entry + 6 continuations */
+
+/*
+ * Scsi_Host_template (see hosts.h) 
+ * Device driver Interfaces to mid-level SCSI driver.
+ */
+
+/* Kernel version specific template additions */
+
 /*
  * max_sectors
  *
  */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,4,8)
-#define TEMPLATE_MAX_SECTORS	max_sectors: 8192,
+#define TEMPLATE_MAX_SECTORS	max_sectors: 512,
 #else
 #define TEMPLATE_MAX_SECTORS 
-#endif
-/*
- * highmem_io
- *
- */
-#if defined CONFIG_HIGHIO || LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,0)
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,4,18)
-/* Assume RedHat Distribution with its different HIGHIO conventions. */
-#define TEMPLATE_HIGHMEM_IO        can_dma_32: 1,
-#else
-#define TEMPLATE_HIGHMEM_IO	   highmem_io : 1,
-#endif
-#else
-#define TEMPLATE_HIGHMEM_IO 
 #endif
 /*
  * use_new_eh_code
@@ -3211,18 +3272,16 @@ void qla2x00_setup(char *s);
 #define TEMPLATE_PROC_DIR proc_dir: NULL,
 #endif
 
-
-
 #define QLA2100_LINUX_TEMPLATE {				\
 TEMPLATE_NEXT 	 	 	 	 	 	 	\
 TEMPLATE_MODULE 	  	 	 	 	 	\
 TEMPLATE_PROC_DIR 	  	 	 	 	 	\
 	proc_info: qla2x00_proc_info,	                        \
-	name:		"Qlogic Fibre Channel 2x00",		\
+	name:		"QLogic Fibre Channel 2x00",		\
 	detect:		qla2x00_detect,				\
 	release:	qla2x00_release,			\
 	info:		qla2x00_info,				\
-	ioctl: qla2x00_ioctl,					\
+	ioctl: qla2x00_ioctl,                                    \
 	command: NULL,						\
 	queuecommand: qla2x00_queuecommand,			\
 	eh_strategy_handler: NULL,				\
@@ -3233,20 +3292,19 @@ TEMPLATE_PROC_DIR 	  	 	 	 	 	\
 	abort: NULL,						\
 	reset: NULL,						\
 	slave_attach: NULL,					\
-	bios_param: QLA2100_BIOSPARAM,				\
-	can_queue: REQUEST_ENTRY_CNT+128,	/* max simultaneous cmds      */\
+	bios_param: qla2x00_biosparam,				\
+	can_queue: REQUEST_ENTRY_CNT+128, /* max simultaneous cmds      */\
 	this_id: -1,		/* scsi id of host adapter    */\
 	sg_tablesize: SG_SEGMENTS,	/* max scatter-gather cmds */\
 	cmd_per_lun: 3,		/* cmds per lun (linked cmds) */\
 	present: 0,		/* number of 7xxx's present   */\
 	unchecked_isa_dma: 0,	/* no memory DMA restrictions */\
-	use_clustering: 0,					\
-	vary_io: 1,						\
-	need_plug_timer:1,					\
 TEMPLATE_USE_NEW_EH_CODE 	 	 	 	 	\
 TEMPLATE_MAX_SECTORS						\
-TEMPLATE_HIGHMEM_IO						\
 TEMPLATE_EMULATED						\
+	vary_io: 1,						\
+	use_clustering: 0,					\
+	highmem_io: 1						\
 }
 
 #endif /* _IO_HBA_QLA2100_H */

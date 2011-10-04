@@ -1683,8 +1683,15 @@ nfsd_set_posix_acl(struct svc_fh *fhp, int type, struct posix_acl *acl)
 	if (size)
 		error = inode->i_op->setxattr(fhp->fh_dentry, name,
 					      value, size, 0);
-	else
-		error = inode->i_op->removexattr(fhp->fh_dentry, name);
+	else {
+		if (!S_ISDIR(inode->i_mode) && type == ACL_TYPE_DEFAULT)
+			error = 0;
+		else {
+			error = inode->i_op->removexattr(fhp->fh_dentry, name);
+			if (error == -ENODATA)
+				error = 0;
+		}
+	}
 	unlock_kernel();  /* goes away in 2.5 */
 
 getout:

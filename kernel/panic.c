@@ -252,6 +252,17 @@ NORET_TYPE void panic(const char * fmt, ...)
 		printk("Press L1-A to return to the boot prom\n");
 	}
 #endif
+#ifdef CONFIG_PPC_PSERIES
+	{
+		long status;
+		char *str = "OS panic";
+		status = rtas_call(rtas_token("ibm,os-term"), 1, 1, NULL,
+				   __pa(str));
+		if (status != 0)
+			printk(KERN_EMERG "ibm,os-term call failed %d\n",
+				status);
+	}
+#endif
 #if defined(CONFIG_ARCH_S390)
         disabled_wait(caller);
 #endif

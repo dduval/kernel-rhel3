@@ -215,7 +215,16 @@ struct oprofile_operations nmi_ops = {
 };
  
 
-#if !defined(CONFIG_X86_64)
+#if !defined(CONFIG_X86_64) || defined(CONFIG_IA32E)
+
+#ifdef CONFIG_IA32E
+inline static int __init is_ia32e(void)
+{
+	return (test_bit(X86_FEATURE_LM, current_cpu_data.x86_capability));
+}
+#else
+#define is_ia32e() 0
+#endif
 
 static int __init p4_init(void)
 {
@@ -225,24 +234,36 @@ static int __init p4_init(void)
 		return 0;
 
 #ifndef CONFIG_SMP
-	nmi_ops.cpu_type = "i386/p4";
+	if (is_ia32e())
+		nmi_ops.cpu_type = "x86-64/ia32e";
+	else
+		nmi_ops.cpu_type = "i386/p4";
 	model = &op_p4_spec;
 	return 1;
 #else
 	switch (smp_num_siblings) {
 		case 1:
-			nmi_ops.cpu_type = "i386/p4";
+			if (is_ia32e())
+				nmi_ops.cpu_type = "x86-64/ia32e";
+			else
+				nmi_ops.cpu_type = "i386/p4";
 			model = &op_p4_spec;
 			return 1;
 
 		case 2:
-			nmi_ops.cpu_type = "i386/p4-ht";
+			if (is_ia32e())
+				nmi_ops.cpu_type = "x86-64/ia32e-ht";
+			else
+				nmi_ops.cpu_type = "i386/p4-ht";
 			model = &op_p4_ht2_spec;
 			return 1;
 	}
 #endif
 
-	printk(KERN_INFO "oprofile: P4 HyperThreading detected with > 2 threads\n");
+	if (is_ia32e())
+		printk(KERN_INFO "oprofile: ia32e HyperThreading detected with > 2 threads\n");
+	else
+		printk(KERN_INFO "oprofile: P4 HyperThreading detected with > 2 threads\n");
 	printk(KERN_INFO "oprofile: Reverting to timer mode.\n");
 	return 0;
 }
@@ -264,8 +285,8 @@ static int __init ppro_init(void)
 	return 1;
 }
 
-#endif /* !CONFIG_X86_64 */
- 
+#endif /* !CONFIG_X86_64 || CONFIG_IA32E */
+
 int __init nmi_init(struct oprofile_operations ** ops)
 {
 	__u8 vendor = current_cpu_data.x86_vendor;
@@ -293,7 +314,7 @@ int __init nmi_init(struct oprofile_operations ** ops)
 			}
 			break;
  
-#if !defined(CONFIG_X86_64)
+#if !defined(CONFIG_X86_64) || defined(CONFIG_IA32E)
 		case X86_VENDOR_INTEL:
 			switch (family) {
 				/* Pentium IV */
@@ -312,7 +333,7 @@ int __init nmi_init(struct oprofile_operations ** ops)
 					return 0;
 			}
 			break;
-#endif /* !CONFIG_X86_64 */
+#endif /* !CONFIG_X86_64 || CONFIG_IA32E */
 
 		default:
 			return 0;

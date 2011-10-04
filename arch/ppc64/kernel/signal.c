@@ -241,7 +241,9 @@ setup_sigcontext(struct sigcontext *sc, struct pt_regs *regs,
 
 	current->thread.saved_msr = regs->msr & ~(MSR_FP | MSR_FE0 | MSR_FE1);
 	regs->msr = current->thread.saved_msr | current->thread.fpexc_mode;
+#ifdef CONFIG_PPC_ISERIES
 	current->thread.saved_softe = regs->softe;
+#endif
 
 	err |= __put_user(&sc->gp_regs, &sc->regs);
 	err |= __copy_to_user(&sc->gp_regs, regs, GP_REGS_SIZE);
@@ -277,7 +279,9 @@ restore_sigcontext(struct pt_regs *regs, sigset_t *set, struct sigcontext *sc)
 
 	/* Don't allow the signal handler to change these modulo FE{0,1} */
 	regs->msr = current->thread.saved_msr & ~(MSR_FP | MSR_FE0 | MSR_FE1);
+#ifdef CONFIG_PPC_ISERIES
 	regs->softe = current->thread.saved_softe;
+#endif
 
 	return err;
 }

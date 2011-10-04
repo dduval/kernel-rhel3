@@ -403,6 +403,36 @@ parse_fpe(siginfo_t *info, struct pt_regs *regs)
 	_exception(SIGFPE, info, regs);
 }
 
+#ifndef CONFIG_ALTIVEC
+void IllegalAltiVecInstruction(struct pt_regs *regs)
+{
+	siginfo_t info;
+
+	info.si_signo = SIGILL;
+	info.si_errno = 0;
+	info.si_code = ILL_ILLTRP;
+	info.si_addr = (void *)regs->nip;
+	_exception(SIGILL, &info, regs);
+}
+#endif
+
+#ifdef CONFIG_ALTIVEC
+/* 
+ * Couldn't allocate space for the AltiVec register set for the
+ * current thread.
+ */
+void AltiVecMemShortage(struct pt_regs *regs)
+{
+	siginfo_t info;
+
+	info.si_signo = SIGILL;
+	info.si_errno = 0;
+	info.si_code = ILL_BADSTK;
+	info.si_addr = (void *)regs->nip;
+	_exception(SIGILL, &info, regs);
+}
+#endif
+
 void
 ProgramCheckException(struct pt_regs *regs)
 {
@@ -447,12 +477,53 @@ ProgramCheckException(struct pt_regs *regs)
 	}
 }
 
- void
+void
 KernelFPUnavailableException(struct pt_regs *regs)
 {
 	printk("Illegal floating point used in kernel (task=0x%016lx, pc=0x%016lx, trap=0x%08x)\n",
-		current, regs->nip, regs->trap);
+		(unsigned long)current, regs->nip, (unsigned int)regs->trap);
 	panic("Unrecoverable FP Unavailable Exception in Kernel");
+}
+
+
+void
+KernelAltiVecUnavailableException(struct pt_regs *regs)
+{
+	printk("Illegal Altivec used in kernel (task=0x%016lx, pc=0x%016lx, trap=0x%08x)\n",
+		(unsigned long)current, regs->nip, (unsigned int)regs->trap);
+	panic("Unrecoverable Altivec Unavailable Exception in Kernel");
+}
+
+void
+AltiVecAssistException(struct pt_regs *regs)
+{
+#ifdef CONFIG_ALTIVEC
+	printk(KERN_INFO "Altivec assist called by %s, switching java mode off\n",
+		current->comm);
+	/* We do this the "hard" way, but that's ok for now, maybe one
+	 * day, we'll have a proper implementation...
+	 */
+	if (regs->msr & MSR_VEC)
+		giveup_altivec(current);
+	current->thread.vmx_regs->vscr.u[3] |= 0x00010000;
+#else
+        siginfo_t info;
+                                                                                                                  
+	printk(KERN_NOTICE "Altivec assist called by %s, no altivec support\n",
+		current->comm);
+                                                                                                                  
+        info.si_signo = SIGTRAP;
+        info.si_errno = 0;
+        info.si_code = 0;
+        info.si_addr = 0;
+        _exception(SIGTRAP, &info, regs);
+#endif /* CONFIG_ALTIVEC */
+}
+
+void
+ThermalInterrupt(struct pt_regs *regs)
+{
+	panic("Thermal interrupt exception not handled !");
 }
 
 void

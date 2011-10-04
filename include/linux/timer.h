@@ -62,4 +62,8 @@ extern void it_real_fn(unsigned long);
 	ok;							\
 })
 
+#ifdef CONFIG_NO_IDLE_HZ
+extern unsigned long next_timer_event(void);
+#endif
+
 #endif

@@ -136,7 +136,7 @@ struct timer_list zfcp_force_error_timer;
 /* Cosmetics */
 #ifndef atomic_test_mask
 #define atomic_test_mask(mask, target) \
-           (atomic_read(target) & mask)
+           ((atomic_read(target) & mask) == mask)
 #endif
 
 #define ZFCP_FSFREQ_CLEANUP_TIMEOUT	HZ/10
@@ -9425,7 +9425,17 @@ inline int zfcp_qdio_handler_error_check(
              }
              /* Restarting IO on the failed adapter from scratch */
              debug_text_event(adapter->erp_dbf,1,"qdio_err");
-             zfcp_erp_adapter_reopen(adapter, 0);
+		/*
+		 * Since we have been using this adapter, it is save to assume
+		 * that it is not failed but recoverable. The card seems to
+		 * report link-up events by self-initiated queue shutdown.
+		 * That is why we need to clear the the link-down flag
+		 * which is set again in case we have missed by a mile.
+		 */
+		zfcp_erp_adapter_reopen(
+			adapter, 
+			ZFCP_STATUS_ADAPTER_LINK_UNPLUGGED |
+			ZFCP_STATUS_COMMON_ERP_FAILED);
      } // if(status & QDIO_STATUS_LOOK_FOR_ERROR)
 
      ZFCP_LOG_TRACE("exit (%i)\n", retval);             
@@ -11121,9 +11131,8 @@ void zfcp_fsf_incoming_els_rscn(
                 known=0;
                 ZFCP_WRITE_LOCK_IRQSAVE(&adapter->port_list_lock, flags);
                 ZFCP_FOR_EACH_PORT (adapter, port) {
-                        if (!atomic_test_mask(ZFCP_STATUS_PORT_DID_DID, &port->status)) {
+                        if (!atomic_test_mask(ZFCP_STATUS_PORT_DID_DID, &port->status))
                                 continue;
-                        }
                         if((port->d_id & range_mask) 
                            == (fcp_rscn_element->nport_did & range_mask)) {
                                 known++;
@@ -11153,9 +11162,9 @@ void zfcp_fsf_incoming_els_rscn(
                               "underwent a state change.\n");
                 ZFCP_WRITE_LOCK_IRQSAVE(&adapter->port_list_lock, flags);
                 ZFCP_FOR_EACH_PORT (adapter, port) {
-                        if (!atomic_test_mask((ZFCP_STATUS_PORT_DID_DID 
-                                              | ZFCP_STATUS_PORT_NAMESERVER), 
-                                              &port->status)) {
+			if (atomic_test_mask(ZFCP_STATUS_PORT_NAMESERVER, &port->status))
+				continue;
+			if (!atomic_test_mask(ZFCP_STATUS_PORT_DID_DID, &port->status)) {
                                 ZFCP_LOG_INFO("Received state change notification."
                                                 "Trying to open the port with WWPN "
                                                 "0x%016Lx. Hope it's there now.\n",
@@ -11715,7 +11724,7 @@ static int zfcp_get_nameserver_buffers(zfcp_fsf_req_t *fsf_req)
 #ifdef ZFCP_MEM_POOL_ONLY
 	data->outbuf = NULL;
 #else
-	data->outbuf = ZFCP_KMALLOC(2 * sizeof(fc_ct_iu_t), GFP_KERNEL);
+	data->outbuf = ZFCP_KMALLOC(2 * sizeof(fc_ct_iu_t), GFP_ATOMIC);
 #endif
 	if (!data->outbuf) {
 		ZFCP_LOG_DEBUG(
@@ -12620,6 +12629,20 @@ static int zfcp_fsf_open_port_handler(zfcp_fsf_req_t *fsf_req)
 			&port->status);
                 retval = 0;
 		/* check whether D_ID has changed during open */
+		/*
+		 * FIXME: This check is not airtight, as the FCP channel does
+		 * not monitor closures of target port connections caused on
+		 * the remote side. Thus, they might miss out on invalidating
+		 * locally cached WWPNs (and other N_Port parameters) of gone
+		 * target ports. So, our heroic attempt to make things safe
+		 * could be undermined by 'open port' response data tagged with
+		 * obsolete WWPNs. Another reason to monitor potential
+		 * connection closures ourself at least (by interpreting
+		 * incoming ELS' and unsolicited status). It just crosses my
+		 * mind that one should be able to cross-check by means of
+		 * another GID_PN straight after a port has been opened.
+		 * Alternately, an ADISC/PDISC ELS should suffice, as well.
+		 */
 		plogi = (fsf_plogi_t*) fsf_req->qtcb->bottom.support.els;
 		if (!atomic_test_mask(ZFCP_STATUS_PORT_NO_WWPN, &port->status)) {
 			if (fsf_req->qtcb->bottom.support.els1_length <
@@ -18799,8 +18822,7 @@ static int zfcp_erp_port_reopen_all_internal(
 
 	ZFCP_READ_LOCK_IRQSAVE(&adapter->port_list_lock, flags);
 	ZFCP_FOR_EACH_PORT(adapter, port) {
-                if (atomic_test_mask(ZFCP_STATUS_PORT_NAMESERVER, &port->status) 
-		    != ZFCP_STATUS_PORT_NAMESERVER)
+                if (!atomic_test_mask(ZFCP_STATUS_PORT_NAMESERVER, &port->status)) 
 			zfcp_erp_port_reopen_internal(port, clear_mask);
         }
 	ZFCP_READ_UNLOCK_IRQRESTORE(&adapter->port_list_lock, flags);
@@ -19656,9 +19678,7 @@ static int zfcp_erp_port_forced_strategy(zfcp_erp_action_t *erp_action)
 			if (atomic_test_mask(
 					(ZFCP_STATUS_PORT_PHYS_OPEN |
 					 ZFCP_STATUS_COMMON_OPEN),
-				 	&port->status) 
-                            == (ZFCP_STATUS_PORT_PHYS_OPEN |
-                               ZFCP_STATUS_COMMON_OPEN)) {
+				 	&port->status)) {
 				ZFCP_LOG_DEBUG(
 					"Port WWPN=0x%016Lx is open -> trying close physical\n",
 					(llui_t)port->wwpn);
@@ -19767,8 +19787,7 @@ static int zfcp_erp_port_strategy_open(zfcp_erp_action_t *erp_action)
 
 	ZFCP_LOG_TRACE("enter\n");
 
-	if (atomic_test_mask(ZFCP_STATUS_PORT_NAMESERVER, &erp_action->port->status)
-			== ZFCP_STATUS_PORT_NAMESERVER)
+	if (atomic_test_mask(ZFCP_STATUS_PORT_NAMESERVER, &erp_action->port->status))
 		retval = zfcp_erp_port_strategy_open_nameserver(erp_action);
 	else	retval = zfcp_erp_port_strategy_open_common(erp_action);
 

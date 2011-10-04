@@ -42,6 +42,7 @@
 #include <asm/sal.h>
 #include <asm/system.h>
 #include <asm/unistd.h>
+#include <asm/ia32.h>
 
 #define SMP_DEBUG 0
 
@@ -365,6 +366,10 @@ smp_callin (void)
 	local_irq_enable();
 	calibrate_delay();
 	local_cpu_data->loops_per_jiffy = loops_per_jiffy;
+#ifdef CONFIG_IA32_SUPPORT
+	ia32_gdt_init();
+#endif
+
 	/*
 	 * Allow the master to continue.
 	 */

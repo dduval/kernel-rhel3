@@ -219,7 +219,6 @@ struct Scsi_Host * scsi_register(Scsi_Host_Template * tpnt, int j){
      * if need be */
     retval->this_id = tpnt->this_id;
     retval->can_queue = tpnt->can_queue;
-    retval->can_queue_mask = ~0UL;
     retval->sg_tablesize = tpnt->sg_tablesize;
     retval->cmd_per_lun = tpnt->cmd_per_lun;
     retval->unchecked_isa_dma = tpnt->unchecked_isa_dma;

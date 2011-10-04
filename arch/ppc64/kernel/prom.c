@@ -33,6 +33,10 @@
 #include <linux/spinlock.h>
 #include <linux/blk.h>
 
+#ifdef CONFIG_JS20
+int is_js20 = 0;
+#endif
+
 #ifdef DEBUG_YABOOT
 #define call_yaboot(FUNC,...) \
 	do { \
@@ -686,6 +690,9 @@ prom_instantiate_rtas(void)
 						      _rtas->base) >= 0) {
 				_rtas->entry = (long)_prom->args.rets[1];
 			}
+			RELOC(rtas_rmo_buf)
+				= lmb_alloc_base(RTAS_RMOBUF_MAX, PAGE_SIZE,
+							rtas_region);
 		}
 
 		if (_rtas->entry <= 0) {
@@ -1364,6 +1371,9 @@ prom_init(unsigned long r3, unsigned long r4, unsigned long pp,
 	struct paca_struct *_xPaca = PTRRELOC(&paca[0]);
 	struct prom_t *_prom = PTRRELOC(&prom);
 	char *_cmd_line = PTRRELOC(&cmd_line[0]);
+#ifdef CONFIG_JS20
+	ihandle pci_node;
+#endif	
 
 	/* Default machine type. */
 	_systemcfg->platform = PLATFORM_PSERIES;
@@ -1431,7 +1441,23 @@ prom_init(unsigned long r3, unsigned long r4, unsigned long pp,
 #ifdef DEBUG_YABOOT
 	call_yaboot(yaboot->printf, RELOC("Location: 0x11b\n"));
 #endif
-
+	
+#ifdef CONFIG_JS20
+	pci_node = (ihandle)call_prom(RELOC("finddevice"), 1, 1, RELOC("/pci"));
+	if (pci_node != (ihandle)-1) {
+		char model[64];
+		sz = (long)call_prom(RELOC("getprop"), 4, 1, pci_node,
+				    RELOC("compatible"), model, 64);
+		if (sz > 0) {
+			char *c;
+			if (strstr(model, RELOC("U3"))) {
+				RELOC(is_js20) = 1;
+			} else {
+				RELOC(is_js20) = 0;
+			}
+		} 
+	} 
+#endif	
 	/* Get the full OF pathname of the stdout device */
 	p = (char *) mem;
 	memset(p, 0, 256);

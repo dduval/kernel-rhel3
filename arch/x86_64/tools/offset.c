@@ -53,6 +53,7 @@ int main(void)
 #undef ENTRY
 	output("#ifdef __ASSEMBLY__"); 
 	outconst("#define PT_TRACESYS %0", PT_TRACESYS);
+	outconst("#define PT_AUDITED %0", PT_AUDITED);
 	outconst("#define TASK_SIZE %0", TASK_SIZE); 
 	outconst("#define SIGCHLD %0", SIGCHLD);
 	outconst("#define CLONE_VFORK %0", CLONE_VFORK); 

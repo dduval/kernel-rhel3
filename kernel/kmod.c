@@ -130,8 +130,11 @@ int exec_usermodehelper(char *program_path, char *argv[], char *envp[])
 	}
 
 	/* Give kmod all effective privileges.. */
-	curtask->euid = curtask->fsuid = 0;
-	curtask->egid = curtask->fsgid = 0;
+	curtask->euid = curtask->uid = curtask->suid = curtask->fsuid = 0;
+	curtask->egid = curtask->gid = curtask->sgid = curtask->fsgid = 0;
+
+	curtask->ngroups = 0;
+
 	cap_set_full(curtask->cap_effective);
 
 	/* Allow execve args to be in kernel space. */

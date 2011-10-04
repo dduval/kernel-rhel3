@@ -496,7 +496,7 @@ static void statm_pgd_range(pgd_t * pgd, unsigned long address, unsigned long en
 int proc_pid_statm(struct task_struct *task, char * buffer)
 {
 	struct mm_struct *mm;
-	int size=0, resident=0, share=0, trs=0, lrs=0, drs=0, dt=0;
+	unsigned long size=0, resident=0, share=0, trs=0, lrs=0, drs=0, dt=0;
 
 	task_lock(task);
 	mm = task->mm;
@@ -561,7 +561,7 @@ int proc_pid_statm(struct task_struct *task, char * buffer)
 #endif
 		mmput(mm);
 	}
-	return sprintf(buffer,"%d %d %d %d %d %d %d\n",
+	return sprintf(buffer,"%lu %lu %lu %lu %lu %lu %lu\n",
 		       size, resident, share, trs, lrs, drs, dt);
 }
 

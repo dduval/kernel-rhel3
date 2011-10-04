@@ -31,6 +31,7 @@
 #include <linux/config.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
+#include <linux/pci.h>
 #include <linux/sched.h>
 #include <linux/smp.h>
 #include <linux/string.h>
@@ -737,16 +738,49 @@ acpi_get_prt (struct pci_vector_struct **vectors, int *count)
 
 	vector = *vectors;
 
+	/* 
+	 * Make sure all devices described by PCI link device entries
+	 * have valid IRQs 
+	 */
+	if (acpi_pci_link_check()) {
+		printk(KERN_ERR PREFIX "Unable to set PCI link device IRQs\n");
+		return -ENODEV;
+	}
+
 	list_for_each(node, &acpi_prt.entries) {
 		entry = (struct acpi_prt_entry *)node;
 		vector[i].segment = entry->id.segment;
 		vector[i].bus    = entry->id.bus;
 		vector[i].pci_id = ((u32) entry->id.device << 16) | 0xffff;
 		vector[i].pin    = entry->pin;
-		vector[i].irq    = entry->link.index;
+		if (!entry->irq && entry->link.handle)
+			vector[i].irq = acpi_pci_link_get_irq(entry->link.handle, entry->link.index, NULL, NULL);
+		else
+			vector[i].irq = entry->link.index;
 		i++;
 	}
 	*count = acpi_prt.count;
+	return 0;
+}
+
+int
+acpi_get_pci_link_irq_params(struct pci_dev *dev, unsigned char pin, int *trig, int *pol)
+{
+	struct list_head *node;
+	struct acpi_prt_entry *entry;
+
+	list_for_each(node, &acpi_prt.entries) {
+		entry = (struct acpi_prt_entry *)node;
+		
+		if ((entry->id.segment == PCI_SEGMENT(dev)) &&
+		    (entry->id.bus == dev->bus->number) &&
+		    (entry->id.device == PCI_SLOT(dev->devfn)) &&
+		    (entry->pin == pin) &&
+		    (!entry->irq && entry->link.handle)) {
+			acpi_pci_link_get_irq(entry->link.handle, entry->link.index, trig, pol);
+			return 1;
+		}
+	}
 	return 0;
 }
 

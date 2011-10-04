@@ -27,7 +27,8 @@
 #include <linux/errno.h>
 #include <linux/sys.h>
 #include <linux/config.h>
-
+#include <asm/cputable.h>
+	
 #ifdef CONFIG_PPC_ISERIES
 #define DO_SOFT_DISABLE
 #endif
@@ -81,7 +82,7 @@ _GLOBAL(DoSyscall)
 1:
 #endif /* SHOW_SYSCALLS */
 	ld	r10,TASK_PTRACE(r13)
-	andi.	r10,r10,PT_TRACESYS
+	andi.	r10,r10,PT_TRACESYS|PT_AUDITED
 	bne-	50f
 	cmpli	0,r0,NR_syscalls
 	bge-	66f
@@ -143,7 +144,8 @@ _GLOBAL(ret_from_syscall_1)
 	b	22b
         
 /* Traced system call support */
-50:	bl	.syscall_trace
+50:	addi	r3,r1,STACK_FRAME_OVERHEAD
+	bl	.syscall_trace_enter
 	ld	r0,GPR0(r1)	/* Restore original registers */
 	ld	r3,GPR3(r1)
 	ld	r4,GPR4(r1)
@@ -190,7 +192,8 @@ _GLOBAL(ret_from_syscall_2)
 	oris	r10,r10,0x1000
 	std	r10,_CCR(r1)
 60:	std	r3,GPR3(r1)	/* Update return value */
-	bl	.syscall_trace
+	addi	r3,r1,STACK_FRAME_OVERHEAD
+	bl	.syscall_trace_leave
 	b	.ret_from_except
 66:	li	r3,ENOSYS
 	b	57b
@@ -217,14 +220,15 @@ _GLOBAL(ppc64_rt_sigreturn)
 	bl	.sys_rt_sigreturn
 
 80:	ld	r10,TASK_PTRACE(r13)
-	andi.	r10,r10,PT_TRACESYS
+	andi.	r10,r10,PT_TRACESYS|PT_AUDITED
 	bne-	81f
 	cmpi	0,r3,0
 	bge	.ret_from_except
 	b	20b
 81:	cmpi	0,r3,0
 	blt	58b
-	bl	.syscall_trace
+	addi	r3,r1,STACK_FRAME_OVERHEAD
+	bl	.syscall_trace_leave
 	b	.ret_from_except
 
 /*
@@ -256,6 +260,11 @@ _GLOBAL(_switch)
 	mflr	r20		/* Return to switch caller */
 	mfmsr	r22
 	li	r6,MSR_FP	/* Disable floating-point */
+#ifdef CONFIG_ALTIVEC
+BEGIN_FTR_SECTION
+	oris	r6,r6,MSR_VEC@h	/* Disable altivec */
+END_FTR_SECTION_IFSET(CPU_FTR_ALTIVEC)
+#endif /* CONFIG_ALTIVEC */
 	andc	r22,r22,r6
 	mtmsrd	r22
 	isync
@@ -295,9 +304,10 @@ _GLOBAL(_switch)
 _GLOBAL(ret_from_fork)
 	bl	.schedule_tail
 	ld	r0,TASK_PTRACE(r13)
-	andi.	r0,r0,PT_TRACESYS
+	andi.	r0,r0,PT_TRACESYS|PT_AUDITED
 	beq+	.ret_from_except
-	bl	.syscall_trace
+	addi	r3,r1,STACK_FRAME_OVERHEAD
+	bl	.syscall_trace_leave
 	b	.ret_from_except
 
 _GLOBAL(ret_from_except)
@@ -383,6 +393,17 @@ restore:
 	ld	r0,_MSR(r1)
 	andi.	r0,r0,MSR_PR
 	beq+	1f
+#ifdef CONFIG_ALTIVEC
+BEGIN_FTR_SECTION
+	ld	r3,THREAD+VMX_REGS(r13)
+	cmpi	0,r3,0
+	beq	2f
+	ld	r0,_VRSAVE(r3)	
+	mtspr	SPRN_VRSAVE,r0		/* if GPUL, restore VRSAVE reg */
+2:	
+END_FTR_SECTION_IFSET(CPU_FTR_ALTIVEC)
+#endif /* CONFIG_ALTIVEC */	
+	
 	addi	r0,r1,INT_FRAME_SIZE	/* size of frame */
 	std	r0,THREAD+KSP(r13)	/* save kernel stack pointer */
 	std	r1,PACAKSAVE(r4)	/* save exception stack pointer */

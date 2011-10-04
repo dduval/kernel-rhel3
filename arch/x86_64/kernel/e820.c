@@ -500,6 +500,7 @@ void __init setup_memory_region(void)
 extern char command_line[], saved_command_line[];
 extern int fallback_aper_order;
 extern int iommu_setup(char *opt);
+extern int acpi_disabled;
 
 void __init parse_mem_cmdline (char ** cmdline_p)
 {
@@ -533,11 +534,24 @@ void __init parse_mem_cmdline (char ** cmdline_p)
 			end_user_pfn = memparse(from+4, &from) + HIGH_MEMORY;
 			end_user_pfn >>= PAGE_SHIFT;
 		}
+#ifdef CONFIG_ACPI_BOOT
+		else if (!memcmp(from, "acpi=off", 8)) {
+			acpi_disabled = 1;
+		}
+#endif
 #ifdef CONFIG_GART_IOMMU 
 		else if (!memcmp(from,"iommu=",6)) { 
 			iommu_setup(from+6); 
 		} 	
 		
+#endif
+#ifdef CONFIG_SWIOTLB
+		else if (!memcmp(from, "swiotlb=", 8)) {
+			if (to != command_line)
+				to--;
+			from+=8;
+			setup_io_tlb_npages(from);
+		}
 #endif
 	next:
 		c = *(from++);

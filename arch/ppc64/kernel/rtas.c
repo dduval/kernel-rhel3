@@ -184,6 +184,35 @@ rtas_call(int token, int nargs, int nret,
 	return (ulong)((nret > 0) ? rtas_args->rets[0] : 0);
 }
 
+/* Given an RTAS status code of 990n perform the hinted delay of 10^n
+ * (last digit) milliseconds.  For now we bound at n=5 (100 secs). 
+ */
+int
+rtas_do_extended_delay(int status)
+{
+	int order = status - 9900;
+	unsigned long ms;
+	unsigned long jiffies;
+
+	if (order < 0)
+		order = 0;	/* RTC depends on this for -2 clock busy */
+	else if (order > 5)
+		order = 5;	/* bound */
+
+	/* Use microseconds for reasonable accuracy */
+	for (ms=1; order > 0; order--)
+		ms *= 10;       
+
+	jiffies = (ms * HZ) / 1000;
+	
+	set_current_state(TASK_INTERRUPTIBLE);
+	schedule_timeout(jiffies);
+	if (signal_pending(current))
+		return RTAS_DELAY_INTR;
+
+	return 0;
+}
+
 #define FLASH_BLOCK_LIST_VERSION (1UL)
 static void
 rtas_flash_firmware(void)
@@ -358,6 +387,45 @@ rtas_errinjct_close(unsigned int open_token)
 
 	return 0;
 }
+
+unsigned long rtas_rmo_buf = 0;
+
+asmlinkage int ppc64_rtas(struct rtas_args *uargs)
+{
+	struct rtas_args args;
+	unsigned long flags;
+
+	if (!capable(CAP_SYS_ADMIN))
+		return -EPERM;
+
+	if (copy_from_user(&args, uargs, 3 * sizeof(u32)) != 0)
+		return -EFAULT;
+
+	if (args.nargs > ARRAY_SIZE(args.args)
+	    || args.nret > ARRAY_SIZE(args.args)
+	    || args.nargs + args.nret > ARRAY_SIZE(args.args))
+		return -EINVAL;
+
+	/* Copy in args. */
+	if (copy_from_user(args.args, uargs->args,
+			   args.nargs * sizeof(rtas_arg_t)) != 0)
+		return -EFAULT;
+
+	spin_lock_irqsave(&rtas.lock, flags);
+	get_paca()->xRtas = args;
+	enter_rtas((void *)__pa((unsigned long)&get_paca()->xRtas));
+	args = get_paca()->xRtas;
+	spin_unlock_irqrestore(&rtas.lock, flags);
+
+	/* Copy out args. */
+	if (copy_to_user(uargs->args + args.nargs,
+			 args.args + args.nargs,
+			 args.nret * sizeof(rtas_arg_t)) != 0)
+		return -EFAULT;
+
+	return 0;
+}
+
 
 #ifdef CONFIG_PPC_PSERIES
 static int __init rtas_errinjct_init(void)

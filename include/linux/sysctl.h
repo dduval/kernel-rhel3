@@ -130,6 +130,7 @@ enum
 	KERN_SERCONS_ESC=59,	/* int: ascii code of ser-cons "break" or -1 */
 	KERN_TASK_SIZE=60,	/* int: process VM size */
 	KERN_HONOR_UAC_NOPRINT=61, /* int: allow access to UAC_NOPRINT prctl */
+	KERN_S390_HZ_TIMER=62,	/* int: hz timer on or off */
 };
 
 
@@ -154,6 +155,7 @@ enum
 	VM_HUGETLB_POOL=23,	/* int: size of the hugetlb pool, in MB */
 	VM_DCACHE_PRIORITY=24,	/* int: priority of the dcache pool */
 	VM_INACTIVE_CLEAN_PERCENT=25, /* int: percent of inactive thats clean */
+	VM_STACK_DEFER_THRESHOLD=26, /* int: softirq-defer threshold */
 };
 
 

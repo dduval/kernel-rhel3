@@ -899,7 +899,7 @@ void scsi_request_fn(request_queue_t * q)
 		 * released the lock and grabbed it again, so each time
 		 * we need to check to see if the queue is plugged or not.
 		 */
-		if (SHpnt->in_recovery || (q->plugged && q->head_active))
+		if (SHpnt->in_recovery || q->plugged)
 			return;
 
 		/*

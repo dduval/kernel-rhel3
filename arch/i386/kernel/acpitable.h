@@ -146,7 +146,7 @@ struct acpi_table_rsdp {
 
 struct acpi_table_rsdt {
 	acpi_table_header header;
-	u32 entry[ACPI_TABLE_COUNT];
+	u32 entry[1];
 } __attribute__ ((packed));
 
 typedef struct {

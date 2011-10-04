@@ -121,6 +121,9 @@
 #ifndef PCI_DEVICE_ID_INTEL_ICH5
 #define PCI_DEVICE_ID_INTEL_ICH5	0x24d5
 #endif
+#ifndef PCI_DEVICE_ID_INTEL_ICH6_3
+#define PCI_DEVICE_ID_INTEL_ICH6_3	0x266e
+#endif
 #ifndef PCI_DEVICE_ID_INTEL_440MX
 #define PCI_DEVICE_ID_INTEL_440MX	0x7195
 #endif
@@ -349,6 +352,9 @@ static struct pci_device_id i810_pci_tbl [] __initdata = {
 	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, AMD8111},
 	{PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_ESB_5,
 	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, INTELICH4},
+	{PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_ICH6_3,
+	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, INTELICH4},
+
 	{0,}
 };
 
@@ -2790,7 +2796,7 @@ static int i810_ac97_power_up_bus(struct i810_card *card)
 	/* see i810_ac97_init for the next 7 lines (jsaw) */
 	inw(card->ac97base);
 	if ((card->pci_id == PCI_DEVICE_ID_INTEL_ICH4 || card->pci_id == PCI_DEVICE_ID_INTEL_ICH5 ||
-	     card->pci_id == PCI_DEVICE_ID_INTEL_ESB_5)
+	     card->pci_id == PCI_DEVICE_ID_INTEL_ESB_5 || card->pci_id == PCI_DEVICE_ID_INTEL_ICH6_3)
 	    && (card->use_mmio)) {
 		primary_codec_id = (int) readl(card->iobase_mmio + SDM) & 0x3;
 		printk(KERN_INFO "i810_audio: Primary codec has ID %d\n",
@@ -2861,7 +2867,7 @@ static int __init i810_ac97_init(struct i810_card *card)
 		   last codec ID spoken to. 
 		*/
 		if ((card->pci_id == PCI_DEVICE_ID_INTEL_ICH4 || card->pci_id == PCI_DEVICE_ID_INTEL_ICH5 ||
-		     card->pci_id == PCI_DEVICE_ID_INTEL_ESB_5)
+		     card->pci_id == PCI_DEVICE_ID_INTEL_ESB_5 || card->pci_id == PCI_DEVICE_ID_INTEL_ICH6_3)
 		    && (card->use_mmio)) {
 			ac97_id = (int) readl(card->iobase_mmio + SDM) & 0x3;
 			printk(KERN_INFO "i810_audio: Connection %d with codec id %d\n",

@@ -96,6 +96,7 @@ static int rtc_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 	switch (cmd) {
 	case RTC_RD_TIME:	/* Read the time/date from RTC	*/
 	{
+		memset(&wtime, 0, sizeof(struct rtc_time));
 		ppc_md.get_rtc_time(&wtime);
 		break;
 	}
@@ -225,6 +226,7 @@ static int rtc_proc_output (char *buf)
 	
 	p = buf;
 
+	memset(&tm, 0, sizeof(struct rtc_time));
 	ppc_md.get_rtc_time(&tm);
 
 	/*

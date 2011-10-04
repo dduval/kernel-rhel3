@@ -175,12 +175,12 @@ do_call_base:
 system_call:
 	SAVE_ALL_BASE
         SAVE_ALL __LC_SVC_OLD_PSW,1
-	lh	%r8,0x8a	  # get svc number from lowcore
-        sll     %r8,2
+	lh	%r7,0x8a	  # get svc number from lowcore
+        sll     %r7,2
         GET_CURRENT               # load pointer to task_struct to R9
         stosm   24(%r15),0x03     # reenable interrupts
-        l       %r8,sys_call_table-entry_base(%r8,%r13) # get system call addr.
-        tm      __TASK_ptrace+3(%r9),0x02 # PT_TRACESYS
+        l       %r8,sys_call_table-entry_base(%r7,%r13) # get system call addr.
+        tm      __TASK_ptrace+3(%r9),0x22 # PT_TRACESYS|PT_AUDITED
         bnz     BASED(sysc_tracesys)
         basr    %r14,%r8          # call sys_xxxx
         st      %r2,SP_R2(%r15)   # store return value (change R2 on stack)
@@ -228,24 +228,26 @@ sysc_tracesys:
 # special linkage: %r11 contains the return address for trace_svc
 #
 trace_svc:
-        l       %r1,BASED(.Ltrace)
-	l       %r7,BASED(.Lc_ENOSYS)
-	st      %r7,SP_R2(%r15)   # give sysc_trace an -ENOSYS retval
-        basr    %r14,%r1
-	l       %r2,SP_R2(%r15)
-	cr      %r2,%r7		  # compare with saved -ENOSYS
-	be      BASED(trace_svc_go) # strace changed the syscall ?
-	sll     %r2,24
-	srl     %r2,22
-        l       %r8,sys_call_table-entry_base(%r2,%r13) # get system call addr.
+        l       %r1,BASED(.Ltrace_enter)
+	srl	%r7,2
+	st	%r7,SP_R2(%r15)
+	la	%r2,SP_PTREGS(%r15)
+	basr    %r14,%r1
+	clc	SP_R2(4,%r15),BASED(.Lnr_syscalls)
+	bnl     BASED(trace_svc_nogo)
+	l	%r7,SP_R2(%r15)   # strace might have changed the
+	sll	%r7,2             #  system call
+	l       %r8,sys_call_table-entry_base(%r7,%r13) # get system call addr.
 trace_svc_go:
 	lm      %r3,%r6,SP_R3(%r15)
 	l       %r2,SP_ORIG_R2(%r15)
-        basr    %r14,%r8          # call sys_xxx
-        st      %r2,SP_R2(%r15)   # store return value
-        l       %r1,BASED(.Ltrace)
+	basr    %r14,%r8          # call sys_xxx
+	st      %r2,SP_R2(%r15)   # store return value
+trace_svc_nogo:
+	l       %r1,BASED(.Ltrace_exit)
+	la	%r2,SP_PTREGS(%r15)
 	lr	%r14,%r11	  # return point is in %r11
-        br      %r1
+	br      %r1
 
 #
 # a new process exits the kernel with ret_from_fork
@@ -675,11 +677,11 @@ pgm_per_only:
 pgm_svcper:
 	SAVE_ALL __LC_SVC_OLD_PSW,1
         GET_CURRENT               # load pointer to task_struct to R9
-	lh	%r8,0x8a	  # get svc number from lowcore
-        sll     %r8,2
+	lh	%r7,0x8a	  # get svc number from lowcore
+        sll     %r7,2
         stosm   24(%r15),0x03     # reenable interrupts
-        l       %r8,sys_call_table-entry_base(%r8,%r13) # get system call addr.
-        tm      __TASK_ptrace+3(%r9),0x02 # PT_TRACESYS
+        l       %r8,sys_call_table-entry_base(%r7,%r13) # get system call addr.
+        tm      __TASK_ptrace+3(%r9),0x22 # PT_TRACESYS|PT_AUDITED
         bnz     BASED(pgm_tracesys)
         basr    %r14,%r8          # call sys_xxxx
         st      %r2,SP_R2(%r15)   # store return value (change R2 on stack)
@@ -715,6 +717,7 @@ pgm_tracesys:
 io_int_handler:
 	SAVE_ALL_BASE
         SAVE_ALL __LC_IO_OLD_PSW,0
+	mc	0,0
         GET_CURRENT               # load pointer to task_struct to R9
         l       %r1,BASED(.Ldo_IRQ)        # load address of do_IRQ
         la      %r2,SP_PTREGS(%r15) # address of register-save area
@@ -783,6 +786,7 @@ io_signal_return:
 ext_int_handler:
 	SAVE_ALL_BASE
         SAVE_ALL __LC_EXT_OLD_PSW,0
+	mc	0,0
         GET_CURRENT                    # load pointer to task_struct to R9
 	lh	%r6,__LC_EXT_INT_CODE  # get interruption code
 	lr	%r1,%r6		       # calculate index = code & 0xff
@@ -795,7 +799,8 @@ ext_int_handler:
 ext_int_loop:
 	ch	%r6,8(%r7)	       # compare external interrupt code
 	bne	BASED(ext_int_next)
-	l	%r1,4(%r7)	       # get handler address
+	icm	%r1,15,4(%r7)	       # get handler address
+	bz	BASED(ext_int_next)
 	la	%r2,SP_PTREGS(%r15)    # address of register-save area
 	lr	%r3,%r6		       # interruption code
 	basr	%r14,%r1	       # call handler
@@ -812,6 +817,7 @@ ext_int_next:
 mcck_int_handler:
 	SAVE_ALL_BASE
         SAVE_ALL __LC_MCK_OLD_PSW,0
+	mc	0,0
 	l       %r1,BASED(.Ls390_mcck)
 	basr    %r14,%r1	  # call machine check handler
 mcck_return:
@@ -890,7 +896,9 @@ restart_go:
 .Lsigreturn:   .long  sys_sigreturn
 .Lsigsuspend:  .long  sys_sigsuspend
 .Lsigaltstack: .long  sys_sigaltstack
-.Ltrace:       .long  syscall_trace
+.Lnr_syscalls: .long  NR_syscalls
+.Ltrace_enter: .long  syscall_trace_enter
+.Ltrace_exit:  .long  syscall_trace_exit
 .Lvfork:       .long  sys_vfork
 
 .Lschedtail:   .long  schedule_tail

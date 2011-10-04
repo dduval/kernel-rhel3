@@ -16,6 +16,12 @@ O_TARGET := kernel.o
 
 
 export-objs     := mtrr.o msr.o cpuid.o x8664_ksyms.o pci-gart.o
+ifdef CONFIG_SWIOTLB
+export-objs	+= swiotlb.o
+endif
+ifdef CONFIG_MICROCODE
+export-objs	+= microcode.o
+endif
 
 obj-y	:= process.o semaphore.o signal.o entry.o traps.o irq.o \
 		ptrace.o i8259.o ioport.o ldt.o setup.o time.o sys_x86_64.o \
@@ -38,6 +44,18 @@ obj-$(CONFIG_EARLY_PRINTK) +=  early_printk.o
 obj-$(CONFIG_GART_IOMMU) += pci-gart.o aperture.o
 obj-$(CONFIG_DUMMY_IOMMU) += pci-nommu.o
 obj-$(CONFIG_MCE) += bluesmoke.o
+obj-$(CONFIG_SWIOTLB)	+= swiotlb.o
+obj-$(CONFIG_MICROCODE)	+= microcode.o
+
+obj := .
+ifdef CONFIG_SWIOTLB
+$(obj)/swiotlb.c: ${INCL}
+	@ln -sf ../../../arch/ia64/lib/swiotlb.c $(obj)/swiotlb.c
+endif
+ifdef CONFIG_MICROCODE
+$(obj)/microcode.c: ${INCL}
+	@ln -sf ../../../arch/i386/kernel/microcode.c $(obj)/microcode.c
+endif
 
 include $(TOPDIR)/Rules.make
 

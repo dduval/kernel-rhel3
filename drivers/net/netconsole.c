@@ -899,7 +899,7 @@ static void netconsole_netdump (struct pt_regs *regs)
 	__save_flags(flags);
 	__cli();
 #if CONFIG_SMP
-	smp_call_function(freeze_cpu, NULL, 1, 0);
+	smp_call_function(freeze_cpu, NULL, 1, -1);
 #endif
 	mdelay(1000);
 	/*
