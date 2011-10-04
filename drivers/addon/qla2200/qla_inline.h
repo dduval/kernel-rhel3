@@ -1,21 +1,10 @@
-/******************************************************************************
- *                  QLOGIC LINUX SOFTWARE
+/*
+ * QLogic Fibre Channel HBA Driver
+ * Copyright (c)  2003-2005 QLogic Corporation
  *
- * QLogic ISPFBLITE device driver for Linux 2.4.x
- * Copyright (C) 2003 QLogic Corporation
- * (www.qlogic.com)
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2, or (at your option) any
- * later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- ******************************************************************************/
+ * See LICENSE.qla2xxx for copyright and licensing details.
+ */
+
 
 /*
  * This file includes a set of defines that are required to compile the 
@@ -42,6 +31,18 @@ check_all_device_ids(scsi_qla_host_t *ha)
                               (ha->subsystem_device == 0x0170) && \
                               (ha->subsystem_vendor == 0x1028))
 
+static inline int 
+check_24xx_or_54xx_device_ids(scsi_qla_host_t *ha)
+{
+	return (((ha->device_id & 0xff00) == 0x2400) || 
+		((ha->device_id & 0xff00) == 0x5400));
+}
+
+static inline int 
+check_25xx_device_ids(scsi_qla_host_t *ha)
+{
+	return ((ha->device_id & 0xff00) == 0x2500);
+}
 static inline void 
 set_model_number(scsi_qla_host_t *ha)
 {
@@ -51,3 +52,26 @@ set_model_number(scsi_qla_host_t *ha)
  	else
 		sprintf(ha->model_number, "QLA23xx");
 }
+
+static inline uint8_t *host_to_fcp_swap(uint8_t *, uint32_t);
+
+/**
+ * host_to_fcp_swap() - 
+ * @fcp: 
+ * @bsize: 
+ *
+ * Returns 
+ */
+static inline uint8_t *
+host_to_fcp_swap(uint8_t *fcp, uint32_t bsize)
+{
+	uint32_t *ifcp = (uint32_t *) fcp;
+	uint32_t *ofcp = (uint32_t *) fcp;
+	uint32_t iter = bsize >> 2;
+
+	for (; iter ; iter--)
+		*ofcp++ = swab32(*ifcp++);
+
+	return (fcp);
+}
+

@@ -1776,7 +1776,7 @@ static ssize_t generic_file_direct_IO(int rw, struct file * filp, char * buf, si
 	loff_t size = inode->i_size;
 	int sectsize = get_min_io_size(inode), good_sectsize = 0;
 	int sectsize_bits;
-	size_t count;
+	size_t count, count_orig = 0;
 
 	count = *d_count;
 	new_iobuf = 0;
@@ -1819,8 +1819,17 @@ static ssize_t generic_file_direct_IO(int rw, struct file * filp, char * buf, si
 	while (good_sectsize > 512)
 		good_sectsize >>= 1, sectsize_bits++;
 
-	if ((rw == READ) && (offset + count > size))
+	/* If the last block in the file is a partial block, do I/O for a
+	 * full sector, and adjust the return value below. */
+	if ((rw == READ) && (offset + count > size)) {
+		int sectsize_mask = sectsize - 1;
+
 		count = size - offset;
+		if (count & sectsize_mask) {
+			count_orig = count;
+			count = (count + sectsize) & ~sectsize_mask;
+		}
+	}
 
 	/*
 	 * Flush to disk exclusively the _data_, metadata must remain
@@ -1878,6 +1887,10 @@ static ssize_t generic_file_direct_IO(int rw, struct file * filp, char * buf, si
 
 	if (progress)
 		retval = progress;
+
+	/* truncate the read to the end of the file */
+	if (unlikely(count_orig && retval > count_orig && retval > 0))
+		retval = count_orig;
 
  out_free:
 	if (!new_iobuf)
@@ -3409,11 +3422,12 @@ do_generic_file_write(struct file *file,const char *buf,size_t count, loff_t *pp
 			PAGE_BUG(page);
 		}
 
-		kaddr = kmap(page);
 		status = mapping->a_ops->prepare_write(file, page, offset, offset+bytes);
 		if (status)
 			goto sync_failure;
+		kaddr = kmap(page);
 		page_fault = __copy_from_user(kaddr+offset, buf, bytes);
+		kunmap(page);
 		flush_dcache_page(page);
 		status = mapping->a_ops->commit_write(file, page, offset, offset+bytes);
 		if (page_fault)
@@ -3428,7 +3442,6 @@ do_generic_file_write(struct file *file,const char *buf,size_t count, loff_t *pp
 			buf += status;
 		}
 unlock:
-		kunmap(page);
 		/* Mark it unlocked again and drop the page.. */
 		UnlockPage(page);
 		if (deactivate)
@@ -3471,7 +3484,6 @@ sync_failure:
 	 * If blocksize < pagesize, prepare_write() may have instantiated a
 	 * few blocks outside i_size.  Trim these off again.
 	 */
-	kunmap(page);
 	UnlockPage(page);
 	page_cache_release(page);
 	if (pos + bytes > inode->i_size)
@@ -4018,6 +4030,7 @@ again:
 					locked = 1;
 					goto again;
 				}
+				return;
 			}
 		}
 	}

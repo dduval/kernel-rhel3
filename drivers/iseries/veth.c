@@ -132,6 +132,7 @@ static int probed __initdata = 0;
 
 static struct VethFabricMgr *mFabricMgr = NULL;
 static struct proc_dir_entry *veth_proc_root = NULL;
+static atomic_t pending_callbacks;
 
 DECLARE_MUTEX_LOCKED(VethProcSemaphore);
 
@@ -327,12 +328,21 @@ void __exit veth_module_cleanup(void)
 		    spin_unlock_irqrestore(&connection->mStatusGate, flags);
 	    }
 
-	    flush_scheduled_tasks();
-
+	    /* Stop interrupts coming from the Hypervisor */
 	    HvLpEvent_unregisterHandler(HvLpEvent_Type_VirtualLan);
 
-	    mb();
+	    /* Stop rescheduling of tasks in ack callbacks */
 	    mFabricMgr = NULL;
+	    mb();
+
+	    /* Wait for any scheduled tasks to complete */
+	    flush_scheduled_tasks();
+
+	    /* Wait for any outstanding callbacks to arrive */
+	    while (atomic_read(&pending_callbacks));
+
+	    /* Ensure all callbacks have finished running */
+	    synchronize_irq();
 
 	    down(&VethProcSemaphore);
 
@@ -443,6 +453,7 @@ int __init veth_module_init(void)
 
 	mFabricMgr->mEyecatcher = 0x56455448464D4752ULL;
 	mFabricMgr->mThisLp = HvLpConfig_getLpIndex_outline();
+	atomic_set(&pending_callbacks, 0);
 
 	for (i = 0; i < HvMaxArchitectedLps; ++i) {
 		mFabricMgr->mConnection[i].mEyecatcher = 0x564554484C50434EULL;
@@ -854,6 +865,9 @@ static void veth_intFinishOpeningConnections(void *parm, int number)
 	struct VethLpConnection *connection = (struct VethLpConnection *) parm;
 	connection->mAllocTaskTq.data = parm;
 	connection->mNumberAllocated = number;
+	atomic_dec(&pending_callbacks);
+	if (!mFabricMgr)
+		return;
 	schedule_task(&connection->mAllocTaskTq);
 }
 
@@ -912,6 +926,7 @@ static void veth_openConnection(u8 remoteLp)
 
 	if (connection->mConnectionStatus.mCapMonAlloced != 1) {
 		connection->mAllocTaskTq.routine = (void *) (void *) veth_finishOpeningConnections;
+		atomic_inc(&pending_callbacks);
 		mf_allocateLpEvents(remoteLp,
 				    HvLpEvent_Type_VirtualLan,
 				    sizeof(struct VethLpEvent), 2, &veth_intFinishOpeningConnections, connection);
@@ -948,6 +963,7 @@ static void veth_closeConnection(u8 remoteLp)
 static void veth_msgsInit(struct VethLpConnection *connection)
 {
 	connection->mAllocTaskTq.routine = (void *) (void *) veth_finishMsgsInit;
+	atomic_inc(&pending_callbacks);
 	mf_allocateLpEvents(connection->mRemoteLp,
 			    HvLpEvent_Type_VirtualLan,
 			    sizeof(struct VethLpEvent),
@@ -959,6 +975,9 @@ static void veth_intFinishMsgsInit(void *parm, int number)
 	struct VethLpConnection *connection = (struct VethLpConnection *) parm;
 	connection->mAllocTaskTq.data = parm;
 	connection->mNumberRcvMsgs = number;
+	atomic_dec(&pending_callbacks);
+	if (!mFabricMgr)
+		return;
 	schedule_task(&connection->mAllocTaskTq);
 }
 
@@ -968,6 +987,9 @@ static void veth_intFinishCapTask(void *parm, int number)
 	connection->mAllocTaskTq.data = parm;
 	if (number > 0)
 		connection->mNumberLpAcksAlloced += number;
+	atomic_dec(&pending_callbacks);
+	if (!mFabricMgr)
+		return;
 	schedule_task(&connection->mAllocTaskTq);
 }
 
@@ -1156,6 +1178,7 @@ static void veth_capTask(void *parm)
 		if (connection->mNumberLpAcksAlloced < numAcks) {
 			numAcks = numAcks - connection->mNumberLpAcksAlloced;
 			connection->mAllocTaskTq.routine = (void *) (void *) veth_finishCapTask;
+			atomic_inc(&pending_callbacks);
 			mf_allocateLpEvents(connection->mRemoteLp,
 					    HvLpEvent_Type_VirtualLan,
 					    sizeof(struct VethLpEvent), numAcks, &veth_intFinishCapTask, connection);

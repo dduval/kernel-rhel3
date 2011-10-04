@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc.h 1.6 2005/05/03 11:21:15EDT sf_support Exp  $
+ * $Id: lpfc.h 483 2006-03-22 00:27:31Z sf_support $
  */
 
 #ifndef _H_LPFC
@@ -248,6 +248,7 @@ typedef struct lpfcHBA {
 #define LPFC_HBA_READY            32
 #define LPFC_HBA_ERROR            0xff
 
+	int32_t stopped;   /* HBA has not been restarted since last ERATT */
 	uint8_t fc_linkspeed;	/* Link speed after last READ_LA */
 
 	uint32_t fc_eventTag;	/* event tag for link attention */

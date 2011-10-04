@@ -187,7 +187,7 @@ E1000_PARAM(RxAbsIntDelay, "Receive Absolute Interrupt Delay");
  *
  * Valid Range: 100-100000 (0=off, 1=dynamic)
  *
- * Default Value: 1
+ * Default Value: 8000
  */
 
 E1000_PARAM(InterruptThrottleRate, "Interrupt Throttling Rate");
@@ -237,7 +237,7 @@ static int __devinit
 e1000_validate_option(int *value, struct e1000_option *opt,
 		struct e1000_adapter *adapter)
 {
-	if(*value == OPTION_UNSET) {
+	if (*value == OPTION_UNSET) {
 		*value = opt->def;
 		return 0;
 	}
@@ -254,7 +254,7 @@ e1000_validate_option(int *value, struct e1000_option *opt,
 		}
 		break;
 	case range_option:
-		if(*value >= opt->arg.r.min && *value <= opt->arg.r.max) {
+		if (*value >= opt->arg.r.min && *value <= opt->arg.r.max) {
 			DPRINTK(PROBE, INFO,
 					"%s set to %i\n", opt->name, *value);
 			return 0;
@@ -264,10 +264,10 @@ e1000_validate_option(int *value, struct e1000_option *opt,
 		int i;
 		struct e1000_opt_list *ent;
 
-		for(i = 0; i < opt->arg.l.nr; i++) {
+		for (i = 0; i < opt->arg.l.nr; i++) {
 			ent = &opt->arg.l.p[i];
-			if(*value == ent->i) {
-				if(ent->str[0] != '\0')
+			if (*value == ent->i) {
+				if (ent->str[0] != '\0')
 					DPRINTK(PROBE, INFO, "%s\n", ent->str);
 				return 0;
 			}
@@ -278,7 +278,7 @@ e1000_validate_option(int *value, struct e1000_option *opt,
 		BUG();
 	}
 
-	DPRINTK(PROBE, INFO, "Invalid %s specified (%i) %s\n",
+	DPRINTK(PROBE, INFO, "Invalid %s value specified (%i) %s\n",
 	       opt->name, *value, opt->err);
 	*value = opt->def;
 	return -1;
@@ -301,7 +301,7 @@ void __devinit
 e1000_check_options(struct e1000_adapter *adapter)
 {
 	int bd = adapter->bd_number;
-	if(bd >= E1000_MAX_NIC) {
+	if (bd >= E1000_MAX_NIC) {
 		DPRINTK(PROBE, NOTICE,
 		       "Warning: no configuration for board #%i\n", bd);
 		DPRINTK(PROBE, NOTICE, "Using defaults for all values\n");
@@ -317,7 +317,8 @@ e1000_check_options(struct e1000_adapter *adapter)
 			.def  = E1000_DEFAULT_TXD,
 			.arg  = { .r = { .min = E1000_MIN_TXD }}
 		};
-		struct e1000_desc_ring *tx_ring = &adapter->tx_ring;
+		struct e1000_tx_ring *tx_ring = adapter->tx_ring;
+		int i;
 		e1000_mac_type mac_type = adapter->hw.mac_type;
 		opt.arg.r.max = mac_type < e1000_82544 ?
 			E1000_MAX_TXD : E1000_MAX_82544_TXD;
@@ -325,6 +326,8 @@ e1000_check_options(struct e1000_adapter *adapter)
 		tx_ring->count = TxDescriptors[bd];
 		e1000_validate_option(&tx_ring->count, &opt, adapter);
 		E1000_ROUNDUP(tx_ring->count, REQ_TX_DESCRIPTOR_MULTIPLE);
+		for (i = 0; i < adapter->num_tx_queues; i++)
+			tx_ring[i].count = tx_ring->count;
 	}
 	{ /* Receive Descriptor Count */
 		struct e1000_option opt = {
@@ -335,7 +338,8 @@ e1000_check_options(struct e1000_adapter *adapter)
 			.def  = E1000_DEFAULT_RXD,
 			.arg  = { .r = { .min = E1000_MIN_RXD }}
 		};
-		struct e1000_desc_ring *rx_ring = &adapter->rx_ring;
+		struct e1000_rx_ring *rx_ring = adapter->rx_ring;
+		int i;
 		e1000_mac_type mac_type = adapter->hw.mac_type;
 		opt.arg.r.max = mac_type < e1000_82544 ? E1000_MAX_RXD :
 			E1000_MAX_82544_RXD;
@@ -343,6 +347,8 @@ e1000_check_options(struct e1000_adapter *adapter)
 		rx_ring->count = RxDescriptors[bd];
 		e1000_validate_option(&rx_ring->count, &opt, adapter);
 		E1000_ROUNDUP(rx_ring->count, REQ_RX_DESCRIPTOR_MULTIPLE);
+		for (i = 0; i < adapter->num_rx_queues; i++)
+			rx_ring[i].count = rx_ring->count;
 	}
 	{ /* Checksum Offload Enable/Disable */
 		struct e1000_option opt = {
@@ -457,7 +463,7 @@ e1000_check_options(struct e1000_adapter *adapter)
 		}
 	}
 
-	switch(adapter->hw.media_type) {
+	switch (adapter->hw.media_type) {
 	case e1000_media_type_fiber:
 	case e1000_media_type_internal_serdes:
 		e1000_check_fiber_options(adapter);
@@ -508,7 +514,7 @@ e1000_check_fiber_options(struct e1000_adapter *adapter)
 static void __devinit
 e1000_check_copper_options(struct e1000_adapter *adapter)
 {
-	int speed, dplx;
+	int speed, dplx, an;
 	int bd = adapter->bd_number;
 	bd = bd > E1000_MAX_NIC ? E1000_MAX_NIC : bd;
 
@@ -543,6 +549,13 @@ e1000_check_copper_options(struct e1000_adapter *adapter)
 			.arg  = { .l = { .nr = ARRAY_SIZE(dplx_list),
 					 .p = dplx_list }}
 		};
+
+		if (e1000_check_phy_reset_block(&adapter->hw)) {
+			DPRINTK(PROBE, INFO,
+				"Link active due to SoL/IDER Session. "
+				"Speed/Duplex/AutoNeg parameter ignored.\n");
+			return;
+		}
 
 		dplx = Duplex[bd];
 		e1000_validate_option(&dplx, &opt, adapter);

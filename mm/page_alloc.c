@@ -28,6 +28,8 @@
 int nr_swap_pages;
 pg_data_t *pgdat_list;
 
+int vm_defragment;
+
 static unsigned long __initdata heuristic_lowmem_pages;
 static unsigned long __initdata heuristic_all_pages;
 
@@ -744,7 +746,7 @@ defragment_again:
 			 */
 			numpages = z->inactive_laundry_pages;
 			if (try_harder) {
-				numpages = 64;
+				numpages = try_harder * 64;
 				rebalance_inactive(20);
 				freed += rebalance_dirty_zone(z, numpages, mask);
 			}
@@ -778,9 +780,14 @@ defragment_again:
 				try_harder = 1;
 				goto defragment_again;
 			}
-			/* Try smaller allocations indefinately. */
+			/* Try smaller allocations indefinitely. */
 			if (order <= 2 && freed)
 				goto defragment_again;
+			/* Try medium allocations a tunable number of times. */
+			if (order < 5 && freed && try_harder <= vm_defragment) {
+				try_harder++;
+				goto defragment_again;
+			}
 		}
 	}
 

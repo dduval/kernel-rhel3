@@ -843,6 +843,7 @@ extern int __kill_pg_info(int sig, struct siginfo *info, pid_t pgrp);
 extern int kill_pg_info(int, struct siginfo *, pid_t);
 extern int kill_sl_info(int, struct siginfo *, pid_t);
 extern int kill_proc_info(int, struct siginfo *, pid_t);
+extern int kill_proc_info_as_uid(int, struct siginfo *, pid_t, uid_t, uid_t);
 extern void notify_parent(task_t *, int);
 extern void do_notify_parent(task_t *, int);
 extern void force_sig(int, task_t *);

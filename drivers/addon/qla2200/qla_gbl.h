@@ -1,21 +1,12 @@
-/********************************************************************************
-*                  QLOGIC LINUX SOFTWARE
-*
-* QLogic ISP2x00 device driver for Linux 2.4.x
-* Copyright (C) 2003 QLogic Corporation
-* (www.qlogic.com)
-*
-* This program is free software; you can redistribute it and/or modify it
-* under the terms of the GNU General Public License as published by the
-* Free Software Foundation; either version 2, or (at your option) any
-* later version.
-*
-* This program is distributed in the hope that it will be useful, but
-* WITHOUT ANY WARRANTY; without even the implied warranty of
-* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-* General Public License for more details.
-*
-******************************************************************************
+/*
+ * QLogic Fibre Channel HBA Driver
+ * Copyright (c)  2003-2005 QLogic Corporation
+ *
+ * See LICENSE.qla2xxx for copyright and licensing details.
+ */
+
+
+/******************************************************************************
 * Global include file.
 ******************************************************************************/
 
@@ -48,6 +39,7 @@ extern inline void *kmem_zalloc( int siz, int code, int id);
 extern uint32_t qla2x00_fo_path_change(uint32_t ,
 					       fc_lun_t *, fc_lun_t *);
 extern scsi_qla_host_t *qla2x00_get_hba(int);
+extern int qla24xx_refresh_flash_version(scsi_qla_host_t *, uint8_t *);
 
 /*
  * Global Function Prototypes in qla_fo.c source file.
@@ -56,6 +48,7 @@ extern uint32_t qla2x00_send_fo_notification(fc_lun_t *fclun_p, fc_lun_t *olun_p
 extern void qla2x00_fo_init_params(scsi_qla_host_t *ha);
 extern BOOL qla2x00_fo_enabled(scsi_qla_host_t *ha, int instance);
 extern uint32_t qla2x00_wait_for_tpg_ready(fc_lun_t *);
+extern int qla2x00_spinup(scsi_qla_host_t *, fc_port_t *, uint16_t ); 
 
 /*
  * Global Data in qla_cfg.c source file.

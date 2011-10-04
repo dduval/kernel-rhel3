@@ -4022,12 +4022,18 @@ megaraid_reboot_notify (struct notifier_block *this, unsigned long code,
 	u8 raw_mbox[sizeof(mbox_t)];
 	mbox_t *mbox;
 	int i;
+	int hba_flush_count = hba_count;
+
+	if (!hba_flush_count)
+		return NOTIFY_DONE;
+
+	hba_count = 0;
 
 	/*
 	 * Flush the controller's cache irrespective of the codes coming down.
 	 * SYS_DOWN, SYS_HALT, SYS_RESTART, SYS_POWER_OFF
 	 */
-	for( i = 0; i < hba_count; i++ ) {
+	for( i = 0; i < hba_flush_count; i++ ) {
 		printk(KERN_INFO "megaraid: flushing adapter %d..", i);
 		host = hba_soft_state[i]->host;
 

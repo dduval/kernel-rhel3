@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_scsiport.c 1.7 2005/05/03 11:22:11EDT sf_support Exp  $
+ * $Id: lpfc_scsiport.c 328 2005-05-03 15:20:43Z sf_support $
  */
 #include <linux/version.h>
 #include <linux/spinlock.h>

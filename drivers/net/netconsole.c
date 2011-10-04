@@ -82,6 +82,8 @@ static unsigned long long mhz_cycles, jiffy_cycles;
  */
 #define MAX_NETCONSOLE_SKBS 128
 
+#define MAX_NETCONSOLE_TX_RETRIES 2500
+
 static spinlock_t netconsole_lock = SPIN_LOCK_UNLOCKED;
 static int nr_netconsole_skbs;
 static struct sk_buff *netconsole_skbs;
@@ -231,12 +233,12 @@ repeat:
 
 static void transmit_raw_skb(struct sk_buff *skb, struct net_device *dev)
 {
-	unsigned long jiffies_start = jiffies;
+	int poll_count = 0;
 
 repeat_poll:
 	/* drop the packet if we are making no progress */
 	if (likely(!netdump_mode) && 
-	    time_after(jiffies, jiffies_start + HZ/100 + 1)) {
+	    poll_count++ > MAX_NETCONSOLE_TX_RETRIES) {
 		dev_kfree_skb_any(skb);
 		return;
 	}
@@ -252,6 +254,7 @@ repeat_poll:
 		if (dev->poll_controller)
 			dev->poll_controller(dev);
 		zap_completion_queue();
+		udelay(50);
 		goto repeat_poll;
 	}
 
@@ -1293,7 +1296,7 @@ static int init_netconsole(void)
 
 	INIT_LIST_HEAD(&request_list);
 
-	if (platform_supports_netdump) {
+	if (netdump_target_ip && platform_supports_netdump) {
 		if (netdump_register_hooks(netconsole_rx, 
 					      netconsole_receive_skb,
 					      netconsole_netdump)) {

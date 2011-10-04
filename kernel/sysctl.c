@@ -365,6 +365,7 @@ extern int inactive_clean_percent;
 extern int skip_mapped_pages;
 extern int oom_kill_limit;
 extern int kscand_work_percent;
+extern int vm_defragment;
 #if defined(CONFIG_DISCONTIGMEM) && defined(CONFIG_NUMA)
 extern int numa_memory_allocator;
 #endif
@@ -414,6 +415,8 @@ static ctl_table vm_table[] = {
 	{VM_NUMA_ALLOCATOR, "numa_memory_allocator", &numa_memory_allocator,
 		sizeof(numa_memory_allocator), 0644, NULL, &proc_dointvec},
 #endif
+	{VM_DEFRAGMENT, "vm-defragment", &vm_defragment,
+		sizeof(vm_defragment), 0644, NULL, &proc_dointvec},
 	{0}
 };
 

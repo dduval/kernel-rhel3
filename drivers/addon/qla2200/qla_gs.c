@@ -1,21 +1,10 @@
-/******************************************************************************
- *                  QLOGIC LINUX SOFTWARE
+/*
+ * QLogic Fibre Channel HBA Driver
+ * Copyright (c)  2003-2005 QLogic Corporation
  *
- * QLogic ISP2x00 device driver for Linux 2.4.x
- * Copyright (C) 2003 Qlogic Corporation
- * (www.qlogic.com)
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2, or (at your option) any
- * later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- ******************************************************************************/
+ * See LICENSE.qla2xxx for copyright and licensing details.
+ */
+
 
 #define QLA_INIT_FDMI_CTIU_HDR(ha, ct_hdr)		\
     ct_hdr.revision = GS4_REVISION;			\
@@ -840,7 +829,7 @@ qla2x00_fdmi_setup_hbaattr(scsi_qla_host_t *ha, hba_attr_t *attr)
 	/* node name */
 	attr->nn.type = __constant_cpu_to_be16(T_NODE_NAME);
 	attr->nn.len = cpu_to_be16(sizeof(hba_nn_attr_t));
-	memcpy(attr->nn.value, ha->init_cb->node_name, WWN_SIZE);
+	memcpy(attr->nn.value, ha->node_name, WWN_SIZE);
 
 	DEBUG13(printk("%s(%ld): NODENAME=%02x%02x%02x%02x%02x"
 	    "%02x%02x%02x.\n",
@@ -937,9 +926,9 @@ qla2x00_fdmi_setup_hbaattr(scsi_qla_host_t *ha, hba_attr_t *attr)
 static __inline__ void
 qla2x00_fdmi_setup_rhbainfo(scsi_qla_host_t *ha, ct_iu_rhba_t *ct)
 {
-	memcpy(ct->hba_identifier, ha->init_cb->port_name, WWN_SIZE);
+	memcpy(ct->hba_identifier, ha->port_name, WWN_SIZE);
 	ct->plist.num_ports = __constant_cpu_to_be32(1);
-	memcpy(ct->plist.port_entry, ha->init_cb->port_name, WWN_SIZE);
+	memcpy(ct->plist.port_entry, ha->port_name, WWN_SIZE);
 
 	DEBUG13(printk("%s(%ld): RHBA identifier=%02x%02x%02x%02x%02x"
 	    "%02x%02x%02x.\n",
@@ -954,7 +943,7 @@ qla2x00_fdmi_setup_rhbainfo(scsi_qla_host_t *ha, ct_iu_rhba_t *ct)
 static __inline__ void
 qla2x00_fdmi_setup_rhatinfo(scsi_qla_host_t *ha, ct_iu_rhat_t *ct)
 {
-	memcpy(ct->hba_identifier, ha->init_cb->port_name, WWN_SIZE);
+	memcpy(ct->hba_identifier, ha->port_name, WWN_SIZE);
 
 	DEBUG13(printk("%s(%ld): RHAT identifier=%02x%02x%02x%02x%02x"
 	    "%02x%02x%02x.\n",
@@ -1101,7 +1090,7 @@ qla2x00_fdmi_ghat(scsi_qla_host_t *ha, ct_iu_ghat_rsp_t *prsp_buf,
 	ct_req->hdr.cmd_rsp_code = __constant_cpu_to_be16(FDMI_CC_GHAT);
 
 	/* Setup get hba attrib payload. */
-	memcpy(ct_req->hba_identifier, ha->init_cb->port_name, WWN_SIZE);
+	memcpy(ct_req->hba_identifier, ha->port_name, WWN_SIZE);
 
 	DEBUG13(printk("%s(%ld): done ct init. ct buf dump:\n",
 	    __func__, ha->host_no);)
@@ -1140,14 +1129,14 @@ static __inline__ void
 qla2x00_fdmi_setup_rpainfo(scsi_qla_host_t *ha, ct_iu_rpa_t *ct)
 {
 	/* Setup register port payload. */
-	memcpy(ct->portname, ha->init_cb->port_name, WWN_SIZE);
+	memcpy(ct->portname, ha->port_name, WWN_SIZE);
 
 	ct->attr.count = __constant_cpu_to_be32(PORT_ATTR_COUNT);
 
 	/* FC4 types */
 	ct->attr.fc4_types.type = __constant_cpu_to_be16(T_FC4_TYPES);
 	ct->attr.fc4_types.len = cpu_to_be16(sizeof(port_fc4_attr_t));
-#if defined(FC_IP_SUPPORT)
+#if defined(ISP2300)
 	if (ha->flags.enable_ip)
 		ct->attr.fc4_types.value[3] = 0x20; /* type 5 for IP */
 #endif
@@ -1163,7 +1152,13 @@ qla2x00_fdmi_setup_rpainfo(scsi_qla_host_t *ha, ct_iu_rpa_t *ct)
 #if defined(ISP2100) || defined (ISP2200)
 	ct->attr.sup_speed.value = __constant_cpu_to_be32(1);	/* 1 Gig */
 #elif defined(ISP2300)
-	ct->attr.sup_speed.value = __constant_cpu_to_be32(2);	/* 2 Gig */
+	if (check_25xx_device_ids(ha)) {
+		ct->attr.sup_speed.value = __constant_cpu_to_be32(8);	/* 8 Gig */
+	} else if (check_24xx_or_54xx_device_ids(ha)) { 
+		ct->attr.sup_speed.value = __constant_cpu_to_be32(4);	/* 4 Gig */
+	} else {
+		ct->attr.sup_speed.value = __constant_cpu_to_be32(2);	/* 2 Gig */
+	}
 #endif
 
 	DEBUG13(printk("%s(%ld): register SUPPSPEED=%x.\n",
@@ -1179,6 +1174,12 @@ qla2x00_fdmi_setup_rpainfo(scsi_qla_host_t *ha, ct_iu_rpa_t *ct)
 	case EXT_DEF_PORTSPEED_2GBIT:
 		ct->attr.cur_speed.value = __constant_cpu_to_be32(2);
 		break;
+	case EXT_DEF_PORTSPEED_4GBIT:
+		ct->attr.cur_speed.value = __constant_cpu_to_be32(4);
+		break;
+	case EXT_DEF_PORTSPEED_8GBIT:
+		ct->attr.cur_speed.value = __constant_cpu_to_be32(8);
+		break;
 	}
 
 	DEBUG13(printk("%s(%ld): register CURRSPEED=%x.\n",
@@ -1187,8 +1188,21 @@ qla2x00_fdmi_setup_rpainfo(scsi_qla_host_t *ha, ct_iu_rpa_t *ct)
 	/* Max frame size */
 	ct->attr.max_fsize.type = __constant_cpu_to_be16(T_MAX_FRAME_SIZE);
 	ct->attr.max_fsize.len = cpu_to_be16(sizeof(port_frame_attr_t));
+#if defined(ISP2300)
+	if (check_24xx_or_54xx_device_ids(ha) || check_25xx_device_ids(ha)) {
+		struct init_cb_24xx *icb = (struct init_cb_24xx *)ha->init_cb;
+		ct->attr.max_fsize.value =
+			    cpu_to_be32((uint32_t)icb->frame_payload_size);
+	} else {	
+		init_cb_t *icb = (init_cb_t *)ha->init_cb;
+		ct->attr.max_fsize.value =
+			    cpu_to_be32((uint32_t)icb->frame_length);
+	}
+#else
+	init_cb_t *icb = (init_cb_t *)ha->init_cb;
 	ct->attr.max_fsize.value =
-	    cpu_to_be32((uint32_t)ha->init_cb->frame_length);
+	    cpu_to_be32((uint32_t)icb->frame_length);
+#endif
 
 	DEBUG13(printk("%s(%ld): register MAXFSIZE=%d.\n",
 	    __func__, ha->host_no, ct->attr.max_fsize.value);)
@@ -1339,7 +1353,7 @@ qla2x00_fdmi_dhba(scsi_qla_host_t *ha, uint8_t *pret_stat)
 	ct->hdr.cmd_rsp_code = __constant_cpu_to_be16(FDMI_CC_DHBA);
 
 	/* Setup deregister hba payload. */
-	memcpy(ct->hba_portname, ha->init_cb->port_name, WWN_SIZE);
+	memcpy(ct->hba_portname, ha->port_name, WWN_SIZE);
 
 	DEBUG13(printk("%s(%ld): done ct init.\n", __func__, ha->host_no);)
 

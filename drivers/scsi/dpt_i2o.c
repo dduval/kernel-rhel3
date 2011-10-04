@@ -593,6 +593,9 @@ static int adpt_proc_info(char *buffer, char **start, off_t offset,
 		for(id = 0; id < MAX_ID; id++) {
 			d = pHba->channel[chan].device[id];
 			while(d){
+				if(!d->pScsi_dev)
+					continue;
+
 				len += sprintf(buffer+len,"\t%-24.24s", d->pScsi_dev->vendor);
 				len += sprintf(buffer+len," Rev: %-8.8s\n", d->pScsi_dev->rev);
 				pos = begin + len;

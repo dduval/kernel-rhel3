@@ -116,6 +116,8 @@ static void * storage_probe(struct usb_device *dev, unsigned int ifnum,
 
 static void storage_disconnect(struct usb_device *dev, void *ptr);
 
+static int max_sectors_init(struct us_data *us);
+
 /* The entries in this table, except for final ones here
  * (USB_MASS_STORAGE_CLASS and the empty entry), correspond,
  * line for line with the entries of us_unsuaul_dev_list[].
@@ -718,10 +720,12 @@ static void * storage_probe(struct usb_device *dev, unsigned int ifnum,
 	 * Now check if we have seen this GUID before
 	 * We're looking for a device with a matching GUID that isn't
 	 * already on the system
+	 * Since GUID will be the same for all interfaces of a multi-
+	 * interface storage device, try to match previous ifnum too.
 	 */
 	ss = us_list;
 	while ((ss != NULL) && 
-	       ((ss->pusb_dev) || !GUID_EQUAL(guid, ss->guid)))
+	    (ss->pusb_dev || !GUID_EQUAL(guid, ss->guid) || ifnum != ss->ifnum))
 		ss = ss->next;
 
 	if (ss != NULL) {
@@ -1067,6 +1071,12 @@ static void * storage_probe(struct usb_device *dev, unsigned int ifnum,
 
 	/* return a pointer for the disconnect function */
 	return ss;
+}
+
+static int max_sectors_init(struct us_data *us)
+{
+	us->htmplt.max_sectors = 60;
+	return 0;
 }
 
 /* Handle a disconnect event from the USB core */

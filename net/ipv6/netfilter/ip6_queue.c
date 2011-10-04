@@ -68,22 +68,17 @@ static DECLARE_MUTEX(ipqnl_sem);
 static void
 ipq_issue_verdict(struct ipq_queue_entry *entry, int verdict)
 {
+	local_bh_disable();
 	nf_reinject(entry->skb, entry->info, verdict);
+	local_bh_enable();
 	kfree(entry);
 }
 
-static inline int
+static inline void
 __ipq_enqueue_entry(struct ipq_queue_entry *entry)
 {
-       if (queue_total >= queue_maxlen) {
-               if (net_ratelimit()) 
-                       printk(KERN_WARNING "ip6_queue: full at %d entries, "
-                              "dropping packet(s).\n", queue_total);
-               return -ENOSPC;
-       }
        list_add(&entry->list, &queue_list);
        queue_total++;
-       return 0;
 }
 
 /*
@@ -307,14 +302,19 @@ ipq_enqueue_packet(struct sk_buff *skb, struct nf_info *info, void *data)
 	if (!peer_pid)
 		goto err_out_free_nskb; 
 
+       if (queue_total >= queue_maxlen) {
+               if (net_ratelimit())
+                       printk(KERN_WARNING "ip6_queue: full at %d entries, "
+                              "dropping packet(s).\n", queue_total);
+	       goto err_out_free_nskb;
+       }
+
  	/* netlink_unicast will either free the nskb or attach it to a socket */ 
 	status = netlink_unicast(ipqnl, nskb, peer_pid, MSG_DONTWAIT);
 	if (status < 0)
 		goto err_out_unlock;
 	
-	status = __ipq_enqueue_entry(entry);
-	if (status < 0)
-		goto err_out_unlock;
+	__ipq_enqueue_entry(entry);
 
 	write_unlock_bh(&queue_lock);
 	return status;
@@ -521,7 +521,7 @@ ipq_rcv_skb(struct sk_buff *skb)
 	write_unlock_bh(&queue_lock);
 	
 	status = ipq_receive_peer(NLMSG_DATA(nlh), type,
-	                          skblen - NLMSG_LENGTH(0));
+	                          nlmsglen - NLMSG_LENGTH(0));
 	if (status < 0)
 		RCV_SKB_FAIL(status);
 		

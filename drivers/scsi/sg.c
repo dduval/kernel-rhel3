@@ -1066,7 +1066,7 @@ static int sg_fasync(int fd, struct file * filp, int mode)
 static void sg_rb_correct4mmap(Sg_scatter_hold * rsv_schp, int startFinish)
 {
     void * page_ptr;
-    struct page * page;
+    struct page * page = NULL;
     int k, m;
 
     SCSI_LOG_TIMEOUT(3, printk("sg_rb_correct4mmap: startFinish=%d, "
@@ -1077,8 +1077,13 @@ static void sg_rb_correct4mmap(Sg_scatter_hold * rsv_schp, int startFinish)
 
         for (k = 0; k < rsv_schp->k_use_sg; ++k, ++sclp) {
 	    for (m = PAGE_SIZE; m < sclp->length; m += PAGE_SIZE) {
-		page_ptr = (unsigned char *)sclp->address + m;
-		page = virt_to_page(page_ptr);
+		if(sclp->page != NULL && sclp->address == NULL)
+		    page = sclp->page;
+		else if(sclp->page == NULL && sclp->address != NULL)
+		    page = virt_to_page(sclp->address + m);
+		else
+		    BUG();
+
 		if (startFinish)
 		    get_page(page);	/* increment page count */
 		else {
@@ -1130,8 +1135,12 @@ static struct page * sg_vma_nopage(struct vm_area_struct *vma,
             len = vma->vm_end - sa;
             len = (len < sclp->length) ? len : sclp->length;
 	    if (offset < len) {
-		page_ptr = (unsigned char *)sclp->address + offset;
-		page = virt_to_page(page_ptr);
+		if(sclp->page != NULL && sclp->address == NULL)
+		    page = sclp->page;
+		else if(sclp->page == NULL && sclp->address != NULL)
+		    page = virt_to_page(sclp->address + offset);
+		else
+		    BUG();
 		get_page(page);	/* increment page count */
 		break;
 	    }
@@ -1593,7 +1602,8 @@ static int sg_start_req(Sg_request * srp)
     	return 0;
     if (sg_allow_dio && (hp->flags & SG_FLAG_DIRECT_IO) && 
 	(dxfer_dir != SG_DXFER_UNKNOWN) && (0 == hp->iovec_count) &&
-	(! sfp->parentdp->device->host->unchecked_isa_dma)) {
+	(! sfp->parentdp->device->host->unchecked_isa_dma) &&
+	sfp->parentdp->device->host->highmem_io) {
 	res = sg_build_dir(srp, sfp, dxfer_len);
 	if (res <= 0)   /* -ve -> error, 0 -> done, 1 -> try indirect */
 	    return res;
@@ -1669,11 +1679,9 @@ static void sg_unmap_and(Sg_scatter_hold * schp, int free_also)
 static int sg_build_dir(Sg_request * srp, Sg_fd * sfp, int dxfer_len)
 {
 #ifdef SG_ALLOW_DIO_CODE
-    int res, k, split, offset, num, mx_sc_elems, rem_sz;
+    int res, k, length, offset, mx_sc_elems;
     struct kiobuf * kp;
     char * mem_src_arr;
-    struct scatterlist * sclp;
-    unsigned long addr, prev_addr;
     sg_io_hdr_t * hp = &srp->header;
     Sg_scatter_hold * schp = &srp->data;
     int sg_tablesize = sfp->parentdp->sg_tablesize;
@@ -1695,56 +1703,34 @@ static int sg_build_dir(Sg_request * srp, Sg_fd * sfp, int dxfer_len)
     }
     schp->mapped = 1;
     kp = schp->kiobp;
-    prev_addr = (unsigned long) page_address(kp->maplist[0]);
-    for (k = 1, split = 0; k < kp->nr_pages; ++k, prev_addr = addr) {
-	addr = (unsigned long) page_address(kp->maplist[k]);
-	if ((prev_addr + PAGE_SIZE) != addr) {
-	    split = k;
-	    break;
-	}
-    }
-    if (! split) {
-	schp->k_use_sg = 0;
-	schp->buffer = page_address(kp->maplist[0]) + kp->offset;
-	schp->bufflen = dxfer_len;
-	schp->buffer_mem_src = SG_USER_MEM;
-	schp->b_malloc_len = dxfer_len;
-	hp->info |= SG_INFO_DIRECT_IO;
-	return 0;
-    }
     mx_sc_elems = sg_build_sgat(schp, sfp, sg_tablesize);
-    if (mx_sc_elems <= 1) {
+    if (mx_sc_elems < kp->nr_pages) {
 	sg_unmap_and(schp, 1);
 	sg_remove_scat(schp);
 	return 1;
     }
     mem_src_arr = schp->buffer + (mx_sc_elems * sizeof(struct scatterlist));
-    for (k = 0, sclp = schp->buffer, rem_sz = dxfer_len;
-	 (rem_sz > 0) && (k < mx_sc_elems);
-	 ++k, ++sclp) {
-	offset = (0 == k) ? kp->offset : 0;
-	num = (rem_sz > (PAGE_SIZE - offset)) ? (PAGE_SIZE - offset) :
-						rem_sz;
-	sclp->address = page_address(kp->maplist[k]) + offset;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,4,13)
-	sclp->page = NULL;
-#endif
-	sclp->length = num;
-	mem_src_arr[k] = SG_USER_MEM;
-	rem_sz -= num;
-	SCSI_LOG_TIMEOUT(5,
-	    printk("sg_build_dir: k=%d, a=0x%p, len=%d, ms=%d\n",
-	    k, sclp->address, num, mem_src_arr[k]));
+    memset(schp->buffer, 0, mx_sc_elems * sizeof(struct scatterlist));
+    memset(mem_src_arr, SG_USER_MEM, mx_sc_elems);
+
+    length = kp->length;
+    offset = kp->offset;
+    for (k = 0; k < kp->nr_pages; k++) {
+	struct scatterlist *sclp = &((struct scatterlist *)schp->buffer)[k];
+
+	sclp->page = kp->maplist[k];
+	sclp->offset = offset;
+	sclp->length = length;
+
+	if(sclp->length + sclp->offset > PAGE_SIZE)
+	    sclp->length = PAGE_SIZE - sclp->offset;
+	length -= sclp->length;
+	offset = 0;
     }
     schp->k_use_sg = k;
     SCSI_LOG_TIMEOUT(5,
-	printk("sg_build_dir: k_use_sg=%d, rem_sz=%d\n", k, rem_sz));
+	printk("sg_build_dir: k_use_sg=%d\n", schp->k_use_sg));
     schp->bufflen = dxfer_len;
-    if (rem_sz > 0) {   /* must have failed */
-	sg_unmap_and(schp, 1);
-	sg_remove_scat(schp);
-	return 1;   /* out of scatter gather elements, try indirect */
-    }
     hp->info |= SG_INFO_DIRECT_IO;
     return 0;
 #else

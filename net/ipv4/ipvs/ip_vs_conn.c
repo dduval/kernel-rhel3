@@ -479,7 +479,7 @@ static inline int vs_tcp_state_idx(struct tcphdr *th, int state_off)
 }
 
 
-static inline int vs_set_state_timeout(struct ip_vs_conn *cp, int state)
+int ip_vs_set_state_timeout(struct ip_vs_conn *cp, int state)
 {
 	struct ip_vs_timeout_table *vstim = cp->timeout_table;
 
@@ -561,7 +561,7 @@ vs_tcp_state(struct ip_vs_conn *cp, int state_off, struct tcphdr *th)
 		}
 	}
 
-	return vs_set_state_timeout(cp, new_state);
+	return ip_vs_set_state_timeout(cp, new_state);
 }
 
 
@@ -579,10 +579,10 @@ int ip_vs_set_state(struct ip_vs_conn *cp,
 		ret = vs_tcp_state(cp, state_off, tp);
 		break;
 	case IPPROTO_UDP:
-		ret = vs_set_state_timeout(cp, IP_VS_S_UDP);
+		ret = ip_vs_set_state_timeout(cp, IP_VS_S_UDP);
 		break;
 	case IPPROTO_ICMP:
-		ret = vs_set_state_timeout(cp, IP_VS_S_ICMP);
+		ret = ip_vs_set_state_timeout(cp, IP_VS_S_ICMP);
 		break;
 	default:
 		ret = -1;
@@ -598,7 +598,7 @@ int ip_vs_set_state(struct ip_vs_conn *cp,
  */
 int ip_vs_conn_listen(struct ip_vs_conn *cp)
 {
-	vs_set_state_timeout(cp, IP_VS_S_LISTEN);
+	ip_vs_set_state_timeout(cp, IP_VS_S_LISTEN);
 	return cp->timeout;
 }
 
@@ -1306,7 +1306,7 @@ ip_vs_conn_new(int proto, __u32 caddr, __u16 cport, __u32 vaddr, __u16 vport,
 	ip_vs_bind_dest(cp, dest);
 
 	/* Set its state and timeout */
-	vs_set_state_timeout(cp, IP_VS_S_NONE);
+	ip_vs_set_state_timeout(cp, IP_VS_S_NONE);
 
 	/* Bind its packet transmitter */
 	ip_vs_bind_xmit(cp);

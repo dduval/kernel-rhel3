@@ -102,6 +102,12 @@ static ssize_t read_kcore(struct file *file, char *buf, size_t count, loff_t *pp
 
 #define roundup(x, y)  ((((x)+((y)-1))/(y))*(y))
 
+#ifdef CONFIG_IA64
+#undef kern_addr_valid
+#define kern_addr_valid(va) (page_is_ram(__pa(va) >> PAGE_SHIFT))
+extern int page_is_ram(unsigned long);
+#endif
+
 /* An ELF note in memory */
 struct memelfnote
 {
@@ -120,12 +126,14 @@ static size_t get_kcore_size(int *num_vma, size_t *elf_buflen)
 
 	*num_vma = 0;
 	size = ((size_t)high_memory - PAGE_OFFSET);
+#ifndef CONFIG_IA64
 	for (m = vmlist; m; m = m->next) {
 		try = ((size_t)m->addr - PAGE_OFFSET) + m->size;
 		if (try > size)
 			size = try;
 		*num_vma = *num_vma + 1;
 	}
+#endif
 	*elf_buflen =	sizeof(struct elfhdr) + 
 			(*num_vma + 2) * sizeof(struct elf_phdr) + 
 			3 * (sizeof(struct elf_note) + 4) +
@@ -242,6 +250,7 @@ static void elf_kcore_store_hdr(char *bufp, int num_vma, int dataoff)
 	phdr->p_filesz	= phdr->p_memsz = ((unsigned long)high_memory - PAGE_OFFSET);
 	phdr->p_align	= PAGE_SIZE;
 
+#ifndef CONFIG_IA64
 	/* setup ELF PT_LOAD program header for every vmalloc'd area */
 	for (m=vmlist; m; m=m->next) {
 		if (m->flags & VM_IOREMAP) /* don't dump ioremap'd stuff! (TA) */
@@ -259,6 +268,7 @@ static void elf_kcore_store_hdr(char *bufp, int num_vma, int dataoff)
 		phdr->p_filesz	= phdr->p_memsz	= m->size;
 		phdr->p_align	= PAGE_SIZE;
 	}
+#endif
 
 	/*
 	 * Set up the notes in similar form to SVR4 core dumps made
@@ -396,6 +406,7 @@ static ssize_t read_kcore(struct file *file, char *buffer, size_t buflen, loff_t
 		tsz = buflen;
 		
 	while (buflen) {
+#ifndef CONFIG_IA64
 		if ((start >= VMALLOC_START) && (start < VMALLOC_END)) {
 			char * elf_buf;
 			struct vm_struct *m;
@@ -441,8 +452,10 @@ static ssize_t read_kcore(struct file *file, char *buffer, size_t buflen, loff_t
 				return -EFAULT;
 			}
 			kfree(elf_buf);
-		} else if ((start > PAGE_OFFSET) && (start < 
-						(unsigned long)high_memory)) {
+		} else
+#endif
+		if (start >= PAGE_OFFSET &&
+		    start < (unsigned long)high_memory) {
 			if (kern_addr_valid(start)) {
 				if (copy_to_user(buffer, (char *)start, tsz))
 					return -EFAULT;

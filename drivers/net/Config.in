@@ -261,6 +261,7 @@ dep_tristate 'D-Link DL2000-based Gigabit Ethernet support' CONFIG_DL2K $CONFIG_
 dep_tristate 'Intel(R) PRO/1000 Gigabit Ethernet support' CONFIG_E1000 $CONFIG_PCI
 if [ "$CONFIG_E1000" != "n" ]; then
    bool '  Use Rx Polling (NAPI)' CONFIG_E1000_NAPI
+   bool '  Disable E1000 Packet Splitting' CONFIG_E1000_DISABLE_PACKET_SPLIT
 fi
 dep_tristate 'MyriCOM Gigabit Ethernet support' CONFIG_MYRI_SBUS $CONFIG_SBUS
 dep_tristate 'National Semiconductor DP83820 support' CONFIG_NS83820 $CONFIG_PCI
@@ -270,6 +271,8 @@ dep_tristate 'Realtek 8169 Gigabit Ethernet support' CONFIG_R8169 $CONFIG_PCI
 dep_tristate 'SysKonnect SK-98xx and SK-95xx Gigabit Ethernet Adapter family support' CONFIG_SK98LIN $CONFIG_PCI
 dep_tristate 'Broadcom Tigon3 support' CONFIG_TIGON3 $CONFIG_PCI
 dep_tristate 'Broadcom NetXtremeII support' CONFIG_BNX2 $CONFIG_PCI
+
+endmenu
 
 if [ "$CONFIG_PPC_ISERIES" = "y" ]; then
    dep_tristate 'iSeries Virtual Ethernet driver support' CONFIG_VETH $CONFIG_PPC_ISERIES

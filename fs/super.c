@@ -306,6 +306,8 @@ static struct super_block *alloc_super(void)
 		s->dq_op = sb_dquot_ops;
 		s->s_qcop = sb_quotactl_ops;
 		s->s_op = &empty_sops;
+		s->s_prunes = 0;
+		init_waitqueue_head(&s->s_wait_prunes);
 	}
 	return s;
 }

@@ -356,10 +356,18 @@ void ptrace_notify(int exit_code)
 	BUG_ON (!(current->ptrace & PT_PTRACED));
 
 	/* Let the debugger run.  */
-	current->exit_code = exit_code;
-	set_current_state(TASK_STOPPED);
-	notify_parent(current, SIGCHLD);
-	schedule();
-	/* Signals sent while we're stopped might not set sigpending. */
-	recalc_sigpending();
+	read_lock(&tasklist_lock);
+	if (likely(current->ptrace & PT_PTRACED) &&
+	    (likely(current->parent->signal != current->signal) ||
+	    !unlikely(current->signal->group_exit))) {
+		current->exit_code = exit_code;
+		set_current_state(TASK_STOPPED);
+		do_notify_parent(current, SIGCHLD);
+		read_unlock(&tasklist_lock);
+		schedule();
+		/* Signals sent while we're stopped might not set sigpending. */
+		recalc_sigpending();
+	} else
+		read_unlock(&tasklist_lock);
+
 }

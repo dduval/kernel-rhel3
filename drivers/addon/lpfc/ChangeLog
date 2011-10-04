@@ -1,9 +1,31 @@
+Changes from 20060328 to 20060404:
+
+	* Changed version to 7.3.6
+	* Fixed FC protocol violation in handling process logout. 
+	  (CR 19803)
+	* Fixed PRLO processing to set npr timer while processing 
+	  unsolicited PRLO. (CR 19795)
+
+Changes from 20060111 to 20060328:
+
+	* Changed version to 7.3.5
+	* Modify lpfc_offline to empty the delay_list and return all ELS
+	  buffers on the free list only after all internal driver queues
+	  have been successfully flushed. (CR 19681)
+	* Introduce lpfc_reset_barrier() function for resets on dual
+	  Helios HBAs (CR 19630)
+
+Changes from 20051028 to 20060111:
+
+	* Changed version to 7.3.4
+	* Fixed a double insertion of mail box object to the SLI mailbox list.
+
 Changes from 20050711 to 20051028:
 
 	* Changed version to 7.3.3
 	* Fix names reported in the system log and in the proc files 
 	* Adding LP11000S and LPE11000S PCI IDs
-
+	
 Changes from 20050503 to 20050711:
 
 	* Changed version to 7.3.2.

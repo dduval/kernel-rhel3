@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_els.c 1.7 2005/07/08 19:29:44EDT sf_support Exp  $
+ * $Id: lpfc_els.c 502 2006-04-04 17:11:23Z sf_support $
  */
 #include <linux/version.h>
 #include <linux/spinlock.h>
@@ -1821,6 +1821,20 @@ lpfc_els_rsp_acc(lpfcHBA_t * phba,
 		pCmd += sizeof (uint32_t);
 		memcpy(pCmd, &phba->fc_sparam, sizeof (SERV_PARM));
 		break;
+	case ELS_CMD_PRLO:
+		cmdsize = (sizeof (uint32_t) + sizeof (PRLO));
+		if ((elsiocb =
+			lpfc_prep_els_iocb(phba, FALSE, cmdsize, oldiocb->retry,
+				ndlp, ELS_CMD_PRLO)) == 0) {
+				return(1);
+		}
+		icmd = &elsiocb->iocb;
+		icmd->ulpContext = oldcmd->ulpContext;
+		pCmd = (uint8_t *) (((DMABUF_t *) elsiocb->context2)->virt);
+		memcpy(pCmd, ((DMABUF_t *) oldiocb->context2)->virt, 
+			sizeof (uint32_t) + sizeof (PRLO));
+		*((uint32_t *) (pCmd)) = ELS_CMD_PRLO_ACC;
+		break;
 	default:
 		return (1);
 	}
@@ -2171,6 +2185,8 @@ lpfc_els_unsol_event(lpfcHBA_t * phba,
 		break;
 	case ELS_CMD_PRLO:
 		phba->fc_stat.elsRcvPRLO++;
+		if (ndlp->nlp_Target)
+			lpfc_set_npr_tmo(phba, ndlp->nlp_Target, ndlp);
 		lpfc_disc_state_machine(phba, ndlp, elsiocb, NLP_EVT_RCV_PRLO);
 		break;
 	case ELS_CMD_RSCN:

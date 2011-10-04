@@ -26,6 +26,10 @@ typedef void irqreturn_t;
 
 #define netdev_priv(dev) dev->priv
 
+#ifndef WARN_ON
+#define WARN_ON(x)	do { } while (0)
+#endif
+
 #ifndef NET_IP_ALIGN
 #define NET_IP_ALIGN    2
 #endif

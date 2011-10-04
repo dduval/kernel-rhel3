@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_module_param.h 1.2 2005/05/03 11:21:59EDT sf_support Exp  $
+ * $Id: lpfc_module_param.h 328 2005-05-03 15:20:43Z sf_support $
  */
 
 #ifndef H_MODULE_PARAM

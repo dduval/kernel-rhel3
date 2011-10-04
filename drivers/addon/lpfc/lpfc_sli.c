@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_sli.c 1.14 2005/05/03 11:22:13EDT sf_support Exp  $
+ * $Id: lpfc_sli.c 483 2006-03-22 00:27:31Z sf_support $
  */
 
 #include <linux/version.h>
@@ -502,7 +502,7 @@ lpfc_sli_intr(lpfcHBA_t * phba)
 		/* Clear Chip error bit */
 		writel(HA_ERATT, phba->HAregaddr);
 		readl(phba->HAregaddr); /* flush */
-
+		phba->stopped = 1;
 		/* Process the Error Attention */
 		lpfc_handle_eratt(phba, status);
 		return (0);
@@ -2148,6 +2148,81 @@ lpfc_sli_resume_iocb(lpfcHBA_t * phba, LPFC_SLI_RING_t * pring)
 	return (portCmdGet);
 }
 
+#define BARRIER_TEST_PATTERN (0xdeadbeef)
+
+void lpfc_reset_barrier(lpfcHBA_t * phba)
+{
+	uint32_t * resp_buf;
+	uint32_t * mbox_buf;
+	volatile uint32_t mbox;
+	uint32_t hc_copy;
+	int  i;
+	uint8_t hdrtype;
+
+	pci_read_config_byte(phba->pcidev, PCI_HEADER_TYPE, &hdrtype);
+	if (hdrtype != 0x80 ||
+	    (FC_JEDEC_ID(phba->vpd.rev.biuRev) != HELIOS_JEDEC_ID &&
+	     FC_JEDEC_ID(phba->vpd.rev.biuRev) != THOR_JEDEC_ID))
+		return;
+
+	/*
+	 * Tell the other part of the chip to suspend temporarily all
+	 * its DMA activity.
+	 */
+	resp_buf =  (uint32_t *)phba->MBslimaddr;
+
+	/* Disable the error attention */
+	hc_copy = readl(phba->HCregaddr);
+	writel((hc_copy & ~HC_ERINT_ENA), phba->HCregaddr);
+	readl(phba->HCregaddr); /* flush */
+
+	if (readl(phba->HAregaddr) & HA_ERATT) {
+		/* Clear Chip error bit */
+		writel(HA_ERATT, phba->HAregaddr);
+		phba->stopped = 1;
+	}
+
+	mbox = 0;
+	((MAILBOX_t *)&mbox)->mbxCommand = MBX_KILL_BOARD;
+	((MAILBOX_t *)&mbox)->mbxOwner = OWN_CHIP;
+
+	writel(BARRIER_TEST_PATTERN, (resp_buf + 1));
+	mbox_buf = (uint32_t *)phba->MBslimaddr;
+	writel(mbox, mbox_buf);
+
+	for (i = 0;
+	     readl(resp_buf + 1) != ~(BARRIER_TEST_PATTERN) && i < 50; i++)
+		mdelay(1);
+
+	if (readl(resp_buf + 1) != ~(BARRIER_TEST_PATTERN)) {
+		if (phba->sli.sliinit.sli_flag & LPFC_SLI2_ACTIVE ||
+		    phba->stopped)
+			goto restore_hc;
+		else
+			goto clear_errat;
+	}
+
+	((MAILBOX_t *)&mbox)->mbxOwner = OWN_HOST;
+	for (i = 0; readl(resp_buf) != mbox &&  i < 500; i++)
+		mdelay(1);
+
+clear_errat:
+
+	while (!(readl(phba->HAregaddr) & HA_ERATT) && ++i < 500)
+		mdelay(1);
+
+	/* Clear Chip error bit */
+	if (readl(phba->HAregaddr) & HA_ERATT) {
+		writel(HA_ERATT, phba->HAregaddr);
+		readl(phba->HAregaddr); /* flush */
+		phba->stopped = 1;
+	}
+
+restore_hc:
+	writel(hc_copy, phba->HCregaddr);
+	readl(phba->HCregaddr); /* flush */
+}
+
 int
 lpfc_sli_brdreset(lpfcHBA_t * phba)
 {
@@ -2162,6 +2237,8 @@ lpfc_sli_brdreset(lpfcHBA_t * phba)
 	DMABUF_t * mp;
 
 	psli = &phba->sli;
+
+	lpfc_reset_barrier(phba);
 
 	/* A board reset must use REAL SLIM. */
 	psli->sliinit.sli_flag &= ~LPFC_SLI2_ACTIVE;
@@ -2220,7 +2297,7 @@ lpfc_sli_brdreset(lpfcHBA_t * phba)
 
 	pci_write_config_word(phba->pcidev, PCI_COMMAND, cfg_value);
 	phba->hba_state = LPFC_INIT_START;
-
+	phba->stopped = 0;
 	/* Initialize relevant SLI info */
 	for (i = 0; i < psli->sliinit.num_rings; i++) {
 		pring = &psli->ring[i];
@@ -3647,11 +3724,10 @@ lpfc_sli_issue_mbox_wait(lpfcHBA_t * phba, LPFC_MBOXQ_t * pmboxq,
 		pmboxq->context1 = 0;
 		/* if schedule_timeout returns 0, we timed out and were not
 		   woken up */
-		if (timeleft == 0) {
+		if ((timeleft == 0) || signal_pending(current))
 			retval = MBX_TIMEOUT;
-		} else {
+		else
 			retval = MBX_SUCCESS;
-		}
 	}
 
 

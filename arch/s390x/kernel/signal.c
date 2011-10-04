@@ -73,6 +73,7 @@ int copy_siginfo_to_user(siginfo_t *to, siginfo_t *from)
 		case __SI_CHLD >> 16:
 			err |= __put_user(from->si_utime, &to->si_utime);
 			err |= __put_user(from->si_stime, &to->si_stime);
+		case __SI_POLL >> 16: /* for duplicate copy of si_fd */
 			err |= __put_user(from->si_status, &to->si_status);
 		default:
 			break;

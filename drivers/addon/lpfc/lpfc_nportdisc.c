@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_nportdisc.c 1.5 2005/05/03 11:22:02EDT sf_support Exp  $
+ * $Id: lpfc_nportdisc.c 502 2006-04-04 17:11:23Z sf_support $
  */
 
 #include <linux/version.h>
@@ -979,7 +979,7 @@ lpfc_rcv_prlo_reglogin_issue(lpfcHBA_t * phba,
 	LPFC_IOCBQ_t *cmdiocb;
 
 	cmdiocb = (LPFC_IOCBQ_t *) arg;
-	lpfc_els_rsp_acc(phba, ELS_CMD_ACC, cmdiocb, ndlp, 0, 0);
+	lpfc_els_rsp_acc(phba, ELS_CMD_PRLO, cmdiocb, ndlp, 0, 0);
 	return (ndlp->nlp_state);
 }
 
@@ -1276,7 +1276,7 @@ lpfc_rcv_prlo_prli_issue(lpfcHBA_t * phba,
 	LPFC_IOCBQ_t *cmdiocb;
 
 	cmdiocb = (LPFC_IOCBQ_t *) arg;
-	lpfc_els_rsp_acc(phba, ELS_CMD_ACC, cmdiocb, ndlp, 0, 0);
+	lpfc_els_rsp_acc(phba, ELS_CMD_PRLO, cmdiocb, ndlp, 0, 0);
 	return (ndlp->nlp_state);
 }
 
@@ -1709,7 +1709,7 @@ lpfc_rcv_prlo_prli_compl(lpfcHBA_t * phba,
 	LPFC_IOCBQ_t *cmdiocb;
 
 	cmdiocb = (LPFC_IOCBQ_t *) arg;
-	lpfc_els_rsp_acc(phba, ELS_CMD_ACC, cmdiocb, ndlp, 0, 0);
+	lpfc_els_rsp_acc(phba, ELS_CMD_PRLO, cmdiocb, ndlp, 0, 0);
 	return (ndlp->nlp_state);
 }
 
@@ -2076,7 +2076,7 @@ lpfc_rcv_prlo_mapped_node(lpfcHBA_t * phba,
 
 	/* Force discovery to rePLOGI as well as PRLI */
 	ndlp->nlp_flag |= NLP_LOGO_ACC;
-	lpfc_els_rsp_acc(phba, ELS_CMD_ACC, cmdiocb, ndlp, 0, 0);
+	lpfc_els_rsp_acc(phba, ELS_CMD_PRLO, cmdiocb, ndlp, 0, 0);
 
 	return (ndlp->nlp_state);
 }

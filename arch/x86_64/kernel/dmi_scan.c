@@ -9,6 +9,7 @@
 #include <linux/pm.h>
 #include <asm/keyboard.h>
 #include <asm/system.h>
+#include <asm/smp.h>
 #include <linux/bootmem.h>
 
 #include "pci-x86_64.h"
@@ -219,6 +220,31 @@ static __init int disable_console_keyboard(struct dmi_blacklist *d)
 
 
 /*
+ * The RHEL3 IO APIC initialization does not work correctly on IBM eServer
+ * xSeries 260 (also called x3800), 366 (x3850) and 460 (x3950). Therefore
+ * disable it.
+ *
+ * Also, if this is a 64-bit Intel kernel (IA32E) and running on the above
+ * mentioned machines, and nmi_watchdog is set to use IO APIC initialization,
+ * then set the nmi_watchdog to use Local APIC instead. This is required since
+ * the IO APIC intialization is disabled by this function.
+ */
+static __init int force_acpi_noirq_nmi_probing(struct dmi_blacklist *d)
+{
+	extern int acpi_noirq;
+	printk(KERN_INFO "%s detected. Disabling ACPI IO initialization.\n",
+		d->ident);
+	acpi_noirq = 1;
+#ifdef CONFIG_IA32E
+#ifdef CONFIG_X86_LOCAL_APIC
+	if (nmi_watchdog == NMI_IO_APIC)
+		nmi_watchdog = NMI_LOCAL_APIC;
+#endif
+#endif
+	return 0;
+}
+
+/*
  *	Process the DMI blacklists
  */
  
@@ -234,6 +260,40 @@ static __initdata struct dmi_blacklist dmi_blacklist[] = {
 	{ disable_console_keyboard, "IBM Server Blade", {
 			MATCH(DMI_SYS_VENDOR,"IBM"),
 			MATCH(DMI_BOARD_NAME, "Server Blade"),
+			NO_MATCH, NO_MATCH
+			} },
+	/* IBM eSeries xServer 266, 366, and 460 */
+	{ force_acpi_noirq_nmi_probing, "IBM eServer xSeries 260", {
+			MATCH(DMI_SYS_VENDOR,"IBM"),
+			MATCH(DMI_PRODUCT_NAME, "eserver xSeries 260"),
+			NO_MATCH, NO_MATCH
+			} },
+	{ force_acpi_noirq_nmi_probing, "IBM eServer xSeries 366", {
+			MATCH(DMI_SYS_VENDOR,"IBM"),
+			MATCH(DMI_PRODUCT_NAME, "eserver xSeries 366"),
+			NO_MATCH, NO_MATCH
+			} },
+	{ force_acpi_noirq_nmi_probing, "IBM eServer xSeries 460", {
+			MATCH(DMI_SYS_VENDOR,"IBM"),
+			MATCH(DMI_PRODUCT_NAME, "eserver xSeries 460"),
+			NO_MATCH, NO_MATCH
+			} },
+	/* formerly known as x460 */
+	{ force_acpi_noirq_nmi_probing, "IBM x3950", {
+			MATCH(DMI_SYS_VENDOR,"IBM"),
+			MATCH(DMI_PRODUCT_NAME, "IBM x3950"),
+			NO_MATCH, NO_MATCH
+			} },
+	/* formerly known as x366 */
+	{ force_acpi_noirq_nmi_probing, "IBM x3850", {
+			MATCH(DMI_SYS_VENDOR,"IBM"),
+			MATCH(DMI_PRODUCT_NAME, "IBM x3850"),
+			NO_MATCH, NO_MATCH
+			} },
+	/* formerly known as x266 */
+	{ force_acpi_noirq_nmi_probing, "IBM x3800", {
+			MATCH(DMI_SYS_VENDOR,"IBM"),
+			MATCH(DMI_PRODUCT_NAME, "IBM x3800"),
 			NO_MATCH, NO_MATCH
 			} },
 

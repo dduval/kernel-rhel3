@@ -351,8 +351,11 @@ do_setlk(struct file *filp, int cmd, struct file_lock *fl)
 	 * ensure that locks_remove_posix() cleans it out when
 	 * the process exits.
 	 */
-	if (status == -EINTR || status == -ERESTARTSYS)
-		posix_lock_file(filp, fl, 0);
+	if (status == -EINTR || status == -ERESTARTSYS) {
+		fl->fl_type = F_UNLCK;
+		nlmclnt_proc(inode, cmd, fl);
+	} 
+
 	unlock_kernel();
 	if (status < 0)
 		return status;

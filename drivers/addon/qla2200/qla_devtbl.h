@@ -1,4 +1,4 @@
-#define QLA_MODEL_NAMES         0x32
+#define QLA_MODEL_NAMES         0x50
 
 /*
  * Adapter model names.
@@ -53,10 +53,36 @@ char	*qla2x00_model_name[QLA_MODEL_NAMES] = {
 	" ",		/* 0x12e */
 	"QLA210",	/* 0x12f */
 	"EMC 250",	/* 0x130 */
-	"HP A7538A"	/* 0x131 */
+	"HP A7538A",	/* 0x131 */
+
+	"QLA210",	/* 0x132 */
+	"QLA2460",	/* 0x133 */
+	"QLA2462",	/* 0x134 */
+	"QMC2462",	/* 0x135 */
+	"QMC2462S",	/* 0x136 */
+	"QLE2460",	/* 0x137 */
+	"QLE2462",	/* 0x138 */
+	"QME2462",	/* 0x139 */
+	"QLA2440",	/* 0x13a */
+	"QLA2442",	/* 0x13b */
+	"QSM2442",	/* 0x13c */
+	"QSM2462",	/* 0x13d */
+	"QLE210",	/* 0x13e */
+	"QLE220",	/* 0x13f */
+	"QLA2460",	/* 0x140 */
+	"QLA2462",	/* 0x141 */
+	"QLE2460",	/* 0x142 */
+	"QLE2462",	/* 0x143 */
+	"QEM2462",	/* 0x144 */
+	"QLE2440", 	/* 0x145 */
+	"QLE2464",	/* 0x146 */
+	"QLA2440",	/* 0x147 */
+	" ",		/* 0x148 */
+	"QLA2340"	/* 0x149 */
+
 };
 
-char	*qla2x00_model_desc[QLA_MODEL_NAMES] = {
+static char	*qla2x00_model_desc[QLA_MODEL_NAMES] = {
 	"133MHz PCI-X to 2Gb FC, Single Channel",	/* 0x100 */
 	"133MHz PCI-X to 2Gb FC, Dual Channel",		/* 0x101 */
 	"133MHz PCI-X to 2Gb FC, Quad Channel",		/* 0x102 */
@@ -107,6 +133,31 @@ char	*qla2x00_model_desc[QLA_MODEL_NAMES] = {
 	"133MHz PCI-X to 2Gb FC SFF",			/* 0x12f */
 	"133MHz PCI-X to 2Gb FC SFF",			/* 0x130 */
 	"HP 1p2g QLA2340"				/* 0x131 */
+	"133MHz PCI-X to 2Gb FC, Single Channel",	/* 0x132 */
+	"PCI-X 2.0 to 4Gb FC, Single Channel",		/* 0x133 */
+	"PCI-X 2.0 to 4Gb FC, Dual Channel",		/* 0x134 */
+	"IBM eServer BC 4Gb FC Expansion Card",		/* 0x135 */
+	"IBM eServer BC 4Gb FC Expansion Card SFF",	/* 0x136 */
+	"PCI-Express to 4Gb FC, Single Channel",	/* 0x137 */
+	"PCI-Express to 4Gb FC, Dual Channel",		/* 0x138 */
+	"Dell PCI-Express to 4Gb FC, Dual Channel",	/* 0x139 */
+	"PCI-X 1.0 to 4Gb FC, Single Channel",		/* 0x13a */
+	"PCI-X 1.0 to 4Gb FC, Dual Channel",		/* 0x13b */
+	"Server I/O Module 4Gb FC, Single Channel",	/* 0x13c */
+	"Server I/O Module 4Gb FC, Single Channel",	/* 0x13d */
+	"PCI-Express to 2Gb FC, Single Channel",	/* 0x13e */
+	"PCI-Express to 4Gb FC, Single Channel"		/* 0x13f */
+	"Sun PCI-X 2.0 to 4Gb FC, Single Channel",	/* 0x140 */
+	"Sun PCI-X 2.0 to 4Gb FC, Dual Channel",	/* 0x141 */
+	"Sun PCI-Express to 2Gb FC, Single Channel",	/* 0x142 */
+	"Sun PCI-Express to 4Gb FC, Single Channel",	/* 0x143 */
+	"Qlogic Server I/O Module 4Gb FC, Dual Channel",/* 0x144 */
+	"PCI-E to 4Gb FC, Single Channel",		/* 0x145 */
+	"PCI-E to 4Gb FC, Quad Channel",		/* 0x146 */
+	"PCI-X 2.0 to 4Gb FC, Single Channel",		/* 0x147 */
+	" ",						/* 0x148 */
+	"SUN - 133MHz PCI-X to 2Gb FC, single channel"	/* 0x149 */
+
 };
 
 
@@ -116,11 +167,14 @@ struct cfg_device_info {
 	const int  flags;	/* bit 0 (0x1) -- This bit will translate the real 
 				   WWNN to the common WWNN for the target AND
 				   XP_DEVICE */
-				/* bit 1 (0x2) -- MSA 1000  */
-				/* bit 2 (0x4) -- EVA  */
-				/* bit 3 (0x8) -- DISABLE FAILOVER  */
-				/* bit 4 (16) -- Adaptec failover */
-				/* bit 5 (32) -- EVA AA failover */
+				/* bit 1 -- MSA 1000  */
+				/* bit 2 -- EVA  */
+				/* bit 3 -- DISABLE FAILOVER  */
+				/* bit 4 -- Adaptec failover */
+				/* bit 5 -- EVA AA failover */
+				/* bit 6 -- IBM */
+				/* bit 7 -- MSA AA failover */
+				/* bit 8 -- HDS */
 	const int  notify_type;	/* support the different types: 1 - 4 */
 	int	( *fo_combine)(void *,
 		 uint16_t, fc_port_t *, uint16_t );
@@ -134,33 +188,44 @@ struct cfg_device_info {
 
 static struct cfg_device_info cfg_device_list[] = {
 
-	{"COMPAQ", "MSA1000", 2, FO_NOTIFY_TYPE_SPINUP, 
+	{"HP", "MSA CONTROLLER", BIT_7, FO_NOTIFY_TYPE_TPGROUP_CDB,
+		qla2x00_combine_by_lunid, qla2x00_get_target_ports,
+		NULL, NULL, NULL},
+	{"HP", "MSA VOLUME", BIT_7, FO_NOTIFY_TYPE_TPGROUP_CDB,
+		qla2x00_combine_by_lunid, qla2x00_get_target_ports,
+		NULL, NULL, NULL},
+	{"COMPAQ", "MSA1000", BIT_1, FO_NOTIFY_TYPE_SPINUP,
 		qla2x00_combine_by_lunid, NULL, NULL, NULL },
-
-/* For testing only
-	{"SEAGATE", "ST318453FC", 0, FO_NOTIFY_TYPE_NONE,   
+	{"HITACHI", "OPEN-", BIT_0, FO_NOTIFY_TYPE_NONE,
 		qla2x00_combine_by_lunid, NULL, NULL, NULL },
-*/
-
-	{"HITACHI", "OPEN-", 1, FO_NOTIFY_TYPE_NONE,   
+	{"HP", "OPEN-", BIT_0, FO_NOTIFY_TYPE_NONE,
 		qla2x00_combine_by_lunid, NULL, NULL, NULL },
-	{"HP", "OPEN-", 1, FO_NOTIFY_TYPE_NONE,   
+	{"COMPAQ", "HSV110 (C)COMPAQ", 4, FO_NOTIFY_TYPE_SPINUP,
 		qla2x00_combine_by_lunid, NULL, NULL, NULL },
-	{"COMPAQ", "HSV110 (C)COMPAQ", 4, FO_NOTIFY_TYPE_SPINUP,   
+	{"HP", "HSV100", BIT_2, FO_NOTIFY_TYPE_SPINUP,
 		qla2x00_combine_by_lunid, NULL, NULL, NULL },
-	{"HP", "HSV100", 4, FO_NOTIFY_TYPE_SPINUP,   
-		qla2x00_combine_by_lunid, NULL, NULL, NULL },
-	{"DEC", "HSG80", 8, FO_NOTIFY_TYPE_NONE,   
+	{"DEC", "HSG80", BIT_3, FO_NOTIFY_TYPE_NONE,
 		qla2x00_export_target, NULL, NULL, NULL },
-	{"IBM", "DS400    S320", 16, FO_NOTIFY_TYPE_TPGROUP_CDB,
+	{"IBM", "DS400", BIT_4, FO_NOTIFY_TYPE_TPGROUP_CDB,
+		qla2x00_combine_by_lunid, qla2x00_get_target_ports,
+		NULL, NULL, NULL},
+	{"HP", "HSV210", BIT_5, FO_NOTIFY_TYPE_TPGROUP_CDB,
+		qla2x00_combine_by_lunid, qla2x00_get_target_ports,
+		NULL, NULL, NULL},
+	{"COMPAQ", "HSV111 (C)COMPAQ", BIT_5, FO_NOTIFY_TYPE_TPGROUP_CDB,
                 qla2x00_combine_by_lunid, qla2x00_get_target_ports,
                 NULL, NULL, NULL},
-	{"HP", "HSV210", 32, FO_NOTIFY_TYPE_TPGROUP_CDB,
+	{"HP", "HSV101", BIT_5, FO_NOTIFY_TYPE_TPGROUP_CDB,
                 qla2x00_combine_by_lunid, qla2x00_get_target_ports,
                 NULL, NULL, NULL},
+	{"HP", "HSV200", BIT_5, FO_NOTIFY_TYPE_TPGROUP_CDB,
+                qla2x00_combine_by_lunid, qla2x00_get_target_ports,
+                NULL, NULL, NULL},
+ 	{"HITACHI", "DF600", BIT_8, FO_NOTIFY_TYPE_NONE,   
+ 		qla2x00_combine_by_lunid, NULL, NULL, NULL },
 
 	/*
-	 * Must be at end of list...
+	    * Must be at end of list...
 	 */
 	{NULL, NULL }
 };
@@ -178,6 +243,13 @@ static struct cfg_device_info cfg_device_list[] = {
 #define QLA6312_DEVICE_ID   0x6312
 #define QLA6322_DEVICE_ID   0x6322
 #define QLA2400_DEVICE_ID   0x2400
+#define QLA2422_DEVICE_ID   0x2422
+#define QLA2432_DEVICE_ID   0x2432
+#define QLA2512_DEVICE_ID   0x2512
+#define QLA2522_DEVICE_ID   0x2522
+#define QLA5422_DEVICE_ID   0x5422
+#define QLA5432_DEVICE_ID   0x5432
+
 //#define QLAFBLITE_DEVICE_ID   	   /* Not Known yet */	
 #define QLA2200A_RISC_ROM_VER  4
 #define FPM_2300            6
@@ -203,7 +275,7 @@ MODULE_DEVICE_TABLE(pci, qla2200_pci_tbl);
 #endif
 
 #if defined(ISP2300)
-#define NUM_OF_ISP_DEVICES  6
+#define NUM_OF_ISP_DEVICES  10
 static struct pci_device_id qla2300_pci_tbl[] =
 {
 	{QLA2X00_VENDOR_ID, QLA2300_DEVICE_ID, PCI_ANY_ID, PCI_ANY_ID,},
@@ -211,6 +283,10 @@ static struct pci_device_id qla2300_pci_tbl[] =
 	{QLA2X00_VENDOR_ID, QLA2322_DEVICE_ID, PCI_ANY_ID, PCI_ANY_ID,},
 	{QLA2X00_VENDOR_ID, QLA6312_DEVICE_ID, PCI_ANY_ID, PCI_ANY_ID,},
 	{QLA2X00_VENDOR_ID, QLA6322_DEVICE_ID, PCI_ANY_ID, PCI_ANY_ID,},
+	{QLA2X00_VENDOR_ID, QLA2422_DEVICE_ID, PCI_ANY_ID, PCI_ANY_ID,},
+	{QLA2X00_VENDOR_ID, QLA2432_DEVICE_ID, PCI_ANY_ID, PCI_ANY_ID,},
+	{QLA2X00_VENDOR_ID, QLA5422_DEVICE_ID, PCI_ANY_ID, PCI_ANY_ID,},
+	{QLA2X00_VENDOR_ID, QLA5432_DEVICE_ID, PCI_ANY_ID, PCI_ANY_ID,},
 	{0,}
 };
 MODULE_DEVICE_TABLE(pci, qla2300_pci_tbl);
@@ -235,7 +311,7 @@ struct qla_fw_info {
 #define ISP22XX_FW_INDEX	0
 #define ISP23XX_FW_INDEX	0
 #define ISP232X_FW_INDEX	2
-#define ISP63XX_FW_INDEX	6
+#define ISP24XX_FW_INDEX	6
 
 typedef struct _qlaboards
 {
@@ -259,31 +335,24 @@ static struct qla_fw_info qla_fw_tbl[] = {
 
 #if defined(ISP2200)
 	/* Start of 22xx firmware list */
-#if defined(FC_IP_SUPPORT)
-	{
-	   FW_INFO_ADDR_NORMAL, &fw2200ip_code01[0],
-	   &fw2200ip_length01, &fw2200ip_addr01,
-	},
-#else
 	{
 	   FW_INFO_ADDR_NORMAL, &fw2200tp_code01[0],
 	   &fw2200tp_length01, &fw2200tp_addr01,
 	},
-#endif
 	{ FW_INFO_ADDR_NOMORE, },
 #endif
 
 #if defined(ISP2300)
-	/* 0 - Start of 23xx firmware list */
+	/* 0 - Start of 23xx/6312 firmware list */
 	{
 		FW_INFO_ADDR_NORMAL, &fw2300ipx_code01[0],
 		&fw2300ipx_length01, &fw2300ipx_addr01, 
 	},
 
-	/* End of 23xx firmware list */
+	/* End of 23xx/6312 firmware list */
 	{ FW_INFO_ADDR_NOMORE, },
 
-	/* 2 - Start of 232x firmware list */
+	/* 2 - Start of 232x/6322 firmware list */
 	{
 		FW_INFO_ADDR_NORMAL, &fw2322ipx_code01[0],
 		&fw2322ipx_length01, &fw2322ipx_addr01,
@@ -296,14 +365,20 @@ static struct qla_fw_info qla_fw_tbl[] = {
 		FW_INFO_ADDR_EXTENDED, &xseqipx_code01[0],
 		&xseqipx_code_length01, 0, &xseqipx_code_addr01,
 	},
+	/* End of 232x/6322 firmware list */
 	{ FW_INFO_ADDR_NOMORE, },
-	/* 6 - Start of 63xx firmware list */
-	{
-		FW_INFO_ADDR_NORMAL, &fw2300flx_code01[0],
-		&fw2300flx_length01, &fw2300flx_addr01, 
-	},
-	{ FW_INFO_ADDR_NOMORE, },
-	/* End of 63xx firmware list */
+
+ 	/* 8 - Start of 24xx/54xx firmware list */
+ 	{
+ 		FW_INFO_ADDR_EXTENDED, (unsigned short *)&fw2400_code01[0],
+                 (unsigned short *)&fw2400_length01, 0,   (unsigned long *)&fw2400_addr01,
+ 	},
+ 	{
+ 		FW_INFO_ADDR_EXTENDED, (unsigned short *)&fw2400_code02[0],
+                 (unsigned short *)&fw2400_length02, 0, (unsigned long *)&fw2400_addr02,
+ 	},
+ 	{ FW_INFO_ADDR_NOMORE, },
+	/* End of 24xx/54xx firmware list */
 	/* End of firmware list */
 #endif
 };
@@ -319,29 +394,38 @@ static struct _qlaboards   QLBoardTbl_fc[NUM_OF_ISP_DEVICES] =
 	{"QLA2312 ", QLA2312_DEVICE_ID,           MAX_BUSES,
 		&fw2300ipx_version_str[0] , &qla_fw_tbl[ISP23XX_FW_INDEX]
 	},
-
 	{"QLA2300 ", QLA2300_DEVICE_ID,           MAX_BUSES,
 		&fw2300ipx_version_str[0] , &qla_fw_tbl[ISP23XX_FW_INDEX]
 	},
 
 	{"QLA6312 ", QLA6312_DEVICE_ID,           MAX_BUSES,
-		&fw2300flx_version_str[0] , &qla_fw_tbl[ISP63XX_FW_INDEX]
+		&fw2300ipx_version_str[0] , &qla_fw_tbl[ISP23XX_FW_INDEX]
 	},
 
 	{"QLA6322 ", QLA6322_DEVICE_ID,           MAX_BUSES,
-		&fw2300flx_version_str[0] , &qla_fw_tbl[ISP63XX_FW_INDEX]
+		&fw2322ipx_version_str[0] , &qla_fw_tbl[ISP232X_FW_INDEX]
+	},
+
+	{"QLA2422 ", QLA2422_DEVICE_ID,           MAX_BUSES,
+		(char *)&fw2400_version_str[0] , &qla_fw_tbl[ISP24XX_FW_INDEX]
+	},
+
+	{"QLA2432 ", QLA2432_DEVICE_ID,           MAX_BUSES,
+		(char *)&fw2400_version_str[0] , &qla_fw_tbl[ISP24XX_FW_INDEX]
+	},
+	{"QLA5422 ", QLA5422_DEVICE_ID,           MAX_BUSES,
+		(char *)&fw2400_version_str[0] , &qla_fw_tbl[ISP24XX_FW_INDEX]
+	},
+
+	{"QLA5432 ", QLA5432_DEVICE_ID,           MAX_BUSES,
+		(char *)&fw2400_version_str[0] , &qla_fw_tbl[ISP24XX_FW_INDEX]
 	},
 #endif
 
 #if defined(ISP2200)
 	{"QLA2200 ", QLA2200_DEVICE_ID,           MAX_BUSES,
-#if defined(FC_IP_SUPPORT)
-		&fw2200ip_version_str[0] ,
-	},
-#else
 		&fw2200tp_version_str[0] , &qla_fw_tbl[ISP22XX_FW_INDEX]
 	},
-#endif
 #endif
 
 #if defined(ISP2100)

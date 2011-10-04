@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: ioctls/lpfc_hbaapi_ioctl.c 1.11 2005/05/03 11:20:53EDT sf_support Exp  $
+ * $Id: lpfc_hbaapi_ioctl.c 484 2006-03-27 16:26:51Z sf_support $
  */
 #include <linux/version.h>
 #include <linux/kernel.h>
@@ -238,7 +238,7 @@ lpfc_process_ioctl_hbaapi(lpfcHBA_t *phba, LPFCCMDINPUT_t *cip)
 
 	case LPFC_HBA_FCPTARGETMAPPING:
 		rc = lpfc_ioctl_hba_fcptargetmapping(phba, cip, 
-						     dataout, &do_cp);
+						     dataout, total_mem, &do_cp);
 		break;
 
 	case LPFC_HBA_FCPBINDING:
@@ -1000,7 +1000,7 @@ lpfc_ioctl_hba_getevent(lpfcHBA_t * phba,
 	for (j = 0; j < MAX_HBAEVT; j++) {
 		if ((j == (int)size) ||
 		    (phba->hba_event_get == phba->hba_event_put))
-			return (rc);
+			break;
 		rec = &phba->hbaevt[phba->hba_event_get];
 		memcpy((uint8_t *) recout, (uint8_t *) rec, sizeof (HBAEVT_t));
 		recout++;
@@ -1039,7 +1039,7 @@ lpfc_ioctl_hba_getevent(lpfcHBA_t * phba,
 int
 lpfc_ioctl_hba_fcptargetmapping(lpfcHBA_t * phba,
 				LPFCCMDINPUT_t * cip,
-				void *dataout, int *do_cp)
+				void *dataout, int buff_size, int *do_cp)
 {
 
 	uint32_t room = (ulong) cip->lpfc_arg1;
@@ -1047,7 +1047,6 @@ lpfc_ioctl_hba_fcptargetmapping(lpfcHBA_t * phba,
 	int count = 0;
 	int size = 0;
 	int minsize;
-	int total_mem = cip->lpfc_outsz;
 	int pansid;
 	union {
 		char* p;
@@ -1065,6 +1064,7 @@ lpfc_ioctl_hba_fcptargetmapping(lpfcHBA_t * phba,
 	int rc = 0;
 	struct pci_dev *pcidev;
 	struct list_head *curr, *next;
+	unsigned long iflag;
 
 #ifdef CONFIG_X86_64
 	if (cip->lpfc_cntl == LPFC_CNTL_X86_APP) {
@@ -1104,17 +1104,20 @@ lpfc_ioctl_hba_fcptargetmapping(lpfcHBA_t * phba,
 					HBA_OSDN *osdn;
 					uint32_t fcpLun[2];
 
-					if ((total_mem - size) < minsize) {
+					if ((buff_size - size) < minsize) {
 						/*  Not enuough space left; we have to 
 						 *  copy what we have now back to 
 						 *  application space, before reusing
 						 *  this buffer again.
 						 */
+						LPFC_DRVR_UNLOCK(phba, iflag);
 						if ( copy_to_user(appPtr,
 								  drvPtr,
 								  size)) {
+							LPFC_DRVR_LOCK(phba, iflag);
 							return(EIO);
 						}
+						LPFC_DRVR_LOCK(phba, iflag);
 						appPtr += size;
 						ep.p = drvPtr;
 						size = 0;
@@ -1207,9 +1210,12 @@ lpfc_ioctl_hba_fcptargetmapping(lpfcHBA_t * phba,
 		}
 	}
 
+	LPFC_DRVR_UNLOCK(phba, iflag);
 	if (copy_to_user(appPtr, drvPtr, size)) {
+		LPFC_DRVR_LOCK(phba, iflag);
 		return(EIO);
 	}
+	LPFC_DRVR_LOCK(phba, iflag);
 
 #ifdef CONFIG_X86_64
 	if (cip->lpfc_cntl == LPFC_CNTL_X86_APP)
@@ -1218,9 +1224,12 @@ lpfc_ioctl_hba_fcptargetmapping(lpfcHBA_t * phba,
 #endif /* CONFIG_X86_64 */
 		((HBA_FCPTARGETMAPPING *) dataout)->NumberOfEntries = total;
 
+	LPFC_DRVR_UNLOCK(phba, iflag);
 	if (copy_to_user(cip->lpfc_dataout, &total, sizeof(HBA_UINT32))) {
+		LPFC_DRVR_LOCK(phba, iflag);
 		return(EIO);
 	}
+	LPFC_DRVR_LOCK(phba, iflag);
 	cip->lpfc_outsz = 0;
 	if (total > room) {
 		rc = ERANGE;

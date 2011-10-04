@@ -75,13 +75,6 @@ typedef struct dev_mapping_s {
 
 extern dev_mapping_t mddev_map [MAX_MD_DEVS];
 
-static inline mddev_t * kdev_to_mddev (kdev_t dev)
-{
-	if (MAJOR(dev) != MD_MAJOR)
-		BUG();
-        return mddev_map[MINOR(dev)].mddev;
-}
-
 /*
  * options passed in raidrun:
  */
@@ -216,6 +209,9 @@ struct mddev_s
 	md_wait_queue_head_t		recovery_wait;
 
 	struct md_list_head		all_mddevs;
+#ifndef __GENKSYMS__ /* preserve KMI/ABI ksyms compatibility for mod linkage */
+	int				dying;
+#endif
 };
 
 struct mdk_personality_s
@@ -310,7 +306,12 @@ extern mdp_disk_t *get_spare(mddev_t *mddev);
 			tmp = tmp->next, tmp->prev != &all_mddevs	\
 		; )
 
-static inline int lock_mddev (mddev_t * mddev)
+static inline void lock_mddev (mddev_t * mddev)
+{
+	return down(&mddev->reconfig_sem);
+}
+
+static inline int lock_mddev_interruptible (mddev_t * mddev)
 {
 	return down_interruptible(&mddev->reconfig_sem);
 }

@@ -78,7 +78,7 @@ static struct linux_binfmt elf_format = {
 	NULL, THIS_MODULE, load_elf_binary, load_elf_library, elf_core_dump, ELF_EXEC_PAGESIZE
 };
 
-#define BAD_ADDR(x)	((unsigned long)(x) > TASK_SIZE)
+#define BAD_ADDR(x)	((unsigned long)(x) >= TASK_SIZE)
 
 static int set_brk(unsigned long start, unsigned long end)
 {
@@ -358,7 +358,7 @@ static unsigned long load_elf_interp(struct elfhdr * interp_elf_ex,
 	    	elf_type |= MAP_FIXED;
 
 	    map_addr = elf_map(interpreter, load_addr + vaddr, eppnt, elf_prot,
-elf_type, total_size);
+				elf_type, total_size);
 	    total_size = 0UL;
 	    if (BAD_ADDR(map_addr)) {
 	        error = map_addr;
@@ -376,7 +376,7 @@ elf_type, total_size);
 	     * <= p_memsz so it is only necessary to check p_memsz.
 	     */
 	    k = load_addr + eppnt->p_vaddr;
-	    if (k > TASK_SIZE || eppnt->p_filesz > eppnt->p_memsz ||
+	    if (BAD_ADDR(k) || eppnt->p_filesz > eppnt->p_memsz ||
 		eppnt->p_memsz > TASK_SIZE || TASK_SIZE - eppnt->p_memsz < k) {
 	        error = -ENOMEM;
 		goto out_close;
@@ -825,7 +825,7 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 		 * allowed task size. Note that p_filesz must always be
 		 * <= p_memsz so it is only necessary to check p_memsz.
 		 */
-		if (k > TASK_SIZE || elf_ppnt->p_filesz > elf_ppnt->p_memsz ||
+		if (BAD_ADDR(k) || elf_ppnt->p_filesz > elf_ppnt->p_memsz ||
 		    elf_ppnt->p_memsz > TASK_SIZE ||
 		    TASK_SIZE - elf_ppnt->p_memsz < k) {
 			/* set_brk can never work.  Avoid overflows.  */
@@ -876,10 +876,9 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 						    &interp_load_addr);
 
 		if (BAD_ADDR(elf_entry)) {
-			printk(KERN_ERR "Unable to load interpreter\n");
-			send_sig(SIGSEGV, current, 0);
+			force_sig(SIGSEGV, current);
 			retval = IS_ERR((void *)elf_entry) ?
-					(int)elf_entry : -ENOEXEC;
+					(int)elf_entry : -EINVAL;
 			goto out_free_dentry;
 		}
 		reloc_func_desc = interp_load_addr;
@@ -887,6 +886,12 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 		allow_write_access(interpreter);
 		fput(interpreter);
 		kfree(elf_interpreter);
+	} else {
+		if (BAD_ADDR(elf_entry)) {
+			force_sig(SIGSEGV, current);
+			retval = -EINVAL;
+			goto out_free_dentry;
+		}
 	}
 
 	kfree(elf_phdata);

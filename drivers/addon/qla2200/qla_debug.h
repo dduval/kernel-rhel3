@@ -1,22 +1,10 @@
-/******************************************************************************
- *                  QLOGIC LINUX SOFTWARE
- *
- * QLogic ISP2x00 device driver for Linux 2.4.x
- * Copyright (C) 2003 QLogic Corporation
- * (www.qlogic.com)
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2, or (at your option) any
- * later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- ******************************************************************************/
 
+/*
+ * QLogic Fibre Channel HBA Driver
+ * Copyright (c)  2003-2005 QLogic Corporation
+ *
+ * See LICENSE.qla2xxx for copyright and licensing details.
+ */
 #undef ENTER_TRACE
 /*
 * Macros use for debugging the driver.
@@ -121,9 +109,9 @@
 #endif
 
 #if defined(QL_DEBUG_LEVEL_12)
-#define DEBUG12(x)      do {x;} while (0);
+#define DEBUG12(x)      do {x;} while (0)
 #else
-#define DEBUG12(x)	do {} while (0);
+#define DEBUG12(x)	do {} while (0)
 #endif
 
 #if defined(QL_DEBUG_LEVEL_13)

@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_mbox.c 1.9 2005/05/03 11:21:52EDT sf_support Exp  $
+ * $Id: lpfc_mbox.c 328 2005-05-03 15:20:43Z sf_support $
  */
 #include <linux/version.h>
 #include <linux/spinlock.h>

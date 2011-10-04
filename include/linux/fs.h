@@ -844,6 +844,10 @@ struct super_block {
 	 * non-directories) are allowed, but not unconnected diretories.
 	 */
 	struct semaphore s_nfsd_free_path_sem;
+#ifndef __GENKSYMS__ /* preserve KMI/ABI ksyms compatibility for mod linkage */
+	wait_queue_head_t s_wait_prunes; 
+	int s_prunes;
+#endif
 };
 
 /*

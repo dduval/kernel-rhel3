@@ -115,7 +115,6 @@ ip_nat_fn(unsigned int hooknum,
 		/* Seen it before?  This can happen for loopback, retrans,
 		   or local packets.. */
 		if (!(info->initialized & (1 << maniptype))) {
-			int in_hashes = info->initialized;
 			unsigned int ret;
 
 			if (ct->master
@@ -126,9 +125,10 @@ ip_nat_fn(unsigned int hooknum,
 			} else {
 #ifdef CONFIG_IP_NF_NAT_LOCAL
 				/* LOCAL_IN hook doesn't have a chain!  */
-				if (hooknum == NF_IP_LOCAL_IN) {
-					ret = NF_ACCEPT;
-				} else
+				if (hooknum == NF_IP_LOCAL_IN)
+					ret = alloc_null_binding(ct, info,
+								 hooknum);
+				else
 #endif
 				ret = ip_nat_rule_find(pskb, hooknum, in, out,
 						       ct, info);
@@ -139,12 +139,6 @@ ip_nat_fn(unsigned int hooknum,
 				return ret;
 			}
 
-			if (in_hashes) {
-				IP_NF_ASSERT(info->bysource.conntrack);
-				replace_in_hashes(ct, info);
-			} else {
-				place_in_hashes(ct, info);
-			}
 		} else
 			DEBUGP("Already setup manip %s for ct %p\n",
 			       maniptype == IP_NAT_MANIP_SRC ? "SRC" : "DST",

@@ -185,7 +185,9 @@ static struct dev_info device_list[] =
 	{"APPLE", "Xserve", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
 	{"COMPAQ", "MSA1000", "*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_NOSTARTONADD},
 	{"COMPAQ", "HSV110", "*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_NOSTARTONADD},
+	{"COMPAQ", "HSV111", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
 	{"HP", "HSV100", "*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_NOSTARTONADD},
+	{"HP", "HSV101", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
 	{"HP", "C1557A", "*", BLIST_FORCELUN},
 	{"IBM", "AuSaV1S2", "*", BLIST_FORCELUN},
 	{"FSC", "CentricStor", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
@@ -235,6 +237,8 @@ static struct dev_info device_list[] =
 	{"SMSC", "USB 2 HS", "*", BLIST_SPARSELUN | BLIST_LARGELUN}, 
 	{"XYRATEX", "RS", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
 	{"Xyratex", "4200", "*", BLIST_SPARSELUN | BLIST_FORCELUN},
+	{"XYRATEX", "F5402E", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
+	{"XYRATEX", "Processor", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
 	{"SUN", "StorEdge 3510 ", "*", BLIST_SPARSELUN},
 	{"SUN", "StorEdge 3511 ", "*", BLIST_SPARSELUN},
 	{"IBM", "1722", "*", BLIST_SPARSELUN | BLIST_LARGELUN}, 
@@ -257,6 +261,8 @@ static struct dev_info device_list[] =
  	{"HP", "C5713A", "*", BLIST_FORCELUN},			/* HP SureStore DAT40x6 */
 	{"HP", "DAT72X6", "*", BLIST_FORCELUN},			/* HP StorageWorks DAT72x6 */
 	{"HP", "UHDL", "*", BLIST_FORCELUN},			/* HP StorageWorks SSL1016 */
+	{"HP", "C7438A", "*", BLIST_FORCELUN},          	/* HP StorageWorks DAT72 */
+	{"HP", "DAT Autoloader", "*", BLIST_FORCELUN},  	/* HP StorageWorks DAT72x10 */
 	{"HP", "NS E1200-160", "*", BLIST_FORCELUN},    /* HP Network Storage Router E1200 */
 	{"APPLE", "Xserve", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
 	{"SanDisk", "ImageMate", "*", BLIST_FORCELUN},
@@ -269,6 +275,7 @@ static struct dev_info device_list[] =
 	{"EMC", "Celerra iSCSI", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
 	{"EMC", "iSCSI", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
 	{"FALCON", "IPSTOR DISK", "*", BLIST_SPARSELUN},
+	{"Decru", "<Controller>", "*", BLIST_SPARSELUN},
 
 	/*
 	 * Must be at end of list...

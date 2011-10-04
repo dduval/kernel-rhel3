@@ -38,6 +38,7 @@
 #include <linux/reboot.h>
 #include <linux/proc_fs.h>
 #include <linux/blk.h>
+#include <linux/diskdump.h>
 
 #if defined (__x86_64__)
 #include <asm/ioctl32.h>
@@ -46,6 +47,7 @@
 #include "scsi.h"
 #include "hosts.h"
 #include "sd.h"
+#include "scsi_dump.h"
 
 #include "megaraid_sas.h"
 
@@ -58,6 +60,11 @@ MODULE_DESCRIPTION("LSI Logic MegaRAID SAS Driver");
 
 static const char *megasas_info(struct Scsi_Host *);
 static void msleep(unsigned long);
+
+static void megasas_deplete_reply_queue(struct megasas_instance *instance, u8 alt_status);
+static irqreturn_t megasas_isr(int irq, void *devp, struct pt_regs *regs);
+static void megasas_flush_cache(struct megasas_instance *instance);
+static int megasas_issue_polled(struct megasas_instance *instance, struct megasas_cmd *cmd);
 
 /*
  * PCI ID table for all supported controllers
@@ -105,6 +112,14 @@ static inline unsigned long msecs_to_jiffies(unsigned long msecs)
 
 static void msleep(unsigned long msecs)
 {
+#if defined(CONFIG_DISKDUMP) || defined(CONFIG_DISKDUMP_MODULE)
+	if (crashdump_mode()) {
+		for (; msecs > 1000; msecs -= 1000)
+			udelay(1000);
+		udelay(msecs);
+		return;
+	}
+#endif
 	set_current_state(TASK_UNINTERRUPTIBLE);
 	schedule_timeout(msecs_to_jiffies(msecs) + 1);
 }
@@ -719,6 +734,17 @@ static inline struct megasas_cmd *megasas_build_cmd(struct megasas_instance
 
 			return cmd;
 
+#if defined(CONFIG_DISKDUMP) || defined(CONFIG_DISKDUMP_MODULE)
+		case SYNCHRONIZE_CACHE:
+			if (crashdump_mode())
+				megasas_flush_cache(instance);
+		case REQUEST_SENSE:
+		case MODE_SELECT:
+			if (crashdump_mode()) {
+				scp->result = (DID_OK << 16);
+				return NULL;
+			}
+#endif
 		default:
 			/*
 			 * Fail for LUN > 0
@@ -832,6 +858,15 @@ static int megasas_wait_for_outstanding(struct megasas_instance *instance)
 		}
 
 		msleep(1000);
+
+#if defined(CONFIG_DISKDUMP) || defined(CONFIG_DISKDUMP_MODULE)
+		/*
+		* In crash dump mode cannot complete cmds in interrupt context
+		* Complete cmds from here
+		*/
+		if (crashdump_mode())
+			megasas_deplete_reply_queue(instance, DID_OK);
+#endif
 	}
 
 	if (instance->fw_outstanding) {
@@ -938,6 +973,66 @@ megasas_service_aen(struct megasas_instance *instance, struct megasas_cmd *cmd)
 	megasas_return_cmd(instance, cmd);
 }
 
+#if defined(CONFIG_DISKDUMP) || defined(CONFIG_DISKDUMP_MODULE)
+static int
+megasas_diskdump_sanity_check(struct scsi_device *device)
+{
+        struct megasas_instance *instance;
+
+	instance = (struct megasas_instance *)device->host->hostdata;
+
+        if (!instance)
+                return -ENXIO;
+
+        if (spin_is_locked(&instance->cmd_pool_lock) ||
+	     spin_is_locked(&instance->instance_lock))
+                return -EBUSY;
+
+        return 0;
+}
+
+static void
+megasas_diskdump_poll(struct scsi_device *device)
+{
+        struct megasas_instance *instance;
+
+	instance = (struct megasas_instance *)device->host->hostdata;
+
+        if (!instance)
+                return;
+
+	megasas_isr(0,instance, NULL);
+}
+static struct scsi_dump_ops megasas_dump_ops = {
+	.sanity_check	= megasas_diskdump_sanity_check,
+	.poll		= megasas_diskdump_poll,
+	.no_write_cache_enable = 1
+};
+/*
+ * Scsi host template for megaraid_sas driver (diskdump)
+ */
+static Scsi_Host_Template_dump megasas_template_dump = {
+
+	.hostt = {
+		.name = "MegaRAID SAS",
+		.proc_name = "megaraid_sas",
+		.info = megasas_info,
+		.queuecommand = megasas_queue_command,
+		.eh_device_reset_handler = megasas_reset_device,
+		.eh_bus_reset_handler = megasas_reset_bus_host,
+		.eh_host_reset_handler = megasas_reset_bus_host,
+		.use_clustering = ENABLE_CLUSTERING,
+		.use_new_eh_code = 1,
+		.highmem_io = 1,
+		.vary_io = 1,
+		.disk_dump = 1,
+		},
+	.dump_ops = &megasas_dump_ops,
+};
+#define megasas_template		(megasas_template_dump.hostt)
+
+#else
+
 /*
  * Scsi host template for megaraid_sas driver
  */
@@ -955,6 +1050,7 @@ static Scsi_Host_Template megasas_template = {
 	.highmem_io = 1,
 	.vary_io = 1,
 };
+#endif
 
 /**
  * megasas_complete_int_cmd -	Completes an internal command
@@ -1195,28 +1291,13 @@ megasas_complete_cmd(struct megasas_instance *instance, struct megasas_cmd *cmd,
  * 					SCSI mid-layer instead of the status
  * 					returned by the FW
  */
-static inline void
+static void
 megasas_deplete_reply_queue(struct megasas_instance *instance, u8 alt_status)
 {
-	u32 status;
 	u32 producer;
 	u32 consumer;
 	u32 context;
 	struct megasas_cmd *cmd;
-
-	/*
-	 * Check if it is our interrupt
-	 */
-	status = readl(&instance->reg_set->outbound_intr_status);
-
-	if (!(status & MFI_OB_INTR_STATUS_MASK)) {
-		return IRQ_NONE;
-	}
-
-	/*
-	 * Clear the interrupt by writing back the same value
-	 */
-	writel(status, &instance->reg_set->outbound_intr_status);
 
 	producer = *instance->producer;
 	consumer = *instance->consumer;
@@ -1236,7 +1317,6 @@ megasas_deplete_reply_queue(struct megasas_instance *instance, u8 alt_status)
 
 	*instance->consumer = producer;
 
-	return IRQ_HANDLED;
 }
 
 /**
@@ -1244,8 +1324,27 @@ megasas_deplete_reply_queue(struct megasas_instance *instance, u8 alt_status)
  */
 static irqreturn_t megasas_isr(int irq, void *devp, struct pt_regs *regs)
 {
-	return megasas_deplete_reply_queue((struct megasas_instance *)devp,
+	struct megasas_instance *instance;
+	u32 status;
+
+	instance = (struct megasas_instance *)devp;
+	/*
+	 * Check if it is our interrupt
+	 */
+	status = readl(&instance->reg_set->outbound_intr_status);
+
+	if (!(status & MFI_OB_INTR_STATUS_MASK)) {
+		return IRQ_NONE;
+	}
+
+	/*
+	 * Clear the interrupt by writing back the same value
+	 */
+	writel(status, &instance->reg_set->outbound_intr_status);
+
+	megasas_deplete_reply_queue((struct megasas_instance *)devp,
 					   DID_OK);
+	return IRQ_HANDLED;
 }
 
 /**
@@ -2318,7 +2417,14 @@ static void megasas_flush_cache(struct megasas_instance *instance)
 	dcmd->opcode = MR_DCMD_CTRL_CACHE_FLUSH;
 	dcmd->mbox.b[0] = MR_FLUSH_CTRL_CACHE | MR_FLUSH_DISK_CACHE;
 
+#if defined(CONFIG_DISKDUMP) || defined(CONFIG_DISKDUMP_MODULE)
+	if (crashdump_mode())
+		megasas_issue_polled(instance, cmd);
+	else
+		megasas_issue_blocked_cmd(instance, cmd);
+#else
 	megasas_issue_blocked_cmd(instance, cmd);
+#endif
 
 	megasas_return_cmd(instance, cmd);
 

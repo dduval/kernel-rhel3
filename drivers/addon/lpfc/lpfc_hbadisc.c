@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_hbadisc.c 1.9 2005/07/08 19:29:41EDT sf_support Exp  $
+ * $Id: lpfc_hbadisc.c 369 2005-07-08 23:29:48Z sf_support $
  */
 
 #include <linux/version.h>

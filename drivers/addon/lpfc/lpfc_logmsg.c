@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_logmsg.c 1.8 2005/07/08 19:29:48EDT sf_support Exp  $
+ * $Id: lpfc_logmsg.c 369 2005-07-08 23:29:48Z sf_support $
  */
 #include <linux/version.h>
 #include <linux/spinlock.h>

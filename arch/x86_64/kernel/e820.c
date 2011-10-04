@@ -16,6 +16,7 @@
 #include <asm/bootsetup.h>
 #include <asm/smp.h>
 
+extern int disable_timer_pin_1;
 extern unsigned long table_start, table_end;
 extern char _end[];
 
@@ -138,6 +139,13 @@ unsigned long end_pfn_map;
  * Last pfn which the user wants to use.
  */
 unsigned long end_user_pfn = MAXMEM>>PAGE_SHIFT;  
+
+#ifdef CONFIG_IA32E
+/*
+ * last DMA zone pfn
+ */
+unsigned long end_dma_pfn = 0;
+#endif
 
 /*
  * Find the highest page frame number we have available
@@ -571,6 +579,8 @@ void __init parse_cmdline_early (char ** cmdline_p)
 		else if (!memcmp(from, "acpi_sci=low", 12))
 			acpi_sci_flags.polarity = 3;
 #endif
+		else if (!memcmp(from, "disable_timer_pin_1", 19))
+			disable_timer_pin_1 = 1;
 #ifdef CONFIG_SWIOTLB
 		else if (!memcmp(from, "swiotlb=", 8)) {
 			if (to != command_line)
@@ -578,6 +588,12 @@ void __init parse_cmdline_early (char ** cmdline_p)
 			from+=8;
 			setup_io_tlb_npages(from);
 		}
+#ifdef CONFIG_IA32E
+		else if (!memcmp(from, "maxdma=", 7)) {
+			end_dma_pfn = memparse(from+7, &from);
+			end_dma_pfn >>= PAGE_SHIFT;
+		}
+#endif
 #endif
 #ifdef CONFIG_ACPI_PMTMR
 		else if (!memcmp(from, "pmtmr", 5)) {

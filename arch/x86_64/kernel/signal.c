@@ -30,6 +30,7 @@
 #include <asm/uaccess.h>
 #include <asm/i387.h>
 #include <asm/proto.h>
+#include <asm/vsyscall.h>
 
 #define DEBUG_SIG 0
 
@@ -69,6 +70,7 @@ int copy_siginfo_to_user(siginfo_t *to, siginfo_t *from)
 		case __SI_CHLD >> 16:
 			err |= __put_user(from->si_utime, &to->si_utime);
 			err |= __put_user(from->si_stime, &to->si_stime);
+		case __SI_POLL >> 16: /* for duplicate copy of si_fd */
 			err |= __put_user(from->si_status, &to->si_status);
 		default:
 			err |= __put_user(from->si_uid, &to->si_uid);
@@ -137,15 +139,15 @@ restore_sigcontext(struct pt_regs *regs, struct sigcontext *sc, unsigned long *p
 
 
 #define COPY(x)		err |= __get_user(regs->x, &sc->x)
-#define COPY_CANON(x)   \
-	COPY(x); \
-	if ((regs->x >> 48)  != 0 && (regs->x >> 48) != 0xffff) \
-				regs->x = 0; 
 
 	/* fs and gs are ignored because we cannot handle the 64bit base easily */ 
 
-	COPY(rdi); COPY(rsi); COPY(rbp); COPY_CANON(rsp); COPY(rbx);
-	COPY(rdx); COPY(rcx); COPY_CANON(rip);
+	COPY(rdi); COPY(rsi); COPY(rbp); COPY(rsp);
+	if (unlikely(regs->rsp >= TASK_SIZE))
+		regs->rsp = 0UL;
+	COPY(rbx); COPY(rdx); COPY(rcx); COPY(rip);
+	if (unlikely(regs->rip >= TASK_SIZE && regs->rip < VSYSCALL_START))
+		regs->rip = 0UL;
 	COPY(r8);
 	COPY(r9);
 	COPY(r10);
@@ -378,7 +380,10 @@ static void setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
 	regs->rsi = (unsigned long)&frame->info; 
 	regs->rdx = (unsigned long)&frame->uc; 
 	regs->rsp = (unsigned long) frame;
-	regs->rip = (unsigned long) ka->sa.sa_handler;
+	if (unlikely((unsigned long)ka->sa.sa_handler >= TASK_SIZE))
+		regs->rip = 0UL;
+	else
+		regs->rip = (unsigned long)ka->sa.sa_handler;
 	regs->cs = __USER_CS;
 	regs->ss = __USER_DS; 
 

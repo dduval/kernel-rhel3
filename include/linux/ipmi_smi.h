@@ -77,6 +77,13 @@ struct ipmi_smi_msg
 
 struct ipmi_smi_handlers
 {
+	/* The low-level interface cannot start sending messages to
+	   the upper layer until this function is called.  This may
+	   not be NULL, the lower layer must take the interface from
+	   this call. */
+	int (*start_processing)(void       *send_info,
+				ipmi_smi_t new_intf);
+
 	/* Called to enqueue an SMI message to be sent.  This
 	   operation is not allowed to fail.  If an error occurs, it
 	   should report back the error in a received message.  It may
@@ -113,12 +120,15 @@ struct ipmi_smi_handlers
 	void (*poll)(void *send_info);
 };
 
-/* Add a low-level interface to the IPMI driver. */
+/* Add a low-level interface to the IPMI driver.
+   The low-level interface should not deliver any messages to the
+   upper layer until the start_processing() function in the handlers
+   is called, and the lower layer must get the interface from that
+   call. */
 int ipmi_register_smi(struct ipmi_smi_handlers *handlers,
 		      void                     *send_info,
 		      unsigned char            version_major,
-		      unsigned char            version_minor,
-		      ipmi_smi_t               *intf);
+		      unsigned char            version_minor);
 
 /*
  * Remove a low-level interface from the IPMI driver.  This will

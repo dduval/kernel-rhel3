@@ -9,7 +9,8 @@ obj-m           :=
 obj-n           :=
 obj-            :=
 
-mod-subdirs     := cipe megarac aep bcm qla2200 lpfc ipr iscsi_sfnet dell_rbu
+mod-subdirs     := cipe megarac aep bcm qla2200 lpfc ipr iscsi_sfnet dell_rbu \
+		dcdbas
 
 O_TARGET := addon.o
 
@@ -31,7 +32,7 @@ subdir-$(CONFIG_SCSI_LPFC) += lpfc
 subdir-$(CONFIG_SCSI_IPR) += ipr
 subdir-$(CONFIG_SCSI_ISCSI) += iscsi_sfnet
 subdir-$(CONFIG_DELL_RBU) += dell_rbu
-
+subdir-$(CONFIG_DCDBAS) += dcdbas
 
 include $(TOPDIR)/Rules.make
 

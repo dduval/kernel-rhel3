@@ -13,11 +13,12 @@ dep_tristate '   Dell MegaRac remote access card support' CONFIG_MEGARAC m
 
 dep_tristate '   Experimental QLogic 2100 support' CONFIG_FC_QLA2100 $CONFIG_PCI m
 dep_tristate '   Experimental QLogic 2200 support' CONFIG_FC_QLA2200 $CONFIG_PCI m
-dep_tristate '   Experimental QLogic 2300 support' CONFIG_FC_QLA2300 $CONFIG_PCI m
+dep_tristate '   Experimental QLogic 2300 and 2400 support' CONFIG_FC_QLA2300 $CONFIG_PCI m
 dep_tristate '   iSCSI support (scsi-over-network)' CONFIG_SCSI_ISCSI $CONFIG_SCSI m
 dep_tristate '   IBM native DASD driver for iSeries, pSeries (ipr)' CONFIG_SCSI_IPR $CONFIG_SCSI $CONFIG_PCI m
 dep_tristate '   LightPulse Fibre Channel HBA support (lpfc)' CONFIG_SCSI_LPFC $CONFIG_PCI m
 dep_tristate '   MPT Fusion Enhanced SCSI error reporting' CONFIG_FUSION_ISENSE $CONFIG_FUSION m
+tristate '   Systems Management Base Driver (dcdbas)' CONFIG_DCDBAS
 tristate '   BIOS update support for DELL systems via procfs' CONFIG_DELL_RBU
 
 endmenu

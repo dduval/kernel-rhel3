@@ -114,6 +114,30 @@ UNUSUAL_DEV(  0x04a4, 0x0004, 0x0001, 0x0001,
 		"DVD-CAM DZ-MV100A Camcorder",
 		US_SC_SCSI, US_PR_CB, NULL, US_FL_SINGLE_LUN),
 
+/* Bug 186307: IBM Remote Supervisor Agent II adapters when using Remote
+   Console|Mount CD-ROM drive function, create a new USB device with
+   ProductID+1 (not all do however). The USB CD-ROM cannot read MAX_SECTORS
+   and must be set to a lower value. */
+UNUSUAL_DEV(  0x04b3, 0x4001, 0x0000, 0xffff,
+		"IBM",
+		"PPC I/F",
+		US_SC_SCSI, US_PR_BULK, max_sectors_init, 0),
+UNUSUAL_DEV(  0x04b3, 0x4001+1, 0x0000, 0xffff,
+		"IBM",
+		"PPC I/F",
+		US_SC_SCSI, US_PR_BULK, max_sectors_init, 0),
+UNUSUAL_DEV(  0x04b3, 0x4002+1, 0x0000, 0xffff,
+		"IBM",
+		"PPC I/F",
+		US_SC_SCSI, US_PR_BULK, max_sectors_init, 0),
+UNUSUAL_DEV(  0x04b3, 0x4003+1, 0x0000, 0xffff,
+		"IBM",
+		"PPC I/F",
+		US_SC_SCSI, US_PR_BULK, max_sectors_init, 0),
+UNUSUAL_DEV(  0x04b3, 0x4004+1, 0x0000, 0xffff,
+		"IBM",
+		"PPC I/F",
+		US_SC_SCSI, US_PR_BULK, max_sectors_init, 0),
 /* Reported by Khalid Aziz <khalid@gonehiking.org>
  * This entry is needed because the device reports Sub=ff */
 UNUSUAL_DEV(  0x04b8, 0x0602, 0x0110, 0x0110,

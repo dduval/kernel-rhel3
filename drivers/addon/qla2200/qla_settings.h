@@ -1,21 +1,11 @@
-/******************************************************************************
- *                  QLOGIC LINUX SOFTWARE
+/*
+ * QLogic Fibre Channel HBA Driver
+ * Copyright (c)  2003-2005 QLogic Corporation
  *
- * QLogic ISP2x00 device driver for Linux 2.4.x
- * Copyright (C) 2003 QLogic Corporation
- * (www.qlogic.com)
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2, or (at your option) any
- * later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- ******************************************************************************/
+ * See LICENSE.qla2xxx for copyright and licensing details.
+ */
+
+
 /*
  * Compile time Options:
  *     0 - Disable and 1 - Enable
@@ -122,7 +112,7 @@
 #define	QLA_PT_CMD_TOV			(66)
 
 #define EH_ACTIVE 		 1    /* Error handler active */
-
+#define SH_HAS_HOST_LOCK		1 /* host lock is defined */
 #include "qla_version.h"
 
 

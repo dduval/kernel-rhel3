@@ -3,7 +3,7 @@
  * Fibre Channel Host Bus Adapters.                                *
  * Refer to the README file included with this package for         *
  * driver version and adapter support.                             *
- * Copyright (C) 2003-2005 Emulex.  All rights reserved.           *
+ * Copyright (C) 2003-2006 Emulex.  All rights reserved.           *
  * www.emulex.com                                                  *
  *                                                                 *
  * This program is free software; you can redistribute it and/or   *
@@ -19,12 +19,12 @@
  *******************************************************************/
 
 /*
- * $Id: ioctls/lpfcdfc_version.h 1.10 2005/05/03 18:20:06EDT sf_support Exp  $
+ * $Id: lpfcdfc_version.h 486 2006-03-28 18:41:49Z sf_support $
  */
 
-#define LPFCDFC_DRIVER_VERSION "1.2.1"
+#define LPFCDFC_DRIVER_VERSION "1.2.3"
 
 #define LPFCDFC_DRIVER_NAME "lpfcdfc"
 
 #define LPFCDFC_MODULE_DESC "Emulex LightPulse FC SCSI IOCTL " LPFCDFC_DRIVER_VERSION
-#define LPFCDFC_COPYRIGHT "Copyright(c) 2003-2005 Emulex.  All rights reserved."
+#define LPFCDFC_COPYRIGHT "Copyright(c) 2003-2006 Emulex.  All rights reserved."

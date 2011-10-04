@@ -191,9 +191,10 @@ restart_scan:
 		}
 		start = i;
 		goto found;
-	fail_block:;
+fail_block:
+		i = ALIGN(j, incr);
 	}
-	if (preferred) {
+	if (preferred > offset) {
 		preferred = offset;
 		goto restart_scan;
 	}

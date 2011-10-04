@@ -1,23 +1,41 @@
-/*****************************************************************************
-*                  QLOGIC LINUX SOFTWARE
-*
-* QLogic ISP2x00 device driver for Linux 2.4.x
-* Copyright (C) 2003 QLogic Corporation
-* (www.qlogic.com)
-*
-* This program is free software; you can redistribute it and/or modify it
-* under the terms of the GNU General Public License as published by the
-* Free Software Foundation; either version 2, or (at your option) any
-* later version.
-*
-* This program is distributed in the hope that it will be useful, but
-* WITHOUT ANY WARRANTY; without even the implied warranty of
-* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-* General Public License for more details.
-****************************************************************************/
+/*
+ * QLogic Fibre Channel HBA Driver
+ * Copyright (c)  2003-2005 QLogic Corporation
+ *
+ * See LICENSE.qla2xxx for copyright and licensing details.
+ */
 
 /*
  * File Name: exioctln.h
+
+   Rev 16.3  October 7, 2005	RL
+   Sync up with latest definitions used in 8.x driver.
+	Rev 24    June 22, 2005      RL
+		- Added reserve internal ioctl command code for future use.
+
+   Rev 16.2  June 22, 2005	RL
+   Sync up with latest definitions used in 8.x drivers, which is needed
+   for driver to tell which addressing mode the ioctl caller uses:
+	Rev 23    June 22, 2005      RL
+		  - Corrected assignment condition of
+		    EXT_ADDR_MODE_OS value.
+
+   Rev 16.1  March 2, 2005	RL
+   Sync up with latest definitions used in 8.x drivers, which include
+   the following from each revision:
+	   Rev 22    February 25, 2005	RL
+		     - Added reserve internal ioctl command codes.
+	   Rev 20    December 20, 2004	RL
+		     - Decreased MAX_HBA_OS value again.
+	   Rev 18    August 6, 2004	RL
+		     - Added 'Flags' field and bit defines for
+		       EXT_LN_DRIVER_DATA.
+		     - Added NFO command values.
+	   Rev 17    August 08, 2003	RL
+		     - Decreased MAX_HBA_OS value to both decrease wasted space
+		       in shared mem so it can be used to store other data, and
+		       to decrease unnecesary loops checking through all
+		       adapters.
 
    Rev 16    July 31, 2003	RL
 	     - Added definitions for Status field in discovered target
@@ -87,27 +105,53 @@
 
 #ifdef APILIB
 #include <stdint.h>
+#include <linux/types.h>
+#include <bits/wordsize.h>
 #endif
 
 
-#define	INT8	int8_t
-#define	INT16	int16_t
-#define	INT32	int32_t
-#define	UINT8	uint8_t
-#define	UINT16	uint16_t
-#define	UINT32	uint32_t
-#define	UINT64	void *
-#define BOOLEAN uint8_t
+#ifndef INT8
+#define	INT8		int8_t
+#endif
 
-typedef struct  track_instance {
-	int   handle;
-} track_instance_t;
+#ifndef INT16
+#define	INT16		int16_t
+#endif
+
+#ifndef INT32
+#define	INT32		int32_t
+#endif
+
+#ifndef UINT8
+#define	UINT8		uint8_t
+#endif
+
+#ifndef UINT16
+#define	UINT16		uint16_t
+#endif
+
+#ifndef UINT32
+#define	UINT32		uint32_t
+#endif
+
+#ifndef UINT64
+#define	UINT64		void *
+#endif
+
+#ifndef BOOLEAN
+#define BOOLEAN		uint8_t
+#endif
+
+#ifndef HANDLE
+#define HANDLE		int
+#endif
 
 
-#if BITS_PER_LONG <= 32
-#define EXT_ADDR_MODE_OS  EXT_DEF_ADDR_MODE_32
-#else
+
+#if __WORDSIZE == 64
 #define EXT_ADDR_MODE_OS  EXT_DEF_ADDR_MODE_64
+#else
+#define EXT_ADDR_MODE_OS  EXT_DEF_ADDR_MODE_32
 #endif
 
 
@@ -116,13 +160,20 @@ typedef struct  track_instance {
 #define _QLBUILD   /* for exioct.h to enable include of qinsdmgt.h */
 
 
+#define	EXT_DEF_MAX_HBA_OS		31	/* 0x1F */
+#define	EXT_DEF_MAX_HBAS		32	/* 0 - 0x1F */
 
-#define	EXT_DEF_MAX_HBA_OS		255	/* 0 - 0xFE */
 #define	EXT_DEF_MAX_BUS_OS		1
-#define	EXT_DEF_MAX_TARGET_OS		255	/* 0 - 0xFE */
-#define	EXT_DEF_MAX_LUN_OS		255	/* 0 - 0xFE */
+
+#define	EXT_DEF_MAX_TARGET_OS		255	/* 0xFE */
+#define	EXT_DEF_MAX_TARGETS		256	/* 0 - 0xFE */
+
+#define	EXT_DEF_MAX_LUN_OS		255	/* 0xFE */
+#define	EXT_DEF_MAX_LUNS		256	/* 0 - 0xFE */
 
 #define EXT_DEF_MAX_AEN_QUEUE_OS        64
+#define EXT_DEF_MAX_TGTEV_QUEUE_OS      256	/* max tgts in driver */
+#define	EXT_DEF_MAX_NFOEV_QUEUE_OS	256
 
 #define EXT_DEF_FC_HEADER_LEN		24
 #define EXT_DEF_ELS_RJT_LENGTH		0x08	/* 8  */
@@ -138,8 +189,10 @@ typedef struct  track_instance {
 						 */
 
 /* target status flags */
-#define	EXT_DEF_TGTSTAT_OFFLINE		0x01
+#define EXT_DEF_TGTSTAT_OFFLINE		0x01
 #define EXT_DEF_TGTSTAT_IN_CFG		0x02
+
+#define EXT_DEF_REGULAR_SIGNATURE	"QLOGIC"
 
 
 /*****************/
@@ -222,11 +275,15 @@ typedef struct  track_instance {
     QL_IOCTL_CMD(0x10)
 #define EXT_CC_RESERVED0J_OS						\
     QL_IOCTL_CMD(0x11)
-
-#define EXT_DEF_LN_INT_CC_END_IDX	0x11	/* supported int cmd end idx */
+#define EXT_CC_RESERVED0K_OS						\
+    QL_IOCTL_CMD(0x12)
+#define EXT_CC_RESERVED0L_OS						\
+    QL_IOCTL_CMD(0x13)
 
 #define EXT_CC_RESERVED0Z_OS						\
     QL_IOCTL_CMD(0x21)
+
+#define EXT_DEF_LN_INT_CC_END_IDX	0x21	/* supported int cmd end idx */
 
 /********************************************************/
 /* These are additional regular/external command codes. */
@@ -235,6 +292,18 @@ typedef struct  track_instance {
 #define EXT_CC_SEND_ELS_PASSTHRU_OS					\
     QL_IOCTL_CMD(0x30)
 #define EXT_DEF_LN_ADD_CC_END_IDX	0x30	/* additional cmd end index */
+
+
+/********************************************************
+ * NextGen Failover (NFO) ioctl command codes range from
+ * 0x37 to 0x4f.  See qlnfoln.h
+ ********************************************************/
+
+
+/********************************************************
+ * NextGen Failover (NFO) ioctl command codes range from
+ * 0x37 to 0x4f.  See qlnfoln.h
+ ********************************************************/
 
 
 /********************************************************
@@ -274,11 +343,13 @@ typedef struct _EXT_LN_DRV_VERSION {
 
 typedef struct _EXT_LN_DRIVER_DATA {
 	EXT_LN_DRV_VERSION  	DrvVer;		/* 8 */
-	UINT32    Reserved[14];			/* 56 */
+	UINT32	Flags;				/* 4 */
+	UINT32	Reserved[13];			/* 52 */
 } EXT_LN_DRIVER_DATA, *PEXT_LN_DRIVER_DATA;	/* 64 */
 
-
-
+/* Bit defines for the Flags field */
+#define EXT_DEF_NGFO_CAPABLE		0x0001	/* bit 0: failover capable */
+#define EXT_DEF_NGFO_ENABLED		0x0002	/* bit 1: failover enabled */
 
 
 

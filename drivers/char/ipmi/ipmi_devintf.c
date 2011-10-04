@@ -50,7 +50,7 @@
 #include <asm/semaphore.h>
 #include "ipmi_kcompat.h"
 
-#define IPMI_DEVINTF_VERSION "35.11"
+#define IPMI_DEVINTF_VERSION "35.13"
 
 struct ipmi_file_private
 {

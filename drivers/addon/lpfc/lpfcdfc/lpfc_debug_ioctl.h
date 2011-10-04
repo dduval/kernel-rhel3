@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: ioctls/lpfc_debug_ioctl.h 1.2 2005/05/03 11:20:49EDT sf_support Exp  $
+ * $Id: lpfc_debug_ioctl.h 328 2005-05-03 15:20:43Z sf_support $
  */
 
 #ifndef H_LPFC_DFC_IOCTL

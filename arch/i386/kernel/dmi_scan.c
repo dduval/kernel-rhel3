@@ -564,7 +564,15 @@ static __init int disable_console_keyboard(struct dmi_blacklist *d)
 	return 0;
 }
 
-
+/* Sun X4100 and X4200 servers need this to prevent PCI-X devices from being scanned twice */
+/* PCI-X cards will not work in this machine otherwise */
+static __init int pci_no_peer_tricks(struct dmi_blacklist *d)
+{
+ 	extern int pcibios_no_peer_tricks;
+	printk(KERN_INFO "Sun X4100/X4200 detected.. disabling pcibios_peer_tricks.\n");
+ 	pcibios_no_peer_tricks = 1;
+ 	return 0;
+}
 /*
  *	Process the DMI blacklists
  */
@@ -645,6 +653,16 @@ static __initdata struct dmi_blacklist dmi_blacklist[]={
 	{ set_bios_reboot, "Dell PowerEdge 2400", {  /* Handle problems with rebooting on Dell 2400's */
 			MATCH(DMI_SYS_VENDOR, "Dell Computer Corporation"),
 			MATCH(DMI_PRODUCT_NAME, "PowerEdge 2400"),
+			NO_MATCH, NO_MATCH
+			} },
+	{ set_bios_reboot, "Dell PowerEdge 6450", {  /* Handle problems with rebooting on Dell 6450's */
+			MATCH(DMI_SYS_VENDOR, "Dell Computer Corporation"),
+			MATCH(DMI_PRODUCT_NAME, "PowerEdge 6450"),
+			NO_MATCH, NO_MATCH
+			} },
+	{ set_bios_reboot, "Dell PowerEdge 6400", {  /* Handle problems with rebooting on Dell 6400's */
+			MATCH(DMI_SYS_VENDOR, "Dell Computer Corporation"),
+			MATCH(DMI_PRODUCT_NAME, "PowerEdge 6400"),
 			NO_MATCH, NO_MATCH
 			} },
 	{ set_apm_ints, "Compaq 12XL125", {	/* Allow interrupts during suspend on Compaq Laptops*/
@@ -944,7 +962,19 @@ static __initdata struct dmi_blacklist dmi_blacklist[]={
 			MATCH(DMI_BOARD_NAME, "Server Blade"),
 			NO_MATCH, NO_MATCH
 			} },
-
+	/* SUN */
+	/* x4100 */
+	{ pci_no_peer_tricks, "Sun X4100", {
+			MATCH(DMI_SYS_VENDOR,"Sun Microsystems"),
+			MATCH(DMI_PRODUCT_NAME, "Sun Fire X4100 Server"),
+			NO_MATCH, NO_MATCH
+			} },
+	/* x4200 */
+	{ pci_no_peer_tricks, "Sun X4200", {
+			MATCH(DMI_SYS_VENDOR,"Sun Microsystems"),
+			MATCH(DMI_PRODUCT_NAME, "Sun Fire X4200 Server"),
+			NO_MATCH, NO_MATCH
+			} },
 	{ NULL, }
 };
 	

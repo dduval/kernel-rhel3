@@ -225,7 +225,11 @@ int request_module(const char * module_name)
 
 	pid = kernel_thread(exec_modprobe, (void*) module_name, 0);
 	if (pid < 0) {
-		printk(KERN_ERR "request_module[%s]: fork failed, errno %d\n", module_name, -pid);
+		if (pid != -EPERM) {
+			printk(KERN_ERR
+				"request_module[%s]: fork failed, errno %d\n",
+				module_name, -pid);
+		}
 		atomic_dec(&kmod_concurrent);
 		return pid;
 	}

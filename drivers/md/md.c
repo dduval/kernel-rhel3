@@ -35,6 +35,7 @@
 #include <linux/raid/xor.h>
 #include <linux/devfs_fs_kernel.h>
 #include <linux/poll.h>
+#include <linux/rwsem.h>
 
 #include <linux/init.h>
 
@@ -131,15 +132,68 @@ static struct gendisk md_gendisk=
 
 /*
  * Enables to iterate over all existing md arrays
+ *
+ * Locking rules:
+ * - access to all_mddevs requires all_mddevs_sem.
+ * - an mddev can be locked while all_mddevs_sem is held.
+ * - When removing an mddev, we
+ *     lock the mddev
+ *     check that ->active is 1 (us).
+ *     set "dying"
+ *     unlock the mddev
+ *     claim all_mddevs_sem
+ *     actually remove device
+ *     release all_mddevs_sem
+ * - to get a reference to an mddev, we
+ *     claim all_mddevs_sem
+ *     find the mddev in the list
+ *     check that it isn't "dying"
+ *     increase ->active or take a lock
  */
 static MD_LIST_HEAD(all_mddevs);
+static DECLARE_RWSEM(all_mddevs_sem);
 
 /*
- * The mapping between kdev and mddev is not necessary a simple
+ * The mapping between kdev and mddev is not necessarily a simple
  * one! Eg. HSM uses several sub-devices to implement Logical
  * Volumes. All these sub-devices map to the same mddev.
  */
 dev_mapping_t mddev_map[MAX_MD_DEVS];
+
+
+static inline mddev_t * kdev_to_mddev (kdev_t dev)
+{
+	mddev_t *mddev;
+	if (MAJOR(dev) != MD_MAJOR)
+		BUG();
+	down_read(&all_mddevs_sem);
+	mddev = mddev_map[MINOR(dev)].mddev;
+	if (mddev &&  !mddev->dying)
+		atomic_inc(&mddev->active);
+	else
+		mddev = NULL;
+	up_read(&all_mddevs_sem);
+	return mddev;
+}
+
+static inline mddev_t * kdev_to_mddev_lock_interruptible (kdev_t dev, int *err)
+{
+	mddev_t *mddev;
+	if (MAJOR(dev) != MD_MAJOR)
+		BUG();
+	down_read(&all_mddevs_sem);
+	mddev = mddev_map[MINOR(dev)].mddev;
+	*err = 0;
+	if (mddev) {
+		if (mddev->dying) {
+			*err = -EBUSY;
+			mddev = NULL;
+		} else
+			*err = lock_mddev_interruptible(mddev);
+	}
+	up_read(&all_mddevs_sem);
+	return mddev;
+}
 
 void add_mddev_mapping(mddev_t * mddev, kdev_t dev, void *data)
 {
@@ -176,13 +230,22 @@ void del_mddev_mapping(mddev_t * mddev, kdev_t dev)
 static int md_make_request(request_queue_t *q, int rw, struct buffer_head * bh)
 {
 	mddev_t *mddev = kdev_to_mddev(bh->b_rdev);
+	int rv;
 
 	if (mddev && mddev->pers)
-		return mddev->pers->make_request(mddev, rw, bh);
+		rv =  mddev->pers->make_request(mddev, rw, bh);
 	else {
 		buffer_IO_error(bh);
-		return 0;
+		rv = 0;
 	}
+	if (mddev)
+		/* should really drop count when request completes... */
+		/* Any time we are resyncing and not mounted, this will
+		 * be 0, so don't BUG(); on 0 
+		if (atomic_dec_and_test(&mddev->active))
+			BUG(); */
+		atomic_dec(&mddev->active);
+	return rv;
 }
 
 static mddev_t * alloc_mddev(kdev_t dev)
@@ -200,20 +263,22 @@ static mddev_t * alloc_mddev(kdev_t dev)
 	memset(mddev, 0, sizeof(*mddev));
 
 	mddev->__minor = MINOR(dev);
-	init_MUTEX(&mddev->reconfig_sem);
+	init_MUTEX_LOCKED(&mddev->reconfig_sem);
 	init_MUTEX(&mddev->recovery_sem);
 	init_MUTEX(&mddev->resync_sem);
 	MD_INIT_LIST_HEAD(&mddev->disks);
 	MD_INIT_LIST_HEAD(&mddev->all_mddevs);
-	atomic_set(&mddev->active, 0);
+	atomic_set(&mddev->active, 1);
 
 	/*
 	 * The 'base' mddev is the one with data NULL.
 	 * personalities can create additional mddevs
 	 * if necessary.
 	 */
+	down_write(&all_mddevs_sem);
 	add_mddev_mapping(mddev, dev, 0);
 	md_list_add(&mddev->all_mddevs, &all_mddevs);
+	up_write(&all_mddevs_sem);
 
 	MOD_INC_USE_COUNT;
 
@@ -793,18 +858,10 @@ static void free_mddev(mddev_t *mddev)
 	md_size[mdidx(mddev)] = 0;
 	md_hd_struct[mdidx(mddev)].nr_sects = 0;
 
-	/*
-	 * Make sure nobody else is using this mddev
-	 * (careful, we rely on the global kernel lock here)
-	 */
-	while (sem_getcount(&mddev->resync_sem) != 1)
-		schedule();
-	while (sem_getcount(&mddev->recovery_sem) != 1)
-		schedule();
-
+	down_write(&all_mddevs_sem);
 	del_mddev_mapping(mddev, MKDEV(MD_MAJOR, mdidx(mddev)));
 	md_list_del(&mddev->all_mddevs);
-	MD_INIT_LIST_HEAD(&mddev->all_mddevs);
+	up_write(&all_mddevs_sem);
 	kfree(mddev);
 	MOD_DEC_USE_COUNT;
 }
@@ -875,7 +932,9 @@ void md_print_devices(void)
 	printk("md:	**********************************\n");
 	printk("md:	* <COMPLETE RAID STATE PRINTOUT> *\n");
 	printk("md:	**********************************\n");
-	ITERATE_MDDEV(mddev,tmp) {
+
+	down_read(&all_mddevs_sem);
+	ITERATE_MDDEV/*_LOCK*/(mddev,tmp) {
 		printk("md%d: ", mdidx(mddev));
 
 		ITERATE_RDEV(mddev,rdev,tmp2)
@@ -890,6 +949,7 @@ void md_print_devices(void)
 		ITERATE_RDEV(mddev,rdev,tmp2)
 			print_rdev(rdev);
 	}
+	up_read(&all_mddevs_sem);
 	printk("md:	**********************************\n");
 	printk("\n");
 }
@@ -967,10 +1027,6 @@ static int write_disk_sb(mdk_rdev_t * rdev)
 	unsigned long sb_offset, size;
 
 	if (!rdev->sb) {
-		MD_BUG();
-		return 1;
-	}
-	if (rdev->faulty) {
 		MD_BUG();
 		return 1;
 	}
@@ -1055,13 +1111,18 @@ static int sync_sbs(mddev_t * mddev)
 
 int md_update_sb(mddev_t * mddev)
 {
-	int err, count = 100;
+	int err, count = 100, unlock = 0;
 	struct md_list_head *tmp;
 	mdk_rdev_t *rdev;
 
+	if (!down_trylock(&mddev->reconfig_sem)) {
+		printk("hm, md_update_sb() called while unlocked from %p.\n", __builtin_return_address(0));
+		unlock = 1;
+	}
+		
 	if (!mddev->sb_dirty) {
 		printk("hm, md_update_sb() called without ->sb_dirty == 1, from %p.\n", __builtin_return_address(0));
-		return 0;
+		goto out;
 	}
 	mddev->sb_dirty = 0;
 repeat:
@@ -1085,7 +1146,7 @@ repeat:
 	 * nonpersistent superblocks
 	 */
 	if (mddev->sb->not_persistent)
-		return 0;
+		goto out;
 
 	dprintk(KERN_INFO "md: updating md%d RAID superblock on device\n",
 					mdidx(mddev));
@@ -1117,6 +1178,9 @@ repeat:
 		}
 		printk(KERN_ERR "md: excessive errors occurred during superblock update, exiting\n");
 	}
+out:
+	if (unlock)
+		unlock_mddev(mddev);
 	return 0;
 }
 
@@ -1816,7 +1880,7 @@ static int do_md_run(mddev_t * mddev)
 	 */
 	md_hd_struct[mdidx(mddev)].start_sect = 0;
 	register_disk(&md_gendisk, MKDEV(MAJOR_NR,mdidx(mddev)),
-			1, &md_fops, md_size[mdidx(mddev)]<<1);
+			1, &md_fops, (unsigned long)md_size[mdidx(mddev)] << 1);
 
 	read_ahead[MD_MAJOR] = 1024;
 	return (0);
@@ -1890,6 +1954,9 @@ static int do_md_stop(mddev_t * mddev, int ro)
 		if (mddev->recovery_running)
 			md_interrupt_thread(md_recovery_thread);
 
+		mddev->dying = 1; /* make sure nobody tries to use this */
+		unlock_mddev(mddev);
+
 		/*
 		 * This synchronizes with signal delivery to the
 		 * resync or reconstruction thread. It also nicely
@@ -1911,6 +1978,7 @@ static int do_md_stop(mddev_t * mddev, int ro)
 			if (mddev->pers->stop(mddev)) {
 				if (mddev->ro)
 					set_device_ro(dev, 1);
+				mddev->dying = 0;
 				OUT(-EBUSY);
 			}
 			if (mddev->ro)
@@ -1926,10 +1994,15 @@ static int do_md_stop(mddev_t * mddev, int ro)
 				mddev->sb->state |= 1 << MD_SB_CLEAN;
 			}
 			mddev->sb_dirty = 1;
+			lock_mddev(mddev);
 			md_update_sb(mddev);
+			unlock_mddev(mddev);
 		}
-		if (ro)
+		if (ro) {
 			set_device_ro(dev, 1);
+			lock_mddev(mddev);
+			mddev->dying = 0;
+		}
 	}
 
 	/*
@@ -1961,7 +2034,7 @@ int detect_old_array(mdp_super_t *sb)
 }
 
 
-static void autorun_array(mddev_t *mddev)
+static int autorun_array(mddev_t *mddev)
 {
 	mdk_rdev_t *rdev;
 	struct md_list_head *tmp;
@@ -1969,7 +2042,8 @@ static void autorun_array(mddev_t *mddev)
 
 	if (mddev->disks.prev == &mddev->disks) {
 		MD_BUG();
-		return;
+		unlock_mddev(mddev);
+		return 0;
 	}
 
 	printk(KERN_INFO "md: running: ");
@@ -1987,7 +2061,10 @@ static void autorun_array(mddev_t *mddev)
 		 */
 		mddev->sb_dirty = 0;
 		do_md_stop (mddev, 0);
+		return err;
 	}
+	unlock_mddev(mddev);
+	return 0;
 }
 
 /*
@@ -2043,6 +2120,7 @@ static void autorun_devices(kdev_t countdev)
 			       mdidx(mddev), partition_name(rdev0->dev));
 			ITERATE_RDEV_GENERIC(candidates,pending,rdev,tmp)
 				export_rdev(rdev);
+			atomic_dec(&mddev->active);
 			continue;
 		}
 		mddev = alloc_mddev(md_kdev);
@@ -2050,15 +2128,15 @@ static void autorun_devices(kdev_t countdev)
 			printk(KERN_ERR "md: cannot allocate memory for md drive.\n");
 			break;
 		}
-		if (md_kdev == countdev)
-			atomic_inc(&mddev->active);
 		printk(KERN_INFO "md: created md%d\n", mdidx(mddev));
 		ITERATE_RDEV_GENERIC(candidates,pending,rdev,tmp) {
 			bind_rdev_to_array(rdev, mddev);
 			md_list_del(&rdev->pending);
 			MD_INIT_LIST_HEAD(&rdev->pending);
 		}
-		autorun_array(mddev);
+		if (autorun_array(mddev)== 0
+		    && md_kdev != countdev)
+			atomic_dec(&mddev->active);
 	}
 	printk(KERN_INFO "md: ... autorun DONE.\n");
 }
@@ -2704,7 +2782,9 @@ static int md_ioctl(struct inode *inode, struct file *file,
 	 * Commands creating/starting a new array:
 	 */
 
-	mddev = kdev_to_mddev(dev);
+	mddev = kdev_to_mddev_lock_interruptible(dev, &err);
+	if (mddev == NULL && err)
+		goto abort;
 
 	switch (cmd)
 	{
@@ -2714,7 +2794,7 @@ static int md_ioctl(struct inode *inode, struct file *file,
 				printk(KERN_WARNING "md: array md%d already exists!\n",
 								mdidx(mddev));
 				err = -EEXIST;
-				goto abort;
+				goto abort_unlock;
 			}
 		default:;
 	}
@@ -2724,17 +2804,6 @@ static int md_ioctl(struct inode *inode, struct file *file,
 			mddev = alloc_mddev(dev);
 			if (!mddev) {
 				err = -ENOMEM;
-				goto abort;
-			}
-			atomic_inc(&mddev->active);
-
-			/*
-			 * alloc_mddev() should possibly self-lock.
-			 */
-			err = lock_mddev(mddev);
-			if (err) {
-				printk(KERN_WARNING "md: ioctl, reason %d, cmd %d\n",
-				       err, cmd);
 				goto abort;
 			}
 
@@ -2759,14 +2828,11 @@ static int md_ioctl(struct inode *inode, struct file *file,
 			goto done_unlock;
 
 		case START_ARRAY:
-			/*
-			 * possibly make it lock the array ...
-			 */
 			err = autostart_array((kdev_t)arg, dev);
 			if (err) {
 				printk(KERN_WARNING "md: autostart %s failed!\n",
 					partition_name((kdev_t)arg));
-				goto abort;
+				goto abort_unlock;
 			}
 			goto done;
 
@@ -2781,13 +2847,11 @@ static int md_ioctl(struct inode *inode, struct file *file,
 		err = -ENODEV;
 		goto abort;
 	}
-	err = lock_mddev(mddev);
-	if (err) {
-		printk(KERN_INFO "md: ioctl lock interrupted, reason %d, cmd %d\n",err, cmd);
-		goto abort;
-	}
-	/* if we don't have a superblock yet, only ADD_NEW_DISK or STOP_ARRAY is allowed */
-	if (!mddev->sb && cmd != ADD_NEW_DISK && cmd != STOP_ARRAY && cmd != RUN_ARRAY) {
+
+	/* if we don't have a superblock yet, only ADD_NEW_DISK,
+	 * STOP_ARRAY, and RUN_ARRAY are allowed */
+	if (!mddev->sb && cmd != ADD_NEW_DISK && cmd != STOP_ARRAY
+	    && cmd != RUN_ARRAY) {
 		err = -ENODEV;
 		goto abort_unlock;
 	}
@@ -2954,17 +3018,17 @@ static int md_open(struct inode *inode, struct file *file)
 	/*
 	 * Always succeed, but increment the usage count
 	 */
-	mddev_t *mddev = kdev_to_mddev(inode->i_rdev);
-	if (mddev)
-		atomic_inc(&mddev->active);
+	kdev_to_mddev(inode->i_rdev);
 	return (0);
 }
 
 static int md_release(struct inode *inode, struct file * file)
 {
 	mddev_t *mddev = kdev_to_mddev(inode->i_rdev);
-	if (mddev)
+	if (mddev) {
 		atomic_dec(&mddev->active);
+		atomic_dec(&mddev->active);
+	}
 	return 0;
 }
 
@@ -3228,6 +3292,8 @@ static void *md_seq_start(struct seq_file *seq, loff_t *pos)
 	loff_t l = *pos;
 	mddev_t *mddev;
 
+	down_read(&all_mddevs_sem);
+
 	if (l >= 0x10000)
 		return NULL;
 	if (!l--)
@@ -3248,7 +3314,7 @@ static void *md_seq_next(struct seq_file *seq, void *v, loff_t *pos)
 {
 	struct list_head *tmp;
 	mddev_t *next_mddev, *mddev = v;
-	
+
 	++*pos;
 	if (v == (void*)2)
 		return NULL;
@@ -3270,7 +3336,7 @@ static void *md_seq_next(struct seq_file *seq, void *v, loff_t *pos)
 
 static void md_seq_stop(struct seq_file *seq, void *v)
 {
-
+	up_read(&all_mddevs_sem);
 }
 
 static int md_seq_show(struct seq_file *seq, void *v)
@@ -3307,12 +3373,7 @@ static int md_seq_show(struct seq_file *seq, void *v)
 	}
 
 	/* Lock device before reading its information */
-	err = lock_mddev(mddev);
-	if (err) {
-		seq_printf(seq, "md%d : interrupted while waiting for "
-			   "read lock\n", mdidx(mddev));
-		return -EINTR;
-	}
+	lock_mddev(mddev);
 
 	/* Lock acquired, proceed */
 	seq_printf(seq, "md%d : %sactive", mdidx(mddev),
@@ -3341,6 +3402,8 @@ static int md_seq_show(struct seq_file *seq, void *v)
 		else
 			seq_printf(seq, "\n      %d blocks", size);
 	}
+	if (mddev->dying)
+		return 0;
 
 	if (mddev->pers) {
 
@@ -3569,6 +3632,7 @@ int md_do_sync(mddev_t *mddev, mdp_disk_t *spare)
 
 recheck:
 	serialize = 0;
+	down_read(&all_mddevs_sem);
 	ITERATE_MDDEV(mddev2,tmp) {
 		if (mddev2 == mddev)
 			continue;
@@ -3580,6 +3644,7 @@ recheck:
 			break;
 		}
 	}
+	up_read(&all_mddevs_sem);
 	if (serialize) {
 		interruptible_sleep_on(&resync_wait);
 		if (md_signal_pending(current)) {
@@ -3718,38 +3783,40 @@ void md_do_recovery(void *data)
 	struct md_list_head *tmp;
 
 	dprintk(KERN_INFO "md: recovery thread got woken up ...\n");
+
 restart:
+	down_read(&all_mddevs_sem);
 	ITERATE_MDDEV(mddev,tmp) {
 		sb = mddev->sb;
 		if (!sb)
 			continue;
-		if (mddev->recovery_running)
-			continue;
 		if (sb->active_disks == sb->raid_disks)
 			continue;
-		if (mddev->sb_dirty)
+		if (mddev->recovery_running)
+			continue;
+		if (mddev->sb_dirty) {
+			lock_mddev(mddev);
 			md_update_sb(mddev);
-		if (!sb->spare_disks) {
+			unlock_mddev(mddev);
+		}
+		if (!sb->spare_disks || ((spare = get_spare(mddev)) == NULL)) {
 			printk(KERN_ERR "md%d: no spare disk to reconstruct array! "
 			       "-- continuing in degraded mode\n", mdidx(mddev));
 			continue;
 		}
-		/*
-		 * now here we get the spare and resync it.
-		 */
-		spare = get_spare(mddev);
-		if (!spare)
-			continue;
 		printk(KERN_INFO "md%d: resyncing spare disk %s to replace failed disk\n",
 		       mdidx(mddev), partition_name(MKDEV(spare->major,spare->minor)));
-		if (!mddev->pers->diskop)
+		if (!mddev->pers->diskop || 
+		    mddev->pers->diskop(mddev, &spare, DISKOP_SPARE_WRITE)) {
 			continue;
-		if (mddev->pers->diskop(mddev, &spare, DISKOP_SPARE_WRITE))
-			continue;
+		}
+		up_read(&all_mddevs_sem);
 		md_new_event();
 		down(&mddev->recovery_sem);
 		mddev->recovery_running = 1;
 		err = md_do_sync(mddev, spare);
+		lock_mddev(mddev);
+
 		if (err == -EIO) {
 			printk(KERN_INFO "md%d: spare disk %s failed, skipping to next spare.\n",
 			       mdidx(mddev), partition_name(MKDEV(spare->major,spare->minor)));
@@ -3773,30 +3840,30 @@ restart:
 			 */
 			mddev->pers->diskop(mddev, &spare,
 							 DISKOP_SPARE_INACTIVE);
-			up(&mddev->recovery_sem);
 			mddev->recovery_running = 0;
-			md_new_event();
-			continue;
+			up(&mddev->recovery_sem);
 		} else {
+			if (!disk_faulty(spare)) {
+				/*
+				 * the SPARE_ACTIVE diskop possibly changes the
+				 * pointer too
+				 */
+				mddev->pers->diskop(mddev, &spare, DISKOP_SPARE_ACTIVE);
+				mark_disk_sync(spare);
+				mark_disk_active(spare);
+				sb->active_disks++;
+				sb->spare_disks--;
+			}
+			mddev->sb_dirty = 1;
+			md_update_sb(mddev);
 			mddev->recovery_running = 0;
 			up(&mddev->recovery_sem);
 		}
-		if (!disk_faulty(spare)) {
-			/*
-			 * the SPARE_ACTIVE diskop possibly changes the
-			 * pointer too
-			 */
-			mddev->pers->diskop(mddev, &spare, DISKOP_SPARE_ACTIVE);
-			mark_disk_sync(spare);
-			mark_disk_active(spare);
-			sb->active_disks++;
-			sb->spare_disks--;
-		}
-		mddev->sb_dirty = 1;
-		md_update_sb(mddev);
 		md_new_event();
+		unlock_mddev(mddev);
 		goto restart;
 	}
+	up_read(&all_mddevs_sem);
 	dprintk(KERN_INFO "md: recovery thread finished ...\n");
 
 }
@@ -3812,8 +3879,13 @@ int md_notify_reboot(struct notifier_block *this,
 
 		printk(KERN_INFO "md: stopping all md devices.\n");
 
-		ITERATE_MDDEV(mddev,tmp)
-			do_md_stop (mddev, 1);
+		ITERATE_MDDEV(mddev,tmp) {
+			lock_mddev(mddev);
+			if (!mddev->dying)
+				do_md_stop (mddev, 1);
+			unlock_mddev(mddev);
+		}
+
 		/*
 		 * certain more exotic SCSI devices are known to be
 		 * volatile wrt too early system reboots. While the
@@ -4157,6 +4229,9 @@ void md__init md_setup_drive(void)
 			mddev->sb_dirty = 0;
 			do_md_stop(mddev, 0);
 			printk(KERN_WARNING "md: starting md%d failed\n", minor);
+		} else {
+			unlock_mddev(mddev);
+			atomic_dec(&mddev->active);
 		}
 	}
 }

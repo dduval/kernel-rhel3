@@ -787,9 +787,15 @@ static void kcs_irq_handler(int irq, void *data, struct pt_regs *regs)
 	spin_unlock_irqrestore(&(kcs_info->kcs_lock), flags);
 }
 
+static int smi_start_processing(void *send_info, ipmi_smi_t intf)
+{
+	return 0;
+}
+
 static struct ipmi_smi_handlers handlers =
 {
 	sender:		       sender,
+	start_processing:      smi_start_processing,
 	request_events:        request_events,
 	new_user:	       new_user,
 	user_left:	       user_left,
@@ -1080,8 +1086,7 @@ static int init_one_kcs(int kcs_port,
 	rv = ipmi_register_smi(&handlers,
 			       new_kcs,
 			       ipmi_version_major,
-			       ipmi_version_minor,
-			       &(new_kcs->intf));
+			       ipmi_version_minor);
 	if (rv) {
 		free_irq(irq, new_kcs);
 		printk(KERN_ERR 

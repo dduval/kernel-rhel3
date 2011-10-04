@@ -67,7 +67,6 @@ static unsigned int num_processors;
 
 /* Bitmask of physically existing CPUs */
 unsigned long phys_cpu_present_map;
-unsigned long logical_cpu_present_map;
 
 #ifdef CONFIG_X86_CLUSTERED_APIC
 unsigned char esr_disable = 0;
@@ -254,7 +253,6 @@ void __init MP_processor_info (struct mpc_config_processor *m)
 	if (APIC_XAPIC_SUPPORT(ver) && !xapic_support_disabled)
 		xapic_support = 1;
 
-	logical_cpu_present_map |= 1 << (num_processors-1);
  	phys_cpu_present_map |= apicid_to_phys_cpu_present(m->mpc_apicid);
  
 	/*
@@ -597,10 +595,21 @@ static int __init smp_read_mpc(struct mp_config_table *mpc)
 		++mpc_record;
 	}
 
-	if (clustered_apic_mode){
-		phys_cpu_present_map = logical_cpu_present_map;
-	}
+	if (clustered_apic_mode) {
+		int i;
+		unsigned long new_map = 0;
 
+		/* Since we're in clustered APIC mode, rebuild
+		 * phys_cpu_present_map from the actual APIC IDs
+		 * already scanned.
+		 */
+
+		for (i = 0; i < NR_CPUS; i++)
+			if (raw_phys_apicid[i] != BAD_APICID)
+				new_map |= apicid_to_phys_cpu_present(raw_phys_apicid[i]);
+
+		phys_cpu_present_map = new_map;
+	}
 
 	if (!num_processors)
 		printk(KERN_ERR "SMP mptable: no processors registered!\n");
@@ -847,11 +856,24 @@ void __init get_smp_config (void)
 	if ((clustered_apic_mode == CLUSTERED_APIC_NONE) &&
 	    (xapic_support) &&
 	    (num_processors > FLAT_APIC_CPU_MAX)) {
+		int i;
+		unsigned long new_map = 0;
+
 		clustered_apic_mode = CLUSTERED_APIC_XAPIC;
 		apic_broadcast_id = APIC_BROADCAST_ID_XAPIC;
 		int_dest_addr_mode = APIC_DEST_PHYSICAL;
 		int_delivery_mode = dest_Fixed;
 		esr_disable = 1;
+
+		/* Since we switched from flat to clustered mode,
+		 * we need to reinterepret the APIC IDs we already
+		 * scanned.
+		 */
+		for (i = 0; i < NR_CPUS; i++)
+			if (raw_phys_apicid[i] != BAD_APICID)
+				new_map |= apicid_to_phys_cpu_present(raw_phys_apicid[i]);
+
+		phys_cpu_present_map = new_map;
 	}
 #endif
 

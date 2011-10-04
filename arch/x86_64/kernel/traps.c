@@ -278,6 +278,14 @@ void show_stack(unsigned long * rsp)
 	show_trace((unsigned long *)rsp);
 }
 
+/*
+ * The architecture-independent backtrace generator
+ */
+void dump_stack(void)
+{
+	show_stack((unsigned long *)0);
+}
+
 void show_registers(struct pt_regs *regs)
 {
 	int i;

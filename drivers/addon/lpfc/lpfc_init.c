@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_init.c 1.10 2005/05/03 11:21:45EDT sf_support Exp  $
+ * $Id: lpfc_init.c 485 2006-03-28 16:18:51Z sf_support $
  */
 
 #include <linux/version.h>
@@ -1289,6 +1289,17 @@ lpfc_offline(lpfcHBA_t * phba)
 		}
 		LPFC_DRVR_LOCK(phba, iflag);
 
+		/* Bring Adapter offline */
+		lpfc_printf_log(phba->brd_no, &lpfc_msgBlk0460,
+			       lpfc_mes0460,
+			       lpfc_msgBlk0460.msgPreambleStr);
+
+		lpfc_sli_hba_down(phba);	/* Bring down the SLI Layer */
+
+		phba->fc_flag |= FC_OFFLINE_MODE;
+ 
+		lpfc_cleanup(phba, 1);	/* Save bindings */
+
 		while(!list_empty(&phba->delay_list)) {
 			lpfc_cmd = list_entry(phba->delay_list.next, LPFC_SCSI_BUF_t, listentry);
 			list_del(&lpfc_cmd->listentry);
@@ -1302,17 +1313,6 @@ lpfc_offline(lpfcHBA_t * phba)
 			kfree((void *)cur_buf);
 		}
 
-		/* Bring Adapter offline */
-		lpfc_printf_log(phba->brd_no, &lpfc_msgBlk0460,
-			       lpfc_mes0460,
-			       lpfc_msgBlk0460.msgPreambleStr);
-
-		lpfc_sli_hba_down(phba);	/* Bring down the SLI Layer */
-
-		phba->fc_flag |= FC_OFFLINE_MODE;
- 
-		lpfc_cleanup(phba, 1);	/* Save bindings */
- 
 		phba->reset_pending = 0;
 	}
 	return (0);

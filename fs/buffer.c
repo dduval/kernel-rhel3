@@ -1500,9 +1500,9 @@ int try_to_reclaim_buffers(int priority, unsigned int gfp_mask)
 	 * don't bother reclaiming any if the buffer heads take up less
 	 * than 10% of pageable low memory.
 	 */
-	if (nr_used_buffer_heads * sizeof(struct buffer_head) * 10 <
-					freeable_lowmem() * PAGE_SIZE)
-			return 0;
+	if (nr_used_buffer_heads <
+	    (freeable_lowmem() * PAGE_SIZE) / (sizeof(struct buffer_head) * 10))
+		return 0;
 
 	spin_lock(&unused_list_lock);
 	while (todo-- && !list_empty(&buffer_lru)) {

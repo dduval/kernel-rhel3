@@ -50,12 +50,12 @@
 
 
 #define CCISS_DRIVER_VERSION(maj,min,submin) ((maj<<16)|(min<<8)|(submin))
-#define DRIVER_NAME "HP CISS Driver (v 2.4.58.RH1)"
-#define DRIVER_VERSION CCISS_DRIVER_VERSION(2,4,58)
+#define DRIVER_NAME "HP CISS Driver (v 2.4.60.RH1)"
+#define DRIVER_VERSION CCISS_DRIVER_VERSION(2,4,60)
 
 /* Embedded module documentation macros - see modules.h */
 MODULE_AUTHOR("Hewlett-Packard Company");
-MODULE_DESCRIPTION("Driver for HP SA5xxx SA6xxx Controllers version 2.4.58.RH1");
+MODULE_DESCRIPTION("Driver for HP SA5xxx SA6xxx Controllers version 2.4.60.RH1");
 MODULE_SUPPORTED_DEVICE("HP SA5i SA5i+ SA532 SA5300 SA5312 SA641 SA642 SA6400"
 		" SA6i P600 P800 P400 E200 E200i"); 
 MODULE_LICENSE("GPL");
@@ -1133,7 +1133,7 @@ static int cciss_ioctl(struct inode *inode, struct file *filep,
 				   /* Copy the data into the buffer created */
 				   if (copy_from_user(buff[sg_used], data_ptr, 
 						buff_size[sg_used])) {
-					status = -ENOMEM;
+					status = -EFAULT;
 					goto cleanup1;			
 				   }
 				} else {

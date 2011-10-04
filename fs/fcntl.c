@@ -430,6 +430,20 @@ static void send_sigio_to_task(struct task_struct *p,
 			else
 				si.si_band = band_table[reason - POLL_IN];
 			si.si_fd    = fd;
+			/*
+			 * Due to a mismatch of the type of "si_band" between
+			 * user-space and the x86_64, ppc64, and s390x kernels,
+			 * the fd is also copied into the first 4 bytes of pad
+			 * beyond where the kernel thinks "si_fd" should be.
+			 * This allows applications to work whether they've
+			 * gotten their siginfo_t declaration from the default
+			 * /usr/include/bits/siginfo.h or from the matching
+			 * /usr/include/asm/siginfo.h (mirror of the kernel's
+			 * version).  The following two lines do not generate
+			 * any code on i386, ia64, or s390 arches.
+			 */
+			if (sizeof(si.si_band) < sizeof(long))
+				*(&si.si_fd + 1) = fd;
 			if (!send_sig_info(fown->signum, &si, p))
 				break;
 		/* fall-through: fall back on the old plain SIGIO signal */

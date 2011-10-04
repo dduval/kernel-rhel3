@@ -47,7 +47,7 @@
 #include <linux/proc_fs.h>
 
 #define PFX "IPMI message handler: "
-#define IPMI_MSGHANDLER_VERSION "35.11"
+#define IPMI_MSGHANDLER_VERSION "35.13"
 
 /* This is a mighty handy macro backported from 2.6. */
 #ifndef list_for_each_entry_safe
@@ -1701,8 +1701,7 @@ void ipmi_poll_interface(ipmi_user_t user)
 int ipmi_register_smi(struct ipmi_smi_handlers *handlers,
 		      void		       *send_info,
 		      unsigned char            version_major,
-		      unsigned char            version_minor,
-		      ipmi_smi_t               *intf)
+		      unsigned char            version_minor)
 {
 	int              i, j;
 	int              rv;
@@ -1766,7 +1765,6 @@ int ipmi_register_smi(struct ipmi_smi_handlers *handlers,
 			spin_unlock_irqrestore(&interfaces_lock, flags);
 
 			rv = 0;
-			*intf = new_intf;
 			break;
 		}
 	}
@@ -1781,8 +1779,14 @@ int ipmi_register_smi(struct ipmi_smi_handlers *handlers,
 		/* Well, it went away.  Just return. */
 		goto out;
 
+	if (rv == 0) {
+		rv = handlers->start_processing(send_info, new_intf);
+		if (rv)
+			goto out;
+	}
+
 	if (rv == 0)
-		rv = add_proc_entries(*intf, i);
+		rv = add_proc_entries(new_intf, i);
 
 	if (rv == 0) {
 		if ((version_major > 1)
@@ -1790,16 +1794,16 @@ int ipmi_register_smi(struct ipmi_smi_handlers *handlers,
 		{
 			/* Start scanning the channels to see what is
 			   available. */
-			(*intf)->null_user_handler = channel_handler;
-			(*intf)->curr_channel = 0;
-			rv = send_channel_info_cmd(*intf, 0);
+			new_intf->null_user_handler = channel_handler;
+			new_intf->curr_channel = 0;
+			rv = send_channel_info_cmd(new_intf, 0);
 			if (rv)
 				goto out;
 
 			/* Wait for the channel info to be read. */
 			up_read(&interfaces_sem);
-			wait_event((*intf)->waitq,
-				   ((*intf)->curr_channel>=IPMI_MAX_CHANNELS));
+			wait_event(new_intf->waitq,
+				   (new_intf->curr_channel>=IPMI_MAX_CHANNELS));
 			down_read(&interfaces_sem);
 
 			if (ipmi_interfaces[i] != new_intf)
@@ -1807,8 +1811,8 @@ int ipmi_register_smi(struct ipmi_smi_handlers *handlers,
 				goto out;
 		} else {
 			/* Assume a single IPMB channel at zero. */
-			(*intf)->channels[0].medium = IPMI_CHANNEL_MEDIUM_IPMB;
-			(*intf)->channels[0].protocol
+			new_intf->channels[0].medium = IPMI_CHANNEL_MEDIUM_IPMB;
+			new_intf->channels[0].protocol
 				= IPMI_CHANNEL_PROTOCOL_IPMB;
 
 		}
@@ -2918,7 +2922,7 @@ static void send_panic_events(char *str)
 	msg.cmd = 2; /* Platform event command. */
 	msg.data = data;
 	msg.data_len = 8;
-	data[0] = 0x21; /* Kernel generator ID, IPMI table 5-4 */
+	data[0] = 0x41; /* Kernel generator ID, IPMI table 5-4 */
 	data[1] = 0x03; /* This is for IPMI 1.0. */
 	data[2] = 0x20; /* OS Critical Stop, IPMI table 36-3 */
 	data[4] = 0x6f; /* Sensor specific, IPMI table 36-1 */

@@ -973,22 +973,10 @@ int __xfrm_route_forward(struct sk_buff *skb, unsigned short family)
 	return xfrm_lookup(&skb->dst, &fl, NULL, 0) == 0;
 }
 
-/* Optimize later using cookies and generation ids. */
-
 static struct dst_entry *xfrm_dst_check(struct dst_entry *dst, u32 cookie)
 {
-	struct dst_entry *child = dst;
-
-	while (child) {
-		if (child->obsolete > 0 ||
-		    (child->xfrm && child->xfrm->km.state != XFRM_STATE_VALID)) {
-			dst_release(dst);
-			return NULL;
-		}
-		child = child->child;
-	}
-
-	return dst;
+	dst_release(dst);
+	return NULL;
 }
 
 static void xfrm_dst_destroy(struct dst_entry *dst)
@@ -1067,7 +1055,7 @@ int xfrm_flush_bundles(struct xfrm_state *x)
 			write_lock(&pol->lock);
 			dstp = &pol->bundles;
 			while ((dst=*dstp) != NULL) {
-				if (bundle_depends_on(dst, x)) {
+				if (!x || bundle_depends_on(dst, x)) {
 					*dstp = dst->next;
 					dst->next = gc_list;
 					gc_list = dst;

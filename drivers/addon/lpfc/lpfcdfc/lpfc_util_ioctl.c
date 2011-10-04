@@ -3,7 +3,7 @@
  * Fibre Channel Host Bus Adapters.                                *
  * Refer to the README file included with this package for         *
  * driver version and adapter support.                             *
- * Copyright (C) 2003-2005 Emulex.  All rights reserved.           *
+ * Copyright (C) 2003-2006 Emulex.  All rights reserved.           *
  * www.emulex.com                                                  *
  *                                                                 *
  * This program is free software; you can redistribute it and/or   *
@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: ioctls/lpfc_util_ioctl.c 1.9 2005/05/03 11:21:00EDT sf_support Exp  $
+ * $Id: lpfc_util_ioctl.c 466 2006-01-05 19:16:29Z sf_support $
  */
 #include <linux/version.h>
 #include <linux/kernel.h>
@@ -711,6 +711,7 @@ lpfc_ioctl_send_scsi_fcp(lpfcHBA_t * phba,
 	    ((bmp->virt = lpfc_mbuf_alloc(phba, 0, &(bmp->phys))) == 0)) {
 		if (bmp)
 			kfree(bmp);
+		bmp = NULL;
 		rc = ENOMEM;
 		goto sndsczout;
 	}
@@ -722,6 +723,7 @@ lpfc_ioctl_send_scsi_fcp(lpfcHBA_t * phba,
 	    ((mp->virt = lpfc_mbuf_alloc(phba, MEM_PRI, &(mp->phys))) == 0)) {
 		if (mp)
 			kfree(mp);
+		mp = NULL;
 		rc = ENOMEM;
 		goto sndsczout;
 	}
@@ -1162,6 +1164,7 @@ lpfc_ioctl_send_mgmt_cmd(lpfcHBA_t * phba,
 	    ((bmp->virt = lpfc_mbuf_alloc(phba, 0, &(bmp->phys))) == 0)) {
 		if (bmp)
 			kfree(bmp);
+		bmp = NULL;
 		rc = ENOMEM;
 		goto sndmgtqwt;
 	}
@@ -1172,6 +1175,7 @@ lpfc_ioctl_send_mgmt_cmd(lpfcHBA_t * phba,
 					reqbfrcnt)) == 0) {
 		lpfc_mbuf_free(phba, bmp->virt, bmp->phys);
 		kfree(bmp);
+		bmp = NULL;
 		rc = ENOMEM;
 		goto sndmgtqwt;
 	}
@@ -1180,6 +1184,7 @@ lpfc_ioctl_send_mgmt_cmd(lpfcHBA_t * phba,
 		dfc_cmd_data_free(phba, indmp);
 		lpfc_mbuf_free(phba, bmp->virt, bmp->phys);
 		kfree(bmp);
+		bmp = NULL;
 		rc = ENOMEM;
 		goto sndmgtqwt;
 	}

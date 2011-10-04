@@ -1,21 +1,10 @@
-/******************************************************************************
- *                  QLOGIC LINUX SOFTWARE
+/*
+ * QLogic Fibre Channel HBA Driver
+ * Copyright (c)  2003-2005 QLogic Corporation
  *
- * QLogic ISP2x00 device driver for Linux 2.4.x
- * Copyright (C) 2003 QLogic Corporation
- * (www.qlogic.com)
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2, or (at your option) any
- * later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- ******************************************************************************/
+ * See LICENSE.qla2xxx for copyright and licensing details.
+ */
+
 
 
 #define QLMULTIPATH_MAGIC 'y'
@@ -60,7 +49,11 @@
 #define FO_CC_GET_FO_DRIVER_VERSION_OS  \
     QL_IOCTL_CMD(0xd2)
 
-#define FO_CC_END_IDX 	0xd2	/* foioctl cmd end index */
+#define FO_CC_GET_LBTYPE_OS        	\
+    QL_IOCTL_CMD(0xd3)				/* 0xd3 */	
+#define FO_CC_SET_LBTYPE_OS        	\
+    QL_IOCTL_CMD(0xd4)				/* 0xd4 */
+#define FO_CC_END_IDX		0xd4		/* fo ioctl end idx */
 
 
 #define BOOLEAN uint8_t

@@ -254,6 +254,6 @@
 #define __NR_ia32_exit_group		252
 #define __NR_ia32_set_tid_address	258
 
-#define IA32_NR_syscalls 265
+#define IA32_NR_syscalls 271
 
 #endif /* _ASM_X86_64_IA32_UNISTD_H_ */

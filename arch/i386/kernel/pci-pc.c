@@ -22,6 +22,7 @@
 
 unsigned int pci_probe = PCI_PROBE_BIOS | PCI_PROBE_CONF1 | PCI_PROBE_CONF2;
 
+int pcibios_no_peer_tricks = 0;
 int pcibios_last_bus = -1;
 struct pci_bus *pci_root_bus = NULL;
 struct pci_ops *pci_root_ops = NULL;
@@ -1492,6 +1493,9 @@ char * __devinit  pcibios_setup(char *str)
 		return NULL;
 	} else if (!strcmp(str, "assign-busses")) {
 		pci_probe |= PCI_ASSIGN_ALL_BUSSES;
+		return NULL;
+	} else if (!strcmp(str, "nopeertricks")) {
+		pcibios_no_peer_tricks = 1;
 		return NULL;
 	} else if (!strncmp(str, "irqmask=", 8)) {
 		pcibios_irq_mask = simple_strtol(str+8, NULL, 0);

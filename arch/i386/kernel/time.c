@@ -685,8 +685,6 @@ static void timer_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 		   code at least */
 		   
 		if (count > LATCH) {
-			printk(KERN_WARNING 
-			       "i8253 count too high! resetting..\n");
 			outb_p(0x34, 0x43);
 			outb_p(LATCH & 0xff, 0x40);
 			outb(LATCH >> 8, 0x40);

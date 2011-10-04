@@ -819,6 +819,19 @@ static int check_scsidisk_media_change(kdev_t full_dev)
 	return retval;
 }
 
+/* See RH bz#157667, also drivers/ide/ide-floppy.c */
+static int sd_should_report_error(int the_result, Scsi_Request *SRpnt)
+{
+	/* Check if media was just changed. Allow any ASCQ and NOT_READY. */
+	if ((driver_byte(the_result) & DRIVER_SENSE) != 0 &&
+	    (SRpnt->sr_sense_buffer[2] == UNIT_ATTENTION ||
+	     SRpnt->sr_sense_buffer[2] == NOT_READY) &&
+	    SRpnt->sr_sense_buffer[12] == 0x3A)
+		return 0;
+	/* Anything else? Just media for now. */
+	return 1;
+}
+
 static int sd_init_onedisk(int i)
 {
 	unsigned char cmd[10];
@@ -844,7 +857,10 @@ static int sd_init_onedisk(int i)
 	/*
 	 * We need to retry the READ_CAPACITY because a UNIT_ATTENTION is
 	 * considered a fatal error, and many devices report such an error
-	 * just after a scsi bus reset.
+	 * just after a scsi bus reset. Also, if a previous READ_CAPACITY
+	 * failed due to media going offline, defaults will have
+         * been established; which may not be correct for current/online
+	 * media.
 	 */
 
 	SRpnt = scsi_allocate_request(rscsi_disks[i].device);
@@ -989,21 +1005,24 @@ static int sd_init_onedisk(int i)
 	 */
 
 	if (the_result) {
-		printk("%s : READ CAPACITY failed.\n"
-		       "%s : status = %x, message = %02x, host = %d, driver = %02x \n",
-		       nbuff, nbuff,
-		       status_byte(the_result),
-		       msg_byte(the_result),
-		       host_byte(the_result),
-		       driver_byte(the_result)
-		    );
-		if (driver_byte(the_result) & DRIVER_SENSE)
-			print_req_sense("sd", SRpnt);
-		else
-			printk("%s : sense not available. \n", nbuff);
+		if (sd_should_report_error(the_result, SRpnt)) {
+			printk("%s : READ CAPACITY failed.\n"
+			       "%s : status = %x, message = %02x, host = %d, driver = %02x \n",
+			       nbuff, nbuff,
+			       status_byte(the_result),
+			       msg_byte(the_result),
+			       host_byte(the_result),
+			       driver_byte(the_result)
+			    );
+			if (driver_byte(the_result) & DRIVER_SENSE)
+				print_req_sense("sd", SRpnt);
+			else
+				printk("%s : sense not available. \n", nbuff);
 
-		printk("%s : block size assumed to be 512 bytes, disk size 1GB.  \n",
-		       nbuff);
+			printk("%s : block size assumed to be 512 bytes,"
+			    " disk size 1GB.\n",
+			    nbuff);
+		}
 		rscsi_disks[i].capacity = 0x1fffff;
 		sector_size = 512;
 
@@ -1040,79 +1059,85 @@ static int sd_init_onedisk(int i)
 		sector_size = (buffer[4] << 24) |
 		    (buffer[5] << 16) | (buffer[6] << 8) | buffer[7];
 
-		if (sector_size == 0) {
-			sector_size = 512;
-			printk("%s : sector size 0 reported, assuming 512.\n",
-			       nbuff);
-		}
-		if (sector_size != 512 &&
-		    sector_size != 1024 &&
-		    sector_size != 2048 &&
-		    sector_size != 4096 &&
-		    sector_size != 256) {
-			printk("%s : unsupported sector size %d.\n",
-			       nbuff, sector_size);
-			/*
-			 * The user might want to re-format the drive with
-			 * a supported sectorsize.  Once this happens, it
-			 * would be relatively trivial to set the thing up.
-			 * For this reason, we leave the thing in the table.
-			 */
-			rscsi_disks[i].capacity = 0;
-		}
-		if (sector_size > 1024) {
-			int m;
-
-			/*
-			 * We must fix the sd_blocksizes and sd_hardsizes
-			 * to allow us to read the partition tables.
-			 * The disk reading code does not allow for reading
-			 * of partial sectors.
-			 */
-			for (m = i << 4; m < ((i + 1) << 4); m++) {
-				sd_blocksizes[m] = sector_size;
-			}
-		} {
-			/*
-			 * The msdos fs needs to know the hardware sector size
-			 * So I have created this table. See ll_rw_blk.c
-			 * Jacques Gelinas (Jacques@solucorp.qc.ca)
-			 */
-			int m;
-			unsigned int hard_sector = sector_size;
-			unsigned int sz = rscsi_disks[i].capacity *
-				(hard_sector / 256);
-
-			if (sz < rscsi_disks[i].capacity) {
-				/* redo computations avoiding "sz" overflow */
-				sz = (rscsi_disks[i].capacity / 1950) *
-					(hard_sector / 256);
-				sz = sz/2 - sz/1250 + 974;
-			} else {
-				sz = (sz/2 - sz/1250 + 974) / 1950;
-			}
-
-			/* There are 16 minors allocated for each major device */
-			for (m = i << 4; m < ((i + 1) << 4); m++) {
-				sd_hardsizes[m] = hard_sector;
-			}
-
-			printk("SCSI device %s: "
-			       "%u %u-byte hdwr sectors (%u MB)\n",
-			       nbuff, rscsi_disks[i].capacity,
-			       hard_sector, sz);
-		}
-
-		/* Rescale capacity to 512-byte units */
-		if (sector_size == 4096)
-			rscsi_disks[i].capacity <<= 3;
-		if (sector_size == 2048)
-			rscsi_disks[i].capacity <<= 2;
-		if (sector_size == 1024)
-			rscsi_disks[i].capacity <<= 1;
-		if (sector_size == 256)
-			rscsi_disks[i].capacity >>= 1;
 	}
+
+	if (sector_size == 0) {
+		sector_size = 512;
+		printk("%s : sector size 0 reported, assuming 512.\n",
+		       nbuff);
+	}
+	if (sector_size != 512 &&
+	    sector_size != 1024 &&
+	    sector_size != 2048 &&
+	    sector_size != 4096 &&
+	    sector_size != 256) {
+		printk("%s : unsupported sector size %d.\n",
+		       nbuff, sector_size);
+		/*
+		 * The user might want to re-format the drive with
+		 * a supported sectorsize.  Once this happens, it
+		 * would be relatively trivial to set the thing up.
+		 * For this reason, we leave the thing in the table.
+		 */
+		rscsi_disks[i].capacity = 0;
+	}
+
+	/* NOTE: if a device had media, then media was removed, and the above code
+	 * failed due to this (lack of media), sd_blocksizes may be left as it was on
+	 * entry to this function; this is okay.
+         */
+	if (sector_size > 1024) {
+		int m;
+
+		/*
+		 * We must fix the sd_blocksizes and sd_hardsizes
+		 * to allow us to read the partition tables.
+		 * The disk reading code does not allow for reading
+		 * of partial sectors.
+		 */
+		for (m = i << 4; m < ((i + 1) << 4); m++) {
+			sd_blocksizes[m] = sector_size;
+		}
+	} {
+		/*
+		 * The msdos fs needs to know the hardware sector size
+		 * So I have created this table. See ll_rw_blk.c
+		 * Jacques Gelinas (Jacques@solucorp.qc.ca)
+		 */
+		int m;
+		unsigned int hard_sector = sector_size;
+		unsigned int sz = rscsi_disks[i].capacity *
+			(hard_sector / 256);
+
+		if (sz < rscsi_disks[i].capacity) {
+			/* redo computations avoiding "sz" overflow */
+			sz = (rscsi_disks[i].capacity / 1950) *
+				(hard_sector / 256);
+			sz = sz/2 - sz/1250 + 974;
+		} else {
+			sz = (sz/2 - sz/1250 + 974) / 1950;
+		}
+
+		/* There are 16 minors allocated for each major device */
+		for (m = i << 4; m < ((i + 1) << 4); m++) {
+			sd_hardsizes[m] = hard_sector;
+		}
+
+		printk("SCSI device %s: "
+		       "%u %u-byte hdwr sectors (%u MB)\n",
+		       nbuff, rscsi_disks[i].capacity,
+		       hard_sector, sz);
+	}
+
+	/* Rescale capacity to 512-byte units */
+	if (sector_size == 4096)
+		rscsi_disks[i].capacity <<= 3;
+	if (sector_size == 2048)
+		rscsi_disks[i].capacity <<= 2;
+	if (sector_size == 1024)
+		rscsi_disks[i].capacity <<= 1;
+	if (sector_size == 256)
+		rscsi_disks[i].capacity >>= 1;
 
 
 	/*

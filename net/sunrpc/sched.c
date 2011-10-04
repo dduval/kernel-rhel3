@@ -564,7 +564,11 @@ __rpc_execute(struct rpc_task *task)
 			if (current->pid == rpciod_pid)
 				printk(KERN_ERR "RPC: rpciod waiting on sync task!\n");
 
-			__wait_event(task->tk_wait, !RPC_IS_SLEEPING(task));
+			if (RPC_TASK_UNINTERRUPTIBLE(task)) {
+				__wait_event(task->tk_wait, !RPC_IS_SLEEPING(task));
+			} else {
+				__wait_event_interruptible(task->tk_wait, !RPC_IS_SLEEPING(task), status);
+			}
 			dprintk("RPC: %4d sync task resuming\n", task->tk_pid);
 
 			/*
@@ -762,8 +766,11 @@ rpc_init_task(struct rpc_task *task, struct rpc_clnt *clnt,
 	list_add(&task->tk_task, &all_tasks);
 	spin_unlock(&rpc_sched_lock);
 
-	if (clnt)
+	if (clnt) {
 		atomic_inc(&clnt->cl_users);
+		if (!clnt->cl_intr)
+			task->tk_flags |= RPC_TASK_NOINTR;
+	}
 
 #ifdef RPC_DEBUG
 	task->tk_magic = 0xf00baa;

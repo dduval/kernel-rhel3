@@ -1,21 +1,10 @@
-/******************************************************************************
- *                  QLOGIC LINUX SOFTWARE
+/*
+ * QLogic Fibre Channel HBA Driver
+ * Copyright (c)  2003-2005 QLogic Corporation
  *
- * QLogic ISP2x00 device driver for Linux 2.4.x
- * Copyright (C) 2003 QLogic Corporation
- * (www.qlogic.com)
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2, or (at your option) any
- * later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- ******************************************************************************/
+ * See LICENSE.qla2xxx for copyright and licensing details.
+ */
+
 
 /*
  * QLogic ISP2x00 Multi-path LUN Support
@@ -52,7 +41,7 @@ extern "C"
  */
 #define MAX_LUNS_PER_DEVICE	MAX_LUNS	/* Maximum # of luns */
 #define MAX_MP_DEVICES		MAX_TARGETS	/* Maximum # of virtual devs */
-#define MAX_PATHS_PER_DEVICE	8		/* Maximum # of paths */
+#define MAX_PATHS_PER_DEVICE	64		/* Maximum # of paths */
 #define MAX_TPG_PORTS		MAX_PATHS_PER_DEVICE  /* Max Ports per Tgt Port Group */
 #if !defined(MAX_LUNS)
 #define	MAX_LUNS		256
@@ -74,6 +63,8 @@ extern "C"
     ((mp_path_list_t *)KMEM_ZALLOC(sizeof(mp_path_list_t)))
 #endif
 
+extern int
+qla2x00_get_vol_access_path(fc_port_t *fcport, fc_lun_t *fclun, int modify);
 /*
  * Per-multipath driver parameters
  */
@@ -140,21 +131,28 @@ failover_notify_srb_t;
 typedef struct _mp_lun {
    	struct _mp_lun   	*next;
 	struct _mp_device	*dp; 			/* Multipath device */
-	struct list_head lu_paths;   		/* list of lu_paths */
-	struct list_head active_list;		/* list of active lu_paths */
-	struct list_head tport_grps_list;   /* list of target port groups */
+	struct list_head 	lu_paths;   		/* list of lu_paths */
+	struct list_head 	active_list;		/* list of active lu_paths */
+	int			active;
+	int			act_cnt;
+	struct list_head 	tport_grps_list;   /* list of target port groups */
 	struct list_head	ports_list;
 	int			number;			/* actual lun number */
 	int			load_balance_type; /* load balancing method */
 #define	LB_NONE		0	/* All the luns on the first active path */
 #define LB_STATIC	1	/* All the luns distributed across all the paths
 			    	   on active optimised controller */	
+#define	LB_LRU		2
+#define	LB_LST		3
+#define	LB_RR		4
+#define	LB_LRU_BYTES	5
 	uint16_t		cur_path_id;	/* current path */
 	uint16_t		pref_path_id;	/* preferred path */
-	fc_lun_t	*paths[MAX_PATHS_PER_DEVICE];	/* list of fcluns */
+	uint16_t		config_pref_id;	/* configuration preferred path */
+	fc_lun_t		*paths[MAX_PATHS_PER_DEVICE];	/* list of fcluns */
 	int			path_cnt;	/* Must be > 1 for fo device  */
 	int			siz;		/* Size of wwuln  */
-	uint8_t		wwuln[WWULN_SIZE];/* lun id from inquiry page 83. */
+	uint8_t			wwuln[WWULN_SIZE];/* lun id from inquiry page 83. */
 	uint8_t			asymm_support;
 }
 mp_lun_t;
@@ -211,6 +209,8 @@ typedef struct _mp_device {
 	mp_path_list_t	*path_list;		/* Path list for device.  */
 	int		dev_id;
 	int		use_cnt;	/* number of users */
+	int 		lbtype;
+	struct 	_mp_device	*mpdev;		
     	struct _mp_lun   *luns;			/* list of luns */
 	uint8_t         nodename[WWN_SIZE];	/* World-wide node name for device. */
 
@@ -284,4 +284,6 @@ struct fo_information {
 extern mp_device_t *qla2x00_find_mp_dev_by_portname(mp_host_t *, uint8_t *,
     uint16_t *);
 extern mp_host_t * qla2x00_cfg_find_host(scsi_qla_host_t *);
+extern  int qla2x00_cfg_is_lbenable(fc_lun_t *);
+extern void qla2x00_cfg_select_route(srb_t *sp); 
 #endif /* _QLA_CFG_H */

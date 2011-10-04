@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_sched.h 1.2 2005/05/03 11:22:06EDT sf_support Exp  $
+ * $Id: lpfc_sched.h 328 2005-05-03 15:20:43Z sf_support $
  */
 
 #ifndef         LPFC_SCHED_H

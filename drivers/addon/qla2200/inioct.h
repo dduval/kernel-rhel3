@@ -1,21 +1,9 @@
-/******************************************************************************
- *                  QLOGIC LINUX SOFTWARE
+/*
+ * QLogic Fibre Channel HBA Driver
+ * Copyright (c)  2003-2005 QLogic Corporation
  *
- * QLogic ISP2x00 device driver for Linux 2.4.x
- * Copyright (C) 2003 QLogic Corporation
- * (www.qlogic.com)
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2, or (at your option) any
- * later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- ******************************************************************************/
+ * See LICENSE.qla2xxx for copyright and licensing details.
+ */
 
 /*
  * File Name: inioct.h
@@ -52,6 +40,12 @@
  * RL	- Modified loopback rsp buffer structure definition to add
  *        diagnostic Echo command support.
  *
+ * Rev. 7	February 25, 2005
+ * RL	- Added VPD get/update command codes.
+ *
+ * Rev. 6.1	March 31, 2005
+ * RL	- Updated option rom region definition.
+ *
  */
 
 #ifndef	_INIOCT_H
@@ -86,6 +80,8 @@
 #define	INT_CC_SWAP_TARGET_DEVICE	EXT_CC_RESERVED0G_OS
 #define	INT_CC_READ_OPTION_ROM		EXT_CC_RESERVED0H_OS
 #define	INT_CC_GET_OPTION_ROM_LAYOUT	EXT_CC_RESERVED0I_OS
+#define	INT_CC_GET_VPD			EXT_CC_RESERVED0J_OS
+#define	INT_CC_UPDATE_VPD		EXT_CC_RESERVED0K_OS
 #define	INT_CC_LEGACY_LOOPBACK		EXT_CC_RESERVED0Z_OS
 
 
@@ -104,7 +100,7 @@ typedef struct _INT_LOOPBACK_REQ
 	UINT64 BufferAddress;			/* 8  */
 	UINT32 BufferLength;			/* 4  */
 	UINT16 Reserved[9];			/* 18  */
-} INT_LOOPBACK_REQ, *PINT_LOOPBACK_REQ;		/* 408 */
+} INT_LOOPBACK_REQ, *PINT_LOOPBACK_REQ;	/* 408 */
 
 typedef struct _INT_LOOPBACK_RSP
 {
@@ -118,7 +114,7 @@ typedef struct _INT_LOOPBACK_RSP
 	UINT8  CommandSent;			/* 1  */
 	UINT8  Reserved1;			/* 1  */
 	UINT16 Reserved2[7];			/* 16 */
-} INT_LOOPBACK_RSP, *PINT_LOOPBACK_RSP;		/* 40 */
+} INT_LOOPBACK_RSP, *PINT_LOOPBACK_RSP;	/* 40 */
 
 /* definition for interpreting CompletionStatus values */
 #define	INT_DEF_LB_COMPLETE	0x4000
@@ -132,26 +128,48 @@ typedef struct _INT_LOOPBACK_RSP
 #define INT_DEF_LB_ECHO_CMD		1
 
 /* definition for option rom */
-#define INT_OPT_ROM_REGION_NONE		0
-#define INT_OPT_ROM_REGION_BIOS		1
-#define INT_OPT_ROM_REGION_FCODE	2
-#define INT_OPT_ROM_REGION_EFI		3
-#define INT_OPT_ROM_REGION_VPD		4
-#define INT_OPT_ROM_REGION_FW1		5
-#define INT_OPT_ROM_REGION_FW2		6
-#define INT_OPT_ROM_REGION_BOOT		7
-#define INT_OPT_ROM_REGION_PCI_CFG	8
-#define INT_OPT_ROM_REGION_ALL		0xF
-#define INT_OPT_ROM_REGION_PHBIOS	0x11 //Bios with pci hdr
-#define INT_OPT_ROM_REGION_PHFCODE  	0x12 //Fcode with pci hdr
-#define INT_OPT_ROM_REGION_PHEFI  	0x13 //Efi with pci hdr
-#define INT_OPT_ROM_REGION_PHVPD  	0x14 // Vpd with pci hdr
-#define INT_OPT_ROM_REGION_PHEC_FW	0x15 // Efi compressed Fw with pci hdr
-#define INT_OPT_ROM_REGION_BCFW	        0x16 // Bios compressed Fw
-#define INT_OPT_ROM_REGION_PHEFI_PHECFW_PHVPD 0x17
-#define INT_OPT_ROM_REGION_PHBIOS_FCODE_EFI_FW 0x18
-#define INT_OPT_ROM_REGION_PHBIOS_PHFCODE_PHEFI 0x19
-#define INT_OPT_ROM_REGION_INVALID	0xFFFFFFFF
+#define INT_OPT_ROM_REGION_NONE				0x00
+#define INT_OPT_ROM_REGION_FW				0x01
+				/* ISP2422/2432: Uncompressed FW */
+#define INT_OPT_ROM_REGION_PHBIOS_FCODE_EFI_CFW		0x02
+				/* ISP2300/2310/2312: BIOS
+				 * w/pcihdr and compressed FW OR
+				 * FCODE w/pcihdr and compressed FW OR
+				 * EFI w/pcihdr and compressed FW
+				 */
+#define INT_OPT_ROM_REGION_PHEFI_PHECFW_PHVPD		0x03
+				/* ISP2300/2310/2312 HP HBAs:
+				 * EFI w/pcihdr and compressed
+				 * FW w/pcihdr and VPD w/pcihdr
+				 */
+#define INT_OPT_ROM_REGION_PHBIOS_CFW			0x04
+				/* ISP6212: BIOS w/pcihdr and
+				 * compressed FW
+				 */
+#define INT_OPT_ROM_REGION_PHBIOS_PHFCODE_PHEFI_FW	0x05
+				/* ISP2322: BIOS w/pcihdr and
+				 * uncompressed FW OR
+				 * FCODE w/pcihdr and uncompressed FW OR
+				 * EFI w/pcihdr and uncompressed FW OR
+				 * BIOS w/pcihdr and FCODE w/pcihdr
+				 * and EFI w/pcihdr and uncompressed FW
+				 */
+#define INT_OPT_ROM_REGION_PHBIOS_FW			0x06
+				/* ISP6322: BIOS w/pcihdr and
+				 * uncompressed FW
+				 */
+#define INT_OPT_ROM_REGION_PHBIOS_PHFCODE_PHEFI		0x07
+				/* ISP2422/2432: BIOS w/pcihdr OR
+				 * FCODE w/pcihdr OR
+				 * EFI w/pcihdr OR
+				 * BIOS w/pcihdr and FCODE
+				 * w/pcihdr and EFI w/pcihdr
+				 */
+#define INT_OPT_ROM_REGION_ALL				0xFF
+				/* Region that includes all regions */
+#define INT_OPT_ROM_REGION_INVALID			0xFFFFFFFF
+				/* Invalid region */
+
 
 // Image device id (PCI_DATA_STRUCTURE.DeviceId) 
 
@@ -230,6 +248,7 @@ typedef struct _INT_OPT_ROM_LAYOUT
 #define INT_OPT_ROM_MAX_REGIONS     0xF
 #define INT_OPT_ROM_SIZE_2312       0x20000     /* 128k */
 #define INT_OPT_ROM_SIZE_2322       0x100000    /* 1 M  */
+#define INT_OPT_ROM_SIZE_2422       0x100000    /* 1 M  */
 #define INT_OPT_ROM_6312_BC_FW_ADR  0xC400      /* 49k  */
 #define INT_OPT_ROM_2322_VPD_ADR    0x40000     /* 256k */
 #define INT_OPT_ROM_2322_FW_ADR     0x80000     /* 512k */

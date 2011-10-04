@@ -1,0 +1,6 @@
+#
+# adp94xx 2.4.x kernel configuration file.
+#
+# $Id: //depot/razor/linux/src/Config.in#3 $
+#
+dep_tristate 'Adaptec ADP94xx support' CONFIG_SCSI_ADP94XX $CONFIG_SCSI

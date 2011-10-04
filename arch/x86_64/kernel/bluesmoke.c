@@ -186,6 +186,7 @@ static char *highbits[32] = {
 static void check_k8_nb(int header)
 {
 	struct pci_dev *nb;
+	unsigned long mc4_ctl;
 	nb = find_k8_nb(); 
 	if (nb == NULL)
 		return;
@@ -195,6 +196,22 @@ static void check_k8_nb(int header)
 	pci_read_config_dword(nb, 0x4c, &statushigh);
 	if (!(statushigh & (1<<31)))
 		return;
+
+	/* Check to see if this is a GART TLB error.  If so,
+	 * check to see if we want to bother with it...
+	 *
+	 * statuslow[15:0] == 0x001x indicates GART TLB error
+	 * mc4_ctl[10] enables GART TLB error reporting.
+	 */
+	rdmsrl(MSR_IA32_MC0_CTL+0x10, mc4_ctl);
+	if (((statuslow & 0xfff0) == 0x10) && !(mc4_ctl & (1<<10))) {
+
+		/* Clear the error */
+		statushigh &= ~(1<<31);
+		pci_write_config_dword(nb, 0x4c, statushigh);
+		return;
+	}
+
 	if (header) 
 		printk(KERN_ERR "CPU %d: Silent Northbridge MCE\n", smp_processor_id());
 
@@ -212,7 +229,7 @@ static void check_k8_nb(int header)
 		break;
 	case 8:
 		printk(KERN_ERR "    ECC error syndrome %x\n", 
-		       (((statuslow >> 24) & 0xff)  << 8) | ((statushigh >> 15) & 0x7f));		
+		       (((statuslow >> 24) & 0xff)  << 8) | ((statushigh >> 15) & 0xff));
 		/*FALL THROUGH*/
 	default:
 		printk(KERN_ERR "    bus error %s, %s\n    %s\n    %s, %s\n",
@@ -468,4 +485,4 @@ static int __init mcheck_enable(char *str)
 }
 
 __setup("nomce", mcheck_disable);
-__setup("mce", mcheck_enable);
+__setup("mce=", mcheck_enable);

@@ -736,8 +736,12 @@ static void multipathd (void *data)
 		md_spin_unlock_irqrestore(&retry_list_lock, flags);
 
 		mddev = mp_bh->mddev;
-		if (mddev->sb_dirty)
-			md_update_sb(mddev);
+		if (mddev->sb_dirty) {
+			lock_mddev(mddev);
+			if (mddev->sb_dirty)
+				md_update_sb(mddev);
+			unlock_mddev(mddev);
+		}
 		bh = &mp_bh->bh_req;
 		dev = bh->b_dev;
 		

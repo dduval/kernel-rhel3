@@ -64,6 +64,13 @@
 #define BLOCK_SECTOR(s)	((s) << (DUMP_BLOCK_SHIFT - 9))
 
 
+static int qcmnd_timeout = 5000000;
+static int io_timeout = 30000000;
+static int scmnd_timeout = 60000000;
+MODULE_PARM(qcmnd_timeout, "i");
+MODULE_PARM(io_timeout, "i");
+MODULE_PARM(scmnd_timeout, "i");
+
 static int quiesce_ok = 0;
 static Scsi_Cmnd scsi_dump_cmnd;
 static uint32_t module_crc;
@@ -275,13 +282,53 @@ static int cmd_result(Scsi_Cmnd *scmd)
 	case ADD_TO_MLQUEUE:
 		return 1 /* retry */;
 	case SUCCESS:
-		if (host_byte(scmd->result) != DID_OK)
-			break;
+		if (host_byte(scmd->result) == DID_RESET) {
+			Err("host_byte(scmd->result) set to : DID_RESET");
+			return 1;  /* retry */
+		} else if ((status == CHECK_CONDITION) &&
+			   ((scmd->sense_buffer[2] == UNIT_ATTENTION) ||
+			    (scmd->sense_buffer[2] == NOT_READY))) {
+			/*
+			 * If we are expecting a CC/UA because of a bus reset that we
+			 * performed, treat this just as a retry.  Otherwise this is
+			 * information that we should pass up to the upper-level driver
+			 * so that we can deal with it there.
+			 */
+			Err("CHECK_CONDITION and UNIT_ATTENTION");
+			if (scmd->device->expecting_cc_ua) {
+				Err("expecting_cc_ua is set. setting it to zero");
+				scmd->device->expecting_cc_ua = 0;
+				return 1; /* retry */
+			}
 
-		if (status == GOOD || status == INTERMEDIATE_GOOD
-				   || status == INTERMEDIATE_C_GOOD)
+			/* Retry if ASC is reset code */
+			if (scmd->sense_buffer[12] == 0x29) {
+				Err("ASC is 0x29");
+				return 1; /* retry */
+			}
+
+			/*
+			 * if the device is in the process of becoming ready, we
+			 * should retry.
+			 */
+			if ((scmd->sense_buffer[12] == 0x04) &&
+			    (scmd->sense_buffer[13] == 0x01)) {
+				Err("device is in the process of becoming ready..");
+				return 1; /* retry */
+			}
+		} else if (host_byte(scmd->result) != DID_OK) {
+			Err("some undefined error");
+			Err("host_byte(scmd->result) : %d", host_byte(scmd->result));
+			break;
+		}
+
+		if (status == GOOD ||
+		    status == CONDITION_GOOD ||
+		    status == INTERMEDIATE_GOOD ||
+		    status == INTERMEDIATE_C_GOOD)
 			return 0;
-		if (status == CHECK_CONDITION && scmd->sense_buffer[2] == RECOVERED_ERROR)
+		if (status == CHECK_CONDITION &&
+		    scmd->sense_buffer[2] == RECOVERED_ERROR)
 			return 0;
 		break;
 	default:
@@ -293,16 +340,33 @@ static int cmd_result(Scsi_Cmnd *scmd)
 	return -EIO;
 }
 
+static inline int send_command_wait(int *timeout, int *total_timeout)
+{
+	int wait = 100;
+
+	udelay(wait);
+	*timeout -= wait;
+	*total_timeout -= wait;
+	diskdump_update();
+
+	return *timeout >= 0;
+}
+
 static int send_command(Scsi_Cmnd *scmd)
 {
 	struct Scsi_Host *host = scmd->host;
 	Scsi_Device *sdev = scmd->device;
 	struct scsi_dump_ops *dump_ops = get_dump_ops(host->hostt);
 	int ret;
+	int qcmnd_tmout, io_tmout, scmnd_tmout;
 
 	BUG_ON(!dump_ops);
 
+	scmnd_tmout = scmnd_timeout;
 	do {
+		qcmnd_tmout = qcmnd_timeout;
+		io_tmout = io_timeout;
+
 		if (!sdev->online) {
 			Err("Scsi disk is not online");
 			return -EIO;
@@ -312,18 +376,38 @@ static int send_command(Scsi_Cmnd *scmd)
 			return -EIO;
 		}
 
-		spin_lock(host->host_lock);
-		host->hostt->queuecommand(scmd, rw_intr);
-		spin_unlock(host->host_lock);
+		for (;;) {
+			spin_lock(host->host_lock);
+			ret = host->hostt->queuecommand(scmd, rw_intr);
+			spin_unlock(host->host_lock);
+			if (ret == 0)
+				break;
+			dump_ops->poll(scmd->device);
+			if (!send_command_wait(&qcmnd_tmout, &scmnd_tmout)) {
+				ret = -EIO;
+				goto retry_out;
+			}
+		}
 
 		while (scmd->done != NULL) {
 			dump_ops->poll(scmd->device);
-			udelay(100);
-			diskdump_update();
+			if (!send_command_wait(&io_tmout, &scmnd_tmout)) {
+				ret = -EIO;
+				goto retry_out;
+			}
 		}
 		scmd->done = rw_intr;
-	} while ((ret = cmd_result(scmd)) > 0);
 
+		if ((ret = cmd_result(scmd)) <= 0)
+			break;
+
+		if (!send_command_wait(&qcmnd_tmout, &scmnd_tmout)) {
+			ret = -EIO;
+			goto retry_out;
+		}
+	} while (scmnd_tmout >= 0);
+
+retry_out:
 	return ret;
 }
 

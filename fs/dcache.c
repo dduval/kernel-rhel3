@@ -300,15 +300,19 @@ restart:
 static inline void prune_one_dentry(struct dentry * dentry)
 {
 	struct dentry * parent;
+	struct super_block *sb = dentry->d_sb;
 
 	list_del_init(&dentry->d_hash);
 	list_del(&dentry->d_child);
+	sb->s_prunes++;
 	dentry_iput(dentry);
 	parent = dentry->d_parent;
 	d_free(dentry);
 	if (parent != dentry)
 		dput(parent);
 	spin_lock(&dcache_lock);
+	if (!--sb->s_prunes)
+		wake_up(&sb->s_wait_prunes);
 }
 
 /**
@@ -473,6 +477,31 @@ positive:
 	return 1;
 }
 
+static int wait_on_prunes(struct super_block *sb)
+{
+	DECLARE_WAITQUEUE(wait, current);
+
+	spin_lock(&dcache_lock);
+	if (!sb->s_prunes) {
+		spin_unlock(&dcache_lock);
+		return 0;
+	}
+
+	add_wait_queue(&sb->s_wait_prunes, &wait);
+
+	while (sb->s_prunes) {
+		set_current_state(TASK_UNINTERRUPTIBLE);
+		spin_unlock(&dcache_lock);
+		schedule();
+		spin_lock(&dcache_lock);
+	}
+	spin_unlock(&dcache_lock);
+ 
+	remove_wait_queue(&sb->s_wait_prunes, &wait);
+
+	return 1;
+} 
+
 /*
  * Search the dentry child list for the specified parent,
  * and move any unused dentries to the end of the unused
@@ -538,8 +567,12 @@ void shrink_dcache_parent(struct dentry * parent)
 {
 	int found;
 
+again:
 	while ((found = select_parent(parent)) != 0)
 		prune_dcache(found);
+
+	if (wait_on_prunes(parent->d_sb))
+		goto again;
 }
 
 /*

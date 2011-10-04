@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: ioctls/lpfc_cdev.c 1.4 2005/05/03 11:20:44EDT sf_support Exp  $
+ * $Id: lpfc_cdev.c 328 2005-05-03 15:20:43Z sf_support $
  */
 
 #ifndef EXPORT_SYMTAB

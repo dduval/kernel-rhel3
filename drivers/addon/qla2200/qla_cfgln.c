@@ -1,22 +1,10 @@
-/******************************************************************************
- *                  QLOGIC LINUX SOFTWARE
- *
- * QLogic ISP2x00 device driver for Linux 2.4.x
- * Copyright (C) 2003 QLogic Corporation
- * (www.qlogic.com)
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2, or (at your option) any
- * later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- ******************************************************************************/
 
+/*
+ * QLogic Fibre Channel HBA Driver
+ * Copyright (c)  2003-2005 QLogic Corporation
+ *
+ * See LICENSE.qla2xxx for copyright and licensing details.
+ */
 /*
  * QLogic ISP2x00 Multi-path LUN Support Driver 
  * Linux specific functions
@@ -227,7 +215,6 @@ qla2x00_cfg_build_path_tree(scsi_qla_host_t *ha)
 	uint16_t	dev_no = 0, tgt;
 	int		instance, rval;
 	mp_host_t	*host = NULL;
-	uint8_t		*name;
 	int		done;
 	uint8_t         control_byte;
 
@@ -263,16 +250,16 @@ qla2x00_cfg_build_path_tree(scsi_qla_host_t *ha)
 	}
 
 	/* Does nodename match the host adapter nodename? */
-	name = 	&ha->init_cb->port_name[0];
-	if (!qla2x00_is_nodename_equal(name, port_name)) {
+	if (!qla2x00_is_nodename_equal(ha->port_name, port_name)) {
 		printk(KERN_INFO
 		    "scsi(%d): Adapter nodenames don't match - ha = %p.\n",
 		    (int)ha->instance,ha);
 		DEBUG(printk("qla(%d): Adapter nodenames don't match - "
 		    "ha=%p. port name=%02x%02x%02x%02x%02x%02x%02x%02x\n",
 		    (int)ha->instance,ha,
-		    name[0], name[1], name[2], name[3],
-		    name[4], name[5], name[6], name[7]);)
+		    ha->port_name[0], ha->port_name[1], ha->port_name[2], 
+		    ha->port_name[3], ha->port_name[4], ha->port_name[5],
+		    ha->port_name[6], ha->port_name[7]);)
 
 		qla2x00_free_ioctl_scrap_mem(ha);
 		return;

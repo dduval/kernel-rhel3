@@ -371,6 +371,11 @@ void __init setup_arch(char **cmdline_p)
 
 	paging_init();
 	dmi_scan_machine();
+
+#ifdef CONFIG_X86_IO_APIC
+	check_ioapic();
+#endif
+
 #ifdef CONFIG_ACPI_BOOT
 	/*
 	 * Initialize the ACPI boot-time table parser (gets the RSDP and SDT).

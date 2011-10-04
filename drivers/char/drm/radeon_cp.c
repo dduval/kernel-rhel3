@@ -1347,7 +1347,7 @@ int radeon_cp_stop( struct inode *inode, struct file *filp,
 
 	LOCK_TEST_WITH_RETURN( dev );
 
-	if ( copy_from_user( &stop, (drm_radeon_init_t *)arg, sizeof(stop) ) )
+	if ( copy_from_user( &stop, (drm_radeon_cp_stop_t *)arg, sizeof(stop) ) )
 		return -EFAULT;
 
 	/* Flush any pending CP commands.  This ensures any outstanding
@@ -1592,7 +1592,7 @@ static int radeon_cp_get_buffers( drm_device_t *dev, drm_dma_t *d )
 
 	for ( i = d->granted_count ; i < d->request_count ; i++ ) {
 		buf = radeon_freelist_get( dev );
-		if ( !buf ) return -EAGAIN;
+		if ( !buf ) return -EBUSY;
 
 		buf->pid = current->pid;
 

@@ -165,6 +165,7 @@ enum
 	VM_OOM_KILL=28,		/* int: limit on concurrent OOM kills */
 	VM_KSCAND_WORK_PERCENT=29, /* int: % of work on each kscand iteration */
 	VM_NUMA_ALLOCATOR=30,	/* NUMA memory allocation policy */
+	VM_DEFRAGMENT=31,	/* Tunable defragmentation iterations */
 };
 
 

@@ -315,6 +315,7 @@ out_freering:
 	aio_free_ring(ctx);
 	ioctx_free_reqs(ctx);
 out_freectx:
+	mmdrop(ctx->mm);
 	kmem_cache_free(kioctx_cachep, ctx);
 	ctx = ERR_PTR(-ENOMEM);
 

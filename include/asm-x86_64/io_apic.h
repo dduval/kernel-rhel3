@@ -132,6 +132,11 @@ static inline void io_apic_sync(unsigned int apic)
 	(void) *(IO_APIC_BASE(apic)+4);
 }
 
+/*
+ * Miscellaneous IO-APIC function prototypes
+ */
+void check_ioapic(void);
+
 /* 1 if "noapic" boot option passed */
 extern int skip_ioapic_setup;
 

@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_logmsg.h 1.5 2005/07/08 19:29:37EDT sf_support Exp  $
+ * $Id: lpfc_logmsg.h 369 2005-07-08 23:29:48Z sf_support $
  */
 
 #ifndef _H_LPFC_LOGMSG

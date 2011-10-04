@@ -1178,8 +1178,12 @@ static void raid1d (void *data)
 	mddev_t *mddev = conf->mddev;
 	kdev_t dev;
 
-	if (mddev->sb_dirty)
-		md_update_sb(mddev);
+	if (mddev->sb_dirty) {
+		lock_mddev(mddev);
+		if (mddev->sb_dirty)
+			md_update_sb(mddev);
+		unlock_mddev(mddev);
+	}
 
 	for (;;) {
 		md_spin_lock_irqsave(&retry_list_lock, flags);

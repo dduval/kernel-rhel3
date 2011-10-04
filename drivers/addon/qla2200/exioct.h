@@ -1,21 +1,9 @@
-/******************************************************************************
- *                  QLOGIC LINUX SOFTWARE
+/*
+ * QLogic Fibre Channel HBA Driver
+ * Copyright (c)  2003-2005 QLogic Corporation
  *
- * QLogic ISP2x00 device driver for Linux 2.4.x
- * Copyright (C) 2003 QLogic Corporation
- * (www.qlogic.com)
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2, or (at your option) any
- * later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- ******************************************************************************/
+ * See LICENSE.qla2xxx for copyright and licensing details.
+ */
 
 /*
  * File Name: exioct.h
@@ -192,11 +180,28 @@
  *
  * Rev. 5.29     April 21, 2003
  * RA   - Defined the structure EXT_BEACON_CONTROL and subcommand code:
- *        EXT_SC_GET_BEACON_STATE,EXT_SC_SET_BEACON_STATE for the
- *        led blinking feature.
+ *	  EXT_SC_GET_BEACON_STATE,EXT_SC_SET_BEACON_STATE for the
+ *	  led blinking feature.
  *
  * Rev. 5.30     July 21, 2003
  * RL	- Added new statistics fields in HBA_PORT_STAT struct.
+ *
+ * Rev. 5.31     September 19, 2003
+ * RL	- Added new command subcode EXT_SC_GET_FC4_STATISTICS.
+ *
+ * Rev. 5.32     September 29, 2003
+ * RL	- Define new command subcodes for both EXT_CC_REG_AEN & EXT_CC_GET_AEN:
+ *	  EXT_SC_REG_AEN_DEFAULT, EXT_SC_REG_AEN_HBA_PORT, EXT_SC_REG_AEN_TGTS,
+ *	  EXT_SC_GET_AEN_DEFAULT, EXT_SC_GET_AEN_HBA_PORT, EXT_SC_GET_AEN_TGTS.
+ *	- Modified EXT_REG_AEN structure to return the buffer length allocated
+ *	  for the given type of event queue registered.
+ *
+ * Rev. 5.32.1     January 4, 2005
+ * RL	- Changed PORTSPEED definitions to add new speed values.
+ *	- Added more BEACON/LED definitions.
+ *
+ * Rev. 5.32.2     October 11, 2005 (sync up with latest api 2.01.01b2)
+ * RL	- Added EXT_SC_GET_LUN_BY_Q subcode.
  */
 
 #ifndef	_EXIOCT_H
@@ -261,22 +266,23 @@
  * ***********************************************************************
  */
 typedef struct {
-	UINT64    Signature;			/* 8 chars string */
-	UINT16    AddrMode;			/* 2 */
-	UINT16    Version;			/* 2 */
-	UINT16    SubCode;			/* 2 */
-	UINT16    Instance;			/* 2 */
-	UINT32    Status;			/* 4 */
-	UINT32    DetailStatus;			/* 4 */
-	UINT32    Reserved1;			/* 4 */
-	UINT32    RequestLen;			/* 4 */
-	UINT32    ResponseLen;			/* 4 */
-	UINT64    RequestAdr;			/* 8 */
-	UINT64    ResponseAdr;			/* 8 */
-	UINT16    HbaSelect;			/* 2 */
-	UINT16    VendorSpecificStatus[11];	/* 22 */
-	UINT64    VendorSpecificData;		/* 8 chars string */
-} EXT_IOCTL, *PEXT_IOCTL;			/* 84 / 0x54 */
+	UINT64		Signature;			/* 8 or 4 */
+	UINT16		AddrMode;			/* 2 */
+	UINT16		Version;			/* 2 */
+	UINT16		SubCode;			/* 2 */
+	UINT16		Instance;			/* 2 */
+	UINT32		Status;				/* 4 */
+	UINT32		DetailStatus;			/* 4 */
+	UINT32		Reserved1;			/* 4 */
+	UINT32		RequestLen;			/* 4 */
+	UINT32		ResponseLen;			/* 4 */
+	UINT64		RequestAdr;			/* 8 or 4 */
+	UINT64		ResponseAdr;			/* 8 or 4 */
+	UINT16		HbaSelect;			/* 2 */
+	UINT16		VendorSpecificStatus[11];	/* 22 */
+	UINT64		VendorSpecificData;		/* 8 or 4 */
+} EXT_IOCTL, *PEXT_IOCTL;			/* 84 or 68 / 0x54 or 0x44 */
+
 
 /*
  * Addressing mode used by the user application
@@ -400,6 +406,22 @@ typedef struct {
 #define	EXT_SC_QUERY_CHIP		8
 
 /*
+ * Sub codes for Reg AEN.
+ * Use in combination with EXT_CC_REG_AEN
+ */
+#define EXT_SC_REG_AEN_DEFAULT		0	/* default events to record.*/
+#define EXT_SC_REG_AEN_HBA_PORT		1	/* enable hba port events */
+#define EXT_SC_REG_AEN_TGTS		2	/* enable target events */
+
+/*
+ * Sub codes for Get AEN.
+ * Use in combination with EXT_CC_GET_AEN
+ */
+#define EXT_SC_GET_AEN_DEFAULT		0	/* default events to record.*/
+#define EXT_SC_GET_AEN_HBA_PORT		1	/* get hba port events */
+#define EXT_SC_GET_AEN_TGTS		2	/* get target events */
+
+/*
  * Sub codes for Get Data.
  * Use in combination with EXT_GET_DATA as the ioctl code
  */
@@ -411,7 +433,9 @@ typedef struct {
 #define	EXT_SC_GET_DR_DUMP_BUF		5	/* Currently Not Supported */
 #define	EXT_SC_GET_RISC_CODE		6	/* Currently Not Supported */
 #define	EXT_SC_GET_FLASH_RAM		7	/* for backward compatible */
-#define	EXT_SC_GET_BEACON_STATE		8	 
+#define	EXT_SC_GET_BEACON_STATE		8	
+#define	EXT_SC_GET_FC4_STATISTICS	9	
+#define	EXT_SC_GET_LUN_BY_Q		10
 
 /* 100 - 199 FC_INTF_TYPE */
 #define	EXT_SC_GET_LINK_STATUS		101	/* Currently Not Supported */
@@ -555,7 +579,9 @@ typedef struct _EXT_HBA_PORT {
 /* Port Speed values */
 #define EXT_DEF_PORTSPEED_1GBIT		1
 #define EXT_DEF_PORTSPEED_2GBIT		2
-#define EXT_DEF_PORTSPEED_10GBIT	4
+#define EXT_DEF_PORTSPEED_4GBIT		4
+#define EXT_DEF_PORTSPEED_8GBIT		8
+#define EXT_DEF_PORTSPEED_10GBIT	0x10
 
 typedef struct _EXT_DISC_PORT {
 	UINT8     WWNN[EXT_DEF_WWN_NAME_SIZE];	/* 8 */
@@ -659,8 +685,8 @@ typedef struct _EXT_DEST_ADDR {
 #define	EXT_DEF_DESTTYPE_FABRIC			4
 #define	EXT_DEF_DESTTYPE_SCSI			5
 
+
 /* Statistic */
-#if defined(linux)					/* Linux */
 typedef struct _EXT_HBA_PORT_STAT {
 	UINT32    ControllerErrorCount;		/* 4 */
 	UINT32    DeviceErrorCount;		/* 4 */
@@ -681,28 +707,6 @@ typedef struct _EXT_HBA_PORT_STAT {
 	uint64_t  OutputMBytes;			/* 8 */
 	UINT32    Reserved[6];			/* 24 */
 } EXT_HBA_PORT_STAT, *PEXT_HBA_PORT_STAT;	/* 112 */
-#else
-typedef struct _EXT_HBA_PORT_STAT {
-	UINT32    ControllerErrorCount;		/* 4 */
-	UINT32    DeviceErrorCount;		/* 4 */
-	UINT32    TotalIoCount;			/* 4 */
-	UINT32    TotalMBytes;			/* 4; MB of data processed */
-	UINT32    TotalLipResets;		/* 4; Total no. of LIP Reset */
-	UINT32    Reserved2;			/* 4 */
-	UINT32    TotalLinkFailures;		/* 4 */
-	UINT32    TotalLossOfSync;		/* 4 */
-	UINT32    TotalLossOfSignals;		/* 4 */
-	UINT32    PrimitiveSeqProtocolErrorCount;/* 4 */
-	UINT32    InvalidTransmissionWordCount;	/* 4 */
-	UINT32    InvalidCRCCount;		/* 4 */
-	UINT64    InputRequestCount;		/* 8 */
-	UINT64    OutputRequestCount;		/* 8 */
-	UINT64    ControlRequestCount;		/* 8 */
-	UINT64    InputMBytes;			/* 8 */
-	UINT64    OutputMBytes;			/* 8 */
-	UINT32    Reserved[6];			/* 24 */
-} EXT_HBA_PORT_STAT, *PEXT_HBA_PORT_STAT;	/* 112 */
-#endif
 
 
 /* Driver property */
@@ -819,13 +823,14 @@ typedef struct _EXT_FC_SCSI_PASSTHRU {
 #define	EXT_DEF_SCSI_PASSTHRU_DATA_OUT		2
 
 
-/* EXT_REG_AEN Request struct */
+/* EXT_REG_AEN_xxx Request struct */
 typedef struct _EXT_REG_AEN {
 	UINT32    Enable;	/* 4; non-0 to enable, 0 to disable. */
-	UINT32    Reserved;	/* 4 */
+	UINT16    BufLength;	/* 2; to RECEIVE buf len expected by driver. */
+	UINT16    Reserved;	/* 2 */
 } EXT_REG_AEN, *PEXT_REG_AEN;	/* 8 */
 
-/* EXT_GET_AEN Response struct */
+/* EXT_SC_GET_AEN_DEFAULT and EXT_SC_GET_AEN_HBA_PORT Response struct */
 typedef struct _EXT_ASYNC_EVENT {
 	UINT32	AsyncEventCode;		/* 4 */
 	union {
@@ -839,7 +844,6 @@ typedef struct _EXT_ASYNC_EVENT {
 	} Payload;
 } EXT_ASYNC_EVENT, *PEXT_ASYNC_EVENT;	/* 16 */
 
-
 /* Asynchronous Event Codes */
 #define	EXT_DEF_LIP_OCCURRED		0x8010
 #define	EXT_DEF_LINK_UP			0x8011
@@ -847,10 +851,37 @@ typedef struct _EXT_ASYNC_EVENT {
 #define	EXT_DEF_LIP_RESET		0x8013
 #define	EXT_DEF_RSCN			0x8015
 #define	EXT_DEF_DEVICE_UPDATE		0x8014
-#define	EXT_DEF_ELS          		0x8200
+#define	EXT_DEF_ELS 			0x8200
+/* Driver Defined Event Codes; only valid as hba port event. */
+#define	EXT_DEF_EV_TGT_ADD		0xA000	/* New target added */
+
+/* EXT_SC_REG_AEN_TGTS Request struct */
+typedef struct _EXT_REG_TGTEV {
+	UINT32    Enable;	/* 4; non-0 to enable, 0 to disable. */
+	UINT32    BufLength;	/* 4; to RECEIVE buf len expected by driver. */
+	UINT32    AllTargets;	/* 4 */
+	UINT8     TgtPortName[EXT_DEF_WWP_NAME_SIZE];/* 8, BE */
+	UINT32    Reserved;	/* 4 */
+} EXT_REG_TGTEV, *PEXT_REG_TGTEV;	/* 24 */
+
+/* EXT_SC_GET_AEN_TGTS Response struct */
+typedef struct _EXT_AEN_TARGETS {
+	UINT8	TgtEventCode;		/* 1 */
+	struct {
+		UINT8	TgtPortName[EXT_DEF_WWP_NAME_SIZE];/* 8, BE */
+		UINT8	Rsvd_1[11];	/* 11 */
+	} TgtInfo;
+
+} EXT_AEN_TARGETS, *PEXT_AEN_TARGETS;	/* 20 */
+
+/* Target Event Codes */
+#define	EXT_DEF_EV_TGT_OFFLINE		1
+#define	EXT_DEF_EV_TGT_ONLINE		2
+#define	EXT_DEF_EV_TGT_REMOVED		3
 
 /* Required # of entries in the queue buffer allocated. */
 #define	EXT_DEF_MAX_AEN_QUEUE		EXT_DEF_MAX_AEN_QUEUE_OS
+#define	EXT_DEF_MAX_TGTEV_QUEUE		EXT_DEF_MAX_TGTEV_QUEUE_OS
 #define	EXT_DEF_MAX_ELS_BUFS		EXT_DEF_MAX_ELS_BUFS_OS
 #define	EXT_DEF_SIZE_ELS_BUF		EXT_DEF_SIZE_ELS_BUF_OS
 
@@ -993,10 +1024,50 @@ typedef struct _EXT_ELS_PT_REQ {
 #define	EXT_DEF_GRN_BLINK_ON	0x01ED0017
 #define	EXT_DEF_GRN_BLINK_OFF	0x01ED00FF
 
+#define EXT_DEF_LED_COLOR_MASK	0x0000f000 /* all valid color bits */
+#define EXT_DEF_GRN_LED		0x00001000
+#define EXT_DEF_ORG_LED		0x00002000
+#define EXT_DEF_RED_LED		0x00004000
+
 typedef struct _EXT_BEACON_CONTROL {
 	UINT32	State;				/* 4  */
 	UINT32	Reserved[3];			/* 12 */	
 } EXT_BEACON_CONTROL , *PEXT_BEACON_CONTROL ;	/* 16 */
+
+#ifndef EXTERNAL_LUN_COUNT
+#define EXTERNAL_LUN_COUNT		2048
+#endif
+
+typedef struct _TGT_LUN_DATA_ENTRY {
+	UINT8       NodeName[EXT_DEF_WWN_NAME_SIZE];
+	UINT8       PortName[EXT_DEF_WWP_NAME_SIZE];
+
+	UINT16      LunCount;         /* Valid entries in Data array. */
+	UINT8       BusNumber;
+	UINT8       TargetId;
+	UINT8       DevType;          /* Discovered target type */
+	UINT8       LoopId;
+	UINT16      Reserved3;
+	UINT8       PortId[4];
+	UINT32      Reserved5;        /* Pad to 32-byte header.*/
+
+	UINT8       Data[EXTERNAL_LUN_COUNT];
+} TGT_LUN_DATA_ENTRY, *PTGT_LUN_DATA_ENTRY;
+
+typedef struct _TGT_LUN_DATA_LIST {
+	UINT16      Version;          /* Should be LUN_DATA_REGISTRY_VERSION.*/
+	UINT16      EntryCount;       /* Number of DataEntry entries.*/
+	UINT32      Reserved1;
+	UINT32      Reserved2;
+	UINT32      Reserved3;
+	UINT32      Reserved4;
+	UINT32      Reserved5;
+	UINT32      Reserved6;
+	UINT32      Reserved7;        /* Pad to 32-byte header.*/
+
+	TGT_LUN_DATA_ENTRY DataEntry[1];   /* Variable-length data.*/
+
+} TGT_LUN_DATA_LIST, *PTGT_LUN_DATA_LIST;
 
 #ifdef _MSC_VER
 #pragma pack()

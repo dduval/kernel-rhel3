@@ -75,7 +75,7 @@ static inline void add_usec_to_timer(struct timer_list *t, long v)
 #include "ipmi_si_sm.h"
 #include <linux/init.h>
 
-#define IPMI_SI_VERSION "35.11"
+#define IPMI_SI_VERSION "35.13"
 
 /* Measure times between events in the driver. */
 #undef DEBUG_TIMING
@@ -956,9 +956,37 @@ static void si_irq_handler(int irq, void *data, struct pt_regs *regs)
 	spin_unlock_irqrestore(&(smi_info->si_lock), flags);
 }
 
+static int smi_start_processing(void       *send_info,
+				ipmi_smi_t intf)
+{
+	struct smi_info *new_smi = send_info;
+	new_smi->intf = intf;
+	/* Set up the timer that drives the interface. */
+	init_timer(&(new_smi->si_timer));
+	new_smi->si_timer.data = (long) new_smi;
+	new_smi->si_timer.function = smi_timeout;
+	new_smi->last_timeout_jiffies = jiffies;
+	new_smi->si_timer.expires = jiffies + SI_TIMEOUT_JIFFIES;
+	add_timer(&(new_smi->si_timer));
+
+ 	if (new_smi->si_type != SI_BT) {
+		init_completion(&(new_smi->exiting));
+		new_smi->thread_pid = kernel_thread(ipmi_thread, new_smi,
+						    CLONE_FS|CLONE_FILES|
+						    CLONE_SIGHAND);
+		if (new_smi->thread_pid <= 0) {
+			printk(KERN_NOTICE "ipmi_si: Could not start"
+			       " kernel thread due to error, only using"
+			       " timers to drive the interface\n");
+		}
+	}
+	return 0;
+}
+
 static struct ipmi_smi_handlers handlers =
 {
 	sender:		       sender,
+	start_processing:      smi_start_processing,
 	request_events:        request_events,
 	new_user:	       new_user,
 	user_left:	       user_left,
@@ -1650,7 +1678,7 @@ static int decode_dmi(dmi_header_t *dm, dmi_ipmi_data_t *ipmi_data)
 		}
 	} else {
 		/* Old DMI spec. */
-		ipmi_data->base_addr = base_addr;
+		ipmi_data->base_addr = base_addr & 0xfffe;
   		ipmi_data->addr_space = IPMI_IO_ADDR_SPACE;
 		ipmi_data->offset = 1;
   	}
@@ -2174,12 +2202,16 @@ static void setup_xaction_handlers(struct smi_info *smi_info)
 
 static inline void wait_for_timer_and_thread(struct smi_info *smi_info)
 {
-	if (smi_info->thread_pid > 0) {
-		/* wake the potentially sleeping thread */
-		kill_proc(smi_info->thread_pid, SIGKILL, 0);
-		wait_for_completion(&(smi_info->exiting));
+	if (smi_info->intf) {
+		/* The timer and thread are only running if the
+		   interface has been started up and registered. */
+		if (smi_info->thread_pid > 0) {
+			/* wake the potentially sleeping thread */
+			kill_proc(smi_info->thread_pid, SIGKILL, 0);
+			wait_for_completion(&(smi_info->exiting));
+		}
+		del_timer_sync(&smi_info->si_timer);
 	}
-	del_timer_sync(&smi_info->si_timer);
 }
 
 /* Returns 0 if initialized, or negative on an error. */
@@ -2303,29 +2335,10 @@ static int init_one_smi(int intf_num, struct smi_info **smi)
 	if (new_smi->irq)
 		new_smi->si_state = SI_CLEARING_FLAGS_THEN_SET_IRQ;
 
-	/* The ipmi_register_smi() code does some operations to
-	   determine the channel information, so we must be ready to
-	   handle operations before it is called.  This means we have
-	   to stop the timer if we get an error after this point. */
-	init_timer(&(new_smi->si_timer));
-	new_smi->si_timer.data = (long) new_smi;
-	new_smi->si_timer.function = smi_timeout;
-	new_smi->last_timeout_jiffies = jiffies;
-	new_smi->si_timer.expires = jiffies + SI_TIMEOUT_JIFFIES;
-
-	add_timer(&(new_smi->si_timer));
- 	if (new_smi->si_type != SI_BT) {
-		init_completion(&(new_smi->exiting));
-		new_smi->thread_pid = kernel_thread(ipmi_thread, new_smi,
-						    CLONE_FS|CLONE_FILES|
-						    CLONE_SIGHAND);
-	}
-
 	rv = ipmi_register_smi(&handlers,
 			       new_smi,
 			       ipmi_version_major(new_smi->device_id.ipmi_version),
-			       ipmi_version_minor(new_smi->device_id.ipmi_version),
-			       &(new_smi->intf));
+			       ipmi_version_minor(new_smi->device_id.ipmi_version));
 	if (rv) {
 		printk(KERN_ERR 
 		       "ipmi_si: Unable to register device: error %d\n",

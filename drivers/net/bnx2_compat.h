@@ -7,6 +7,7 @@
 #include <linux/delay.h>
 #include <linux/time.h>
 #include <linux/sched.h>
+#include <linux/netdevice.h>
 
 #define __iomem
 #define __bitwise
@@ -123,5 +124,10 @@ static inline unsigned long msleep_interruptible(unsigned int msecs)
 #define INIT_WORK INIT_TQUEUE
 #define schedule_work schedule_task
 #define flush_scheduled_work flush_scheduled_tasks
+
+static inline void *netdev_priv(struct net_device *dev)
+{
+	return dev->priv;
+}
 
 #endif /* __BNX2_COMPAT_H__ */

@@ -1,27 +1,15 @@
-/******************************************************************************
- *                  QLOGIC LINUX SOFTWARE
+/*
+ * QLogic Fibre Channel HBA Driver
+ * Copyright (c)  2003-2005 QLogic Corporation
  *
- * QLogic ISP2x00 device driver for Linux 2.4.x
- * Copyright (C) 2003 QLogic Corporation
- * (www.qlogic.com)
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2, or (at your option) any
- * later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- ******************************************************************************/
+ * See LICENSE.qla2xxx for copyright and licensing details.
+ */
 
 
 #define QLA_PT_CMD_DRV_TOV		(ql2xioctltimeout + 1) /* drvr timeout */
 #define QLA_IOCTL_ACCESS_WAIT_TIME	(ql2xioctltimeout + 2) /* wait_q tov */
-#define QLA_INITIAL_IOCTLMEM_SIZE	(2 * PAGE_SIZE)
-#define QLA_IOCTL_SCRAP_SIZE		2048 /* scrap memory for local use. */
+#define QLA_INITIAL_IOCTLMEM_SIZE	8192
+#define QLA_IOCTL_SCRAP_SIZE		16384 /* scrap memory for local use. */
 
 /* ELS related defines */
 #define FC_HEADER_LEN		24
@@ -45,6 +33,8 @@ extern int qla2x00_send_loopback(scsi_qla_host_t *, EXT_IOCTL *, int);
 extern int qla2x00_read_option_rom(scsi_qla_host_t *, EXT_IOCTL *, int);
 extern int qla2x00_update_option_rom(scsi_qla_host_t *, EXT_IOCTL *, int);
 extern int qla2x00_get_option_rom_layout(scsi_qla_host_t *, EXT_IOCTL *, int);
+extern int qla2x00_get_vpd(scsi_qla_host_t *, EXT_IOCTL *, int);
+extern int qla2x00_update_vpd(scsi_qla_host_t *, EXT_IOCTL *, int);
 #endif
 
 
@@ -81,6 +71,7 @@ STATIC int qla2x00_get_fcport_summary(scsi_qla_host_t *, EXT_DEVICEDATAENTRY *,
     void *, uint32_t, uint32_t, uint32_t *, uint32_t *);
 STATIC int qla2x00_std_missing_port_summary(scsi_qla_host_t *,
     EXT_DEVICEDATAENTRY *, void *, uint32_t, uint32_t *, uint32_t *);
+
 STATIC int qla2x00_query_driver(scsi_qla_host_t *, EXT_IOCTL *, int);
 STATIC int qla2x00_query_fw(scsi_qla_host_t *, EXT_IOCTL *, int);
 
@@ -123,10 +114,16 @@ STATIC uint8_t qla2x00_wait_q_add(scsi_qla_host_t *, wait_q_t **);
 STATIC void qla2x00_wait_q_get_next(scsi_qla_host_t *, wait_q_t **);
 STATIC void qla2x00_wait_q_remove(scsi_qla_host_t *, wait_q_t *);
 
-#if defined(ISP2300)
+STATIC int qla2x00_get_tgt_lun_by_q(scsi_qla_host_t *, EXT_IOCTL *, int);
+
+#if !defined(ISP2100) && !defined(ISP2200)
 /* BEACON Support */
 STATIC int qla2x00_get_led_state(scsi_qla_host_t *, EXT_IOCTL *, int);
 STATIC int qla2x00_set_led_state(scsi_qla_host_t *, EXT_IOCTL *, int);
+static int qla2x00_set_led_23xx(scsi_qla_host_t *, EXT_BEACON_CONTROL *,
+    uint32_t *, uint32_t *);
+static int qla2x00_set_led_24xx(scsi_qla_host_t *, EXT_BEACON_CONTROL *,
+    uint32_t *, uint32_t *);
 #endif
 
 
@@ -303,6 +300,21 @@ qla2x00_ioctl(Scsi_Device *dev, int cmd, void *arg)
 		return (ret);
 	}
 
+#if defined(QLA_CONFIG_COMPAT)
+	if (pext->AddrMode == EXT_DEF_ADDR_MODE_64) {
+		int	ocmd;
+
+		ocmd = cmd;
+		cmd = ocmd - 0x40000;
+		DEBUG9(printk("%s: got 64bit user app. Converting cmd "
+		    "value from %x to %x.\n",
+		    __func__, ocmd, cmd);)
+	} else {
+		DEBUG9(printk("%s: got 32bit user app. cmd =%x.\n",
+		    __func__, cmd);)
+	}
+#endif
+
 	/* check signature of this ioctl */
 	temp = (uint8_t *) &pext->Signature;
 
@@ -408,6 +420,10 @@ qla2x00_ioctl(Scsi_Device *dev, int cmd, void *arg)
 			ret = tmp_rval;
 
 		KMEM_FREE(pext, sizeof(EXT_IOCTL));
+
+		DEBUG9(printk("%s: DRIVER_SPECIFIC exiting. ret=%d.\n",
+		    __func__, ret);)
+
 		return (ret);
 
 	default:
@@ -559,6 +575,16 @@ qla2x00_ioctl(Scsi_Device *dev, int cmd, void *arg)
 	        ret = qla2x00_get_option_rom_layout(ha, pext, mode);
 	        break; 
 
+#if !defined(ISP2100) && !defined(ISP2200)
+	case INT_CC_GET_VPD:
+		ret = qla2x00_get_vpd(ha, pext, mode);
+		break; 
+
+	case INT_CC_UPDATE_VPD:
+		ret = qla2x00_update_vpd(ha, pext, mode);
+		break; 
+#endif
+
 #endif /* INTAPI */
 
 	case EXT_CC_SEND_FCCT_PASSTHRU:
@@ -586,6 +612,8 @@ qla2x00_ioctl(Scsi_Device *dev, int cmd, void *arg)
 	case FO_CC_SET_LUN_DATA:
 	case FO_CC_GET_TARGET_DATA:
 	case FO_CC_SET_TARGET_DATA:
+	case FO_CC_GET_LBTYPE:
+	case FO_CC_SET_LBTYPE:
 		DEBUG9(printk("%s: failover arg (%p):\n", __func__, arg);)
 
 		qla2x00_fo_ioctl(ha, cmd, pext, mode);
@@ -593,6 +621,9 @@ qla2x00_ioctl(Scsi_Device *dev, int cmd, void *arg)
 		break;
 
 	default:
+		DEBUG9_10(printk(
+		    "%s: invalid request (%x):\n", __func__, cmd);)
+
 		pext->Status = EXT_STATUS_INVALID_REQUEST;
 		break;
 
@@ -954,6 +985,7 @@ qla2x00_get_driver_specifics(EXT_IOCTL *pext)
 	if (ret) {
 		pext->Status = EXT_STATUS_COPY_ERR;
 		DEBUG9_10(printk("%s: ERROR copy resp buf\n", __func__);)
+		ret = (-EFAULT);
 	}
 
 	DEBUG9(printk("%s: exiting. ret=%d.\n",
@@ -998,6 +1030,7 @@ qla2x00_aen_reg(scsi_qla_host_t *ha, EXT_IOCTL *cmd, int mode)
 		}
 	} else {
 		cmd->Status = EXT_STATUS_COPY_ERR;
+		rval = (-EFAULT);
 	}
 
 	DEBUG9(printk("%s(%ld): inst %ld reg_struct.Enable(%d) "
@@ -1116,6 +1149,7 @@ qla2x00_aen_get(scsi_qla_host_t *ha, EXT_IOCTL *cmd, int mode)
 		stat = EXT_STATUS_COPY_ERR;
 		DEBUG9_10(printk("%s(%ld): inst=%ld FAILED. error = %d\n",
 		    __func__, ha->host_no, ha->instance, stat);)
+		rval = (-EFAULT);
 	} else {
 		stat = EXT_STATUS_OK;
 	}
@@ -1337,7 +1371,10 @@ qla2x00_query_hba_node(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	ptmp_hba_node->SerialNum[2] = ha->serial2;
 	sprintf((char *)(ptmp_hba_node->DriverVersion),qla2x00_version_str);
 	sprintf((char *)(ptmp_hba_node->FWVersion),"%2d.%02d.%02d",
-	    bdp->fwver[0], bdp->fwver[1], bdp->fwver[2]);
+	    ha->fw_version[0], ha->fw_version[1], ha->fw_version[2]);
+	DEBUG9_10(printk("%s(%ld): inst=%ld fw ver=%02d.%02d.%02d.\n",
+	    __func__, ha->host_no, ha->instance,
+	    ha->fw_version[0], ha->fw_version[1], ha->fw_version[2]);)
 
 	/* Option ROM version string. */
 	memset(ptmp_hba_node->OptRomVersion, 0,
@@ -1357,21 +1394,48 @@ qla2x00_query_hba_node(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	memset(ptmp_hba_node->BIFCodeVersion, 0,
 	    sizeof(ptmp_hba_node->BIFCodeVersion));
 	if (test_bit(ROM_CODE_TYPE_FCODE, &ha->code_types)) {
-		unsigned int barray[3];
+#if defined(ISP2300)
+		if (check_24xx_or_54xx_device_ids(ha) || check_25xx_device_ids(ha)) {
+			ptmp_hba_node->BIValid |= EXT_HN_BI_FCODE_VALID;
+			ptmp_hba_node->BIFCodeVersion[0] = ha->fcode_revision[1];
+			ptmp_hba_node->BIFCodeVersion[1] = ha->fcode_revision[0];
+                } else {
+#endif
+			unsigned int barray[3];
 
-		memset (barray, 0, sizeof(barray));
-		ptmp_hba_node->BIValid |= EXT_HN_BI_FCODE_VALID;
-		sscanf(ha->fcode_revision, "%u.%u.%u", &barray[0], &barray[1],
-		    &barray[2]);
-		ptmp_hba_node->BIFCodeVersion[0] = barray[0];
-		ptmp_hba_node->BIFCodeVersion[1] = barray[1];
-		ptmp_hba_node->BIFCodeVersion[2] = barray[2];
+			memset (barray, 0, sizeof(barray));
+			ptmp_hba_node->BIValid |= EXT_HN_BI_FCODE_VALID;
+			sscanf(ha->fcode_revision, "%u.%u.%u",
+			    &barray[0], &barray[1], &barray[2]);
+			ptmp_hba_node->BIFCodeVersion[0] = barray[0];
+			ptmp_hba_node->BIFCodeVersion[1] = barray[1];
+			ptmp_hba_node->BIFCodeVersion[2] = barray[2];
+#if defined(ISP2300)
+		}
+#endif
 	}
 	if (test_bit(ROM_CODE_TYPE_EFI, &ha->code_types)) {
-		ptmp_hba_node->BIValid |= EXT_HN_BI_FCODE_VALID;
+		ptmp_hba_node->BIValid |= EXT_HN_BI_EFI_VALID;
 		ptmp_hba_node->BIEfiVersion[0] = ha->efi_revision[1];
 		ptmp_hba_node->BIEfiVersion[1] = ha->efi_revision[0];
 	}
+
+#if defined(ISP2300)
+	if (check_24xx_or_54xx_device_ids(ha) || check_25xx_device_ids(ha) ||
+	    (ha->device_id == QLA2322_DEVICE_ID)) {
+		ptmp_hba_node->BIValid |= EXT_HN_BI_FW_VALID;
+		ptmp_hba_node->BIFwVersion[0] = ha->fw_revision[0];
+		ptmp_hba_node->BIFwVersion[1] = ha->fw_revision[1];
+		ptmp_hba_node->BIFwVersion[2] = ha->fw_revision[2];
+		ptmp_hba_node->BIFwVersion[3] = ha->fw_revision[3];
+
+		DEBUG9_10(printk(
+		    "%s(%ld): inst=%ld fw rev=%04d.%04d.%04d.%04d.\n",
+		    __func__, ha->host_no, ha->instance,
+		    ha->fw_revision[0], ha->fw_revision[1],
+		    ha->fw_revision[2], ha->fw_revision[3]);)
+	}
+#endif
 
 	ptmp_hba_node->InterfaceType = EXT_DEF_FC_INTF_TYPE;
 	ptmp_hba_node->PortCount = 1;
@@ -1392,7 +1456,7 @@ qla2x00_query_hba_node(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR copy rsp buffer.\n",
 		    __func__, ha->host_no, ha->instance);)
 		qla2x00_free_ioctl_scrap_mem(ha);
-		return (ret);
+		return (-EFAULT);
 	}
 
 	pext->Status       = EXT_STATUS_OK;
@@ -1445,14 +1509,14 @@ qla2x00_query_hba_port(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	}
 
 	/* reflect all HBA PORT related info */
-	ptmp_hba_port->WWPN[7] = ha->init_cb->port_name[7];
-	ptmp_hba_port->WWPN[6] = ha->init_cb->port_name[6];
-	ptmp_hba_port->WWPN[5] = ha->init_cb->port_name[5];
-	ptmp_hba_port->WWPN[4] = ha->init_cb->port_name[4];
-	ptmp_hba_port->WWPN[3] = ha->init_cb->port_name[3];
-	ptmp_hba_port->WWPN[2] = ha->init_cb->port_name[2];
-	ptmp_hba_port->WWPN[1] = ha->init_cb->port_name[1];
-	ptmp_hba_port->WWPN[0] = ha->init_cb->port_name[0];
+	ptmp_hba_port->WWPN[7] = ha->port_name[7];
+	ptmp_hba_port->WWPN[6] = ha->port_name[6];
+	ptmp_hba_port->WWPN[5] = ha->port_name[5];
+	ptmp_hba_port->WWPN[4] = ha->port_name[4];
+	ptmp_hba_port->WWPN[3] = ha->port_name[3];
+	ptmp_hba_port->WWPN[2] = ha->port_name[2];
+	ptmp_hba_port->WWPN[1] = ha->port_name[1];
+	ptmp_hba_port->WWPN[0] = ha->port_name[0];
 	ptmp_hba_port->Id[0] = 0;
 	ptmp_hba_port->Id[1] = ha->d_id.r.d_id[2];
 	ptmp_hba_port->Id[2] = ha->d_id.r.d_id[1];
@@ -1477,6 +1541,9 @@ qla2x00_query_hba_port(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 
 	port_cnt = 0;
 	list_for_each_entry(fcport, &ha->fcports, list) {
+		if (fcport->port_type != FCT_TARGET)
+			continue;
+
 		/* if removed or missing */
 		if (atomic_read(&fcport->state) != FC_ONLINE) {
 			DEBUG9_10(printk(
@@ -1535,8 +1602,7 @@ qla2x00_query_hba_port(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 
 	/* Return supported FC4 type depending on driver support. */
 	ptmp_hba_port->PortSupportedFC4Types = EXT_DEF_FC4_TYPE_SCSI;
-#if defined(FC_IP_SUPPORT)
-
+#if defined(ISP2300)
 	ptmp_hba_port->PortSupportedFC4Types |= EXT_DEF_FC4_TYPE_IP;
 #endif
 #if defined(FC_SCTP_SUPPORT)
@@ -1575,7 +1641,7 @@ qla2x00_query_hba_port(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR copy rsp buffer.\n",
 		    __func__, ha->host_no, ha->instance);)
 		qla2x00_free_ioctl_scrap_mem(ha);
-		return (ret);
+		return (-EFAULT);
 	}
 
 	pext->Status       = EXT_STATUS_OK;
@@ -1735,7 +1801,7 @@ qla2x00_query_disc_port(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR copy rsp buffer.\n",
 		    __func__, ha->host_no, ha->instance);)
 		qla2x00_free_ioctl_scrap_mem(ha);
-		return (ret);
+		return (-EFAULT);
 	}
 
 	pext->Status       = EXT_STATUS_OK;
@@ -1804,11 +1870,19 @@ qla2x00_query_disc_tgt(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		if (ha->otgt[tgt] == NULL) {
 			continue;
 		}
+		if (ha->otgt[tgt]->vis_port == NULL) {
+			/* port doesn't exist */
+			DEBUG9(printk("%s(%ld): tgt %d port not exist.\n",
+			    __func__, ha->host_no, tgt);)
+			continue;
+		}
+
 		/* if wrong target id then skip to next entry */
 		if (inst != pext->Instance) {
 			inst++;
 			continue;
 		}
+
 		tq = ha->otgt[tgt];
 		break;
 	}
@@ -1923,7 +1997,7 @@ qla2x00_query_disc_tgt(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR copy rsp buffer.\n",
 		    __func__, ha->host_no, ha->instance);)
 		qla2x00_free_ioctl_scrap_mem(ha);
-		return (ret);
+		return (-EFAULT);
 	}
 
 	pext->Status       = EXT_STATUS_OK;
@@ -2004,7 +2078,7 @@ qla2x00_query_chip(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR copy rsp buffer.\n",
 		    __func__, ha->host_no, ha->instance);)
 		qla2x00_free_ioctl_scrap_mem(ha);
-		return (ret);
+		return (-EFAULT);
 	}
 
 	pext->Status       = EXT_STATUS_OK;
@@ -2062,7 +2136,12 @@ qla2x00_get_data(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	case EXT_SC_GET_RNID:
 		tmp_rval = qla2x00_get_rnid_params(ha, pext, mode);
 		break;
-#if defined(ISP2300)
+
+	case EXT_SC_GET_LUN_BY_Q:
+		tmp_rval = qla2x00_get_tgt_lun_by_q(ha, pext, mode);
+		break;
+
+#if !defined(ISP2100) && !defined(ISP2200)
 	case EXT_SC_GET_BEACON_STATE:
 		tmp_rval = qla2x00_get_led_state(ha, pext, mode);
 		break;
@@ -2124,9 +2203,16 @@ qla2x00_get_statistics(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	}
 
 	/* Send mailbox cmd to get more. */
-	if ((rval = qla2x00_get_link_status(ha, ha->loop_id, &stat_buf,
-	    mb_stat)) != QL_STATUS_SUCCESS) {
+#if defined(ISP2300)
+	if (check_24xx_or_54xx_device_ids(ha) || check_25xx_device_ids(ha)) 
+		rval = qla24xx_get_isp_stats(ha, (uint32_t *)&stat_buf,
+		    sizeof(stat_buf) / 4, mb_stat);
+	else
+#endif
+		rval = qla2x00_get_link_status(ha, ha->loop_id, &stat_buf, 
+						mb_stat);
 
+	if (rval != QL_STATUS_SUCCESS) {
 		if (rval == BIT_0) {
 			pext->Status = EXT_STATUS_NO_MEMORY;
 		} else if (rval == BIT_1) {
@@ -2213,7 +2299,7 @@ qla2x00_get_statistics(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR copy rsp buffer.\n",
 		    __func__, ha->host_no, ha->instance);)
 		qla2x00_free_ioctl_scrap_mem(ha);
-		return (ret);
+		return (-EFAULT);
 	}
 
 	pext->Status       = EXT_STATUS_OK;
@@ -2268,7 +2354,7 @@ qla2x00_get_fc_statistics(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		pext->Status = EXT_STATUS_COPY_ERR;
 		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR copy req buf.\n",
 		    __func__, ha->host_no, ha->instance);)
-		return (ret);
+		return (-EFAULT);
 	}
 
 	/* find the device's loop_id */
@@ -2409,7 +2495,7 @@ qla2x00_get_fc_statistics(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR copy rsp buffer.\n",
 		    __func__, ha->host_no, ha->instance);)
 		qla2x00_free_ioctl_scrap_mem(ha);
-		return (ret);
+		return (-EFAULT);
 	}
 
 	pext->Status       = EXT_STATUS_OK;
@@ -2491,7 +2577,7 @@ qla2x00_get_port_summary(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		    "copy_from_user() of struct failed (%d).\n",
 		    __func__, ha->host_no, ha->instance, ret);)
 		qla2x00_free_ioctl_scrap_mem(ha);
-		return (ret);
+		return (-EFAULT);
 	}
 
 	/* Get maximum number of entries allowed in response buf */
@@ -2566,7 +2652,7 @@ qla2x00_get_port_summary(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		    "devicedata buffer.\n",
 		    __func__, ha->host_no, ha->instance);)
 		qla2x00_free_ioctl_scrap_mem(ha);
-		return (ret);
+		return (-EFAULT);
 	}
 
 	pext->Status       = EXT_STATUS_OK;
@@ -2748,7 +2834,7 @@ qla2x00_get_fcport_summary(scsi_qla_host_t *ha, EXT_DEVICEDATAENTRY *pdd_entry,
 			DEBUG9_10(printk("%s(%ld): inst=%ld ERROR copy rsp "
 			    "entry list buffer.\n",
 			    __func__, ha->host_no, ha->instance);)
-			return (ret);
+			return (-EFAULT);
 		}
 
 		*pentry_cnt += 1;
@@ -2854,6 +2940,7 @@ qla2x00_std_missing_port_summary(scsi_qla_host_t *ha,
 				    "ERROR copy rsp list buffer.\n",
 				    __func__, ha->host_no,
 				    ha->instance);)
+				ret = (-EFAULT);
 				break;
 			} else {
 				*pentry_cnt+=1;
@@ -2935,7 +3022,7 @@ qla2x00_query_driver(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR copy rsp buffer.\n",
 		    __func__, ha->host_no, ha->instance);)
 		qla2x00_free_ioctl_scrap_mem(ha);
-		return (ret);
+		return (-EFAULT);
 	}
 
 	pext->Status       = EXT_STATUS_OK;
@@ -3003,7 +3090,7 @@ qla2x00_query_fw(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR copy rsp buffer.\n",
 		    __func__, ha->host_no, ha->instance);)
 		qla2x00_free_ioctl_scrap_mem(ha);
-		return (ret);
+		return (-EFAULT);
 	}
 
 	pext->Status       = EXT_STATUS_OK;
@@ -3042,7 +3129,7 @@ qla2x00_msiocb_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext, int cmd,
 		    QLA_INITIAL_IOCTLMEM_SIZE) != QL_STATUS_SUCCESS) {
 
 			DEBUG9_10(printk("%s: ERROR cannot alloc DMA "
-			    "buffer size=%lx.\n",
+			    "buffer size=%d.\n",
 			    __func__, QLA_INITIAL_IOCTLMEM_SIZE);)
 
 			pext->Status = EXT_STATUS_NO_MEMORY;
@@ -3114,6 +3201,7 @@ qla2x00_msiocb_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext, int cmd,
 		ret = qla2x00_send_fcct(ha, pext, pscsi_cmd, ptemp_fcport,
 		    ptemp_fclun, mode);
 		break;
+
 #if defined(ISP2300)
 	case EXT_CC_SEND_ELS_PASSTHRU:
 		DEBUG9(printk("%s: got ELS passthru cmd.\n", __func__));
@@ -3207,7 +3295,7 @@ qla2x00_send_els_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 		    "copy_from_user() of struct failed (%d).\n",
 		    __func__, ha->host_no, ha->instance, ret);)
 
-		return (ret);
+		return (-EFAULT);
 	}
 
 	pusr_req_buf = (uint8_t *)pext->RequestAdr + sizeof(EXT_ELS_PT_REQ);
@@ -3220,7 +3308,7 @@ qla2x00_send_els_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 		    "copy_from_user() of request buf failed (%d).\n",
 		    __func__, ha->host_no, ha->instance, ret);)
 
-		return (ret);
+		return (-EFAULT);
 	}
 
 	DEBUG9(printk("%s(%ld): inst=%ld after copy request.\n",
@@ -3259,7 +3347,7 @@ qla2x00_send_els_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 
 	/* second: it cannot be the local/current HBA itself */
 	if (!invalid_wwn) {
-		if (memcmp(ha->init_cb->port_name, pels_pt_req->WWPN,
+		if (memcmp(ha->port_name, pels_pt_req->WWPN,
 		    EXT_DEF_WWN_NAME_SIZE) == 0) {
 
 			/* local HBA specified. */
@@ -3385,7 +3473,7 @@ qla2x00_send_els_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 		pext->Status = EXT_STATUS_COPY_ERR;
 		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR copy rsp buffer.\n",
 		    __func__, ha->host_no, ha->instance);)
-		return (ret);
+		return (-EFAULT);
 	}
 
 	DEBUG9(printk("%s(%ld): inst=%ld exiting normally.\n",
@@ -3490,8 +3578,7 @@ qla2x00_send_fcct(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 		    "%s(%ld): inst=%ld ERROR copy req buf. ret=%d\n",
 		    __func__, ha->host_no, ha->instance, ret);)
 
-
-		return (ret);
+		return (-EFAULT);
 	}
 
 	DEBUG9(printk("%s(%ld): inst=%ld after copy request.\n",
@@ -3517,11 +3604,14 @@ qla2x00_send_fcct(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 		return (ret);
 	}
 
-	if (CMD_COMPL_STATUS(pscsi_cmd) != 0 ||
+	if ((CMD_COMPL_STATUS(pscsi_cmd) != 0 &&
+	    CMD_COMPL_STATUS(pscsi_cmd) != 0x15 &&
+	    CMD_COMPL_STATUS(pscsi_cmd) != 0x7) ||
 	    CMD_ENTRY_STATUS(pscsi_cmd) != 0) {
-		DEBUG9_10(printk("%s(%ld): inst=%ld cmd returned error=%x.\n",
+		DEBUG9_10(printk("%s(%ld): inst=%ld cmd completion error=%x. "
+		    "entry stat=%x.\n",
 		    __func__, ha->host_no, ha->instance,
-		    CMD_COMPL_STATUS(pscsi_cmd));)
+		    CMD_COMPL_STATUS(pscsi_cmd), CMD_ENTRY_STATUS(pscsi_cmd));)
 		pext->Status = EXT_STATUS_ERR;
 		return (ret);
 	}
@@ -3532,7 +3622,7 @@ qla2x00_send_fcct(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 		pext->Status = EXT_STATUS_COPY_ERR;
 		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR copy rsp buffer.\n",
 		    __func__, ha->host_no, ha->instance);)
-		return (ret);
+		return (-EFAULT);
 	}
 
 	DEBUG9(printk("%s(%ld): inst=%ld exiting.\n",
@@ -3667,61 +3757,137 @@ qla2x00_start_ms_cmd(scsi_qla_host_t *ha, EXT_IOCTL *pext, srb_t *sp,
 		return (QL_STATUS_RESOURCE_ERROR);
 	}
 
-	pkt->entry_type  = MS_IOCB_TYPE;
-	pkt->entry_count = 1;
-	
-	if (pels_pt_req != NULL) {
-		/* process ELS passthru command */
-		usr_req_len = pext->RequestLen - sizeof(EXT_ELS_PT_REQ);
-		usr_resp_len = pext->ResponseLen - sizeof(EXT_ELS_PT_REQ);
-	
-		pkt->control_flags = __constant_cpu_to_le16(CF_ELS_PASSTHRU);
-#if defined(EXTENDED_IDS)
-		pkt->loop_id = cpu_to_le16(pels_pt_req->Lid);
-#else
-		pkt->loop_id = pels_pt_req->Lid;
-#endif
-		pkt->type    = 1; /* ELS frame */
-		
-		if (pext->ResponseLen != 0) {
-			pkt->r_ctl    = ELS_REQUEST_RCTL;
-			pkt->rx_id    = 0;
+#if !defined(ISP2100) && !defined(ISP2200)
+	if (check_24xx_or_54xx_device_ids(ha) || check_25xx_device_ids(ha)) {
+		struct ct_entry_24xx *ct_pkt;
+		struct els_entry_24xx *els_pkt;
+
+		ct_pkt = (struct ct_entry_24xx *)pkt;
+		els_pkt = (struct els_entry_24xx *)pkt;
+
+		if (pels_pt_req != NULL) {
+			/* ELS Passthru */
+			usr_req_len = pext->RequestLen -
+			    sizeof(EXT_ELS_PT_REQ);
+			usr_resp_len = pext->ResponseLen -
+			    sizeof(EXT_ELS_PT_REQ);
+
+			els_pkt->entry_type = ELS_IOCB_TYPE;
+			els_pkt->entry_count = 1;
+			els_pkt->nport_handle = cpu_to_le16(pels_pt_req->Lid);
+			els_pkt->tx_dsd_count = __constant_cpu_to_le16(1);
+			els_pkt->rx_dsd_count = __constant_cpu_to_le16(1);
+			els_pkt->rx_byte_count = cpu_to_le32(usr_resp_len);
+			els_pkt->tx_byte_count = cpu_to_le32(usr_req_len);
+			els_pkt->sof_type = EST_SOFI3; /* assume class 3 */
+			els_pkt->opcode = 0;
+			els_pkt->control_flags = 0;
+
+			if (pext->ResponseLen == 0) {
+				memcpy(els_pkt->port_id, &pels_pt_req->Id[1],
+				    3);
+			}
+
+			els_pkt->tx_address[0] =
+			    cpu_to_le32(LSD(ha->ioctl_mem_phys));
+			els_pkt->tx_address[1] =
+			    cpu_to_le32(MSD(ha->ioctl_mem_phys));
+			els_pkt->tx_len = els_pkt->tx_byte_count;
+			els_pkt->rx_address[0] =
+			    cpu_to_le32(LSD(ha->ioctl_mem_phys));
+			els_pkt->rx_address[1] =
+			    cpu_to_le32(MSD(ha->ioctl_mem_phys));
+			els_pkt->rx_len = els_pkt->rx_byte_count;
 		} else {
-			pkt->r_ctl    = ELS_REPLY_RCTL;
-			pkt->rx_id    = pels_pt_req->Rxid;
+			/* CT Passthru */
+			usr_req_len = pext->RequestLen;
+			usr_resp_len = pext->ResponseLen;
+
+			ct_pkt->entry_type = CT_IOCB_TYPE;
+			ct_pkt->entry_count = 1;
+			ct_pkt->nport_handle =
+			    __constant_cpu_to_le16(NPH_SNS);
+			ct_pkt->timeout = cpu_to_le16(ql2xioctltimeout);
+			ct_pkt->cmd_dsd_count = __constant_cpu_to_le16(1);
+			ct_pkt->rsp_dsd_count = __constant_cpu_to_le16(1);
+			ct_pkt->rsp_byte_count = cpu_to_le32(usr_resp_len);
+			ct_pkt->cmd_byte_count = cpu_to_le32(usr_req_len);
+			ct_pkt->dseg_0_address[0] =
+			    cpu_to_le32(LSD(ha->ioctl_mem_phys));
+			ct_pkt->dseg_0_address[1] =
+			    cpu_to_le32(MSD(ha->ioctl_mem_phys));
+			ct_pkt->dseg_0_len = ct_pkt->cmd_byte_count;
+			ct_pkt->dseg_1_address[0] =
+			    cpu_to_le32(LSD(ha->ioctl_mem_phys));
+			ct_pkt->dseg_1_address[1] =
+			    cpu_to_le32(MSD(ha->ioctl_mem_phys));
+			ct_pkt->dseg_1_len = ct_pkt->rsp_byte_count;
 		}
 	} else {
-		usr_req_len = pext->RequestLen;
-		usr_resp_len = pext->ResponseLen;
-#if defined(EXTENDED_IDS)
-		pkt->loop_id = __constant_cpu_to_le16(MANAGEMENT_SERVER);
-#else
-		pkt->loop_id = MANAGEMENT_SERVER;
 #endif
+		pkt->entry_type  = MS_IOCB_TYPE;
+		pkt->entry_count = 1;
+		
+		if (pels_pt_req != NULL) {
+			/* process ELS passthru command */
+			usr_req_len = pext->RequestLen -
+			    sizeof(EXT_ELS_PT_REQ);
+			usr_resp_len = pext->ResponseLen -
+			    sizeof(EXT_ELS_PT_REQ);
+		
+			pkt->control_flags =
+			    __constant_cpu_to_le16(CF_ELS_PASSTHRU);
+#if defined(EXTENDED_IDS)
+			pkt->loop_id = cpu_to_le16(pels_pt_req->Lid);
+#else
+			pkt->loop_id = pels_pt_req->Lid;
+#endif
+			pkt->type    = 1; /* ELS frame */
+			
+			if (pext->ResponseLen != 0) {
+				pkt->r_ctl    = ELS_REQUEST_RCTL;
+				pkt->rx_id    = 0;
+			} else {
+				pkt->r_ctl    = ELS_REPLY_RCTL;
+				pkt->rx_id    = pels_pt_req->Rxid;
+			}
+		} else {
+			usr_req_len = pext->RequestLen;
+			usr_resp_len = pext->ResponseLen;
+#if defined(EXTENDED_IDS)
+			pkt->loop_id =
+			    __constant_cpu_to_le16(MANAGEMENT_SERVER);
+#else
+			pkt->loop_id = MANAGEMENT_SERVER;
+#endif
+		}
+
+		DEBUG9_10(printk(
+		    "%s(%ld): inst=%ld using loop_id=%02x req_len=%d, "
+		    "resp_len=%d. Initializing pkt.\n",
+		    __func__, ha->host_no, ha->instance,
+		    pkt->loop_id, usr_req_len, usr_resp_len);)
+
+		pkt->timeout = cpu_to_le16(ql2xioctltimeout);
+		pkt->cmd_dsd_count = __constant_cpu_to_le16(1);
+		pkt->total_dsd_count = __constant_cpu_to_le16(2);
+		pkt->rsp_bytecount = cpu_to_le32(usr_resp_len);
+		pkt->req_bytecount = cpu_to_le32(usr_req_len);
+
+		/* loading command payload address. user request is assumed
+		 * to have been copied to ioctl_mem.
+		 */
+		pkt->dseg_req_address[0] = cpu_to_le32(LSD(ha->ioctl_mem_phys));
+		pkt->dseg_req_address[1] = cpu_to_le32(MSD(ha->ioctl_mem_phys));
+		pkt->dseg_req_length = usr_req_len;
+
+		/* loading response payload address */
+		pkt->dseg_rsp_address[0] = cpu_to_le32(LSD(ha->ioctl_mem_phys));
+		pkt->dseg_rsp_address[1] = cpu_to_le32(MSD(ha->ioctl_mem_phys));
+		pkt->dseg_rsp_length = usr_resp_len;
+#if !defined(ISP2100) && !defined(ISP2200)
 	}
-
-	DEBUG9_10(printk("%s(%ld): inst=%ld using loop_id=%02x req_len=%d, "
-	    "resp_len=%d. Initializing pkt.\n",
-	    __func__, ha->host_no, ha->instance,
-	    pkt->loop_id, usr_req_len, usr_resp_len);)
-
-	pkt->timeout = cpu_to_le16(ql2xioctltimeout);
-	pkt->cmd_dsd_count = __constant_cpu_to_le16(1);
-	pkt->total_dsd_count = __constant_cpu_to_le16(2); /* no continuation */
-	pkt->rsp_bytecount = cpu_to_le32(usr_resp_len);
-	pkt->req_bytecount = cpu_to_le32(usr_req_len);
-
-	/* loading command payload address. user request is assumed
-	 * to have been copied to ioctl_mem.
-	 */
-	pkt->dseg_req_address[0] = cpu_to_le32(LSD(ha->ioctl_mem_phys));
-	pkt->dseg_req_address[1] = cpu_to_le32(MSD(ha->ioctl_mem_phys));
-	pkt->dseg_req_length = usr_req_len;
-
-	/* loading response payload address */
-	pkt->dseg_rsp_address[0] = cpu_to_le32(LSD(ha->ioctl_mem_phys));
-	pkt->dseg_rsp_address[1] = cpu_to_le32(MSD(ha->ioctl_mem_phys));
-	pkt->dseg_rsp_length = usr_resp_len;
+#endif
 
 	/* set flag to indicate IOCTL MSIOCB cmd in progress */
 	ha->ioctl->MSIOCB_InProgress = 1;
@@ -3806,7 +3972,7 @@ qla2x00_wwpn_to_scsiaddr(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		    "failed(%d) on request buf.\n",
 		    __func__, ha->host_no, ha->instance, ret);)
 		pext->Status = EXT_STATUS_COPY_ERR;
-		return (ret);
+		return (-EFAULT);
 	}
 
 	tq = NULL;
@@ -3862,7 +4028,7 @@ qla2x00_wwpn_to_scsiaddr(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		pext->Status = EXT_STATUS_COPY_ERR;
 		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR copy rsp buffer.\n",
 		    __func__, ha->host_no, ha->instance);)
-		return (ret);
+		return (-EFAULT);
 	}
 
 	DEBUG9(printk(KERN_INFO
@@ -4078,7 +4244,7 @@ qla2x00_ioctl_scsi_queuecommand(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 			atomic_set(&sp->ref_count, 0);
 			add_to_free_queue (ha, sp);
 
-			return (ret);
+			return (-EFAULT);
 		}
 	}
 
@@ -4282,7 +4448,7 @@ qla2x00_sc_scsi_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 		DEBUG9_10(printk(
 		    "%s(%ld): inst=%ld ERROR copy req buf ret=%d\n",
 		    __func__, ha->host_no, ha->instance, ret);)
-		return (ret);
+		return (-EFAULT);
 	}
 
 	/* set target coordinates */
@@ -4451,7 +4617,7 @@ qla2x00_sc_scsi_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 			DEBUG9_10(printk("%s(%ld): inst=%ld ERROR copy sense "
 			    "buffer.\n",
 			    __func__, ha->host_no, ha->instance);)
-			return (ret);
+			return (-EFAULT);
 		}
 	}
 
@@ -4483,7 +4649,7 @@ qla2x00_sc_scsi_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 			DEBUG9_10(printk(
 			    "%s(%ld): inst=%ld ERROR copy rsp buf\n",
 			    __func__, ha->host_no, ha->instance);)
-			return (ret);
+			return (-EFAULT);
 		}
 	}
 
@@ -4589,7 +4755,7 @@ qla2x00_sc_fc_scsi_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 		    "%s(%ld): inst=%ld ERROR copy req buf ret=%d\n",
 		    __func__, ha->host_no, ha->instance, ret);)
 
-		return (ret);
+		return (-EFAULT);
 	}
 
 	if (pfc_scsi_pass->FCScsiAddr.DestType != EXT_DEF_DESTTYPE_WWPN) {
@@ -4803,7 +4969,7 @@ qla2x00_sc_fc_scsi_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 			DEBUG9_10(printk("%s(%ld): inst=%ld ERROR copy sense "
 			    "buffer.\n",
 			    __func__, ha->host_no, ha->instance);)
-			return (ret);
+			return (-EFAULT);
 		}
 	}
 
@@ -4832,7 +4998,7 @@ qla2x00_sc_fc_scsi_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 			DEBUG9_10(printk(
 			    "%s(%ld): inst=%ld ERROR copy rsp buf\n",
 			    __func__, ha->host_no, ha->instance);)
-			return (ret);
+			return (-EFAULT);
 		}
 	}
 
@@ -4940,7 +5106,7 @@ qla2x00_sc_scsi3_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 		DEBUG9_10(printk(
 		    "%s(%ld): inst=%ld ERROR copy req buf ret=%d\n",
 		    __func__, ha->host_no, ha->instance, ret);)
-		return (ret);
+		return (-EFAULT);
 	}
 
 	if (pscsi3_pass->FCScsiAddr.DestType != EXT_DEF_DESTTYPE_WWPN) {
@@ -5148,7 +5314,7 @@ qla2x00_sc_scsi3_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 			DEBUG9_10(printk("%s(%ld): inst=%ld ERROR copy sense "
 			    "buffer.\n",
 			    __func__, ha->host_no, ha->instance);)
-			return (ret);
+			return (-EFAULT);
 		}
 	}
 
@@ -5181,7 +5347,7 @@ qla2x00_sc_scsi3_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 			DEBUG9_10(printk(
 			    "%s(%ld): inst=%ld ERROR copy rsp buf\n",
 			    __func__, ha->host_no, ha->instance);)
-			return (ret);
+			return (-EFAULT);
 		}
 	}
 
@@ -5267,7 +5433,7 @@ qla2x00_send_els_rnid(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		    "%s(%ld): inst=%ld ERROR copy req buf ret=%d\n",
 		    __func__, ha->host_no, ha->instance, ret);)
 		qla2x00_free_ioctl_scrap_mem(ha);
-		return (ret);
+		return (-EFAULT);
 	}
 
 	/* Find loop ID of the device */
@@ -5434,7 +5600,7 @@ qla2x00_send_els_rnid(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		    "%s(%ld): inst=%ld ERROR copy rsp buf\n",
 		    __func__, ha->host_no, ha->instance);)
 		qla2x00_free_ioctl_scrap_mem(ha);
-		return (ret);
+		return (-EFAULT);
 	}
 
 	if (SEND_RNID_RSP_SIZE > pext->ResponseLen) {
@@ -5515,7 +5681,7 @@ qla2x00_get_rnid_params(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		pext->Status = EXT_STATUS_COPY_ERR;
 		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR copy rsp buf\n",
 		    __func__, ha->host_no, ha->instance);)
-		return (ret);
+		return (-EFAULT);
 	}
 
 	pext->ResponseLen = copy_len;
@@ -5537,7 +5703,7 @@ qla2x00_get_rnid_params(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 
 	return (ret);
 }
-#if defined(ISP2300)
+#if !defined(ISP2100) && !defined(ISP2200)
 /*
  *qla2x00_get_led_state
  *	IOCTL to get QLA2XXX HBA LED state
@@ -5558,33 +5724,41 @@ static int
 qla2x00_get_led_state(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 {
 	int			ret = 0;
-	EXT_BEACON_CONTROL	ptmp_led_state;
+	EXT_BEACON_CONTROL	tmp_led_state;
 
 
 	DEBUG9(printk("%s(%ld): inst=%ld entered.\n",
 	    __func__, ha->host_no, ha->instance);)
 
-	if (test_bit(ABORT_ISP_ACTIVE, &ha->dpc_flags)) {
-		 pext->Status = EXT_STATUS_BUSY;
-		 DEBUG9_10(printk("%s(%ld): inst=%ld loop not ready.\n",
-		     __func__, ha->host_no, ha->instance);)
-		 return (ret);
-	 }
+	if (pext->ResponseLen < sizeof(EXT_BEACON_CONTROL)) {
+		pext->Status = EXT_STATUS_BUFFER_TOO_SMALL;
+		DEBUG9_10(printk("%s: ERROR ResponseLen too small.\n",
+		    __func__);)
 
-	if (ha->blink_led){
-		ptmp_led_state.State = EXT_DEF_GRN_BLINK_ON;
+		return (ret);
+	}
+
+	if (test_bit(ABORT_ISP_ACTIVE, &ha->dpc_flags)) {
+		pext->Status = EXT_STATUS_BUSY;
+		DEBUG9_10(printk("%s(%ld): inst=%ld loop not ready.\n",
+		    __func__, ha->host_no, ha->instance);)
+		return (ret);
+	}
+
+	if (ha->beacon_blink_led){
+		tmp_led_state.State = EXT_DEF_GRN_BLINK_ON;
 	} else {
-		ptmp_led_state.State = EXT_DEF_GRN_BLINK_OFF;
+		tmp_led_state.State = EXT_DEF_GRN_BLINK_OFF;
 
 	}
 
-	ret = copy_to_user(pext->ResponseAdr, &ptmp_led_state, 
+	ret = copy_to_user(pext->ResponseAdr, &tmp_led_state, 
 	    sizeof(EXT_BEACON_CONTROL));
 	if (ret) {
 		pext->Status = EXT_STATUS_COPY_ERR;
 		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR copy rsp buffer.\n",
 		    __func__, ha->host_no, ha->instance);)
-		return (ret);
+		return (-EFAULT);
 	}
 
 	pext->Status       = EXT_STATUS_OK;
@@ -5627,7 +5801,7 @@ qla2x00_set_host_data(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	case EXT_SC_SET_RNID:
 		ret = qla2x00_set_rnid_params(ha, pext, mode);
 		break;
-#if defined(ISP2300)
+#if !defined(ISP2100) && !defined(ISP2200)
 	case EXT_SC_SET_BEACON_STATE:
 		ret = qla2x00_set_led_state(ha, pext, mode);
 		break;
@@ -5712,7 +5886,7 @@ qla2x00_set_rnid_params(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		    "%s(%ld): inst=%ld ERROR copy req buf ret=%d\n", 
 		    __func__, ha->host_no, ha->instance, ret);)
 		qla2x00_free_ioctl_scrap_mem(ha);
-		return(ret);
+		return(-EFAULT);
 	}
 
 	tmp_rval = qla2x00_get_rnid_params_mbx(ha, ha->ioctl_mem_phys,
@@ -5750,7 +5924,7 @@ qla2x00_set_rnid_params(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	qla2x00_free_ioctl_scrap_mem(ha);
 	return (ret);
 }
-#if defined(ISP2300)
+#if !defined(ISP2100) && !defined(ISP2200)
 /*
  *qla2x00_set_led_state
  *	IOCTL to set QLA2XXX HBA LED state
@@ -5771,14 +5945,20 @@ static int
 qla2x00_set_led_state(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 {
 	int			ret = 0;
-	EXT_BEACON_CONTROL	ptmp_led_state;
-	device_reg_t		*reg = ha->iobase;
-	uint8_t			gpio_enable, gpio_data;
-	unsigned long		cpu_flags = 0;
+	uint32_t		tmp_ext_stat = 0;
+	uint32_t		tmp_ext_dstat = 0;
+	EXT_BEACON_CONTROL	tmp_led_state;
 
 
 	DEBUG9(printk("%s(%ld): inst=%ld entered.\n",
 	    __func__, ha->host_no, ha->instance);)
+
+	if (pext->RequestLen < sizeof(EXT_BEACON_CONTROL)) {
+		pext->Status = EXT_STATUS_BUFFER_TOO_SMALL;
+		DEBUG9_10(printk("%s: ERROR RequestLen too small.\n",
+		    __func__);)
+		return (ret);
+	}
 
 	if (test_bit(ABORT_ISP_ACTIVE, &ha->dpc_flags)) {
 		pext->Status = EXT_STATUS_BUSY;
@@ -5787,166 +5967,374 @@ qla2x00_set_led_state(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		return (ret);
 	}
 
-	ret = copy_from_user(&ptmp_led_state, pext->RequestAdr,
+	ret = copy_from_user(&tmp_led_state, pext->RequestAdr,
 	    pext->RequestLen);
 	if (ret) {
 		pext->Status = EXT_STATUS_COPY_ERR;
 		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR copy req buf.\n",
 		    __func__, ha->host_no, ha->instance);)
-		return (ret);
+		return (-EFAULT);
 	}
 
-	if (ptmp_led_state.State != EXT_DEF_GRN_BLINK_ON 
-	    && ptmp_led_state.State != EXT_DEF_GRN_BLINK_OFF){
-		pext->Status = EXT_STATUS_ERR;
-		DEBUG9_10(printk("%s(%ld): inst=%ld "
-		    "Unknown Led State set operation.\n",
-		    __func__, ha->host_no, ha->instance);)
-		return (ret);
+	if ((ha->device_id & 0xff00) == 0x2300 ||
+	    (ha->device_id & 0xff00) == 0x6300) {
+		/* 23xx */
+		ret = qla2x00_set_led_23xx(ha, &tmp_led_state, &tmp_ext_stat,
+		    &tmp_ext_dstat);
+	} else if ((ha->device_id & 0xff00) == 0x2400 ||
+	    (ha->device_id & 0xff00) == 0x2500) {
+		/* 24xx/25xx */
+		ret = qla2x00_set_led_24xx(ha, &tmp_led_state, &tmp_ext_stat,
+		    &tmp_ext_dstat);
+	} else {
+		/* not supported */
+		tmp_ext_stat = EXT_STATUS_UNSUPPORTED_SUBCODE;
 	}
 
-	if (ptmp_led_state.State == EXT_DEF_GRN_BLINK_ON){
-
-		DEBUG9(printk("%s(%ld): inst=%ld start blinking led \n",
-		    __func__, ha->host_no, ha->instance);)
-
-		if (qla2x00_get_firmware_options(ha,
-		    &ha->fw_options1, &ha->fw_options2, 
-		    &ha->fw_options3) != QL_STATUS_SUCCESS){
-
-			pext->Status = EXT_STATUS_ERR;
-			DEBUG9_10(printk("%s(%ld): inst=%ld get_firmware"
-			    " options failed.\n",
-			    __func__, ha->host_no, ha->instance);)
-			return (ret);
-		} else {
-			uint16_t        opt10 = 0, opt11 = 0;
-
-			DEBUG9(printk("%s(%ld): inst=%ld get_firmware"
-			    " options success fw_options1=0x%x"
-			    " fw_options2=0x%x fw_options3=0x%x.\n",
-			    __func__, ha->host_no, ha->instance,
-			    ha->fw_options1,ha->fw_options2,ha->fw_options3);)
-
-			/* Clear BIT_8 to not set Output Emphasis 
-			 * and Output Swing values again
-			 */ 
-			ha->fw_options1 &= ~BIT_8;
-
-			ha->fw_options1 |= DISABLE_GPIO; /* Disable GPIO pins */
-
-			if (qla2x00_set_firmware_options(ha, ha->fw_options1,
-			    ha->fw_options2, ha->fw_options3, 
-			    opt10, opt11)!= QL_STATUS_SUCCESS){
-
-				pext->Status = EXT_STATUS_ERR;
-				DEBUG9_10(printk("%s(%ld): inst=%ld set" 
-				    "firmware  options failed.\n",
-				    __func__, ha->host_no, ha->instance);)
-				return (ret);
-			}
-
-			if (ha->pio_address) 
-				reg = (device_reg_t *)ha->pio_address;
-
-			/* Turn off both LEDs */
-			spin_lock_irqsave(&ha->hardware_lock, cpu_flags);
-			if (ha->pio_address) {
-				gpio_enable = RD_REG_WORD_PIO(&reg->gpioe);
-				gpio_data   = RD_REG_WORD_PIO(&reg->gpiod);
-			} else {
-				gpio_enable = RD_REG_WORD(&reg->gpioe);
-				gpio_data   = RD_REG_WORD(&reg->gpiod);
-			}
-			gpio_enable |= LED_MASK;
-
-			/* Set the modified gpio_enable values */
-			if (ha->pio_address) {
-				WRT_REG_WORD_PIO(&reg->gpioe,gpio_enable);
-			} else {	
-				WRT_REG_WORD(&reg->gpioe,gpio_enable);
-				PCI_POSTING(&reg->gpioe);
-			}
-
-			/* Clear out previously set LED colour */
-			gpio_data &= ~LED_MASK;
-			if (ha->pio_address) {
-				WRT_REG_WORD_PIO(&reg->gpiod,gpio_data);
-			} else {
-				WRT_REG_WORD(&reg->gpiod,gpio_data);
-				PCI_POSTING(&reg->gpiod);
-			}
-			spin_unlock_irqrestore(&ha->hardware_lock, cpu_flags);
-
-			/* Let the per HBA timer kick off the blinking process*/
-			ha->blink_led = 1;
-			ha->green_on = 0;
-		}
-
-	} /* end of if(ptmp_led_state.State == EXT_DEF_GRN_BLINK_ON) ) */
-
-	if (ptmp_led_state.State == EXT_DEF_GRN_BLINK_OFF){
-		DEBUG9(printk("%s(%ld): inst=%ld stop blinking led \n",
-		    __func__, ha->host_no, ha->instance);)
-
-		ha->blink_led = 0;
-		ha->green_on = 1; /* Turn green led on */
-		qla2x00_blink_led(ha);
-
-		if (qla2x00_get_firmware_options(ha,
-		    &ha->fw_options1, &ha->fw_options2, 
-		    &ha->fw_options3) != QL_STATUS_SUCCESS){
-
-			pext->Status = EXT_STATUS_ERR;
-			DEBUG9_10(printk("%s(%ld): inst=%ld get_firmware"
-			    " options failed.\n",
-			    __func__, ha->host_no, ha->instance);)
-			return (ret);
-		} else {
-			/* Output swing and emphasis vars */
-			uint16_t        opt10 = 0, opt11 = 0;
-
-			DEBUG9(printk("%s(%ld): inst=%ld get_firmware"
-			    " options success fw_options1=0x%x"
-			    " fw_options2=0x%x fw_options3=0x%x.\n",
-			    __func__, ha->host_no, ha->instance,
-			    ha->fw_options1,ha->fw_options2,ha->fw_options3);)
-
-			/* Clear BIT_8 to not set Output Emphasis 
-			 * and Output Swing values again.
-			 */ 
-			ha->fw_options1 &= ~BIT_8;
-
-			ha->fw_options1 &= ~DISABLE_GPIO; /* Enable GPIO pins */
-
-			if (qla2x00_set_firmware_options(ha, ha->fw_options1,
-			    ha->fw_options2, ha->fw_options3, 
-			    opt10, opt11) != QL_STATUS_SUCCESS){
-
-				pext->Status = EXT_STATUS_ERR;
-				DEBUG9_10(printk("%s(%ld): inst=%ld set" 
-				    "firmware  options failed.\n",
-				    __func__, ha->host_no, ha->instance);)
-				return (ret);
-			}
-
-			DEBUG9(printk("%s(%ld): inst=%ld set_firmware"
-			    " options success fw_options1=0x%x"
-			    " fw_options2=0x%x fw_options3=0x%x.\n",
-			    __func__, ha->host_no, ha->instance,
-
-			ha->fw_options1,ha->fw_options2,ha->fw_options3);)
-		}
-	} /* end of if(ptmp_led_state.State == EXT_DEF_GRN_BLINK_OFF) */
-
-	pext->Status       = EXT_STATUS_OK;
-	pext->DetailStatus = EXT_STATUS_OK;
+	pext->Status       = tmp_ext_stat;
+	pext->DetailStatus = tmp_ext_dstat;
 
 	DEBUG9(printk("%s(%ld): inst=%ld exiting.\n",
 	    __func__, ha->host_no, ha->instance);)
 
 	return (ret);
 }
+
+static int
+qla2x00_set_led_23xx(scsi_qla_host_t *ha, EXT_BEACON_CONTROL *ptmp_led_state,
+    uint32_t *pext_stat, uint32_t *pext_dstat)
+{
+	int			ret = 0;
+	device_reg_t		*reg = ha->iobase;
+	uint8_t			gpio_enable, gpio_data;
+	uint16_t		mb_stat = 0;
+	unsigned long		cpu_flags = 0;
+
+
+	DEBUG9(printk("%s(%ld): inst=%ld entered.\n",
+	    __func__, ha->host_no, ha->instance);)
+
+	if (ptmp_led_state->State != EXT_DEF_GRN_BLINK_ON 
+	    && ptmp_led_state->State != EXT_DEF_GRN_BLINK_OFF){
+		*pext_stat = EXT_STATUS_ERR;
+		DEBUG9_10(printk("%s(%ld): inst=%ld "
+		    "Unknown Led State set operation.\n",
+		    __func__, ha->host_no, ha->instance);)
+		return (ret);
+	}
+
+	if (test_bit(ABORT_ISP_ACTIVE, &ha->dpc_flags)) {
+		*pext_stat = EXT_STATUS_BUSY;
+		DEBUG9_10(printk("%s(%ld): inst=%ld abort isp active.\n",
+		     __func__, ha->host_no, ha->instance);)
+		return (ret);
+	}
+
+	switch (ptmp_led_state->State) {
+	case EXT_DEF_GRN_BLINK_ON:
+
+		DEBUG9(printk("%s(%ld): inst=%ld start blinking led \n",
+		    __func__, ha->host_no, ha->instance);)
+
+		if (qla2x00_get_firmware_options(ha, &ha->fw_options1,
+		    &ha->fw_options2, &ha->fw_options3, &mb_stat) !=
+		    QL_STATUS_SUCCESS){
+
+			*pext_stat = EXT_STATUS_ERR;
+			*pext_dstat = mb_stat;
+			DEBUG9_10(printk("%s(%ld): inst=%ld get_firmware"
+			    " options failed.\n",
+			    __func__, ha->host_no, ha->instance);)
+			break;
+		}
+
+		DEBUG9(printk("%s(%ld): inst=%ld get_firmware"
+		    " options success fw_options1=0x%x"
+		    " fw_options2=0x%x fw_options3=0x%x.\n",
+		    __func__, ha->host_no, ha->instance,
+		    ha->fw_options1,ha->fw_options2,ha->fw_options3);)
+
+		/* Clear BIT_8 to not set Output Emphasis 
+		 * and Output Swing values again
+		 */ 
+		ha->fw_options1 &= ~BIT_8;
+		ha->fw_options1 |= DISABLE_GPIO; /* Disable GPIO pins */
+
+		if (qla2x00_set_firmware_options(ha, ha->fw_options1,
+		    ha->fw_options2, ha->fw_options3, 0, 0, &mb_stat)!=
+		    QL_STATUS_SUCCESS){
+
+			*pext_stat = EXT_STATUS_ERR;
+			*pext_dstat = mb_stat;
+			DEBUG9_10(printk("%s(%ld): inst=%ld set" 
+			    "firmware  options failed.\n",
+			    __func__, ha->host_no, ha->instance);)
+			break;
+		}
+
+		if (ha->pio_address) 
+			reg = (device_reg_t *)ha->pio_address;
+
+		/* Turn off both LEDs */
+		spin_lock_irqsave(&ha->hardware_lock, cpu_flags);
+		if (ha->pio_address) {
+			gpio_enable = RD_REG_WORD_PIO(&reg->gpioe);
+			gpio_data   = RD_REG_WORD_PIO(&reg->gpiod);
+		} else {
+			gpio_enable = RD_REG_WORD(&reg->gpioe);
+			gpio_data   = RD_REG_WORD(&reg->gpiod);
+		}
+		gpio_enable |= LED_MASK;
+
+		/* Set the modified gpio_enable values */
+		if (ha->pio_address) {
+			WRT_REG_WORD_PIO(&reg->gpioe,gpio_enable);
+		} else {	
+			WRT_REG_WORD(&reg->gpioe,gpio_enable);
+			PCI_POSTING(&reg->gpioe);
+		}
+
+		/* Clear out previously set LED colour */
+		gpio_data &= ~LED_MASK;
+		if (ha->pio_address) {
+			WRT_REG_WORD_PIO(&reg->gpiod,gpio_data);
+		} else {
+			WRT_REG_WORD(&reg->gpiod,gpio_data);
+			PCI_POSTING(&reg->gpiod);
+		}
+		spin_unlock_irqrestore(&ha->hardware_lock, cpu_flags);
+
+		/* Let the per HBA timer kick off the blinking process based on
+		 * the following flags.
+		 */
+		ha->beacon_blink_led = 1;
+		ha->beacon_color_state = 0;
+
+		/* end of if(ptmp_led_state.State == EXT_DEF_GRN_BLINK_ON) ) */
+		*pext_stat  = EXT_STATUS_OK;
+		*pext_dstat = EXT_STATUS_OK;
+		break;
+
+	case EXT_DEF_GRN_BLINK_OFF:
+		DEBUG9(printk("%s(%ld): inst=%ld stop blinking led \n",
+		    __func__, ha->host_no, ha->instance);)
+
+		ha->beacon_blink_led = 0;
+		/* Set the on flag so when it gets flipped it will be off */
+		if (ha->device_id == QLA2322_DEVICE_ID)
+			ha->beacon_color_state = QLA_LED_RGA_ON;
+		else
+			ha->beacon_color_state = QLA_LED_GRN_ON;
+
+		qla23xx_blink_led(ha);
+
+		if (qla2x00_get_firmware_options(ha, &ha->fw_options1,
+		    &ha->fw_options2, &ha->fw_options3, &mb_stat) !=
+		    QL_STATUS_SUCCESS){
+
+			*pext_stat = EXT_STATUS_ERR;
+			*pext_dstat = mb_stat;
+			DEBUG9_10(printk("%s(%ld): inst=%ld get_firmware"
+			    " options failed.\n",
+			    __func__, ha->host_no, ha->instance);)
+			break;
+		}
+
+		DEBUG9(printk("%s(%ld): inst=%ld get_firmware"
+		    " options success fw_options1=0x%x"
+		    " fw_options2=0x%x fw_options3=0x%x.\n",
+		    __func__, ha->host_no, ha->instance,
+		    ha->fw_options1,ha->fw_options2,ha->fw_options3);)
+
+		/* Clear BIT_8 to not set Output Emphasis 
+		 * and Output Swing values again.
+		 */ 
+		ha->fw_options1 &= ~BIT_8;
+		ha->fw_options1 &= ~DISABLE_GPIO; /* Enable GPIO pins */
+
+		if (qla2x00_set_firmware_options(ha, ha->fw_options1,
+		    ha->fw_options2, ha->fw_options3, 0, 0, &mb_stat) !=
+		    QL_STATUS_SUCCESS){
+
+			*pext_stat = EXT_STATUS_ERR;
+			*pext_dstat = mb_stat;
+			DEBUG9_10(printk("%s(%ld): inst=%ld set" 
+			    "firmware  options failed.\n",
+			    __func__, ha->host_no, ha->instance);)
+			return (ret);
+		}
+
+		DEBUG9(printk("%s(%ld): inst=%ld set_firmware"
+		    " options success fw_options1=0x%x"
+		    " fw_options2=0x%x fw_options3=0x%x.\n",
+		    __func__, ha->host_no, ha->instance,
+		    ha->fw_options1,ha->fw_options2,ha->fw_options3);)
+
+		/* end of if(ptmp_led_state.State == EXT_DEF_GRN_BLINK_OFF) */
+		*pext_stat  = EXT_STATUS_OK;
+		*pext_dstat = EXT_STATUS_OK;
+		break;
+
+	default:
+		*pext_stat = EXT_STATUS_UNSUPPORTED_SUBCODE;
+		break;
+	}
+
+	DEBUG9(printk("%s(%ld): inst=%ld exiting.\n",
+	    __func__, ha->host_no, ha->instance);)
+
+	return (ret);
+}
+
+static int
+qla2x00_set_led_24xx(scsi_qla_host_t *ha, EXT_BEACON_CONTROL *ptmp_led_state,
+    uint32_t *pext_stat, uint32_t *pext_dstat)
+{
+	int			rval = 0;
+	struct device_reg_24xx *reg24 = (struct device_reg_24xx *)ha->iobase;
+	uint16_t		mb_stat;
+	uint32_t		gpio_data;
+	uint32_t		led_state;
+	unsigned long		cpu_flags = 0;
+
+
+	DEBUG9(printk("%s(%ld): inst=%ld entered.\n",
+	    __func__, ha->host_no, ha->instance);)
+
+	led_state = ptmp_led_state->State;
+	if (led_state != EXT_DEF_GRN_BLINK_ON &&
+	    led_state != EXT_DEF_GRN_BLINK_OFF) {
+		*pext_stat = EXT_STATUS_INVALID_PARAM;
+		DEBUG9_10(printk(
+		    "%s(%ld): inst=%ld Unknown Led State set "
+		    "operation recieved %x.\n",
+		    __func__, ha->host_no, ha->instance,
+		    ptmp_led_state->State);)
+		return (rval);
+	}
+
+	if (test_bit(ABORT_ISP_ACTIVE, &ha->dpc_flags)) {
+		*pext_stat = EXT_STATUS_BUSY;
+		DEBUG9_10(printk("%s(%ld): inst=%ld abort isp active.\n",
+		     __func__, ha->host_no, ha->instance);)
+		return (rval);
+	}
+
+	if (qla2x00_get_firmware_options(ha, &ha->fw_options1,
+	    &ha->fw_options2, &ha->fw_options3, &mb_stat) != QL_STATUS_SUCCESS){
+
+		*pext_stat = EXT_STATUS_ERR;
+		*pext_dstat = mb_stat;
+		DEBUG9_10(printk("%s(%ld): inst=%ld get_firmware"
+		    " options failed.\n",
+		    __func__, ha->host_no, ha->instance);)
+		return (rval);
+	}
+
+	DEBUG9_10(printk("%s(%ld): inst=%ld orig firmware options "
+	    "fw_options1=0x%x fw_options2=0x%x fw_options3=0x%x.\n",
+	     __func__, ha->host_no, ha->instance, ha->fw_options1,
+	     ha->fw_options2, ha->fw_options3);)
+
+	switch (led_state) {
+	case EXT_DEF_GRN_BLINK_ON:
+
+		DEBUG9(printk("%s(%ld): inst=%ld start blinking led \n",
+		    __func__, ha->host_no, ha->instance);)
+
+		if (!ha->beacon_blink_led) {
+			/* Enable firmware for update */
+			ha->fw_options1 |= ADD_FO1_DISABLE_GPIO_LED_CTRL;
+
+			if (qla2x00_set_firmware_options(ha, ha->fw_options1,
+			    ha->fw_options2, ha->fw_options3, 0, 0, &mb_stat) !=
+			    QL_STATUS_SUCCESS){
+				*pext_stat = EXT_STATUS_MAILBOX;
+				*pext_dstat = mb_stat;
+				DEBUG9_10(printk("%s(%ld): inst=%ld set"
+				    "firmware options failed.\n",
+				    __func__, ha->host_no, ha->instance);)
+				break;
+			}
+
+			spin_lock_irqsave(&ha->hardware_lock, cpu_flags);
+			gpio_data = RD_REG_DWORD(&reg24->gpiod);
+
+			/* Enable the gpio_data reg for update */
+			gpio_data |= GPDX_LED_UPDATE_MASK;
+			WRT_REG_DWORD(&reg24->gpiod, gpio_data);
+			RD_REG_DWORD(&reg24->gpiod);
+
+			spin_unlock_irqrestore(&ha->hardware_lock, cpu_flags);
+		}
+
+		ha->beacon_color_state = 0; /* so all colors blink together */
+
+		/* Let the per HBA timer kick off the blinking process*/
+		ha->beacon_blink_led = 1;
+
+		*pext_stat  = EXT_STATUS_OK;
+		*pext_dstat = EXT_STATUS_OK;
+
+		DEBUG9(printk("%s(%ld): inst=%ld LED setup to blink.\n",
+		    __func__, ha->host_no, ha->instance);)
+
+		break;
+
+	case EXT_DEF_GRN_BLINK_OFF:
+		DEBUG9(printk("%s(%ld): inst=%ld stop blinking led \n",
+		    __func__, ha->host_no, ha->instance);)
+
+		ha->beacon_blink_led = 0;
+		ha->beacon_color_state = QLA_LED_BCN_ON;
+		qla24xx_blink_led(ha); /* will flip to all off */
+
+		/* give control back to firmware */
+		spin_lock_irqsave(&ha->hardware_lock, cpu_flags);
+		gpio_data = RD_REG_DWORD(&reg24->gpiod);
+
+		/* Disable the gpio_data reg for update */
+		gpio_data &= ~GPDX_LED_UPDATE_MASK;
+		WRT_REG_DWORD(&reg24->gpiod, gpio_data);
+		RD_REG_DWORD(&reg24->gpiod);
+		spin_unlock_irqrestore(&ha->hardware_lock, cpu_flags);
+
+		ha->fw_options1 &= ~ADD_FO1_DISABLE_GPIO_LED_CTRL;
+
+		if (qla2x00_set_firmware_options(ha, ha->fw_options1,
+		    ha->fw_options2, ha->fw_options3, 0, 0, &mb_stat) !=
+		    QL_STATUS_SUCCESS){
+			*pext_stat = EXT_STATUS_MAILBOX;
+			*pext_dstat = mb_stat;
+			DEBUG9_10(printk("%s(%ld): inst=%ld set"
+			    "firmware options failed.\n",
+			    __func__, ha->host_no, ha->instance);)
+			return (rval);
+		}
+
+		*pext_stat  = EXT_STATUS_OK;
+		*pext_dstat = EXT_STATUS_OK;
+
+		DEBUG9(printk("%s(%ld): inst=%ld all LED blinking stopped.\n",
+		    __func__, ha->host_no, ha->instance);)
+
+		break;
+
+	default:
+		DEBUG9_10(printk(
+		    "%s(%ld): inst=%ld invalid state received=%x.\n",
+		    __func__, ha->host_no, ha->instance, led_state);)
+
+		*pext_stat = EXT_STATUS_UNSUPPORTED_SUBCODE;
+		break;
+	}
+
+	DEBUG9(printk("%s(%ld): inst=%ld exiting.\n",
+	    __func__, ha->host_no, ha->instance);)
+
+	return (rval);
+}
+
 #endif
 
 
@@ -6392,6 +6780,160 @@ qla2x00_wait_q_remove(scsi_qla_host_t *ha, wait_q_t *rem_wq)
 
 	DEBUG9(printk("%s(%ld): inst=%ld exiting.\n",
 	    __func__, ha->host_no, ha->instance);)
+}
+
+/*
+ * qla2x00_get_tgt_lun_by_q
+ *      Get list of enabled luns from all target devices attached to the HBA
+ *	by searching through lun queue.
+ *
+ * Input:
+ *      ha = pointer to adapter
+ *
+ * Return;
+ *      0 on success or errno.
+ *
+ * Context:
+ *      Kernel context.
+ */
+STATIC int
+qla2x00_get_tgt_lun_by_q(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
+{
+	fc_port_t        *fcport;
+	int              ret = 0;
+	os_tgt_t         *ostgt;
+	os_lun_t         *up;
+	uint16_t         lun;
+	uint16_t	 tgt;
+	TGT_LUN_DATA_ENTRY *u_entry, *entry;
+	TGT_LUN_DATA_LIST *u_list, *llist;
+
+
+	DEBUG9(printk("%s: entered.\n", __func__);)
+
+	llist = vmalloc(sizeof(TGT_LUN_DATA_LIST));
+	if (llist == NULL) {
+		DEBUG2_9_10(printk("%s: failed to alloc memory of size (%d)\n",
+		    __func__, (int)sizeof(TGT_LUN_DATA_LIST));)
+		pext->Status = EXT_STATUS_NO_MEMORY;
+		return (-ENOMEM);
+	}
+	memset(llist, 0, sizeof(TGT_LUN_DATA_LIST));
+
+	entry = &llist->DataEntry[0];
+
+	u_list = (TGT_LUN_DATA_LIST *)pext->ResponseAdr;
+	u_entry = &u_list->DataEntry[0];
+
+	DEBUG9(printk("%s(%ld): entry->Data size=%ld.\n",
+	    __func__, ha->host_no, (ulong)sizeof(entry->Data));)
+
+	/* Check thru this adapter's target list */
+	for (tgt = 0; tgt < MAX_TARGETS; tgt++) {
+		if ((ostgt = (os_tgt_t *)TGT_Q(ha, tgt)) == NULL) {
+			continue;
+		}
+
+		if (ostgt->vis_port == NULL) {
+			/* no port */
+			DEBUG9(printk("%s(%ld): tgt %d port not exist.\n",
+			    __func__, ha->host_no, tgt);)
+			continue;
+		}
+
+		fcport = ostgt->vis_port;
+
+		if (fcport->port_type != FCT_TARGET) {
+			/* sanity check */
+			DEBUG9(printk("%s(%ld): tgt %d port not target.\n",
+			    __func__, ha->host_no, tgt);)
+			continue;
+		}
+
+		memcpy(entry->PortName, fcport->port_name,
+		    EXT_DEF_WWN_NAME_SIZE);
+		memcpy(entry->NodeName, fcport->node_name,
+		    EXT_DEF_WWN_NAME_SIZE);
+		entry->BusNumber = 0;
+		entry->TargetId = tgt;
+
+		entry->DevType = EXT_DEF_TARGET_DEV;
+
+		if (fcport->flags & FC_FABRIC_DEVICE) {
+			entry->DevType |= EXT_DEF_FABRIC_DEV;
+		}
+		if (fcport->flags & FC_TAPE_DEVICE) {
+			entry->DevType |= EXT_DEF_TAPE_DEV;
+		}
+		if (fcport->port_type & FC_INITIATOR_DEVICE) {
+			entry->DevType |= EXT_DEF_INITIATOR_DEV;
+		}
+
+		entry->LoopId   = fcport->loop_id;
+
+		entry->PortId[0] = 0;
+		entry->PortId[1] = fcport->d_id.r.d_id[2];
+		entry->PortId[2] = fcport->d_id.r.d_id[1];
+		entry->PortId[3] = fcport->d_id.r.d_id[0];
+
+		memset(entry->Data, 0, sizeof(entry->Data));
+
+		for (lun = 0; lun < ha->max_luns && lun < EXTERNAL_LUN_COUNT;
+		    lun++) {
+			up = (os_lun_t *) GET_LU_Q(ha, tgt, lun);
+			if (up == NULL) {
+				continue;
+			}
+
+			if (up->fclun == NULL) {
+				continue;
+			}
+
+			DEBUG9(printk("%s: found lun queue at %d:%d. "
+			    "io_cnt=%ld.\n",
+			    __func__, tgt, lun, up->io_cnt);)
+
+			DEBUG9(printk("%s: return lun enabled at %d:%d.\n",
+			    __func__, tgt, lun);)
+
+			entry->Data[lun] |= LUN_DATA_ENABLED;
+		}
+
+		entry->LunCount = lun;
+
+		ret = copy_to_user(u_entry, entry, sizeof(TGT_LUN_DATA_ENTRY));
+
+		if (ret) {
+			/* error */
+			DEBUG9_10(printk("%s: u_entry %p copy "
+			    "error. list->EntryCount=%d.\n",
+			    __func__, u_entry, llist->EntryCount);)
+			pext->Status = EXT_STATUS_COPY_ERR;
+			ret = -EFAULT;
+			break;
+		}
+
+		llist->EntryCount++;
+
+		/* Go to next target */
+		u_entry++;
+	}
+
+	DEBUG9(printk("%s: final entry count = %d\n",
+	    __func__, llist->EntryCount);)
+
+	if (ret == 0) {
+		/* copy number of entries */
+		ret = copy_to_user(&u_list->EntryCount, &llist->EntryCount,
+		    sizeof(llist->EntryCount));
+		pext->ResponseLen = sizeof(TGT_LUN_DATA_LIST) +
+		    sizeof(TGT_LUN_DATA_ENTRY ) * (llist->EntryCount-1);
+	}
+
+	vfree(llist);
+	DEBUG9(printk("%s: exiting. ret=%d.\n", __func__, ret);)
+
+	return ret;
 }
 
 

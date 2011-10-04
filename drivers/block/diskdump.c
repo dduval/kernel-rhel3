@@ -43,6 +43,7 @@
 #include <linux/seq_file.h>
 #include <linux/slab.h>
 #include <linux/blkdev.h>
+#include <linux/swap.h>
 #include <linux/diskdump.h>
 #include <linux/diskdumplib.h>
 #include <linux/blk.h>
@@ -284,6 +285,35 @@ redo:
 }
 
 /*
+ * Check the signaures in the first blocks of the swap partition
+ * Return 1 if the signature is correct, else return 0
+ */
+static int check_swap_partition(struct disk_dump_partition *dump_part,
+					    unsigned int partition_size)
+{
+	int ret;
+	union swap_header *swh;
+
+	if ((ret = read_blocks(dump_part, 0, scratch, 1)) < 0)
+	   return 0;
+
+	swh = (union swap_header *)scratch;
+
+	if (memcmp(swh->magic.magic, "SWAPSPACE2",
+						sizeof("SWAPSPACE2") - 1) != 0)
+								     return 0;
+
+	if (swh->info.version != 1)
+	   return 0;
+
+	if (swh->info.last_page + 1 != SECTOR_BLOCK(dump_part->nr_sects) ||
+				  swh->info.last_page < partition_size)
+						      return 0;
+
+	return 1;
+}
+
+/*
  * Write memory bitmap after location of dump headers.
  */
 #define IDX2PAGENR(nr, byte, bit)	(((nr) * PAGE_SIZE + (byte)) * 8 + (bit))
@@ -493,7 +523,8 @@ static void disk_dump(struct pt_regs *regs, void *platform_arg)
 
 	/* Check dump partition */
 	printk("check dump partition...\n");
-	if (!check_dump_partition(dump_part, total_blocks)) {
+	if (!check_swap_partition(dump_part, total_blocks) &&
+	    !check_dump_partition(dump_part, total_blocks)) {
 		Err("check partition failed.");
 		ret = -EIO;
 		goto done;

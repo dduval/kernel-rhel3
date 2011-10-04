@@ -391,8 +391,6 @@ static inline int activate_task(task_t *p, runqueue_t *rq)
 static inline void deactivate_task(struct task_struct *p, runqueue_t *rq)
 {
 	nr_running_dec(rq);
-	if (p->state == TASK_UNINTERRUPTIBLE)
-		rq->nr_uninterruptible++;
 	dequeue_task(p, p->array);
 	p->array = NULL;
 }
@@ -755,6 +753,13 @@ unsigned long nr_uninterruptible(void)
 		if (!cpu_idx(i))
 			sum += cpu_rq(i)->nr_uninterruptible;
 	}
+	/*
+	 * Since we read the counters lockless, it might be slightly
+	 * inaccurate. Do not allow it to go below zero though:
+	 */
+	if (unlikely((long)sum < 0))
+		sum = 0;
+
 	return sum;
 }
 
@@ -1373,6 +1378,10 @@ need_resched:
 			break;
 		}
 	default:
+		deactivate_task(prev, rq);
+		break;
+	case TASK_UNINTERRUPTIBLE:
+		rq->nr_uninterruptible++;
 		deactivate_task(prev, rq);
 	case TASK_RUNNING:
 		;

@@ -2974,5 +2974,7 @@ int netdump_register_hooks(netdump_rx_cb_t *rx_hook,
 
 void netdump_unregister_hooks(void)
 {
-	netdump_rx = netdump_receive_skb = netdump_func = NULL;
+	netdump_rx = NULL;
+	netdump_receive_skb = NULL;
+	netdump_func = NULL;
 }

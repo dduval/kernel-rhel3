@@ -24,7 +24,7 @@
 
 int broken_hp_bios_irq9;
 int broken_440gx_bios;
-
+extern int pcibios_no_peer_tricks;
 static struct irq_routing_table *pirq_table;
 
 /*
@@ -700,7 +700,8 @@ void __init pcibios_irq_init(void)
 		pirq_table = pcibios_get_irq_routing_table();
 #endif
 	if (pirq_table) {
-		pirq_peer_trick();
+		if (!pcibios_no_peer_tricks)
+			pirq_peer_trick();
 		pirq_find_router();
 		if (pirq_table->exclusive_irqs) {
 			int i;

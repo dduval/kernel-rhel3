@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_clock.c 1.3 2005/05/03 11:21:19EDT sf_support Exp  $
+ * $Id: lpfc_clock.c 328 2005-05-03 15:20:43Z sf_support $
  */
 
 #include <linux/version.h>

@@ -1,13 +1,14 @@
 				Release Notes
 
-Driver Name  : QLogic QLA22xx/QLA23xx/QLA63xx PCI Fibre Channel Linux Driver
-Version      : 7.05.00
-OS platform  : Red Hat AS2.1 (IA32 & IA64)
-               Red Hat RHEL 3 AS (IA32, PPC64, IA64 & AMD64)
-               SuSE SLES8 (IA32, PPC64, AMD64 & IA64)
-	       RedHat 9.0 (IA32)		
-HBA Support  : QLA22xx, QLA23xx, QLA63xx, QLE236X
-FW version   : QLA22xx : 2.02.06(tp/ip),  QLA23xx: 3.03.11(ipx/flx)
+Driver Name  : QLogic QLA22xx/QLA23xx/QLA63xx/QLA24xx 
+	       PCI Fibre Channel Linux Driver
+Version      : 7.07.04b6
+OS platform  : Red Hat RHEL 3 AS Update 5(IA32, PPC64, IA64 & AMD64)
+               SuSE SLES8 ( PPC64)
+HBA Support  : QLA22xx, QLA23xx, QLA63xx, QLE236X, QLA24xx
+FW version   : QLA22xx : 2.02.06(tp/ip),  
+	       QLA23xx: 3.03.19(ipx)
+	       QLA24xx: 4.00.18
 
  
 Table of Contents
@@ -19,60 +20,31 @@ V.      Additional Information
 
 I.	Overview
 
-This document describes the changes between versions 6.06.10 and 7.01.01.
+This document describes the changes between versions 7.07.03 and 7.07.04b6
 of the QLogic Fibre Channel driver for Linux.
 
-II.	Enhancements
- - Added support for 2322 chips.
- - Added support for ISP200.
- - Added extended interface for 16 bit loop id support.
- - Improved fabric discovery logic. 
- - Added failover support for XP, VA, MSA1000 and EVA.
- - Added RPM support for installing and updating driver.
- - Added support to change dynamic parameters without reload.
- - Change license of HBA API to be GPL.
- - Added hot add support for failover luns.
- - Added support for optional FDMI registration.
- - Added support for RHEL 3.0
- - Added commandline parameter: "ql2xioctltimeout" to change
-   the default ioctl pass-thur timeout and change default t0 66 sec.
- - Added commandline parameter: "ql2xmaxsectors" and "ql2xmaxsgs".
- - Added selective failover support for non-failover devices.
- - Added support for AMD Opteron, and x86_64 platforms.
- - Added support to initiate a pseudo LIP via the /proc interface.
- - Added support to always export HSG80 devices as non-failover device 
-   in failover mode.
--  Improved tape handling
--  Added cmd line param - ql2xprocessnotready.
--  Added the semaphore to protect failover database updation
+II. Enhancements
 
-III.	Bug Fixes
+- Added support for ISP24xx parts.
+- Added support for  embedded ISP24XX firmware
+- Added support for new flash parts used with ISP2322.
+- Added support HBA aliasing.
+- Added ALUA compliant failover support.
+- Improved tape handling.
+- Updated ISP23XX Firmware to 3.03.19
 
- - Fixed logic to honor "ConfigRequired=1" in non-failover mode. 
- - Fixed PortID binding.
- - Fixed panic loding firmware on 2100/2200.
- - Fixed handling of tape commands during LIPs
- - Fixed flushing logic for START_STOP commands
- - Back-out PLUG-TIMER and scsi-affine 'performace patches'
- - Fixed DMA double allocation bug on retries.
- - Fixed PCI posting issues.
- - Fixed endianess issues.
- - Fixed recursive issue in ZIO logic.
- - Fixed IA64 /proc alinment issue.
- - Fixed compilation issue with SLES 8 SP3.
- - Fixed ER36592.
- - Fixed FCP protocol error checking.
- - Set the firmware options for swing/emphasis before init_fw.
- - Fixed flash issue.
- - Fixed code that reads the target port group identifer.
+III. Bug Fixes
 
-IV.	Known Issues
+- Fixed PortID binding.
+- Fixed PCI posting issues.
+- Fixed ISP2322 beaconing support.
+- Fixed the nvram hang isssue.
+- Fixed the domain/area exclusion logic within FCAL. 
+
+IV. Known Issues
 
 There are no known issues at this time.
 
-V.	Additional Information
+V. Additional Information
 
-- This driver must be used with API library v2.00Beta4 + 
-  to handle re-entrant API/ioctl commands correctly.
-
-
+This driver must be used with API library v2.01.00.

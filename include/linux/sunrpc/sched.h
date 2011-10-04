@@ -112,6 +112,7 @@ typedef void			(*rpc_action)(struct rpc_task *);
 #define RPC_TASK_ROOTCREDS	0x0040		/* force root creds */
 #define RPC_TASK_DYNAMIC	0x0080		/* task was kmalloc'ed */
 #define RPC_TASK_KILLED		0x0100		/* task was killed */
+#define RPC_TASK_NOINTR		0x0400		/* uninterruptible task */
 
 #define RPC_IS_ASYNC(t)		((t)->tk_flags & RPC_TASK_ASYNC)
 #define RPC_IS_SETUID(t)	((t)->tk_flags & RPC_TASK_SETUID)
@@ -121,6 +122,7 @@ typedef void			(*rpc_action)(struct rpc_task *);
 #define RPC_ASSASSINATED(t)	((t)->tk_flags & RPC_TASK_KILLED)
 #define RPC_IS_ACTIVATED(t)	((t)->tk_active)
 #define RPC_DO_CALLBACK(t)	((t)->tk_callback != NULL)
+#define RPC_TASK_UNINTERRUPTIBLE(t) ((t)->tk_flags & RPC_TASK_NOINTR)
 
 #define RPC_TASK_SLEEPING	0
 #define RPC_TASK_RUNNING	1

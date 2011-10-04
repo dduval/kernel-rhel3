@@ -614,6 +614,8 @@ extern void ip_vs_secure_tcp_set(int on);
 extern void ip_vs_random_dropentry(void);
 extern int ip_vs_conn_init(void);
 extern void ip_vs_conn_cleanup(void);
+extern int ip_vs_set_state_timeout(struct ip_vs_conn *cp, int state);
+
 
 static inline void ip_vs_control_del(struct ip_vs_conn *cp)
 {

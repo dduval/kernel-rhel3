@@ -3435,6 +3435,7 @@ static ST_buffer *
 		st_max_sg_segs * sizeof(unsigned int);
 	tb = kmalloc(i, priority);
 	if (tb) {
+		memset(tb, 0, i);
 		tb->sg_lengths = (unsigned int *)(&tb->sg[0] + st_max_sg_segs);
 
 		if (need_dma)

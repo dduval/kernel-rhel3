@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: ioctls/lpfc_hbaapi_ioctl.h 1.6 2005/05/03 11:20:55EDT sf_support Exp  $
+ * $Id: lpfc_hbaapi_ioctl.h 484 2006-03-27 16:26:51Z sf_support $
  */
 
 #include "hbaapi.h"
@@ -37,7 +37,7 @@ int lpfc_ioctl_hba_getmgmtinfo(lpfcHBA_t *, LPFCCMDINPUT_t *, void *);
 int lpfc_ioctl_hba_refreshinfo(lpfcHBA_t *, LPFCCMDINPUT_t *, void *);
 int lpfc_ioctl_hba_rnid(lpfcHBA_t *, LPFCCMDINPUT_t *, void *);
 int lpfc_ioctl_hba_getevent(lpfcHBA_t *, LPFCCMDINPUT_t *, void *);
-int lpfc_ioctl_hba_fcptargetmapping(lpfcHBA_t *, LPFCCMDINPUT_t *, void *, int *);
+int lpfc_ioctl_hba_fcptargetmapping(lpfcHBA_t *, LPFCCMDINPUT_t *, void *, int, int *);
 int lpfc_ioctl_hba_fcpbinding(lpfcHBA_t *, LPFCCMDINPUT_t *, void *, int, int *);
 int lpfc_ioctl_port_attrib(lpfcHBA_t *, void *);
 int lpfc_ioctl_found_port(lpfcHBA_t *, LPFC_NODELIST_t *, void *, MAILBOX_t *, HBA_PORTATTRIBUTES *);

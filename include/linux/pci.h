@@ -254,6 +254,13 @@
 #define  PCI_AGP_COMMAND_RATE1	0x0001	/* Use 1x rate */
 #define PCI_AGP_SIZEOF		12
 
+/* Vital Product Data */
+
+#define PCI_VPD_ADDR		2	/* Address to access (15 bits!) */
+#define  PCI_VPD_ADDR_MASK	0x7fff	/* Address mask */
+#define  PCI_VPD_ADDR_F		0x8000	/* Write 0, 1 indicates completion */
+#define PCI_VPD_DATA		4	/* 32-bits of data returned here */
+
 /* Slot Identification */
 
 #define PCI_SID_ESR		2	/* Expansion Slot Register */

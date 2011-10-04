@@ -74,6 +74,7 @@ extern int system_running;
  *	and the like. 
  */
 
+static int reboot_in_progress;
 static struct notifier_block *reboot_notifier_list;
 rwlock_t notifier_lock = RW_LOCK_UNLOCKED;
 
@@ -367,6 +368,8 @@ asmlinkage long sys_reboot(int magic1, int magic2, unsigned int cmd, void * arg)
 	lock_kernel();
 	switch (cmd) {
 	case LINUX_REBOOT_CMD_RESTART:
+		if (reboot_in_progress++)
+			goto nested_reboot_error;
 		notifier_call_chain(&reboot_notifier_list, SYS_RESTART, NULL);
 		printk(KERN_EMERG "Restarting system.\n");
 		machine_restart(NULL);
@@ -381,6 +384,8 @@ asmlinkage long sys_reboot(int magic1, int magic2, unsigned int cmd, void * arg)
 		break;
 
 	case LINUX_REBOOT_CMD_HALT:
+		if (reboot_in_progress++)
+			goto nested_reboot_error;
 		notifier_call_chain(&reboot_notifier_list, SYS_HALT, NULL);
 		printk(KERN_EMERG "System halted.\n");
 		machine_halt();
@@ -388,6 +393,8 @@ asmlinkage long sys_reboot(int magic1, int magic2, unsigned int cmd, void * arg)
 		break;
 
 	case LINUX_REBOOT_CMD_POWER_OFF:
+		if (reboot_in_progress++)
+			goto nested_reboot_error;
 		notifier_call_chain(&reboot_notifier_list, SYS_POWER_OFF, NULL);
 		printk(KERN_EMERG "Power down.\n");
 		machine_power_off();
@@ -401,6 +408,8 @@ asmlinkage long sys_reboot(int magic1, int magic2, unsigned int cmd, void * arg)
 		}
 		buffer[sizeof(buffer) - 1] = '\0';
 
+		if (reboot_in_progress++)
+			goto nested_reboot_error;
 		notifier_call_chain(&reboot_notifier_list, SYS_RESTART, buffer);
 		printk(KERN_EMERG "Restarting system with command '%s'.\n", buffer);
 		machine_restart(buffer);
@@ -412,11 +421,16 @@ asmlinkage long sys_reboot(int magic1, int magic2, unsigned int cmd, void * arg)
 	}
 	unlock_kernel();
 	return 0;
+
+nested_reboot_error:
+	unlock_kernel();
+	return -EBUSY;
 }
 
 static void deferred_cad(void *dummy)
 {
-	notifier_call_chain(&reboot_notifier_list, SYS_RESTART, NULL);
+	if (!reboot_in_progress++)
+		notifier_call_chain(&reboot_notifier_list, SYS_RESTART, NULL);
 	machine_restart(NULL);
 }
 

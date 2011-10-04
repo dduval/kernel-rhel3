@@ -28731,4 +28731,14 @@ CONFIG_DELL_RBU
   the new image for the image update to take effect.
   See <file:Documentation/dell_rbu.txt> for more details on the driver.
 
+Dell Systems Management Base Driver
+CONFIG_DCDBAS
+  The Dell Systems Management Base Driver provides an interface for systems
+  management software to perform System Management Interrupts (SMIs) and
+  Host Control Actions (system power cycle or power off after OS shutdown)
+  on certain Dell systems.
+
+  Say Y or M here to enable the driver for use by Dell systems
+  management software such as Dell OpenManage.
+
 # End:

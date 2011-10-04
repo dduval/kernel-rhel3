@@ -37,6 +37,7 @@ int HvLpEvent_unregisterHandler( HvLpEvent_Type eventType )
 		if ( !lpEventHandlerPaths[eventType] ) {
 			lpEventHandler[eventType] = NULL;
 			rc = 0;
+			synchronize_irq();
 		}
 	}
 	return rc;

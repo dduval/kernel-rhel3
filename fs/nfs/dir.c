@@ -493,7 +493,7 @@ int nfs_check_verifier(struct inode *dir, struct dentry *dentry)
 		return 1;
 	if (nfs_revalidate_inode(NFS_SERVER(dir), dir))
 		return 0;
-	return time_after(dentry->d_time, NFS_MTIME_UPDATE(dir));
+	return time_after_eq(dentry->d_time, NFS_MTIME_UPDATE(dir));
 }
 
 /*

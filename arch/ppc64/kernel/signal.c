@@ -106,6 +106,7 @@ copy_siginfo_to_user(siginfo_t *to, siginfo_t *from)
 		case __SI_CHLD >> 16:
 			err |= __put_user(from->si_utime, &to->si_utime);
 			err |= __put_user(from->si_stime, &to->si_stime);
+		case __SI_POLL >> 16: /* for duplicate copy of si_fd */
 			err |= __put_user(from->si_status, &to->si_status);
 		default:
 			err |= __put_user(from->si_uid, &to->si_uid);
@@ -329,7 +330,7 @@ setup_trampoline(unsigned int syscall, unsigned int *tramp)
 }
 
 
-asmlinkage int
+asmlinkage long
 sys_rt_sigreturn(unsigned long r3, unsigned long r4, unsigned long r5,
 		 unsigned long r6, unsigned long r7, unsigned long r8,
 		 struct pt_regs *regs)

@@ -1,21 +1,10 @@
-/******************************************************************************
- *                  QLOGIC LINUX SOFTWARE
+/*
+ * QLogic Fibre Channel HBA Driver
+ * Copyright (c)  2003-2005 QLogic Corporation
  *
- * QLogic ISP2x00 device driver for Linux 2.4.x
- * Copyright (C) 2003 QLogic Corporation
- * (www.qlogic.com)
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2, or (at your option) any
- * later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- ******************************************************************************/
+ * See LICENSE.qla2xxx for copyright and licensing details.
+ */
+
 
 /*
  * San/Device Management Failover Ioctl Header
@@ -113,6 +102,8 @@
 #define FO_CC_GET_TARGET_DATA           FO_CC_GET_TARGET_DATA_OS
 #define FO_CC_SET_TARGET_DATA           FO_CC_SET_TARGET_DATA_OS
 #define FO_CC_GET_FO_DRIVER_VERSION     FO_CC_GET_FO_DRIVER_VERSION_OS
+#define FO_CC_GET_LBTYPE           	FO_CC_GET_LBTYPE_OS
+#define FO_CC_SET_LBTYPE           	FO_CC_SET_LBTYPE_OS
 
 
 /* Systemwide failover parameters. */
@@ -399,6 +390,31 @@ typedef struct _FO_DRIVER_VERSION
 
 }
 FO_DRIVER_VERSION, *PFO_DRIVER_VERSION;
+
+/* LB Type structures */
+#define MAX_LB_ENTRIES	256
+typedef struct _FO_LBTYPE_DATA
+{
+    UINT8    NodeName[FO_DEF_WWN_SIZE];            /* 8 */
+    UINT32   LBPolicy;				     /* 4 */
+    UINT8   Reserved0[12];                            /* 12 */
+} 
+FO_LBTYPE_DATA, *PFO_LBTYPE_DATA;
+
+typedef struct _FOTGTLBDATALIST
+{
+    UINT16       Reserved0;
+    UINT16       EntryCount;
+    UINT32       Reserved1;
+    UINT32       Reserved2;
+    UINT32       Reserved3;
+    UINT32       Reserved4;
+    UINT32       Reserved5;
+    UINT32       Reserved6;
+    UINT32       Reserved7;
+    FO_LBTYPE_DATA Entry[MAX_LB_ENTRIES];
+} FOTGTLBDATALIST, *PFOTGTLBDATALIST; 
+
 
 
 #define FO_LUN_DATA_LIST_MIN_ENTRIES      1

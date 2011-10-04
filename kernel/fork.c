@@ -309,6 +309,10 @@ static struct mm_struct * mm_init(struct mm_struct * mm)
 	mm->non_executable_cache = NON_EXECUTABLE_CACHE(current);
 	mm->pgd = pgd_alloc(mm);
 	mm->def_flags = 0;
+	if (current->mm)
+		mm->rlimit_rss = current->mm->rlimit_rss;
+	else
+		mm->rlimit_rss = RLIM_INFINITY;
 	if (mm->pgd)
 		return mm;
 	free_mm(mm);

@@ -79,6 +79,11 @@ void __init setup_node_bootmem(int nodeid, unsigned long start, unsigned long en
 
 EXPORT_SYMBOL(maxnode);
 
+#ifdef CONFIG_IA32E
+extern unsigned long end_dma_pfn;
+unsigned long max_dma_address_pa = __pa(MAX_DMA_ADDRESS);
+#endif
+
 /* Initialize final allocator for a zone */
 void __init setup_node_zones(int nodeid)
 { 
@@ -93,9 +98,20 @@ void __init setup_node_zones(int nodeid)
 	end_pfn = PLAT_NODE_DATA(nodeid)->end_pfn; 
 
 	printk("setting up node %d %lx-%lx\n", nodeid, start_pfn, end_pfn); 
-	
-	/* All nodes > 0 have a zero length zone DMA */ 
-	dma_end_pfn = __pa(MAX_DMA_ADDRESS) >> PAGE_SHIFT; 
+#ifdef CONFIG_IA32E
+	/* bootline maxdma= option overrides MAX_DMA_ADDRESS */
+	if (end_dma_pfn) {
+		if ((end_dma_pfn << PAGE_SHIFT) > (1L << 32)) {
+			printk("Warning: maxdma exceeds 4GB, resetting to %ld\n", max_dma_address_pa);
+			dma_end_pfn = max_dma_address_pa >> PAGE_SHIFT;
+		} else {
+			dma_end_pfn = end_dma_pfn;
+			max_dma_address_pa = end_dma_pfn << PAGE_SHIFT;
+		}
+	} else
+#endif
+		dma_end_pfn = __pa(MAX_DMA_ADDRESS) >> PAGE_SHIFT;
+	/* All nodes > 0 have a zero length zone DMA */
 	if (start_pfn < dma_end_pfn) { 
 		zones[ZONE_DMA] = dma_end_pfn - start_pfn;
 		zones[ZONE_NORMAL] = end_pfn - dma_end_pfn; 

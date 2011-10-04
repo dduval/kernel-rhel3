@@ -58,11 +58,6 @@
 #define MCT_U232_SET_MODEM_CTRL_SIZE    1
 
 /*
- * Baud rate (divisor)
- */
-#define MCT_U232_BAUD_RATE(b)		(115200/b)
-
-/*
  * Line Control Register (LCR)
  */
 #define MCT_U232_SET_BREAK              0x40

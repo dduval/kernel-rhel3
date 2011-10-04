@@ -1,3 +1,15 @@
+Changes from 20060106 to 20060328:
+
+	* Changed version to 1.2.3
+	* Fixed system hang/panic while executing
+	  lpfc_ioctl_hba_fcptargetmapping function (CR 19692)
+
+Changes from 20050503 to 20060106:
+
+	* Changed version to 1.2.2.
+	* Fixed a panic found during 7.3.2 driver testing.
+	* Fixed lpfc_ioctl_hba_getevent() to return correct number of events.
+
 Changes from 20050401 to 20050503:
 
 	* Changed version to 1.2.1.

@@ -712,7 +712,7 @@ fh_verify(struct svc_rqst *rqstp, struct svc_fh *fhp, int type, int access)
 			tdentry = parent;
 		}
 		if (exp->ex_dentry != tdentry) {
-			error = nfserr_stale;
+			error = nfserr_acces;
 			printk("fh_verify: no root_squashed access at %s/%s.\n",
 			       dentry->d_parent->d_name.name,
 			       dentry->d_name.name);

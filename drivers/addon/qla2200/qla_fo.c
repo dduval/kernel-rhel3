@@ -1,21 +1,12 @@
-/********************************************************************************
-*                  QLOGIC LINUX SOFTWARE
-*
-* QLogic ISP2x00 device driver for Linux 2.4.x
-* Copyright (C) 2003 QLogic Corporation
-* (www.qlogic.com)
-*
-* This program is free software; you can redistribute it and/or modify it
-* under the terms of the GNU General Public License as published by the
-* Free Software Foundation; either version 2, or (at your option) any
-* later version.
-*
-* This program is distributed in the hope that it will be useful, but
-* WITHOUT ANY WARRANTY; without even the implied warranty of
-* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-* General Public License for more details.
-*
-******************************************************************************
+/*
+ * QLogic Fibre Channel HBA Driver
+ * Copyright (c)  2003-2005 QLogic Corporation
+ *
+ * See LICENSE.qla2xxx for copyright and licensing details.
+ */
+
+
+/******************************************************************************
 * Failover include file
 ******************************************************************************/
 #include "qla2x00.h"
@@ -25,6 +16,7 @@
 #include "qlfo.h"
 #include "qla_fo.h"
 #include "qlfolimits.h"
+#include "qla_cfg.h"
 
 
 /* This type is used to create a temporary list of port names */
@@ -61,10 +53,81 @@ static int qla2x00_fo_get_tgt(mp_host_t *, scsi_qla_host_t *, EXT_IOCTL *,
     FO_DEVICE_DATA *);
 static int qla2x00_fo_set_target_data(EXT_IOCTL *pext,
     FO_TARGET_DATA_INPUT *bp, int mode);
+static int qla2x00_fo_get_lbtype(EXT_IOCTL *pext, int mode);
+static int qla2x00_fo_set_lbtype(EXT_IOCTL *pext, int mode);
+
 
 STATIC BOOL qla2x00_port_name_in_list(uint8_t *, portname_list *);
 STATIC int qla2x00_add_to_portname_list(uint8_t *, portname_list **);
 STATIC void qla2x00_free_portname_list(portname_list **);
+
+int qla2x00_lookup_sense_code(unsigned char *sense_buffer);
+
+/*
+ * Error structure
+ */
+struct error_code_info {
+	uint8_t	key;
+	uint8_t	asc;
+	uint8_t	ascq;
+	uint8_t	reserved;
+};
+
+static  struct error_code_info cfg_sense_code_list[] = {
+	{HARDWARE_ERROR, 0x80, 0x02},
+	{HARDWARE_ERROR, 	0x44, 0x00},
+	{HARDWARE_ERROR,   0x80, 0x03},
+	{HARDWARE_ERROR,	0x95, 0x01},
+	{HARDWARE_ERROR,	0x45, 0x00},
+	{HARDWARE_ERROR,	0xD1, 0x0a},
+	{HARDWARE_ERROR,	0x4b, 0x00},
+	{HARDWARE_ERROR,	0xd0, 0x06},
+	{HARDWARE_ERROR,    0x40, 0x81},
+	{HARDWARE_ERROR,	0x44, 0x00},        
+	{HARDWARE_ERROR,	0xc0, 0x00},              
+	{HARDWARE_ERROR,	0x40, 0x81},
+	{HARDWARE_ERROR,	0x44, 0x00},
+	{HARDWARE_ERROR,	0xc0, 0x00}, 
+	{HARDWARE_ERROR,	0x91, 0x09},
+	{HARDWARE_ERROR,	0x40, 0x91},
+	{HARDWARE_ERROR,	0x40, 0x92},
+	{HARDWARE_ERROR,	0x40, 0x93},
+	{HARDWARE_ERROR,	0x40, 0x94},
+	{HARDWARE_ERROR,	0x40, 0x95},
+	{HARDWARE_ERROR,	0x40, 0x96},
+	{HARDWARE_ERROR,   0x44, 0x00},
+	{HARDWARE_ERROR,	0x40, 0x81},
+	{HARDWARE_ERROR,   0x87, 0x08},
+	{HARDWARE_ERROR,  0x44, 0x00},
+	{HARDWARE_ERROR,  0xa8, 0x00},
+	{HARDWARE_ERROR,  0xa8, 0x01},
+	{HARDWARE_ERROR,  0x40, 0x80},
+	{HARDWARE_ERROR, 0x3F, 0xA1},
+	{HARDWARE_ERROR, 0x0c, 0x80 },
+	{HARDWARE_ERROR, 0x0c, 0x00 },
+	{HARDWARE_ERROR, 0x0c, 0x81 },
+	{0, 0, 0 }
+};
+
+
+int qla2x00_lookup_sense_code(unsigned char *sense_buffer)
+{
+	int i = 0;
+
+	DEBUG3(printk("%s entered\n",__func__);)
+
+	for (i = 0; 1; i++) {
+		if (cfg_sense_code_list[i].key == 0)
+			return 0;
+
+		if( cfg_sense_code_list[i].key != (sense_buffer[2] & 0xf) )
+			continue;
+
+		if (cfg_sense_code_list[i].asc == sense_buffer[12] &&
+			  cfg_sense_code_list[i].ascq == sense_buffer[13] )
+			return 1;
+	}
+}
 
 /*
  * qla2x00_get_hba
@@ -475,6 +538,9 @@ qla2x00_fo_get_lun_data(EXT_IOCTL *pext, FO_LUN_DATA_INPUT *bp, int mode)
 			/* Lookup entry name */
 			if (!qla2x00_is_portname_in_device(dp, entry->PortName))
 				continue;
+			if( dp->mpdev ) {
+				dp = dp->mpdev;
+			} 
 
 			if ((pathlist = dp->path_list) == NULL)
 				continue;
@@ -974,7 +1040,7 @@ qla2x00_fo_get_tgt(mp_host_t *host, scsi_qla_host_t *ha,
 
 	FO_DEVICE_DATA	*u_entry;
 
-	DEBUG9(printk("%s(%ld): entered.\n", __func__, host->ha->host_no);)
+	DEBUG9(printk("%s(%ld): entered.\n", __func__, ha->host_no);)
 
 	u_entry = (FO_DEVICE_DATA *) pext->ResponseAdr;
 
@@ -1019,7 +1085,7 @@ qla2x00_fo_get_tgt(mp_host_t *host, scsi_qla_host_t *ha,
 
 			DEBUG10(printk("%s(%ld): found fcport %p:%02x%02x%02x"
 			    "%02x%02x%02x%02x%02x.\n",
-			    __func__, host->ha->host_no,
+			    __func__, ha->host_no,
 			    fcport,
 			    fcport->port_name[0],
 			    fcport->port_name[1],
@@ -1035,7 +1101,7 @@ qla2x00_fo_get_tgt(mp_host_t *host, scsi_qla_host_t *ha,
 
 			DEBUG9_10(printk("%s(%ld): fcport mpbyte=%02x. "
 			    "return unconfigured. ",
-			    __func__, host->ha->host_no, fcport->mp_byte);)
+			    __func__, ha->host_no, fcport->mp_byte);)
 
 			entry->TargetId = 0;
 			entry->Dev_No = 0;
@@ -1051,7 +1117,7 @@ qla2x00_fo_get_tgt(mp_host_t *host, scsi_qla_host_t *ha,
 				/* error */
 				DEBUG2_9_10(printk("%s(%ld): u_entry %p "
 				    "copy out err. no tgt id.\n",
-				    __func__, host->ha->host_no, u_entry);)
+				    __func__, ha->host_no, u_entry);)
 				pext->Status = EXT_STATUS_COPY_ERR;
 				break;
 			}
@@ -1061,7 +1127,7 @@ qla2x00_fo_get_tgt(mp_host_t *host, scsi_qla_host_t *ha,
 
 		DEBUG9(printk("%s(%ld): after returning unconfigured fcport "
 		    "list. got %d entries.\n",
-		    __func__, host->ha->host_no, cnt);)
+		    __func__, ha->host_no, cnt);)
 
 		return (ret);
 	}
@@ -1161,6 +1227,10 @@ qla2x00_fo_get_tgt(mp_host_t *host, scsi_qla_host_t *ha,
 
 			if (dp == NULL)
 				continue;
+
+			if (dp->mpdev) {
+			        dp = dp->mpdev;
+			}
 
 			/* Lookup entry name */
 			if (!qla2x00_is_portname_in_device(dp, entry->PortName))
@@ -1476,9 +1546,7 @@ qla2x00_fo_set_target_data(EXT_IOCTL *pext, FO_TARGET_DATA_INPUT  *bp, int mode)
 int
 qla2x00_fo_ioctl(scsi_qla_host_t *ha, int ioctl_code, EXT_IOCTL *pext, int mode)
 {
-	int	rval = 0;
-	size_t	in_size, out_size;
-	static	union {
+	typedef	union {
 		FO_PARAMS params;
 		FO_GET_PATHS path;
 		FO_SET_CURRENT_PATH set_path;
@@ -1486,7 +1554,10 @@ qla2x00_fo_ioctl(scsi_qla_host_t *ha, int ioctl_code, EXT_IOCTL *pext, int mode)
 		FO_HBA_STAT stat;
 		FO_LUN_DATA_INPUT lun_data;
 		FO_TARGET_DATA_INPUT target_data;
-	} buff;
+	} fodata_t;
+	fodata_t	*buff;
+	int		rval = 0;
+	size_t		in_size, out_size;
 
 
 	ENTER("qla2x00_fo_ioctl");
@@ -1526,8 +1597,26 @@ qla2x00_fo_ioctl(scsi_qla_host_t *ha, int ioctl_code, EXT_IOCTL *pext, int mode)
 		case FO_CC_SET_TARGET_DATA:
 			in_size = sizeof(FO_TARGET_DATA_INPUT);
 			break;
+		case FO_CC_GET_LBTYPE:
+			/* Empty */
+			break;
+		case FO_CC_SET_LBTYPE:
+			/* Empty */
+			break;
 
 	}
+
+	if (qla2x00_get_ioctl_scrap_mem(ha, (void **)&buff,
+	    sizeof(fodata_t))) {
+		/* not enough memory */
+		pext->Status = EXT_STATUS_NO_MEMORY;
+		DEBUG10(printk( "%s(%ld): inst=%ld scrap not big enough. "
+		    "size requested=%ld.\n",
+		    __func__, ha->host_no, ha->instance,
+		    (ulong)sizeof(fodata_t));)
+		goto done_fo_ioctl;
+	}
+
 	if (in_size != 0) {
 		if ((int)pext->RequestLen < in_size) {
 			pext->Status = EXT_STATUS_INVALID_PARAM;
@@ -1536,7 +1625,7 @@ qla2x00_fo_ioctl(scsi_qla_host_t *ha, int ioctl_code, EXT_IOCTL *pext, int mode)
 			    __func__, pext->RequestLen);)
 
 		} else {
-			rval = copy_from_user(&buff, pext->RequestAdr, in_size);
+			rval = copy_from_user(buff, pext->RequestAdr, in_size);
 			if (rval) {
 				DEBUG2_9_10(printk("%s: req buf copy error. "
 				    "size=%ld.\n",
@@ -1563,32 +1652,32 @@ qla2x00_fo_ioctl(scsi_qla_host_t *ha, int ioctl_code, EXT_IOCTL *pext, int mode)
 
 	switch (ioctl_code) {
 		case FO_CC_GET_PARAMS:
-			DEBUG4(printk(KERN_INFO "calling qla2x00_fo_get_param\n");)
-			rval = qla2x00_fo_get_params(&buff.params);
+			DEBUG4(printk("calling qla2x00_fo_get_param\n");)
+			rval = qla2x00_fo_get_params(&(buff->params));
 			break;
 		case FO_CC_SET_PARAMS:
-			DEBUG4(printk(KERN_INFO "calling qla2x00_fo_set_param\n");)
-			rval = qla2x00_fo_set_params(&buff.params);
+			DEBUG4(printk("calling qla2x00_fo_set_param\n");)
+			rval = qla2x00_fo_set_params(&(buff->params));
 			break;
 		case FO_CC_GET_PATHS:
-			DEBUG4(printk(KERN_INFO "calling qla2x00_fo_get_paths\n");)
+			DEBUG4(printk("calling qla2x00_fo_get_paths\n");)
 			rval = qla2x00_cfg_get_paths(pext,
-			    &buff.path,mode);
+			    &(buff->path),mode);
 			if (rval != 0)
 				out_size = 0;
 			break;
 		case FO_CC_SET_CURRENT_PATH:
-			DEBUG4(printk(KERN_INFO "calling qla2x00_fo_set_paths\n");)
+			DEBUG4(printk("calling qla2x00_fo_set_paths\n");)
 			rval = qla2x00_cfg_set_current_path(pext,
-			    &buff.set_path,mode);
+			    &(buff->set_path),mode);
 			break;
 		case FO_CC_RESET_HBA_STAT:
-			DEBUG4(printk(KERN_INFO "calling qla2x00_fo_reset_hba_stat\n");)
-			rval = qla2x00_fo_stats(&buff.stat, TRUE);
+			DEBUG4(printk("calling qla2x00_fo_reset_hba_stat\n");)
+			rval = qla2x00_fo_stats(&(buff->stat), TRUE);
 			break;
 		case FO_CC_GET_HBA_STAT:
-			DEBUG4(printk(KERN_INFO "calling qla2x00_fo_get_hba_stat\n");)
-			rval = qla2x00_fo_stats(&buff.stat, FALSE);
+			DEBUG4(printk("calling qla2x00_fo_get_hba_stat\n");)
+			rval = qla2x00_fo_stats(&(buff->stat), FALSE);
 			break;
 		case FO_CC_GET_LUN_DATA:
 
@@ -1597,7 +1686,7 @@ qla2x00_fo_ioctl(scsi_qla_host_t *ha, int ioctl_code, EXT_IOCTL *pext, int mode)
 			    pext->RequestAdr);)
 
 			rval = qla2x00_fo_get_lun_data(pext,
-			    &buff.lun_data, mode);
+			    &(buff->lun_data), mode);
 
 			if (rval != 0)
 				out_size = 0;
@@ -1609,7 +1698,7 @@ qla2x00_fo_ioctl(scsi_qla_host_t *ha, int ioctl_code, EXT_IOCTL *pext, int mode)
 			    pext->RequestAdr);)
 
 			rval = qla2x00_fo_set_lun_data(pext,
-			    &buff.lun_data, mode);
+			    &(buff->lun_data), mode);
 			break;
 		case FO_CC_GET_TARGET_DATA:
 			DEBUG4(printk("calling qla2x00_fo_get_target_data\n");)
@@ -1617,7 +1706,7 @@ qla2x00_fo_ioctl(scsi_qla_host_t *ha, int ioctl_code, EXT_IOCTL *pext, int mode)
 			    pext->RequestAdr);)
 
 			rval = qla2x00_fo_get_target_data(pext,
-			    &buff.target_data, mode);
+			    &(buff->target_data), mode);
 
 			if (rval != 0) {
 				out_size = 0;
@@ -1628,13 +1717,20 @@ qla2x00_fo_ioctl(scsi_qla_host_t *ha, int ioctl_code, EXT_IOCTL *pext, int mode)
 			DEBUG4(printk("	pext->RequestAdr (%p):\n",
 			    pext->RequestAdr);)
 			rval = qla2x00_fo_set_target_data(pext,
-			    &buff.target_data, mode);
+			    &(buff->target_data), mode);
 			break;
-
+		case FO_CC_GET_LBTYPE:
+			DEBUG4(printk("calling qla2x00_fo_get_lbtype\n");)
+			rval = qla2x00_fo_get_lbtype(pext, mode);
+			break;
+		case FO_CC_SET_LBTYPE:
+			DEBUG4(printk("calling qla2x00_fo_set_lbtype\n");)
+			rval = qla2x00_fo_set_lbtype(pext, mode);
+			break;
 	}
 
 	if (rval == 0) {
-		rval = copy_to_user(pext->ResponseAdr, &buff, out_size);
+		rval = copy_to_user(pext->ResponseAdr, buff, out_size);
 		if (rval) {
 			DEBUG10(printk("%s: resp buf copy error. size=%ld.\n",
 			    __func__, (ulong)out_size);)
@@ -1643,6 +1739,8 @@ qla2x00_fo_ioctl(scsi_qla_host_t *ha, int ioctl_code, EXT_IOCTL *pext, int mode)
 	}
 
 done_fo_ioctl:
+
+	qla2x00_free_ioctl_scrap_mem(ha);
 
 	if (rval != 0) {
 		/*EMPTY*/
@@ -1653,6 +1751,37 @@ done_fo_ioctl:
 	}
 
 	return rval;
+}
+
+/*
+ * qla2x00_cfg_get_path_cnt
+ *	Get the path cnt for the target. 
+ * Input:
+ *	sp = Pointer to command.
+ *	ha = adapter state pointer.
+ *
+ * Returns:
+ *
+ * Context:
+ *	Kernel context.
+ */
+int qla2x00_cfg_get_path_cnt(scsi_qla_host_t *ha, srb_t *sp)
+{
+	mp_host_t	*host;			/* host adapter pointer */
+	os_tgt_t	*tq;
+	mp_path_list_t  *path_list;
+	mp_device_t	*dp;
+	int	id = 0;
+
+	tq = sp->tgt_queue;
+	if ((host = qla2x00_cfg_find_host(ha)) != NULL) {
+		if ((dp = qla2x00_find_mp_dev_by_nodename(host,
+		    tq->node_name)) != NULL) {
+			path_list = dp->path_list;
+			id = path_list->path_cnt;
+		}
+	}
+	return id;
 }
 
 
@@ -1680,6 +1809,8 @@ qla2x00_fo_count_retries(scsi_qla_host_t *ha, srb_t *sp)
 	scsi_qla_host_t	*vis_ha;
 	uint16_t        path_id;
 	struct fo_information	*mp_info = NULL;
+	int		path_cnt;
+	mp_lun_t	*mplun;
 
 
 	DEBUG9(printk("%s: entered.\n", __func__);)
@@ -1687,7 +1818,18 @@ qla2x00_fo_count_retries(scsi_qla_host_t *ha, srb_t *sp)
 	lq = sp->lun_queue;
 	mp_info = (struct fo_information *) lq->fo_info;
 
+	/* 
+	 * if load balancing is enabled then we don't try 
+	 * and failover until  all the active paths are gone.
+	 */
+	mplun = (mp_lun_t *)sp->fclun->mplun; 
+	path_cnt = qla2x00_cfg_get_path_cnt(ha, sp);
+	DEBUG(printk("%s path_cnt=%d osl_fo_path_cnt=%d for lun=%d\n",
+	    __func__, path_cnt, mp_info->path_cnt, lq->fclun->lun);)
+
        if (test_and_clear_bit(LUN_MPIO_RESET_CNTS, &lq->q_flag)) {
+		DEBUG2(printk("%s CLEAR MPIO counts: vis_ha=%ld, max retries %d path_cnt=%d osl_fo_path_cnt=%d for lun=%d\n",
+	    __func__, ha->host_no,qla_fo_params.MaxRetriesPerPath,path_cnt, mp_info->path_cnt, lq->fclun->lun);)
                for (path_id = 0; path_id < MAX_PATHS_PER_DEVICE; path_id++)
                        mp_info->fo_retry_cnt[path_id] = 0;
 	}
@@ -1702,6 +1844,8 @@ qla2x00_fo_count_retries(scsi_qla_host_t *ha, srb_t *sp)
         }
 
 	if(retry == FALSE) {
+	DEBUG2(printk("%s vis_ha=%ld, path_cnt=%d osl_fo_path_cnt=%d for lun=%d\n",
+	    __func__, ha->host_no,path_cnt, mp_info->path_cnt, lq->fclun->lun);)
                 printk(KERN_INFO
                     "qla2x00: no more failovers for request - "
 		    "pid= %ld\n", sp->cmd->serial_number);
@@ -1711,6 +1855,27 @@ qla2x00_fo_count_retries(scsi_qla_host_t *ha, srb_t *sp)
 		 * max retries this path
 		 */
 		if((++sp->fo_retry_cnt % qla_fo_params.MaxRetriesPerPath) == 0){
+			if (mplun) {
+				if( mplun->load_balance_type >= LB_LRU ) {
+					DEBUG2(printk(" %s: LB-FAILOVER - lun=%d visha=%ld, sp=%p,"
+					"pid =%ld, path_id=%d fo retry= %d, act paths=%d max_paths=%d\n",
+					 __func__, sp->fclun->lun, ha->host_no, sp,  
+					sp->cmd->serial_number, path_id, 
+					mp_info->fo_retry_cnt[path_id], mplun->act_cnt,
+					path_cnt);)
+					if ( qla2x00_del_fclun_from_active_list( mplun, 
+						sp->fclun, sp) == 0 ){
+						sp->fclun = sp->lun_queue->fclun;
+						sp->ha = sp->fclun->fcport->ha;
+						return 1;
+					}
+					printk(KERN_INFO
+						"%s: no more active paths for request - "
+						"pid= %ld, lun=%d, lq=%p\n", 
+						__func__,sp->cmd->serial_number, sp->fclun->lun, lq);
+				}
+			}
+
 			path_id = sp->fclun->fcport->cur_path;
 			mp_info->fo_retry_cnt[path_id]++;
 			DEBUG(printk(" %s: FAILOVER - queuing ha=%ld, sp=%p,"
@@ -1763,7 +1928,7 @@ qla2x00_fo_check_device(scsi_qla_host_t *ha, srb_t *sp)
 
 		case NOT_READY:
 			if (fcport->flags & (FC_MSA_DEVICE | FC_EVA_DEVICE 
-				| FC_AA_EVA_DEVICE)) {
+				| FC_AA_EVA_DEVICE | FC_AA_MSA_DEVICE)) {
 				/*
 				 * if we can't access port 
 				 */
@@ -1771,29 +1936,35 @@ qla2x00_fo_check_device(scsi_qla_host_t *ha, srb_t *sp)
 					(cp->sense_buffer[13] == 0x0 ||
 					cp->sense_buffer[13] == 0x2)) {
 				 	sp->err_id = SRB_ERR_DEVICE;
+					CMD_RESULT(sp->cmd) = DID_NO_CONNECT << 16;
 					return (TRUE);
 				}
 			} 
  	     		if (fcport->flags & FC_DSXXX_DEVICE) {
-				/*
-				 * if we can't access port: lun in transition 
-				 */
+				   /* retry I/O */
 				if (cp->sense_buffer[12] == 0x4 &&
-					(cp->sense_buffer[13] == 0x0 ||
-					cp->sense_buffer[13] == 0xa ||
-					cp->sense_buffer[13] == 0xb)) {
-				 	sp->err_id = SRB_ERR_DEVICE;
+				    (cp->sense_buffer[13] == 0x0 ||
+					cp->sense_buffer[13] == 0xa)) {
+					CMD_RESULT(sp->cmd) = DID_BUS_BUSY << 16;
 					return (TRUE);
 				}
+				if (cp->sense_buffer[12] == 0x4 &&
+					cp->sense_buffer[13] == 0xb) {
+					sp->err_id = SRB_ERR_DEVICE;
+					CMD_RESULT(sp->cmd) = DID_NO_CONNECT << 16;
+					return (TRUE);
+				}
+
 			} 
 			break;
 
 		case UNIT_ATTENTION:
 			if (fcport->flags & (FC_EVA_DEVICE | 
-				FC_AA_EVA_DEVICE)) {
+				FC_AA_EVA_DEVICE | FC_AA_MSA_DEVICE)) {
 				if ((cp->sense_buffer[12] == 0xa &&
 					cp->sense_buffer[13] == 0x8)) {
 				 	sp->err_id = SRB_ERR_DEVICE;
+					CMD_RESULT(sp->cmd) = DID_NO_CONNECT << 16;
 					return (TRUE);
 				}
 				if ((cp->sense_buffer[12] == 0xa &&
@@ -1801,13 +1972,30 @@ qla2x00_fo_check_device(scsi_qla_host_t *ha, srb_t *sp)
 					/* failback lun */
 				}
 			} 
+			/* retry I/O */
  	     		if (fcport->flags & FC_DSXXX_DEVICE) {
 				/* lun config changed */
 				if (cp->sense_buffer[12] == 0x2a &&
 					cp->sense_buffer[13] == 0x6) {
-				 	sp->err_id = SRB_ERR_DEVICE;
+					CMD_RESULT(sp->cmd) = DID_BUS_BUSY << 16;
 					return (TRUE);
 				}
+			}
+			break;
+
+		case HARDWARE_ERROR:
+			if (fcport->flags & (FC_DFXXX_DEVICE)) {
+				sp->err_id = SRB_ERR_DEVICE;
+				CMD_RESULT(sp->cmd) = DID_BUS_BUSY << 16;
+				return (TRUE);
+			}
+			break;
+
+		case ABORTED_COMMAND:
+			if (fcport->flags & (FC_DFXXX_DEVICE)) {
+				sp->err_id = SRB_ERR_DEVICE;
+				CMD_RESULT(sp->cmd) = DID_BUS_BUSY << 16;
+				return (TRUE);
 			}
 			break;
 
@@ -1859,10 +2047,18 @@ qla2x00_fo_check(scsi_qla_host_t *ha, srb_t *sp)
 
 	DEBUG9(printk("%s: entered.\n", __func__);)
 
-	/* we failover on selction timeouts only */
+	/* we failover on selction timeouts and some device check conditions */
+	if (sp->err_id == SRB_ERR_RETRY) {
+		sp->cmd->result = DID_BUS_BUSY << 16;
+		// spin_lock_irqsave(&ha->hardware_lock, flags);
+		sp->fclun->io_cnt++;
+		sp->fclun->s_time += HZ;
+		// spin_unlock_irqrestore(&ha->hardware_lock, flags);
+	}
+
+        qla2x00_fo_check_device(ha, sp);
 	host_status = CMD_RESULT(sp->cmd) >>16;
-	if( host_status == DID_NO_CONNECT ||
-		qla2x00_fo_check_device(ha, sp) ) {
+	if( host_status == DID_NO_CONNECT) {
 			
 		if( qla2x00_fo_count_retries(ha,sp) ) {
 			/* Force a retry  on this request, it will
@@ -1887,8 +2083,9 @@ qla2x00_fo_check(scsi_qla_host_t *ha, srb_t *sp)
 	}
 
 	/* Clear out any FO retry counts on good completions. */
-	if (host_status == DID_OK)
+	if (host_status == DID_OK) {
 		set_bit(LUN_MPIO_RESET_CNTS, &sp->lun_queue->q_flag);
+	}
 
 
 	DEBUG9(printk("%s: exiting. retry = %d.\n", __func__, retry);)
@@ -2006,6 +2203,102 @@ qla2x00_fo_set_params(PFO_PARAMS pp)
 	return EXT_STATUS_OK;
 }
 
+#if 0
+static mp_tport_grp_t *
+qla2x00_find_tpg_by_lu_path(mp_lun_t *mplun, lu_path_t *lu_path)
+{
+	struct list_head *list, *temp;
+	mp_tport_grp_t *tport_grp;
+	mp_tport_grp_t *tpg = NULL;
+
+	list_for_each_safe(list, temp, &mplun->tport_grps_list) {
+		tport_grp = list_entry(list, mp_tport_grp_t, list);
+		if (tport_grp->tpg_id[0] == lu_path->tpg_id[0]  &&
+		    tport_grp->tpg_id[1] == lu_path->tpg_id[1]  ) {
+			tpg = tport_grp;
+			break;
+		} 
+	}
+	return tpg;
+}
+#endif
+
+static lu_path_t *
+qla2x00_find_lu_path_by_fclun(mp_lun_t *mplun, fc_lun_t *fclun)
+{
+	struct list_head *list, *temp;
+	lu_path_t  *tmp_path;
+	lu_path_t	*lu_path = NULL;
+
+	list_for_each_safe(list, temp, &mplun->lu_paths){
+		tmp_path = list_entry(list, lu_path_t, list);
+		if (tmp_path->fclun == fclun ) {
+			lu_path = tmp_path;
+			break;
+		}
+	}
+	return lu_path;
+}
+
+static int 
+qla2x00_update_tpg_states(fc_lun_t *old_lp, fc_lun_t *new_lp)
+{
+ 	mp_tport_grp_t *new_tpg = NULL;
+ 	mp_tport_grp_t *old_tpg = NULL;
+	mp_lun_t *mplun = (mp_lun_t *)new_lp->mplun; 
+	lu_path_t	*new_lu_path;
+	lu_path_t	*old_lu_path;
+ 	uint8_t		passive_state = 0;
+ 	struct list_head *list, *temp;
+ 	mp_tport_grp_t *tport_grp;
+
+	new_lu_path = qla2x00_find_lu_path_by_fclun(mplun,new_lp);
+	old_lu_path = qla2x00_find_lu_path_by_fclun(mplun,old_lp);
+	if( new_lu_path == NULL || old_lu_path == NULL) {
+		return 1;
+	}
+	if( new_lu_path ==  old_lu_path ) {
+		DEBUG2(printk("%s Ignoring new path_id =%d,"
+			" old path_id =%d\n",__func__,
+			new_lu_path->path_id, old_lu_path->path_id);)
+		 return 1;
+	}
+ 
+ 	/* Always change */
+ 	list_for_each_safe(list, temp, &mplun->tport_grps_list) {
+ 		tport_grp = list_entry(list, mp_tport_grp_t, list);
+ 		if (tport_grp->asym_acc_state != TPG_ACT_OPT) {
+ 			passive_state = tport_grp->asym_acc_state;
+ 			new_tpg = tport_grp;
+ 		} else  {
+ 			old_tpg = tport_grp;
+ 		}
+ 	}
+ 
+ 	if( new_tpg == NULL || old_tpg == NULL) {
+ 		return 1;
+ 	}
+ 
+ 	old_tpg->asym_acc_state = passive_state;	
+  	new_tpg->asym_acc_state = TPG_ACT_OPT;	
+ 
+ 	old_lu_path->asym_acc_state = old_tpg->asym_acc_state;
+ 	new_lu_path->asym_acc_state = new_tpg->asym_acc_state;
+ 
+ 	DEBUG2(printk(
+ 	"%s TPG STATES: lun %d  new_tpg[%d]=%d new tpg %p, old_tpg[%d]=%d old tpg %p\n",
+ 		__func__, mplun->number, new_tpg->tpg_id[1], 
+ 		new_tpg->asym_acc_state,new_tpg,old_tpg->tpg_id[1],
+ 		old_tpg->asym_acc_state,old_tpg);)
+ 	DEBUG2(printk(
+ 	"%s lun %d  new_lu_path[%d]=%d (new state), old_lun_path[%d]=%d (old state)\n",
+ 		__func__, mplun->number,  new_lu_path->path_id,
+ 		new_lu_path->asym_acc_state, old_lu_path->path_id,
+ 		old_lu_path->asym_acc_state);)
+
+	return 0;
+}
+
 static int 
 qla2x00_issue_set_tpg_cdb (fc_lun_t *new_lp)
 {
@@ -2025,6 +2318,9 @@ qla2x00_issue_set_tpg_cdb (fc_lun_t *new_lp)
 	struct list_head *list, *temp;
 	mp_tport_grp_t *tport_grp;
 	uint8_t	index = 0;
+	uint16_t        *cstatus, *sstatus;
+        uint8_t         *sense_data;
+
 
 	ENTER(__func__);
 
@@ -2062,74 +2358,144 @@ qla2x00_issue_set_tpg_cdb (fc_lun_t *new_lp)
 		return (QLA2X00_FUNCTION_FAILED);
 	}
 
+	if (check_24xx_or_54xx_device_ids(ha) || check_25xx_device_ids(ha)) {
+		cstatus = &stpg->p.rsp24.comp_status;
+		sstatus = &stpg->p.rsp24.scsi_status;
+		sense_data = stpg->p.rsp24.data;
+	} else {
+		cstatus = &stpg->p.rsp.comp_status;
+		sstatus = &stpg->p.rsp.scsi_status; 
+		sense_data = stpg->p.rsp.req_sense_data;
+	}
+
+
 	retry = 5;
 	do {
 		memset(stpg, 0, sizeof(set_tport_grp_rsp_t));
-		stpg->p.cmd.entry_type = COMMAND_A64_TYPE;
-		stpg->p.cmd.entry_count = 1;
-		stpg->p.cmd.lun = cpu_to_le16(lun);
-#if defined(EXTENDED_IDS)
-		stpg->p.cmd.target = cpu_to_le16(fcport->loop_id);
-#else
-		stpg->p.cmd.target = (uint8_t)fcport->loop_id;
-#endif
-		stpg->p.cmd.control_flags =
-			__constant_cpu_to_le16(CF_WRITE | CF_SIMPLE_TAG);
-		stpg->p.cmd.scsi_cdb[0] = SCSIOP_MAINTENANCE_OUT;
-		stpg->p.cmd.scsi_cdb[1] = SCSISA_TARGET_PORT_GROUPS;
-		stpg->p.cmd.scsi_cdb[8] = ((sizeof(set_tport_grp_data_t) >> 8) & 0xff); 
-		stpg->p.cmd.scsi_cdb[9] = (sizeof(set_tport_grp_data_t) & 0xff);
+		if (check_24xx_or_54xx_device_ids(ha) || check_25xx_device_ids(ha)) {
+			stpg->p.cmd24.entry_type = COMMAND_TYPE_7;
+			stpg->p.cmd24.entry_count = 1;
+			stpg->p.cmd24.nport_handle = fcport->loop_id;
+			stpg->p.cmd24.port_id[0] = fcport->d_id.b.al_pa;
+			stpg->p.cmd24.port_id[1] = fcport->d_id.b.area;
+			stpg->p.cmd24.port_id[2] = fcport->d_id.b.domain;
+			stpg->p.cmd24.lun[1] = LSB(lun);
+			stpg->p.cmd24.lun[2] = MSB(lun);
+			host_to_fcp_swap(stpg->p.cmd24.lun,
+			    sizeof(stpg->p.cmd24.lun));
+			stpg->p.cmd24.task_mgmt_flags =
+			    __constant_cpu_to_le16(TMF_WRITE_DATA);
+			stpg->p.cmd24.task = TSK_SIMPLE;
+			stpg->p.cmd24.fcp_cdb[0] = SCSIOP_MAINTENANCE_OUT;
+			stpg->p.cmd24.fcp_cdb[1] = SCSISA_TARGET_PORT_GROUPS;
+			stpg->p.cmd24.fcp_cdb[8] = 
+				((sizeof(set_tport_grp_data_t) >> 8) & 0xff); 
+			stpg->p.cmd24.fcp_cdb[9] = 
+					(sizeof(set_tport_grp_data_t) & 0xff);
 
-		/* Right now we support only two tgt port groups. For
-		 * failover to occur the state of the two controller must be
-		 * opposite to each other and different from current state */
-		tpg_count = 0; 
-		list_for_each_safe(list, temp, &mplun->tport_grps_list) {
-			tport_grp = list_entry(list, mp_tport_grp_t, list);
-			if (tport_grp->asym_acc_state != TPG_ACT_OPT) {
-				passive_state = tport_grp->asym_acc_state;
-				stpg->list.descriptor[tpg_count].
-					    asym_acc_state = TPG_ACT_OPT;	
-			} else  {
-				index = tpg_count;
+			host_to_fcp_swap(stpg->p.cmd24.fcp_cdb,
+			    sizeof(stpg->p.cmd24.fcp_cdb));
+
+			/* Right now we support only two tgt port groups. For
+			 * failover to occur the state of the two controller must be
+			 * opposite to each other and different from current state */
+			tpg_count = 0; 
+			list_for_each_safe(list, temp, &mplun->tport_grps_list) {
+				tport_grp = list_entry(list, mp_tport_grp_t, list);
+				if (tport_grp->asym_acc_state != TPG_ACT_OPT) {
+					passive_state = tport_grp->asym_acc_state;
+					stpg->list.descriptor[tpg_count].
+						    asym_acc_state = TPG_ACT_OPT;	
+				} else  {
+					index = tpg_count;
+				}
+				memcpy(&stpg->list.descriptor[tpg_count].
+					tgt_port_grp[0], &tport_grp->tpg_id[0],
+					 sizeof(tport_grp->tpg_id));
+				DEBUG4(printk("%s lun=%d tpg_id=%d old_tpg_state=%d \n",__func__, lun, 
+					tport_grp->tpg_id[1], tport_grp->asym_acc_state);) 
+				tpg_count++; 
 			}
-			memcpy(&stpg->list.descriptor[tpg_count].
-				tgt_port_grp[0], &tport_grp->tpg_id[0],
-				 sizeof(tport_grp->tpg_id));
-			DEBUG4(printk("%s lun=%d tpg_id=%d old_tpg_state=%d \n",__func__, lun, 
-				tport_grp->tpg_id[1], tport_grp->asym_acc_state);) 
-			tpg_count++; 
+
+			/* setting the active controller to passive state */	
+			stpg->list.descriptor[index].asym_acc_state = passive_state;	
+			stpg->p.cmd24.dseg_count = __constant_cpu_to_le16(1);
+			stpg->p.cmd24.timeout = __constant_cpu_to_le16(10);
+			stpg->p.cmd24.byte_count =
+			__constant_cpu_to_le32(sizeof(set_tport_grp_data_t));
+			stpg->p.cmd24.dseg_0_address[0] = cpu_to_le32(
+			    LSD(stpg_dma + sizeof(struct sts_entry_24xx)));
+			stpg->p.cmd24.dseg_0_address[1] = cpu_to_le32(
+			    MSD(stpg_dma + sizeof(struct sts_entry_24xx)));
+			stpg->p.cmd24.dseg_0_len =
+			__constant_cpu_to_le32(sizeof(set_tport_grp_data_t));
+		} else {
+			stpg->p.cmd.entry_type = COMMAND_A64_TYPE;
+			stpg->p.cmd.entry_count = 1;
+			stpg->p.cmd.lun = cpu_to_le16(lun);
+	#if defined(EXTENDED_IDS)
+			stpg->p.cmd.target = cpu_to_le16(fcport->loop_id);
+	#else
+			stpg->p.cmd.target = (uint8_t)fcport->loop_id;
+	#endif
+			stpg->p.cmd.control_flags =
+				__constant_cpu_to_le16(CF_WRITE | CF_SIMPLE_TAG);
+			stpg->p.cmd.scsi_cdb[0] = SCSIOP_MAINTENANCE_OUT;
+			stpg->p.cmd.scsi_cdb[1] = SCSISA_TARGET_PORT_GROUPS;
+			stpg->p.cmd.scsi_cdb[8] = ((sizeof(set_tport_grp_data_t) >> 8) & 0xff); 
+			stpg->p.cmd.scsi_cdb[9] = (sizeof(set_tport_grp_data_t) & 0xff);
+
+			/* Right now we support only two tgt port groups. For
+			 * failover to occur the state of the two controller must be
+			 * opposite to each other and different from current state */
+			tpg_count = 0; 
+			list_for_each_safe(list, temp, &mplun->tport_grps_list) {
+				tport_grp = list_entry(list, mp_tport_grp_t, list);
+				if (tport_grp->asym_acc_state != TPG_ACT_OPT) {
+					passive_state = tport_grp->asym_acc_state;
+					stpg->list.descriptor[tpg_count].
+						    asym_acc_state = TPG_ACT_OPT;	
+				} else  {
+					index = tpg_count;
+				}
+				memcpy(&stpg->list.descriptor[tpg_count].
+					tgt_port_grp[0], &tport_grp->tpg_id[0],
+					 sizeof(tport_grp->tpg_id));
+				DEBUG4(printk("%s lun=%d tpg_id=%d old_tpg_state=%d \n",__func__, lun, 
+					tport_grp->tpg_id[1], tport_grp->asym_acc_state);) 
+				tpg_count++; 
+			}
+
+			/* setting the active controller to passive state */	
+			stpg->list.descriptor[index].asym_acc_state = passive_state;	
+
+			stpg->p.cmd.dseg_count = __constant_cpu_to_le16(1);
+			stpg->p.cmd.timeout = __constant_cpu_to_le16(10);
+			stpg->p.cmd.byte_count =
+				__constant_cpu_to_le32(sizeof(set_tport_grp_data_t));
+			stpg->p.cmd.dseg_0_address[0] = cpu_to_le32(
+					LSD(stpg_dma + sizeof(sts_entry_t)));
+			stpg->p.cmd.dseg_0_address[1] = cpu_to_le32(
+					MSD(stpg_dma + sizeof(sts_entry_t)));
+			stpg->p.cmd.dseg_0_length =
+				__constant_cpu_to_le32(sizeof(set_tport_grp_data_t));
+
 		}
-
-		/* setting the active controller to passive state */	
-		stpg->list.descriptor[index].asym_acc_state = passive_state;	
-
-		stpg->p.cmd.dseg_count = __constant_cpu_to_le16(1);
-		stpg->p.cmd.timeout = __constant_cpu_to_le16(10);
-		stpg->p.cmd.byte_count =
-			__constant_cpu_to_le32(sizeof(set_tport_grp_data_t));
-		stpg->p.cmd.dseg_0_address[0] = cpu_to_le32(
-				LSD(stpg_dma + sizeof(sts_entry_t)));
-		stpg->p.cmd.dseg_0_address[1] = cpu_to_le32(
-				MSD(stpg_dma + sizeof(sts_entry_t)));
-		stpg->p.cmd.dseg_0_length =
-			__constant_cpu_to_le32(sizeof(set_tport_grp_data_t));
-
-		#if  0
-			for (tpg_count = 0; tpg_count < TGT_PORT_GRP_COUNT; 
-				tpg_count++) {
-				printk("%s lun=%d tpg cnt=%d tpg_id[0]=%d tpg_id[1]=%d new_tpg_state=%d\n",__func__, 
-					lun, tpg_count,stpg->list.descriptor[tpg_count].tgt_port_grp[0],
-					stpg->list.descriptor[tpg_count].tgt_port_grp[1],
-					stpg->list.descriptor[tpg_count].asym_acc_state);
-			}
+		#if  1
+		for (tpg_count = 0; tpg_count < TGT_PORT_GRP_COUNT; 
+			tpg_count++) {
+			printk("%s lun=%d tpg cnt=%d tpg_id[0]=%d tpg_id[1]=%d new_tpg_state=%d\n",__func__, 
+				lun, tpg_count,stpg->list.descriptor[tpg_count].tgt_port_grp[0],
+				stpg->list.descriptor[tpg_count].tgt_port_grp[1],
+				stpg->list.descriptor[tpg_count].asym_acc_state);
+		}
 		#endif	
 
 		rval = qla2x00_issue_iocb(ha, stpg, stpg_dma,
 				sizeof(set_tport_grp_rsp_t));
 
-		comp_status = le16_to_cpu(stpg->p.rsp.comp_status);
-		scsi_status = le16_to_cpu(stpg->p.rsp.scsi_status);
+		comp_status = le16_to_cpup(cstatus);
+		scsi_status = le16_to_cpup(sstatus);
 
 		/* Port Logged Out, so don't retry */
 		if (comp_status == CS_PORT_LOGGED_OUT ||
@@ -2142,29 +2508,25 @@ qla2x00_issue_set_tpg_cdb (fc_lun_t *new_lp)
 
 		if (scsi_status & SS_CHECK_CONDITION) {
 			DEBUG2(printk("%s: check status bytes = 0x%02x 0x%02x 0x%02x\n", __func__,
-				stpg->p.rsp.req_sense_data[2], stpg->p.rsp.req_sense_data[12],
-				stpg->p.rsp.req_sense_data[13]);)
+				sense_data[2], sense_data[12], sense_data[13]);)
 
 			/* switched status */
  	     		if( (fcport->flags & FC_DSXXX_DEVICE) &&
-			    stpg->p.rsp.req_sense_data[2] == 0x6 &&
-			    stpg->p.rsp.req_sense_data[12] == 0x29 &&
-			    stpg->p.rsp.req_sense_data[13] == 0x1) {
+			    sense_data[2] == 0x6 && sense_data[12] == 0x29 &&
+			    sense_data[13] == 0x1) {
 				scsi_status = 0; /* make OK */
 				break;
 			}
 			/* Already switched status */
  	     		if( (fcport->flags & FC_DSXXX_DEVICE) &&
-			    stpg->p.rsp.req_sense_data[2] == 0x5 &&
-			    stpg->p.rsp.req_sense_data[12] == 0x26 &&
-			    stpg->p.rsp.req_sense_data[13] == 0x0) {
+			    sense_data[2] == 0x5 && sense_data[12] == 0x26 &&
+			    sense_data[13] == 0x0) {
 				scsi_status = 0; /* make OK */
 				break;
 			}
 
-			if (stpg->p.rsp.req_sense_data[2] == NOT_READY &&
-			    stpg->p.rsp.req_sense_data[12] == 0x4 &&
-			    stpg->p.rsp.req_sense_data[13] == 0xa) {
+			if (sense_data[2] == NOT_READY &&
+			    sense_data[12] == 0x4 && sense_data[13] == 0xa) {
 				set_current_state(TASK_UNINTERRUPTIBLE);
 				schedule_timeout(3 * HZ);
 			}
@@ -2185,7 +2547,7 @@ qla2x00_issue_set_tpg_cdb (fc_lun_t *new_lp)
 
 	if (rval == QLA2X00_SUCCESS && retry &&
 		(!((scsi_status & SS_CHECK_CONDITION) &&
-		   (stpg->p.rsp.req_sense_data[2] == NOT_READY )) &&
+		   (sense_data[2] == NOT_READY )) &&
 		 comp_status == CS_COMPLETE)) {
 		DEBUG2(printk("%s Set tgt port group - SUCCEDED, lun (%d) cs=0x%x ss=0x%x, rval=%d\n",
 					__func__, lun, comp_status, scsi_status, rval);)
@@ -2198,6 +2560,8 @@ qla2x00_issue_set_tpg_cdb (fc_lun_t *new_lp)
 	pci_free_consistent(ha->pdev, sizeof(set_tport_grp_rsp_t),
 			stpg, stpg_dma); 
 
+	/* update state info */
+	// qla2x00_get_target_ports(fcport, new_lp, 0);
 	DEBUG(printk(KERN_INFO "%s  leaving\n",__func__);)
 	LEAVE(__func__);
 
@@ -2250,7 +2614,7 @@ qla2x00_fo_init_params(scsi_qla_host_t *ha)
 
 }
 
-static int
+int
 qla2x00_spinup(scsi_qla_host_t *ha, fc_port_t *fcport, uint16_t lun) 
 {
 	inq_cmd_rsp_t	*pkt;
@@ -2259,6 +2623,8 @@ qla2x00_spinup(scsi_qla_host_t *ha, fc_port_t *fcport, uint16_t lun)
 	dma_addr_t	phys_address = 0;
 	uint16_t	comp_status = CS_COMPLETE;
 	uint16_t	scsi_status = 0;
+        uint16_t        *cstatus, *sstatus;
+        uint8_t         *sense_data;
 
 	ENTER(__func__);
 
@@ -2271,6 +2637,15 @@ qla2x00_spinup(scsi_qla_host_t *ha, fc_port_t *fcport, uint16_t lun)
 			ha->host_no);
 		return( QLA2X00_FAILED);
 	}
+	if (check_24xx_or_54xx_device_ids(ha) || check_25xx_device_ids(ha)) {
+                cstatus = &pkt->p.rsp24.comp_status;
+                sstatus = &pkt->p.rsp24.scsi_status;
+                sense_data = pkt->p.rsp24.data;
+        } else {
+                cstatus = &pkt->p.rsp.comp_status;
+                sstatus = &pkt->p.rsp.scsi_status;
+                sense_data = pkt->p.rsp.req_sense_data;
+        }
 
 	count = 5; 
 	retry = 5;
@@ -2282,28 +2657,48 @@ qla2x00_spinup(scsi_qla_host_t *ha, fc_port_t *fcport, uint16_t lun)
 	else do {
 		/* issue spinup */
 		memset(pkt, 0, sizeof(inq_cmd_rsp_t));
-		pkt->p.cmd.entry_type = COMMAND_A64_TYPE;
-		pkt->p.cmd.entry_count = 1;
-		pkt->p.cmd.lun = cpu_to_le16(lun);
+		if (check_24xx_or_54xx_device_ids(ha) || check_25xx_device_ids(ha)) {
+                        pkt->p.cmd24.entry_type = COMMAND_TYPE_7;
+                        pkt->p.cmd24.entry_count = 1;
+                        pkt->p.cmd24.nport_handle = cpu_to_le16(fcport->loop_id);
+                        pkt->p.cmd24.port_id[0] = fcport->d_id.b.al_pa;
+                        pkt->p.cmd24.port_id[1] = fcport->d_id.b.area;
+                        pkt->p.cmd24.port_id[2] = fcport->d_id.b.domain;
+                        pkt->p.cmd24.lun[1] = LSB(lun);
+                        pkt->p.cmd24.lun[2] = MSB(lun);
+                        host_to_fcp_swap(pkt->p.cmd24.lun,
+                            sizeof(pkt->p.cmd24.lun));
+                        pkt->p.cmd24.task = TSK_SIMPLE;
+                        pkt->p.cmd24.fcp_cdb[0] = START_STOP;
+			pkt->p.cmd24.fcp_cdb[4] = 1;	/* start spin cycle */
+                        host_to_fcp_swap(pkt->p.cmd24.fcp_cdb,
+                            sizeof(pkt->p.cmd24.fcp_cdb));
+                        pkt->p.cmd24.dseg_count = __constant_cpu_to_le16(0);
+                        pkt->p.cmd24.timeout = __constant_cpu_to_le16(20);
+                } else {
+			pkt->p.cmd.entry_type = COMMAND_A64_TYPE;
+			pkt->p.cmd.entry_count = 1;
+			pkt->p.cmd.lun = cpu_to_le16(lun);
 #if defined(EXTENDED_IDS)
-		pkt->p.cmd.target = cpu_to_le16(fcport->loop_id);
+			pkt->p.cmd.target = cpu_to_le16(fcport->loop_id);
 #else
-		pkt->p.cmd.target = (uint8_t)fcport->loop_id;
+			pkt->p.cmd.target = (uint8_t)fcport->loop_id;
 #endif
-		/* no direction for this command */
-		pkt->p.cmd.control_flags =
-			__constant_cpu_to_le16(CF_SIMPLE_TAG);
-		pkt->p.cmd.scsi_cdb[0] = START_STOP;
-		pkt->p.cmd.scsi_cdb[4] = 1;	/* start spin cycle */
-		pkt->p.cmd.dseg_count = __constant_cpu_to_le16(0);
-		pkt->p.cmd.timeout = __constant_cpu_to_le16(20);
-		pkt->p.cmd.byte_count = __constant_cpu_to_le32(0);
+			/* no direction for this command */
+			pkt->p.cmd.control_flags =
+				__constant_cpu_to_le16(CF_SIMPLE_TAG);
+			pkt->p.cmd.scsi_cdb[0] = START_STOP;
+			pkt->p.cmd.scsi_cdb[4] = 1;	/* start spin cycle */
+			pkt->p.cmd.dseg_count = __constant_cpu_to_le16(0);
+			pkt->p.cmd.timeout = __constant_cpu_to_le16(20);
+			pkt->p.cmd.byte_count = __constant_cpu_to_le32(0);
+		}
 
 		rval = qla2x00_issue_iocb(ha, pkt,
 				phys_address, sizeof(inq_cmd_rsp_t));
 
-		comp_status = le16_to_cpu(pkt->p.rsp.comp_status);
-		scsi_status = le16_to_cpu(pkt->p.rsp.scsi_status);
+		comp_status = le16_to_cpu(*cstatus);
+		scsi_status = le16_to_cpu(*sstatus);
 
  		/* Port Logged Out, so don't retry */
 		if( 	comp_status == CS_PORT_LOGGED_OUT  ||
@@ -2320,19 +2715,13 @@ qla2x00_spinup(scsi_qla_host_t *ha, fc_port_t *fcport, uint16_t lun)
 						"%02x %02x %02x %02x "
 						"%02x %02x %02x %02x\n",
 						__func__,
-						ha->host_no,
-						pkt->p.rsp.req_sense_data[0],
-						pkt->p.rsp.req_sense_data[1],
-						pkt->p.rsp.req_sense_data[2],
-						pkt->p.rsp.req_sense_data[3],
-						pkt->p.rsp.req_sense_data[4],
-						pkt->p.rsp.req_sense_data[5],
-						pkt->p.rsp.req_sense_data[6],
-						pkt->p.rsp.req_sense_data[7]);)
-				if (pkt->p.rsp.req_sense_data[2] ==
-							NOT_READY  &&
-				   (pkt->p.rsp.req_sense_data[12] == 4 ) &&
-				   (pkt->p.rsp.req_sense_data[13] == 3 ) ) {
+						ha->host_no, sense_data[0],
+						sense_data[1], sense_data[2],
+						sense_data[3], sense_data[4],
+						sense_data[5], sense_data[6],
+						sense_data[7]);)
+				if (sense_data[2] == NOT_READY  &&
+				   (sense_data[12] == 4 ) && (sense_data[13] == 3 ) ) {
 
  					set_current_state(TASK_UNINTERRUPTIBLE);
 					schedule_timeout(HZ);
@@ -2422,27 +2811,37 @@ qla2x00_wait_for_tpg_avail(fc_lun_t *new_lp)
 	return rval;
 }
 
+
 uint32_t
 qla2x00_wait_for_tpg_ready(fc_lun_t *new_lp)
 {
-	int seconds = 60;
-	int rval = QLA2X00_FAILED;
-	uint8_t	 wait_for_transition;	
+        int seconds = 60;
+        int rval = 0, completed =0;
+        uint8_t  wait_for_transition;
 
-	DEBUG2(printk("%s: entered.\n", __func__);)
-	wait_for_transition = 1;	
-	do  {
-		rval = qla2x00_test_active_lun(new_lp->fcport, new_lp, &wait_for_transition);
-		if(rval == 1 || wait_for_transition == 0)
-			break; 
- 		set_current_state(TASK_UNINTERRUPTIBLE);
-		schedule_timeout(HZ * 2);
-	} while (--seconds); 
+        DEBUG2(printk("%s: entered.\n", __func__);)
+        wait_for_transition = 1;
+        do  {
+                rval = qla2x00_test_active_lun(new_lp->fcport,
+                        new_lp, &wait_for_transition);
+                if(rval == 1 || wait_for_transition == 0) {
+                        completed++;
+                        break;
+                }
+                set_current_state(TASK_UNINTERRUPTIBLE);
+                schedule_timeout(HZ * 2);
+        } while (--seconds);
 
-	printk("%s: leaving rval=%d seconds=%d.\n", __func__, rval, seconds);
+        if (completed)
+                rval = QLA2X00_SUCCESS;
+        else
+                rval = QLA2X00_FUNCTION_FAILED;
+        DEBUG2(printk("%s: leaving rval=%d seconds=%d.\n", __func__,
+                        rval, seconds);)
 
-	return rval;
+        return rval;
 }
+
 	
 
 /*
@@ -2468,6 +2867,7 @@ qla2x00_send_fo_notification(fc_lun_t *old_lp, fc_lun_t *new_lp)
 	inq_cmd_rsp_t	*pkt;
 	uint16_t	loop_id, lun;
 	dma_addr_t	phys_address;
+        uint16_t        *cstatus, *sstatus;
 
 
 	ENTER("qla2x00_send_fo_notification");
@@ -2482,7 +2882,7 @@ qla2x00_send_fo_notification(fc_lun_t *old_lp, fc_lun_t *new_lp)
 	lun = new_lp->lun;
 
 	if (qla_fo_params.FailoverNotifyType == FO_NOTIFY_TYPE_LUN_RESET) {
-		rval = qla2x00_lun_reset(old_ha, loop_id, lun);
+		rval = qla2x00_lun_reset(old_ha, new_lp->fcport, lun);
 		if (rval == QLA2X00_SUCCESS) {
 			DEBUG4(printk("qla2x00_send_fo_notification: LUN "
 			    "reset succeded\n");)
@@ -2497,7 +2897,9 @@ qla2x00_send_fo_notification(fc_lun_t *old_lp, fc_lun_t *new_lp)
 	    (qla_fo_params.FailoverNotifyType ==
 	     FO_NOTIFY_TYPE_LOGOUT_OR_CDB) )  {
 
-		rval = qla2x00_fabric_logout(old_ha, loop_id);
+		rval = qla2x00_fabric_logout(old_ha, loop_id,
+		    new_lp->fcport->d_id.b.domain, new_lp->fcport->d_id.b.area,
+		    new_lp->fcport->d_id.b.al_pa);
 		if (rval == QLA2X00_SUCCESS) {
 			DEBUG4(printk("qla2x00_send_fo_failover_notify: "
 			    "logout succeded\n");)
@@ -2524,6 +2926,7 @@ qla2x00_send_fo_notification(fc_lun_t *old_lp, fc_lun_t *new_lp)
 				qla2x00_wait_for_tpg_ready(new_lp);
 				DEBUG2(printk("qla2x00_send_fo_failover_notify: "
 			    	"set tgt port group succeded\n");)
+				qla2x00_update_tpg_states(old_lp, new_lp);
 			
 			} else {
 				DEBUG2(printk("qla2x00_send_fo_failover_notify: "
@@ -2541,44 +2944,75 @@ qla2x00_send_fo_notification(fc_lun_t *old_lp, fc_lun_t *new_lp)
 
 			return(QLA2X00_FUNCTION_FAILED);
 		}
+		if (check_24xx_or_54xx_device_ids(old_ha) || check_25xx_device_ids(old_ha)) {
+			cstatus = &pkt->p.rsp24.comp_status;
+			sstatus = &pkt->p.rsp24.scsi_status;
+		} else {
+			cstatus = &pkt->p.rsp.comp_status;
+			sstatus = &pkt->p.rsp.scsi_status;
+		}
 
 		memset(pkt,0, sizeof(inq_cmd_rsp_t));
-		pkt->p.cmd.entry_type = COMMAND_A64_TYPE;
-		pkt->p.cmd.entry_count = 1;
-		pkt->p.cmd.lun = cpu_to_le16(lun);
+		if (check_24xx_or_54xx_device_ids(old_ha) || check_25xx_device_ids(old_ha)) {
+			pkt->p.cmd24.entry_type = COMMAND_TYPE_7;
+			pkt->p.cmd24.entry_count = 1;
+			pkt->p.cmd24.nport_handle = loop_id;
+			pkt->p.cmd24.port_id[0] = new_lp->fcport->d_id.b.al_pa;
+			pkt->p.cmd24.port_id[1] = new_lp->fcport->d_id.b.area;
+			pkt->p.cmd24.port_id[2] = new_lp->fcport->d_id.b.domain;
+			pkt->p.cmd24.lun[1] = LSB(lun);
+			pkt->p.cmd24.lun[2] = MSB(lun);
+			host_to_fcp_swap(pkt->p.cmd24.lun,
+			    sizeof(pkt->p.cmd24.lun));
+			pkt->p.cmd24.task = TSK_SIMPLE;
+			memcpy(pkt->p.cmd24.fcp_cdb,
+			    qla_fo_params.FailoverNotifyCdb,
+			    qla_fo_params.FailoverNotifyCdbLength);
+			host_to_fcp_swap(pkt->p.cmd24.fcp_cdb,
+			    sizeof(pkt->p.cmd24.fcp_cdb));
+			pkt->p.cmd24.dseg_count = __constant_cpu_to_le16(1);
+			pkt->p.cmd24.timeout = __constant_cpu_to_le16(10);
+			pkt->p.cmd24.byte_count = __constant_cpu_to_le32(0);
+		} else {
+
+			pkt->p.cmd.entry_type = COMMAND_A64_TYPE;
+			pkt->p.cmd.entry_count = 1;
+			pkt->p.cmd.lun = cpu_to_le16(lun);
 #if defined(EXTENDED_IDS)
-		pkt->p.cmd.target = cpu_to_le16(loop_id);
+			pkt->p.cmd.target = cpu_to_le16(loop_id);
 #else
-		pkt->p.cmd.target = (uint8_t)loop_id;
+			pkt->p.cmd.target = (uint8_t)loop_id;
 #endif
-		/* FIXME: How do you know the direction ???? */
-		/* This has same issues as passthur commands - you 
-		 * need more than just the CDB.
-		 */
-		pkt->p.cmd.control_flags =__constant_cpu_to_le16(CF_SIMPLE_TAG);
-		memcpy(pkt->p.cmd.scsi_cdb,
-		    qla_fo_params.FailoverNotifyCdb,
-		    qla_fo_params.FailoverNotifyCdbLength);
-		pkt->p.cmd.dseg_count = __constant_cpu_to_le16(1);
-		pkt->p.cmd.byte_count = __constant_cpu_to_le32(0);
-		pkt->p.cmd.dseg_0_address[0] = cpu_to_le32(
-		      LSD(phys_address + sizeof(sts_entry_t)));
-		pkt->p.cmd.dseg_0_address[1] = cpu_to_le32(
-		      MSD(phys_address + sizeof(sts_entry_t)));
-		pkt->p.cmd.dseg_0_length = __constant_cpu_to_le32(0);
+			/* FIXME: How do you know the direction ???? */
+			/* This has same issues as passthur commands - you 
+			 * need more than just the CDB.
+			 */
+			pkt->p.cmd.control_flags =__constant_cpu_to_le16(CF_SIMPLE_TAG);
+			memcpy(pkt->p.cmd.scsi_cdb,
+			    qla_fo_params.FailoverNotifyCdb,
+			    qla_fo_params.FailoverNotifyCdbLength);
+			pkt->p.cmd.dseg_count = __constant_cpu_to_le16(1);
+			pkt->p.cmd.byte_count = __constant_cpu_to_le32(0);
+			pkt->p.cmd.dseg_0_address[0] = cpu_to_le32(
+			      LSD(phys_address + sizeof(sts_entry_t)));
+			pkt->p.cmd.dseg_0_address[1] = cpu_to_le32(
+			      MSD(phys_address + sizeof(sts_entry_t)));
+			pkt->p.cmd.dseg_0_length = __constant_cpu_to_le32(0);
+			pkt->p.cmd.timeout = __constant_cpu_to_le16(10);
+		}
 
 		rval = qla2x00_issue_iocb(old_ha, pkt, phys_address,
 		    sizeof (inq_cmd_rsp_t));
 		if (rval != QLA2X00_SUCCESS ||
-		    pkt->p.rsp.comp_status != CS_COMPLETE ||
-		    pkt->p.rsp.scsi_status & SS_CHECK_CONDITION ||
+		    le16_to_cpup(cstatus) != CS_COMPLETE ||
+		    le16_to_cpup(sstatus) & SS_CHECK_CONDITION ||
 		    pkt->inq[0] == 0x7f) {
 
 			DEBUG4(printk("qla2x00_fo_notification: send CDB "
 			    "failed: comp_status = %x"
 			    "scsi_status = %x inq[0] = %x\n",
-			    pkt->p.rsp.comp_status,
-			    pkt->p.rsp.scsi_status,
+			    le16_to_cpup(cstatus),
+			    le16_to_cpup(sstatus),
 			    pkt->inq[0]);)
 		}
 
@@ -2904,3 +3338,317 @@ qla2x00_free_portname_list(portname_list **plist)
 	*plist = NULL;
 }
 
+
+/*
+ * qla2x00_fo_get_lbtype
+ *      Get the lbtype, go thruoug the host->mp_device
+ *	match based on the PortName. If match found 
+ * 	return the lbtype.
+ *
+ * Input:
+ *
+ * Return;
+ *      0 on success or errno.
+ *
+ * Context:
+ *      Kernel context.
+ */
+static int
+qla2x00_fo_get_lbtype(EXT_IOCTL *pext, int mode)
+{
+	scsi_qla_host_t  *ha		= NULL;
+	int              ret 		= 0;
+	int		 devid 		= 0;
+	mp_host_t        *host 		= NULL;
+	mp_device_t	 *dp 		= NULL;
+	uint16_t	 idx		= 0;
+	int		 respSize	= 0;
+
+	/* Response */
+	PFOTGTLBDATALIST pTgtLBDataList	= NULL;
+
+	DEBUG9(printk("%s: entered.\n", __func__);)
+	pext->Status = EXT_STATUS_OK;
+
+	/* Check resp size */
+	respSize = sizeof(FOTGTLBDATALIST);
+
+	do { /* do 0 for a quick break */
+
+		if ((int)pext->ResponseLen < respSize) {
+			pext->Status = EXT_STATUS_BUFFER_TOO_SMALL;
+			DEBUG9_10(printk("%s: ERROR ResponseLen %d too small."
+			    "\n", __func__, pext->ResponseLen);)
+			break;
+		}
+
+		/* Allocate memory for response */
+		pTgtLBDataList = (PFOTGTLBDATALIST)vmalloc(respSize);
+		if (pTgtLBDataList == NULL) {
+			pext->Status = EXT_STATUS_NO_MEMORY;
+			break;
+
+		}
+
+		/* Copy the response from user space */
+		ret = copy_from_user(pTgtLBDataList, pext->ResponseAdr,
+		    respSize);
+		if (ret) {
+			DEBUG2_9_10(printk("%s: resp buf copy error. "
+			"size=%ld.\n",
+			__func__, (ulong)respSize);)
+
+			pext->Status = EXT_STATUS_COPY_ERR;
+			ret = (-EFAULT);
+			break;
+		} 
+
+		/* Reserved field is used to pass in HbaInstance */
+		ha = qla2x00_get_hba((int)pTgtLBDataList->Reserved0); 
+
+		if (!ha) {
+			DEBUG2_9_10(printk("%s: no ha matching inst %d.\n",
+			    __func__, (int)pTgtLBDataList->Reserved0);)
+
+			pext->Status = EXT_STATUS_DEV_NOT_FOUND;
+			break;
+		}
+
+		if (ha->flags.failover_enabled) {
+			if ((host = qla2x00_cfg_find_host(ha)) == NULL) {
+				DEBUG2_9_10(printk("%s: no HOST for ha inst "
+				    "%ld.\n", __func__, ha->instance);)
+				pext->Status = EXT_STATUS_DEV_NOT_FOUND;
+				break;
+			}
+		} else {
+			/* Failover disable,can not loop hosts */
+			DEBUG2_9_10(printk("%s: Non-failover driver %ld.\n",
+			    __func__, ha->instance);)
+			pext->Status = EXT_STATUS_DEV_NOT_FOUND;
+			break;
+		}
+
+	} while (0);
+
+	/* check if error, return */
+	if (pext->Status != EXT_STATUS_OK) {
+		/* free any memory and return */
+		if (pTgtLBDataList) {
+			vfree(pTgtLBDataList);	
+		}
+		
+		return (ret);
+	}
+
+	/* go through the mp_devices in host and get all the node name */
+	for (devid = 0; devid < MAX_MP_DEVICES; devid++) {
+		dp = host->mp_devs[devid];
+		if (dp == NULL) {
+			continue;
+		}
+
+		/* go throug the dp to find matching NodeName */
+		if (qla2x00_is_wwn_zero(&dp->nodename[0])) {
+			continue;
+		}
+				
+		printk(KERN_INFO "%s: %d LB Type is:0x%x\n",
+		   __func__, devid, dp->lbtype);
+
+		/* Found a Node Name, get the lbtype */
+		DEBUG2_9_10(printk("%s: %ld LB Type is:0x%x\n",
+		    __func__, ha->instance, dp->lbtype);)
+		if (idx < MAX_LB_ENTRIES ) {
+			pTgtLBDataList->Entry[idx].LBPolicy = dp->lbtype;
+			memcpy(&pTgtLBDataList->Entry[idx].NodeName[0], 
+			    &dp->nodename[0], WWN_SIZE);
+		} else {
+			DEBUG2_9_10(printk("%s: %ld Array out of bound:\n"
+			    , __func__, ha->instance);)
+			pext->Status =  EXT_STATUS_DATA_OVERRUN;
+			break;
+		}
+		idx++;
+		pTgtLBDataList->EntryCount = idx;
+		pext->Status = EXT_STATUS_OK;
+	}
+
+	if (pext->Status == EXT_STATUS_OK ) {
+		/* copy back the response */
+		ret = copy_to_user(pext->ResponseAdr, pTgtLBDataList, respSize);
+		if (ret) {
+			DEBUG2_9_10(printk("%s(%ld): resp %p copy out err.\n",
+			    __func__, ha->host_no, pext->ResponseAdr);)
+			pext->Status = EXT_STATUS_COPY_ERR;
+			ret = (-EFAULT);
+		}
+	}
+
+	/* free memory */
+	if (pTgtLBDataList) {
+		vfree(pTgtLBDataList);	
+	}
+
+	DEBUG9(printk("%s: exiting. ret = %d.\n", __func__, ret);)
+	return (ret);
+}
+
+/*
+ * qla2x00_fo_set_lbtype
+ *      Set the lbtype, go thruoug the host->mp_device
+ *	match based on the NodeName. If match found 
+ * 	set the lbtype.
+ *
+ * Input:
+ *
+ * Return;
+ *      0 on success or errno.
+ *
+ * Context:
+ *      Kernel context.
+ */
+static int
+qla2x00_fo_set_lbtype(EXT_IOCTL *pext, int mode)
+{
+	scsi_qla_host_t  *ha		= NULL;
+	int              ret 		= 0;
+	int		 devid 		= 0;
+	int		 requestSize	= 0;
+	uint16_t	 entryCount	= 0;
+	uint16_t	 idx		= 0;
+	mp_host_t        *host 		= NULL;
+        mp_host_t     	*tmp_host	= NULL;
+	mp_device_t	 *dp 		= NULL;
+
+	/* Request */
+	PFOTGTLBDATALIST pTgtLBDataList	= NULL;
+
+
+	DEBUG9(printk("%s: entered.\n", __func__);)
+
+	pext->Status = EXT_STATUS_OK;
+	requestSize = sizeof(FOTGTLBDATALIST);
+
+	do { /* do 0 for a quick break */
+
+		if ((int)pext->RequestLen < requestSize) {
+			pext->Status = EXT_STATUS_INVALID_PARAM;
+			pext->DetailStatus = EXT_DSTATUS_REQUEST_LEN;
+			DEBUG10(printk("%s: got invalie req len (%d).\n",
+			    __func__, pext->RequestLen);)
+			break;
+		}
+
+		/* Allocate memory for request */
+		pTgtLBDataList = (PFOTGTLBDATALIST)vmalloc(requestSize);
+		if (pTgtLBDataList == NULL) {
+			pext->Status = EXT_STATUS_NO_MEMORY;
+			break;
+		}
+
+		/* Copy the request from user space */
+		ret = copy_from_user(pTgtLBDataList, (pext->RequestAdr), 
+		    requestSize);
+		if (ret) {
+			DEBUG2_9_10(printk("%s: req buf copy error size=%ld.\n",
+			__func__, (ulong)requestSize);)
+			pext->Status = EXT_STATUS_COPY_ERR;
+			ret = (-EFAULT);
+			break;
+		} 
+
+		/* Reserved field is used to pass in HbaInstance */
+		ha = qla2x00_get_hba((int)pTgtLBDataList->Reserved0); 
+
+		if (!ha) {
+			DEBUG2_9_10(printk("%s: no ha matching inst %d.\n",
+			    __func__, (int)pTgtLBDataList->Reserved0);)
+			pext->Status = EXT_STATUS_DEV_NOT_FOUND;
+			break;
+		}
+
+		if (ha->flags.failover_enabled) {
+			if ((host = qla2x00_cfg_find_host(ha)) == NULL) {
+				DEBUG2_9_10(printk("%s: no HOST for ha inst "
+				    "%ld.\n", __func__, ha->instance);)
+				pext->Status = EXT_STATUS_DEV_NOT_FOUND;
+				break;
+			}
+		} else {
+			/* Failover disable,can not loop hosts */
+			DEBUG2_9_10(printk("%s: Non-failover driver %ld.\n",
+			    __func__, ha->instance);)
+			pext->Status = EXT_STATUS_DEV_NOT_FOUND;
+			break;
+		}
+
+	} while (0);
+	/* check if error, return */
+	if (pext->Status != EXT_STATUS_OK) {
+		/* free any memory and return */
+		if (pTgtLBDataList) {
+			vfree(pTgtLBDataList);	
+		}
+		return (pext->Status);
+	}
+
+	/* Loop for all the targets here */
+	entryCount = pTgtLBDataList->EntryCount;
+	DEBUG9(printk("%s(): Entry Count = %d\n", __func__, entryCount));
+	for (idx = 0; idx < entryCount; idx++) {
+		devid = 0;
+		/* reset Status */
+		pext->Status = EXT_STATUS_DEV_NOT_FOUND;
+		DEBUG9(printk("%s(): Status reset\n", __func__));
+
+		/* go through all the hosts and set the lbtype 
+		 * in matching dp->node name
+		 */
+		for (tmp_host = mp_hosts_base; (tmp_host); 
+		    tmp_host = tmp_host->next) {
+
+			/* go through the mp_devices in host and
+			 * match the node name 
+			 */
+		for (devid = 0; devid < MAX_MP_DEVICES; devid++) {
+				dp = tmp_host->mp_devs[devid];
+			if (dp == NULL) {
+				continue;
+			}
+				/* go throug the dp to find matching NodeName */
+				if (qla2x00_is_wwn_zero(&dp->nodename[0])) {
+					continue;
+				}
+				
+				if (memcmp(&dp->nodename[0], 
+				    &pTgtLBDataList->Entry[idx].NodeName[0], 
+				    WWN_SIZE) == 0) {
+					/* Found matching Node Name, 
+					 * set the lbtype 
+					 */
+
+					DEBUG2_9_10(printk("%s: %ld LB Type is:"
+					    " 0x%x\n",
+					   __func__, ha->instance, dp->lbtype);)
+
+					dp->lbtype = 
+					    pTgtLBDataList->Entry[idx].LBPolicy;
+
+					DEBUG2_9_10(printk("%s: %ld LB Type "
+					    "after is: 0x%x\n",
+					   __func__, ha->instance, dp->lbtype);)
+					pext->Status = EXT_STATUS_OK;
+					break; /* search for next */
+				}
+			}
+		}
+	}
+
+	if (pTgtLBDataList) {
+		vfree(pTgtLBDataList);	
+	}
+
+	DEBUG9(printk("%s: exiting. ret = %d.\n", __func__, ret);)
+	return (ret);
+}

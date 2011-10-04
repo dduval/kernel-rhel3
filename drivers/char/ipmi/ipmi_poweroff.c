@@ -42,7 +42,7 @@
 #include <linux/init.h>
 
 #define PFX "IPMI poweroff: "
-#define IPMI_POWEROFF_VERSION	"35.11"
+#define IPMI_POWEROFF_VERSION	"35.13"
 
 /* Where to we insert our poweroff function? */
 extern void (*pm_power_off)(void);
