@@ -8,6 +8,12 @@
 #include <linux/profile.h>
 #include <linux/bootmem.h>
 #include <linux/notifier.h>
+#ifdef CONFIG_X86_LOCAL_APIC
+#include <asm/apic.h>
+#endif
+#ifdef CONFIG_APM
+#include <linux/apm_bios.h>
+#endif
 
 extern char _stext, _etext;
 
@@ -23,6 +29,13 @@ int __init profile_setup(char * str)
 		prof_shift = par;
 		prof_on = 1;
 		printk(KERN_INFO "kernel profiling enabled\n");
+#ifdef CONFIG_X86_LOCAL_APIC
+		if (nmi_watchdog == NMI_NONE)
+			nmi_watchdog = NMI_IO_APIC;
+#endif
+#ifdef CONFIG_APM
+		apm_info.forbid_idle = 1;
+#endif
 	}
 	return 1;
 }

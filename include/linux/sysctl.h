@@ -129,6 +129,7 @@ enum
  	KERN_CORE_SETUID=58,	/* int: set to allow core dumps of setuid apps */
 	KERN_SERCONS_ESC=59,	/* int: ascii code of ser-cons "break" or -1 */
 	KERN_TASK_SIZE=60,	/* int: process VM size */
+	KERN_HONOR_UAC_NOPRINT=61, /* int: allow access to UAC_NOPRINT prctl */
 };
 
 
@@ -152,6 +153,7 @@ enum
 	VM_PAGEBUF=22,		/* struct: Control pagebuf parameters */
 	VM_HUGETLB_POOL=23,	/* int: size of the hugetlb pool, in MB */
 	VM_DCACHE_PRIORITY=24,	/* int: priority of the dcache pool */
+	VM_INACTIVE_CLEAN_PERCENT=25, /* int: percent of inactive thats clean */
 };
 
 

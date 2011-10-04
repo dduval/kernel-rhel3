@@ -204,11 +204,39 @@ si_meminfo (struct sysinfo *val)
 	return;
 }
 
+struct show_mem_stats {
+	int total;
+	int reserved;
+	int shared;
+	int cached;
+};
+
+static int
+get_show_mem_stats (u64 start, u64 end, void *arg)
+{
+	struct show_mem_stats *s = arg;
+	struct page *pg;
+
+	for (pg = virt_to_page((void *)start);
+	     pg < virt_to_page((void *)end); ++pg) {
+		s->total++;
+		if (PageReserved(pg))
+			s->reserved++;
+		else if (PageSwapCache(pg))
+			s->cached++;
+		else if (page_count(pg))
+			s->shared += page_count(pg) - 1;
+	}
+
+	return 0;
+}
+
 void
 show_mem(void)
 {
 	int i, total = 0, reserved = 0;
 	int shared = 0, cached = 0;
+	struct show_mem_stats stats;
 
 	printk("Mem-info:\n");
 	show_free_areas();
@@ -240,24 +268,12 @@ show_mem(void)
 	}
 #else /* !CONFIG_DISCONTIGMEM */
 	printk("Free swap:       %6dkB\n", nr_swap_pages<<(PAGE_SHIFT-10));
-	i = max_mapnr;
-	while (i-- > 0) {
-		int ia64_page_valid_debug(struct page *);
-
-		if (!ia64_page_valid_debug(mem_map + i))
-			continue;
-		total++;
-		if (PageReserved(mem_map+i))
-			reserved++;
-		else if (PageSwapCache(mem_map+i))
-			cached++;
-		else if (page_count(mem_map + i))
-			shared += page_count(mem_map + i) - 1;
-	}
-	printk("%d pages of RAM\n", total);
-	printk("%d reserved pages\n", reserved);
-	printk("%d pages shared\n", shared);
-	printk("%d pages swap cached\n", cached);
+	memset(&stats, 0, sizeof(struct show_mem_stats));
+	efi_memmap_walk(get_show_mem_stats, &stats);
+	printk("%d pages of RAM\n", stats.total);
+	printk("%d reserved pages\n", stats.reserved);
+	printk("%d pages shared\n", stats.shared);
+	printk("%d pages swap cached\n", stats.cached);
 	printk("%ld pages in page table cache\n", pgtable_cache_size);
 	show_buffers();
 #endif /* !CONFIG_DISCONTIGMEM */
@@ -511,25 +527,6 @@ ia64_page_valid (struct page *page)
 	char byte;
 
 	return __get_user(byte, (char *) page) == 0;
-}
-
-/*
- *  for show_mem() usage only 
- */
-int
-ia64_page_valid_debug(struct page *page)
-{
-	char byte;
-	unsigned long last_byte;
-
-	if (__get_user(byte, (char *) page) != 0)
-		return 0;
-
-	last_byte = (unsigned long)(page) + sizeof(struct page) - 1;
-	if (((unsigned long)page >> PAGE_SHIFT) != (last_byte >> PAGE_SHIFT))
-		return __get_user(byte, (char *)(last_byte)) == 0;
-	else
-		return 1;
 }
 
 static int

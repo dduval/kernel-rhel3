@@ -126,7 +126,7 @@ static struct socket *igmp6_socket;
 
 static void igmp6_join_group(struct ifmcaddr6 *ma);
 static void igmp6_leave_group(struct ifmcaddr6 *ma);
-void igmp6_timer_handler(unsigned long data);
+static void igmp6_timer_handler(unsigned long data);
 
 static void mld_gq_timer_expire(unsigned long data);
 static void mld_ifc_timer_expire(unsigned long data);
@@ -604,9 +604,9 @@ int inet6_mc_check(struct sock *sk, struct in6_addr *mc_addr,
 			if (ipv6_addr_cmp(&psl->sl_addr[i], src_addr) == 0)
 				break;
 		}
-		if (mc->sfmode == MCAST_INCLUDE && i >= psl->sl_count);
+		if (mc->sfmode == MCAST_INCLUDE && i >= psl->sl_count)
 			rv = 0;
-		if (mc->sfmode == MCAST_EXCLUDE && i < psl->sl_count);
+		if (mc->sfmode == MCAST_EXCLUDE && i < psl->sl_count)
 			rv = 0;
 	}
 	read_unlock(&ipv6_sk_mc_lock);
@@ -853,14 +853,9 @@ int ipv6_dev_mc_inc(struct net_device *dev, struct in6_addr *addr)
 /*
  *	device multicast group del
  */
-int ipv6_dev_mc_dec(struct net_device *dev, struct in6_addr *addr)
+static int __ipv6_dev_mc_dec(struct net_device *dev, struct inet6_dev *idev, struct in6_addr *addr)
 {
-	struct inet6_dev *idev;
 	struct ifmcaddr6 *ma, **map;
-
-	idev = in6_dev_get(dev);
-	if (idev == NULL)
-		return -ENODEV;
 
 	write_lock_bh(&idev->lock);
 	for (map = &idev->mc_list; (ma=*map) != NULL; map = &ma->next) {
@@ -872,18 +867,30 @@ int ipv6_dev_mc_dec(struct net_device *dev, struct in6_addr *addr)
 				igmp6_group_dropped(ma);
 
 				ma_put(ma);
-				in6_dev_put(idev);
 				return 0;
 			}
 			write_unlock_bh(&idev->lock);
-			in6_dev_put(idev);
 			return 0;
 		}
 	}
 	write_unlock_bh(&idev->lock);
-	in6_dev_put(idev);
 
 	return -ENOENT;
+}
+
+int ipv6_dev_mc_dec(struct net_device *dev, struct in6_addr *addr)
+{
+	struct inet6_dev *idev = in6_dev_get(dev);
+	int err;
+
+	if (!idev)
+		return -ENODEV;
+
+	err = __ipv6_dev_mc_dec(dev, idev, addr);
+
+	in6_dev_put(idev);
+
+	return err;
 }
 
 /*
@@ -2004,9 +2011,17 @@ void ipv6_mc_destroy_dev(struct inet6_dev *idev)
 	struct ifmcaddr6 *i;
 	struct in6_addr maddr;
 
+	/* Deactivate timers */
+	ipv6_mc_down(idev);
+
 	/* Delete all-nodes address. */
 	ipv6_addr_all_nodes(&maddr);
-	ipv6_dev_mc_dec(idev->dev, &maddr);
+
+	/* We cannot call ipv6_dev_mc_dec() directly, our caller in
+	 * addrconf.c has NULL'd out dev->ip6_ptr so in6_dev_get() will
+	 * fail.
+	 */
+	__ipv6_dev_mc_dec(idev->dev, idev, &maddr);
 
 	write_lock_bh(&idev->lock);
 	while ((i = idev->mc_list) != NULL) {

@@ -1034,11 +1034,11 @@ void add_mimetype (char *new_ext, char *new_type, char *new_expire)
         if (expire_len > MAX_CACHE_CONTROL_AGE_LEN)
                 expire_len = MAX_CACHE_CONTROL_AGE_LEN;
 
-	mime = kmalloc(sizeof(*mime), GFP_KERNEL);
+	mime = tux_kmalloc(sizeof(*mime));
 	memset(mime, 0, sizeof(*mime));
-	ext = kmalloc(ext_len + 1, GFP_KERNEL);
-	type = kmalloc(type_len + 1, GFP_KERNEL);
-	expire = kmalloc(expire_len + 1, GFP_KERNEL);
+	ext = tux_kmalloc(ext_len + 1);
+	type = tux_kmalloc(type_len + 1);
+	expire = tux_kmalloc(expire_len + 1);
 
 	strncpy(ext, new_ext, ext_len);
 	strncpy(type, new_type, type_len);
@@ -1311,9 +1311,7 @@ tux_attribute_t * lookup_tux_attribute (tux_req_t *req)
 	struct inode *inode;
 	mimetype_t *mime;
 
-	attr = kmalloc(sizeof(*attr), GFP_KERNEL);
-	if (!attr)
-		TUX_BUG();
+	attr = tux_kmalloc(sizeof(*attr));
 	memset(attr, 0, sizeof(*attr));
 
 	mime = lookup_mimetype(req);

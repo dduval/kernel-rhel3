@@ -37,6 +37,8 @@ pg_data_t *pgdat_list;
 zone_t *zone_table[MAX_NR_ZONES*MAX_NR_NODES];
 EXPORT_SYMBOL(zone_table);
 
+zone_wired_t zone_wired[MAX_NR_ZONES*MAX_NR_NODES];
+
 static char *zone_names[MAX_NR_ZONES] = { "DMA", "Normal", "HighMem" };
 #ifdef CONFIG_HIGHMEM64G
 static int zone_balance_ratio[MAX_NR_ZONES] __initdata = { 4097, 128, 128, };
@@ -381,8 +383,8 @@ void fixup_freespace(zone_t * zone, int direct_reclaim)
 			if ((page = reclaim_page(zone))) {
 				if (page_count(page) != 1)
 					printk("fixup_freespace(): incorrect sub-page count %08x, of page %016Lx(%08lx).\n", page_count(page), (unsigned long long)(page-mem_map)*PAGE_SIZE, page->flags);
-					set_page_count(page, 0);
-					__free_pages_ok(page, 0);
+				set_page_count(page, 0);
+				__free_pages_ok(page, 0);
 			}
 		} while (page && worktodo-- > 0);
 	}
@@ -393,13 +395,14 @@ void fixup_freespace(zone_t * zone, int direct_reclaim)
 #define PAGES_LOW	2
 #define PAGES_HIGH	3
 
+#define zone_is_highmem(z) ((z) == &(z)->zone_pgdat->node_zones[ZONE_HIGHMEM])
 /*
  * This function does the dirty work for __alloc_pages
  * and is separated out to keep the code size smaller.
  * (suggested by Davem at 1:30 AM, typed by Rik at 6 AM)
  */
 static struct page * __alloc_pages_limit(zonelist_t *zonelist,
-			unsigned long order, int limit, int direct_reclaim)
+			unsigned long order, int limit, int direct_reclaim, int wired)
 {
 	zone_t **zone = zonelist->zones;
 	unsigned long water_mark = 0;
@@ -441,6 +444,9 @@ static struct page * __alloc_pages_limit(zonelist_t *zonelist,
 			if (page)
 				return page;
 		}
+
+		if (wired)
+			break;
 	}
 
 	/* Found nothing. */
@@ -455,6 +461,7 @@ struct page * __alloc_pages(unsigned int gfp_mask, unsigned int order, zonelist_
 	zone_t **zone;
 	int min, direct_reclaim = 0;
 	struct page * page;
+	int wired = gfp_mask & __GFP_WIRED;
 
 	/*
 	 * (If anyone calls gfp from interrupts nonatomically then it
@@ -489,13 +496,15 @@ try_again:
 			break;
 		if (!z->size)
 			continue;
-
-		if (z->free_pages > z->pages_low) {
+		if (z->free_pages > ((wired && zone_is_highmem(z)) ? z->pages_min:z->pages_low)) {
 			page = rmqueue(z, order);
 			if (page)
 				return page;
 		} else if (z->free_pages < z->pages_min)
 			fixup_freespace(z, direct_reclaim);
+
+		if (wired)
+			break;
 	}
 
 	/*
@@ -506,7 +515,7 @@ try_again:
 	 * will be high and we'll have a good chance of
 	 * finding a page using the HIGH limit.
 	 */
-	page = __alloc_pages_limit(zonelist, order, PAGES_HIGH, direct_reclaim);
+	page = __alloc_pages_limit(zonelist, order, PAGES_HIGH, direct_reclaim, wired);
 	if (page)
 		return page;
 
@@ -518,7 +527,7 @@ try_again:
 	 * is low, we're most likely to have our allocation
 	 * succeed here.
 	 */
-	page = __alloc_pages_limit(zonelist, order, PAGES_LOW, direct_reclaim);
+	page = __alloc_pages_limit(zonelist, order, PAGES_LOW, direct_reclaim, wired);
 	if (page)
 		return page;
 
@@ -544,7 +553,7 @@ try_again:
 	 * Kswapd should, in most situations, bring the situation
 	 * back to normal in no time.
 	 */
-	page = __alloc_pages_limit(zonelist, order, PAGES_MIN, direct_reclaim);
+	page = __alloc_pages_limit(zonelist, order, PAGES_MIN, direct_reclaim, wired);
 	if (page)
 		return page;
 
@@ -554,7 +563,7 @@ try_again:
 	 * the SCSI layer isn't happy ...
 	 */
 	if (gfp_mask & __GFP_HIGH) {
-		page = __alloc_pages_limit(zonelist, order, PAGES_KERNEL, direct_reclaim);
+		page = __alloc_pages_limit(zonelist, order, PAGES_KERNEL, direct_reclaim, wired);
 		if (page)
 			return page;
 	}
@@ -592,8 +601,10 @@ try_again:
 			yield();
 			if (!order || free_high(ALL_ZONES) >= 0) {
 				int progress = try_to_free_pages(gfp_mask);
-				if (progress || (gfp_mask & __GFP_FS))
+				if (progress || (gfp_mask & __GFP_FS)) {
+					wired = 0;
 					goto try_again;
+				}
 				/*
 				 * Fail if no progress was made and the
 				 * allocation may not be able to block on IO.
@@ -872,28 +883,24 @@ void show_free_areas_core(pg_data_t *pgdat)
 	unsigned type;
 	pg_data_t *tmpdat = pgdat;
 
-	printk("Free pages:      %6dkB (%6dkB HighMem)\n",
-		K(nr_free_pages()),
-		K(nr_free_highpages()));
-
 	while (tmpdat) {
 		zone_t *zone;
 		for (zone = tmpdat->node_zones;
 			       	zone < tmpdat->node_zones + MAX_NR_ZONES; zone++)
-			printk("Zone:%s freepages:%6lukB min:%6lukB low:%6lukB " 
-				       "high:%6lukB\n", 
+			printk("Zone:%s freepages:%6lu min:%6lu low:%6lu " 
+				       "high:%6lu\n", 
 					zone->name,
-					K(zone->free_pages),
-					K(zone->pages_min),
-					K(zone->pages_low),
-					K(zone->pages_high));
+					zone->free_pages,
+					zone->pages_min,
+					zone->pages_low,
+					zone->pages_high);
 			
 		tmpdat = tmpdat->node_next;
 	}
 
-	printk("Free pages:      %6dkB (%6dkB HighMem)\n",
-		nr_free_pages() << (PAGE_SHIFT-10),
-		nr_free_highpages() << (PAGE_SHIFT-10));
+	printk("Free pages:      %6d (%6d HighMem)\n",
+		nr_free_pages(),
+		nr_free_highpages());
 
 	printk("( Active: %d/%d, inactive_laundry: %d, inactive_clean: %d, free: %d )\n",
 		nr_active_anon_pages() + nr_active_cache_pages(),
@@ -902,6 +909,22 @@ void show_free_areas_core(pg_data_t *pgdat)
 		nr_inactive_clean_pages(),
 		nr_free_pages());
 
+	tmpdat = pgdat; 
+	while (tmpdat) {
+		zone_t *zone;
+		for (zone = tmpdat->node_zones;
+		     zone < tmpdat->node_zones + MAX_NR_ZONES; zone++)
+			printk("  aa:%ld ac:%ld id:%ld il:%ld ic:%ld fr:%ld\n",
+				zone->active_anon_pages,
+				zone->active_cache_pages,
+				zone->inactive_dirty_pages,
+				zone->inactive_laundry_pages,
+				zone->inactive_clean_pages,
+				zone->free_pages);
+
+		tmpdat = tmpdat->node_next;
+	}
+
 	for (type = 0; type < MAX_NR_ZONES; type++) {
 		struct list_head *head, *curr;
 		zone_t *zone = pgdat->node_zones + type;
@@ -909,7 +932,12 @@ void show_free_areas_core(pg_data_t *pgdat)
 
 		total = 0;
 		if (zone->size) {
-			spin_lock_irqsave(&zone->lock, flags);
+			local_irq_save(flags);
+			if (!spin_trylock(&zone->lock)) {
+				printk("[%s zone locked]\n", zone->name);
+				local_irq_restore(flags);
+				continue;
+			}
 		 	for (order = 0; order < MAX_ORDER; order++) {
 				head = &(zone->free_area + order)->free_list;
 				curr = head;
@@ -922,9 +950,11 @@ void show_free_areas_core(pg_data_t *pgdat)
 				total += nr * (1 << order);
 				printk("%lu*%lukB ", nr, K(1UL) << order);
 			}
-			spin_unlock_irqrestore(&zone->lock, flags);
+			spin_unlock(&zone->lock);
+			local_irq_restore(flags);
 		}
-		printk("= %lukB)\n", K(total));
+		if (zone->size)
+			printk("= %lukB)\n", K(total));
 	}
 
 #ifdef SWAP_CACHE_INFO
@@ -932,9 +962,17 @@ void show_free_areas_core(pg_data_t *pgdat)
 #endif	
 }
 
+extern int slabpages;
+extern int nr_threads;
+extern atomic_t lowmem_pagetables, highmem_pagetables;
 void show_free_areas(void)
 {
 	show_free_areas_core(pgdat_list);
+	printk("%d pages of slabcache\n", slabpages);
+	printk("%d pages of kernel stacks\n", nr_threads * 2);
+	printk("%d lowmem pagetables, %d highmem pagetables\n", 
+		atomic_read(&lowmem_pagetables),
+		atomic_read(&highmem_pagetables));
 }
 
 /*
@@ -1159,6 +1197,8 @@ void __init free_area_init_core(int nid, pg_data_t *pgdat, struct page **gmap,
 		INIT_LIST_HEAD(&zone->inactive_dirty_list);
 		INIT_LIST_HEAD(&zone->inactive_laundry_list);
 		INIT_LIST_HEAD(&zone->inactive_clean_list);
+ 		INIT_LIST_HEAD(&zone_wired[j].wired_list);
+		zone_wired[j].wired_pages = 0;
 		spin_lock_init(&zone->lru_lock);
 
 		if (!size)

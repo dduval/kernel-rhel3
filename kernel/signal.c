@@ -504,6 +504,7 @@ inline void signal_wake_up(struct task_struct *t, int resume)
 	unsigned int mask;
 
 	t->sigpending = 1;
+	smp_mb();
 
 	/*
 	 * If resume is set, we want to wake it up in the TASK_STOPPED case.

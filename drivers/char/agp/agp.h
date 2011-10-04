@@ -481,6 +481,14 @@ struct agp_bridge_data {
 #define NVIDIA_3_APBASE     0x50
 #define NVIDIA_3_APLIMIT    0x54
 
+/* NVIDIA x86-64 registers */
+#define NVIDIA_X86_64_0_APBASE		0x10
+#define NVIDIA_X86_64_1_APBASE1		0x50
+#define NVIDIA_X86_64_1_APLIMIT1	0x54
+#define NVIDIA_X86_64_1_APSIZE		0xa8
+#define NVIDIA_X86_64_1_APBASE2		0xd8
+#define NVIDIA_X86_64_1_APLIMIT2	0xdc
+
 /* HP ZX1 SBA registers */
 #define HP_ZX1_CTRL		0x200
 #define HP_ZX1_IBASE		0x300

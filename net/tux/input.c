@@ -430,7 +430,7 @@ restart:
 	INC_STAT(input_slowpath);
 
 	if (!req->headers)
-		req->headers = kmalloc(tux_max_header_len, GFP_KERNEL);
+		req->headers = tux_kmalloc(tux_max_header_len);
 
 	/* First, read the data */
 	len = read_request(req->sock, (char *)req->headers, tux_max_header_len-1);

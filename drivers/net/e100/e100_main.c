@@ -46,39 +46,20 @@
 
 /* Change Log
  * 
+ * 2.3.30       09/21/03
+ * o Bug fix (Bugzilla 97908): Loading e100 was causing crash on Itanium2
+ *   with HP chipset
+ * o Bug fix (Bugzilla 101583): e100 can't pass traffic with ipv6
+ * o Bug fix (Bugzilla 101360): PRO/10+ can't pass traffic
+ * 
+ * 2.3.27       08/08/03
+ * o Bug fix: read skb->len after freeing skb
+ *   [Andrew Morton] akpm@zip.com.au
+ * o Bug fix: 82557 (with National PHY) timeout during init
+ *   [Adam Kropelin] akropel1@rochester.rr.com
+ * o Feature add: allow to change Wake On LAN when EEPROM disabled
+ * 
  * 2.3.13       05/08/03
- * o Feature remove: /proc/net/PRO_LAN_Adapters support gone completely
- * o Feature remove: IDIAG support (use ethtool -t instead)
- * o Cleanup: fixed spelling mistakes found by community
- * o Feature add: ethtool cable diag test
- * o Feature add: ethtool parameter support (ring size, xsum, flow ctrl)
- * o Cleanup: move e100_asf_enable under CONFIG_PM to avoid warning
- *   [Stephen Rothwell (sfr@canb.auug.org.au)]
- * o Bug fix: don't call any netif_carrier_* until netdev registered.
- *   [Andrew Morton (akpm@digeo.com)]
- * o Cleanup: replace (skb->len - skb->data_len) with skb_headlen(skb)
- *   [jmorris@intercode.com.au]
- * o Bug fix: cleanup of Tx skbs after running ethtool diags
- * o Bug fix: incorrect reporting of ethtool diag overall results
- * o Bug fix: must hold xmit_lock before stopping queue in ethtool
- *   operations that require reset h/w and driver structures.
- * o Bug fix: statistic command failure would stop statistic collection.
- * 
- * 2.2.21	02/11/03
- * o Removed marketing brand strings. Instead, Using generic string 
- *   "Intel(R) PRO/100 Network Connection" for all adapters.
- * o Implemented ethtool -S option
- * o Strip /proc/net/PRO_LAN_Adapters files for kernel driver
- * o Bug fix: Read wrong byte in EEPROM when offset is odd number
- * o Bug fix: PHY loopback test fails on ICH devices
- * o Bug fix: System panic on e100_close when repeating Hot Remove and 
- *   Add in a team
- * o Bug fix: Linux Bonding driver claims adapter's link loss because of
- *   not updating last_rx field
- * o Bug fix: e100 does not check validity of MAC address
- * o New feature: added ICH5 support
- * 
- * 2.1.27	11/20/02
  */
  
 #include <linux/config.h>
@@ -144,7 +125,7 @@ static void e100_non_tx_background(unsigned long);
 static inline void e100_tx_skb_free(struct e100_private *bdp, tcb_t *tcb);
 /* Global Data structures and variables */
 char e100_copyright[] __devinitdata = "Copyright (c) 2003 Intel Corporation";
-char e100_driver_version[]="2.3.13-k1-1";
+char e100_driver_version[]="2.3.30-k1";
 const char *e100_full_driver_name = "Intel(R) PRO/100 Network Driver";
 char e100_short_driver_name[] = "e100";
 static int e100nics = 0;
@@ -191,7 +172,7 @@ static unsigned char e100_init(struct e100_private *);
 static int e100_set_mac(struct net_device *, void *);
 struct net_device_stats *e100_get_stats(struct net_device *);
 
-static void e100intr(int, void *, struct pt_regs *);
+static irqreturn_t e100intr(int, void *, struct pt_regs *);
 static void e100_print_brd_conf(struct e100_private *);
 static void e100_set_multi(struct net_device *);
 
@@ -695,17 +676,16 @@ e100_found1(struct pci_dev *pcid, const struct pci_device_id *ent)
 
 	bdp->wolsupported = 0;
 	bdp->wolopts = 0;
+	if (bdp->rev_id >= D101A4_REV_ID)
+		bdp->wolsupported = WAKE_PHY | WAKE_MAGIC;
+	if (bdp->rev_id >= D101MA_REV_ID)
+		bdp->wolsupported |= WAKE_UCAST | WAKE_ARP;
 	
 	/* Check if WoL is enabled on EEPROM */
 	if (e100_eeprom_read(bdp, EEPROM_ID_WORD) & BIT_5) {
 		/* Magic Packet WoL is enabled on device by default */
 		/* if EEPROM WoL bit is TRUE                        */
-		bdp->wolsupported = WAKE_MAGIC;
 		bdp->wolopts = WAKE_MAGIC;
-		if (bdp->rev_id >= D101A4_REV_ID)
-			bdp->wolsupported = WAKE_PHY | WAKE_MAGIC;
-		if (bdp->rev_id >= D101MA_REV_ID)
-			bdp->wolsupported |= WAKE_UCAST | WAKE_ARP;
 	}
 
 	printk(KERN_NOTICE "\n");
@@ -1091,9 +1071,9 @@ e100_xmit_frame(struct sk_buff *skb, struct net_device *dev)
 		goto exit1;
 	}
 
-	e100_prepare_xmit_buff(bdp, skb);
-
 	bdp->drv_stats.net_stats.tx_bytes += skb->len;
+
+	e100_prepare_xmit_buff(bdp, skb);
 
 	dev->trans_start = jiffies;
 
@@ -1418,6 +1398,9 @@ e100_hw_init(struct e100_private *bdp)
 		bdp->flags |= DF_UCODE_LOADED;
 	}
 
+	if ((u8) bdp->rev_id < D101A4_REV_ID)
+		e100_config_init_82557(bdp);
+		
 	if (!e100_config(bdp))
 		goto err;
 
@@ -1860,7 +1843,7 @@ e100_manage_adaptive_ifs(struct e100_private *bdp)
  * the RX & TX queues & starts the RU if it has stopped due
  * to no resources.
  */
-void
+irqreturn_t
 e100intr(int irq, void *dev_inst, struct pt_regs *regs)
 {
 	struct net_device *dev;
@@ -1873,7 +1856,7 @@ e100intr(int irq, void *dev_inst, struct pt_regs *regs)
 	intr_status = readw(&bdp->scb->scb_status);
 	/* If not my interrupt, just return */
 	if (!(intr_status & SCB_STATUS_ACK_MASK) || (intr_status == 0xffff)) {
-		return;
+		return IRQ_NONE;
 	}
 
 	/* disable and ack intr */
@@ -1882,7 +1865,7 @@ e100intr(int irq, void *dev_inst, struct pt_regs *regs)
 	/* the device is closed, don't continue or else bad things may happen. */
 	if (!netif_running(dev)) {
 		e100_set_intr_mask(bdp);
-		return;
+		return IRQ_NONE;
 	}
 
 	/* SWI intr (triggered by watchdog) is signal to allocate new skb buffers */
@@ -1900,6 +1883,7 @@ e100intr(int irq, void *dev_inst, struct pt_regs *regs)
 		e100_tx_srv(bdp);
 
 	e100_set_intr_mask(bdp);
+	return IRQ_HANDLED;
 }
 
 /**
@@ -2073,13 +2057,14 @@ e100_rx_srv(struct e100_private *bdp)
 			skb->ip_summed = CHECKSUM_NONE;
 		}
 
+		bdp->drv_stats.net_stats.rx_bytes += skb->len;
+
 		if(bdp->vlgrp && (rfd_status & CB_STATUS_VLAN)) {
 			vlan_hwaccel_rx(skb, bdp->vlgrp, be16_to_cpu(rfd->vlanid));
 		} else {
 			netif_rx(skb);
 		}
 		dev->last_rx = jiffies;
-		bdp->drv_stats.net_stats.rx_bytes += skb->len;
 		
 		rfd_cnt++;
 	}			/* end of rfd loop */
@@ -4262,13 +4247,13 @@ e100_vlan_rx_kill_vid(struct net_device *netdev, u16 vid)
 static int
 e100_notify_reboot(struct notifier_block *nb, unsigned long event, void *p)
 {
-        struct pci_dev *pdev;
+        struct pci_dev *pdev = NULL;
 	
         switch(event) {
         case SYS_DOWN:
         case SYS_HALT:
         case SYS_POWER_OFF:
-                pci_for_each_dev(pdev) {
+		while ((pdev = pci_find_device(PCI_ANY_ID, PCI_ANY_ID, pdev)) != NULL) {
                         if(pci_dev_driver(pdev) == &e100_driver) {
 				/* If net_device struct is allocated? */
                                 if (pci_get_drvdata(pdev))

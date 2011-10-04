@@ -140,7 +140,6 @@ static int multipath_map (mddev_t *mddev, kdev_t *rdev)
 {
 	multipath_conf_t *conf = mddev_to_conf(mddev);
 	int i, disks = MD_SB_DISKS;
-	unsigned long ev = md_new_event();
 
 	/*
 	 * Later we do read balancing on the read side 
@@ -154,13 +153,18 @@ static int multipath_map (mddev_t *mddev, kdev_t *rdev)
 		}
 	}
 
-	/* sync with any monitoring daemon */
-	wait_event(md_event_waiters,
-		   md_event_reached(ev) ||
-		   conf->working_disks >= 1);
+	/* Oops, no device available.  Make sure our failover event is
+	 * actually complete first. */
+	wait_event(md_event_waiters, conf->multipath_error_running == 0);
+	/* Now see if a disk was made operational by multipath_error */
 	if (conf->working_disks)
 		goto retry;
-
+	/* Last ditch effort, see if some daemon reading events might solve our
+	 * problem */
+	wait_event(md_event_waiters,
+		   md_event_reached(conf->last_failover_event));
+	if (conf->working_disks)
+		goto retry;
 	printk (KERN_ERR "multipath_map(): no more operational IO paths?\n");
 	return (-1);
 }
@@ -239,10 +243,26 @@ static int multipath_read_balance (multipath_conf_t *conf)
 {
 	int disk;
 
+retry:
 	for (disk = 0; disk < conf->raid_disks; disk++)	
 		if (conf->multipaths[disk].operational)
 			return disk;
-	BUG();
+	/* Oops, no device available.  Make sure our failover event is
+	 * actually complete first. */
+	wait_event(md_event_waiters, conf->multipath_error_running == 0);
+	/* Now see if a disk was made operational by multipath_error */
+	if (conf->working_disks)
+		goto retry;
+	/* Last ditch effort, see if some daemon reading events might solve our
+	 * problem */
+	wait_event(md_event_waiters,
+		   md_event_reached(conf->last_failover_event));
+	if (conf->working_disks)
+		goto retry;
+
+	printk (KERN_ERR "multipath_read_balance(): no more operational IO paths?\n");
+	/* returning 0 just uses a dead path device, which will eventually
+	 * make the I/O error out. */
 	return 0;
 }
 
@@ -342,58 +362,65 @@ static int multipath_error (mddev_t *mddev, kdev_t dev)
 	int disks = MD_SB_DISKS;
 	int other_paths = 1;
 	int i;
+	unsigned long flags;
 
-	if (conf->working_disks == 1) {
-		other_paths = 0;
-		for (i = 0; i < disks; i++) {
-			if (multipaths[i].spare) {
-				other_paths = 1;
-				break;
-			}
+	/*
+	 * Only want to fail a device once, take the spinlock to avoid races.
+	 */
+	md_spin_lock_irqsave(&conf->device_lock, flags);
+	for (i = 0; i < disks; i++) {
+		if (multipaths[i].dev==dev && !multipaths[i].operational) {
+			/*
+			 * The first failed command starts a failover event.
+			 * All other commands on the failed path will trickle
+			 * in afterwards.  This is just another command
+			 * trickling in.
+			 */
+			md_spin_unlock_irqrestore(&conf->device_lock, flags);
+			return 0;
+		} else if (multipaths[i].dev==dev) {
+			/*
+			 * This is our failure event.
+			 */
+			conf->last_failover_event = md_new_event();
+			conf->multipath_error_running = 1;
+			mark_disk_bad(mddev, i);
+			break;
+		}
+	}
+	md_spin_unlock_irqrestore(&conf->device_lock, flags);
+		
+	other_paths = 0;
+	for (i = 0; i < disks; i++) {
+		if (multipaths[i].spare) {
+			other_paths = 1;
+			break;
 		}
 	}
 
-	if (!other_paths) {
-		/*
-		 * Uh oh, we can do nothing if this is our last path, but
-		 * first check if this is a queued request for a device
-		 * which has just failed.
-		 */
-		for (i = 0; i < disks; i++) {
-			if (multipaths[i].dev==dev && !multipaths[i].operational)
-				return 0;
-		}
+	if (!conf->working_disks && !other_paths) {
 		printk (LAST_DISK);
 	}
-	{
-		/*
-		 * Mark disk as unusable
-		 */
-		for (i = 0; i < disks; i++) {
-			if (multipaths[i].dev==dev && multipaths[i].operational) {
-				mark_disk_bad(mddev, i);
-				break;
-			}
-		}
-		if (!conf->working_disks) {
-			int err = 1;
-			mdp_disk_t *spare;
-			mdp_super_t *sb = mddev->sb;
+	if (!conf->working_disks) {
+		int err = 1;
+		mdp_disk_t *spare;
+		mdp_super_t *sb = mddev->sb;
 
-			spare = get_spare(mddev);
-			if (spare) {
-				err = multipath_diskop(mddev, &spare, DISKOP_SPARE_WRITE);
-				printk("got DISKOP_SPARE_WRITE err: %d. (spare_faulty(): %d)\n", err, disk_faulty(spare));
-			}
-			if (!err && !disk_faulty(spare)) {
-				multipath_diskop(mddev, &spare, DISKOP_SPARE_ACTIVE);
-				mark_disk_sync(spare);
-				mark_disk_active(spare);
-				sb->active_disks++;
-				sb->spare_disks--;
-			}
+		spare = get_spare(mddev);
+		if (spare) {
+			err = multipath_diskop(mddev, &spare, DISKOP_SPARE_WRITE);
+			printk("got DISKOP_SPARE_WRITE err: %d. (spare_faulty(): %d)\n", err, disk_faulty(spare));
+		}
+		if (!err && !disk_faulty(spare)) {
+			multipath_diskop(mddev, &spare, DISKOP_SPARE_ACTIVE);
+			mark_disk_sync(spare);
+			mark_disk_active(spare);
+			sb->active_disks++;
+			sb->spare_disks--;
 		}
 	}
+	conf->multipath_error_running = 0;
+	wake_up(&md_event_waiters);
 	return 0;
 }
 

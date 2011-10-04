@@ -24,4 +24,10 @@ get_cycles (void)
 #define vxtime_lock()		do {} while (0)
 #define vxtime_unlock()		do {} while (0)
 
+#define ARCH_UPDATE_WALL_TIME() \
+do { \
+	extern unsigned long last_time_offset; \
+	last_time_offset = 0; \
+} while (0)
+
 #endif /* _ASM_IA64_TIMEX_H */

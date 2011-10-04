@@ -815,8 +815,12 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 #endif
 
 	start_thread(regs, elf_entry, bprm->p);
-	if (current->ptrace & PT_PTRACED)
-		send_sig(SIGTRAP, current, 0);
+	if (unlikely(current->ptrace & PT_PTRACED)) {
+		if (current->ptrace & PT_TRACE_EXEC)
+			ptrace_notify((PTRACE_EVENT_EXEC << 8) | SIGTRAP);
+		else
+			send_sig(SIGTRAP, current, 0);
+	}
 	retval = 0;
 out:
 	return retval;
@@ -935,7 +939,7 @@ static int dump_write(struct file *file, const void *addr, int nr)
 	return file->f_op->write(file, addr, nr, &file->f_pos) == nr;
 }
 
-static int dump_seek(struct file *file, off_t off)
+static int dump_seek(struct file *file, loff_t off)
 {
 	if (file->f_op->llseek) {
 		if (file->f_op->llseek(file, off, 0) != off)
@@ -1042,10 +1046,9 @@ static int writenote(struct memelfnote *men, struct file *file)
 
 	DUMP_WRITE(&en, sizeof(en));
 	DUMP_WRITE(men->name, en.n_namesz);
-	/* XXX - cast from long long to long to avoid need for libgcc.a */
-	DUMP_SEEK(roundup((unsigned long)file->f_pos, 4));	/* XXX */
+	DUMP_SEEK(roundup(file->f_pos, 4));
 	DUMP_WRITE(men->data, men->datasz);
-	DUMP_SEEK(roundup((unsigned long)file->f_pos, 4));	/* XXX */
+	DUMP_SEEK(roundup(file->f_pos, 4));
 
 	return 1;
 }
@@ -1208,6 +1211,23 @@ static int elf_dump_thread_status(long signr, struct task_struct * p, struct lis
 }
 
 /*
+ * If a 32-bit binary generates a core file of >= 4GB, then it's possible
+ * that the 64-bit file offset of a program header defined segment would 
+ * overflow the maximum value that can be contained in its associated 
+ * 32-bit elf_phdr.p_offset field.  Rather than truncating the 64-bit offset
+ * to a misleading, incorrect, 32-bit value, it's preferable to just set
+ * the p_offset to zero.  Having p_offset be zero when p_filesz is nonzero
+ * is a clear indication that something funny happened; tools can easily 
+ * identify that the dump was truncated if it was, or they can try to 
+ * intuit the file position >= 4GB where this segment actually got written.
+ */
+static inline elf_addr_t core_header_offset(loff_t offset)
+{
+	elf_addr_t ofs = offset;
+	return (loff_t)ofs != offset ? 0 : ofs;
+}
+
+/*
  * Actual dumper
  *
  * This is a two-pass process; first we find the offsets of the bits,
@@ -1223,7 +1243,7 @@ static int elf_core_dump(long signr, struct pt_regs * regs, struct file * file)
 	int i;
 	struct vm_area_struct *vma;
 	struct elfhdr elf;
-	off_t offset = 0, dataoff;
+	loff_t offset = 0, dataoff;
 	unsigned long limit = current->rlim[RLIMIT_CORE].rlim_cur;
 	int numnote = 5;
 	struct memelfnote notes[5];
@@ -1377,7 +1397,7 @@ static int elf_core_dump(long signr, struct pt_regs * regs, struct file * file)
 		
 		sz += thread_status_size;
 
-		fill_elf_note_phdr(&phdr, sz, offset);
+		fill_elf_note_phdr(&phdr, sz, core_header_offset(offset));
 		offset += sz;
 		DUMP_WRITE(&phdr, sizeof(phdr));
 	}
@@ -1393,7 +1413,7 @@ static int elf_core_dump(long signr, struct pt_regs * regs, struct file * file)
 		sz = vma->vm_end - vma->vm_start;
 
 		phdr.p_type = PT_LOAD;
-		phdr.p_offset = offset;
+		phdr.p_offset = core_header_offset(offset);
 		phdr.p_vaddr = vma->vm_start;
 		phdr.p_paddr = 0;
 		phdr.p_filesz = maydump(vma) ? sz : 0;
@@ -1457,10 +1477,10 @@ static int elf_core_dump(long signr, struct pt_regs * regs, struct file * file)
 		}
 	}
 
-	if ((off_t) file->f_pos != offset) {
+	if (file->f_pos != offset) {
 		/* Sanity check */
-		printk("elf_core_dump: file->f_pos (%ld) != offset (%ld)\n",
-		       (off_t) file->f_pos, offset);
+		printk("elf_core_dump: file->f_pos (%lld) != offset (%lld)\n",
+		       file->f_pos, offset);
 	}
 
 end_coredump:

@@ -153,7 +153,7 @@ struct page *pte_alloc_one(struct mm_struct *mm, unsigned long address)
    
    	do {
 #if CONFIG_HIGHPTE
-		pte = alloc_pages(GFP_KERNEL | __GFP_HIGHMEM, 0);
+		pte = alloc_pages(GFP_KERNEL | __GFP_HIGHMEM | __GFP_WIRED, 0);
 #else
 		pte = alloc_pages(GFP_KERNEL, 0);
 #endif

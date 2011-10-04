@@ -4244,9 +4244,7 @@ dasd_setup_blkdev (dasd_device_t *device )
                 request_queue->queuedata = device;
                 blk_init_queue (request_queue, do_dasd_request);
                 blk_queue_headactive (request_queue, 1);
-#ifdef CONFIG_BLK_DEV_ELEVATOR_NOOP
                 elevator_init (&(request_queue->elevator),ELEVATOR_NOOP);
-#endif
         }
         device->request_queue = request_queue;
         

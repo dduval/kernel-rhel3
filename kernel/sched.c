@@ -69,7 +69,7 @@
 #define INTERACTIVE_DELTA	2
 #define MAX_SLEEP_AVG		(10*HZ)
 #define STARVATION_LIMIT	(10*HZ)
-#define AGRESSIVE_IDLE_STEAL	0
+#define AGRESSIVE_IDLE_STEAL	1
 #define BUSY_STEAL		1
 #define NODE_THRESHOLD		125
 
@@ -544,7 +544,7 @@ repeat_lock_task:
 			}
 			if (old_state == TASK_UNINTERRUPTIBLE)
 				rq->nr_uninterruptible--;
-			if (sync)
+			if (sync && (task_cpu(p) == smp_processor_id()))
 				__activate_task(p, rq);
 			else {
 				requeue_waker = activate_task(p, rq);
@@ -1199,11 +1199,10 @@ static void rebalance_tick(runqueue_t *this_rq, int this_cpu, int idle)
 			load_balance(this_rq, this_cpu, idle, cpu_to_node_mask(this_cpu));
 			spin_unlock(&this_rq->lock);
 		}
-		return;
 	}
 	if (!(j % BUSY_REBALANCE_TICK)) {
 		spin_lock(&this_rq->lock);
-		load_balance(this_rq, this_cpu, idle, cpu_to_node_mask(this_cpu));
+		load_balance(this_rq, this_cpu, 0, cpu_to_node_mask(this_cpu));
 		spin_unlock(&this_rq->lock);
 	}
 }

@@ -26,8 +26,9 @@
 #include <asm/mpspec.h>
 
 unsigned int nmi_watchdog = NMI_NONE;
-static unsigned int nmi_hz = 10000;
-unsigned int nmi_perfctr_msr;	/* the MSR to reset in NMI handler */
+static unsigned int nmi_hz = HZ;
+static unsigned int nmi_perfctr_msr; /* the MSR to reset in NMI handler */
+static long nmi_perfctr_val; /* the counter value to write into the MSR */
 extern void show_registers(struct pt_regs *regs);
 
 #define K7_EVNTSEL_ENABLE	(1 << 22)
@@ -62,10 +63,8 @@ extern void show_registers(struct pt_regs *regs);
 /* Set up IQ_COUNTER0 to behave like a clock, by having IQ_CCCR0 filter
    CRU_ESCR0 (with any non-null event selector) through a complemented
    max threshold. [IA32-Vol3, Section 14.9.9] */
-#define MSR_P4_IQ_COUNTER0	0x30C
-#define MSR_P4_IQ_CCCR0		0x36C
-#define MSR_P4_CRU_ESCR0	0x3B8
-#define P4_NMI_CRU_ESCR0	(P4_ESCR_EVENT_SELECT(0x3F)|P4_ESCR_OS|P4_ESCR_USR)
+#define P4_NMI_CRU_ESCR0 \
+	(P4_ESCR_EVENT_SELECT(0x3F)|P4_ESCR_OS|P4_ESCR_USR)
 #define P4_NMI_IQ_CCCR0	\
 	(P4_CCCR_OVF_PMI|P4_CCCR_THRESHOLD(15)|P4_CCCR_COMPLEMENT|	\
 	 P4_CCCR_COMPARE|P4_CCCR_REQUIRED|P4_CCCR_ESCR_SELECT(4)|P4_CCCR_ENABLE)
@@ -92,12 +91,6 @@ int __init check_nmi_watchdog (void)
 		}
 	}
 	printk("OK.\n");
-
-	/* now that we know it works we can reduce NMI frequency to
-	   something more reasonable; makes a difference in some configs */
-	if (nmi_watchdog == NMI_LOCAL_APIC)
-		nmi_hz = 10000;
-
 	return 0;
 }
 
@@ -116,14 +109,16 @@ static int __init setup_nmi_watchdog(char *str)
 	 * please test the NMI stuff there and send me the
 	 * missing bits. Right now Intel P6/P4 and AMD K7 only.
 	 */
-	if ((nmi == NMI_LOCAL_APIC) &&
-			(boot_cpu_data.x86_vendor == X86_VENDOR_INTEL) &&
-			(boot_cpu_data.x86 == 6 || boot_cpu_data.x86 == 15))
-		nmi_watchdog = nmi;
-	if ((nmi == NMI_LOCAL_APIC) &&
-			(boot_cpu_data.x86_vendor == X86_VENDOR_AMD) &&
-	       	    ((boot_cpu_data.x86 == 6) || (boot_cpu_data.x86 == 15)))
-		nmi_watchdog = nmi;
+	if (nmi == NMI_LOCAL_APIC) {
+		if (((boot_cpu_data.x86_vendor == X86_VENDOR_INTEL) &&
+		     (boot_cpu_data.x86 == 6 || boot_cpu_data.x86 == 15)) ||
+		    ((boot_cpu_data.x86_vendor == X86_VENDOR_AMD) &&
+	       	     (boot_cpu_data.x86 == 6 || boot_cpu_data.x86 == 15))) {
+			nmi_watchdog = nmi;
+			nmi_hz = 10000;
+		}
+	}
+
 	/*
 	 * We can enable the IO-APIC watchdog
 	 * unconditionally.
@@ -230,8 +225,8 @@ static void __pminit setup_k7_watchdog(void)
 		| K7_NMI_EVENT;
 
 	wrmsr(MSR_K7_EVNTSEL0, evntsel, 0);
-	Dprintk("setting K7_PERFCTR0 to %08lx\n", -(cpu_khz*1000/nmi_hz));
-	wrmsr(MSR_K7_PERFCTR0, -(cpu_khz*1000/nmi_hz), -1);
+	Dprintk("setting K7_PERFCTR0 to %08lx\n", nmi_perfctr_val);
+	wrmsr(MSR_K7_PERFCTR0, nmi_perfctr_val, -1);
 	apic_write(APIC_LVTPC, APIC_DM_NMI);
 	evntsel |= K7_EVNTSEL_ENABLE;
 	wrmsr(MSR_K7_EVNTSEL0, evntsel, 0);
@@ -252,8 +247,8 @@ static void __pminit setup_p6_watchdog(void)
 		| P6_NMI_EVENT;
 
 	wrmsr(MSR_P6_EVNTSEL0, evntsel, 0);
-	Dprintk("setting P6_PERFCTR0 to %08lx\n", -(cpu_khz*1000/nmi_hz));
-	wrmsr(MSR_P6_PERFCTR0, -(cpu_khz*1000/nmi_hz), 0);
+	Dprintk("setting P6_PERFCTR0 to %08lx\n", nmi_perfctr_val);
+	wrmsr(MSR_P6_PERFCTR0, nmi_perfctr_val, 0);
 	apic_write(APIC_LVTPC, APIC_DM_NMI);
 	evntsel |= P6_EVNTSEL0_ENABLE;
 	wrmsr(MSR_P6_EVNTSEL0, evntsel, 0);
@@ -267,7 +262,7 @@ static int __pminit setup_p4_watchdog(void)
 	if (!(misc_enable & MSR_P4_MISC_ENABLE_PERF_AVAIL))
 		return 0;
 
-	nmi_perfctr_msr = MSR_P4_IQ_COUNTER0;
+	nmi_perfctr_msr = MSR_P4_IQ_PERFCTR0;
 
 	if (!(misc_enable & MSR_P4_MISC_ENABLE_PEBS_UNAVAIL))
 		clear_msr_range(0x3F1, 2);
@@ -282,15 +277,22 @@ static int __pminit setup_p4_watchdog(void)
 
 	wrmsr(MSR_P4_CRU_ESCR0, P4_NMI_CRU_ESCR0, 0);
 	wrmsr(MSR_P4_IQ_CCCR0, P4_NMI_IQ_CCCR0 & ~P4_CCCR_ENABLE, 0);
-	Dprintk("setting P4_IQ_COUNTER0 to 0x%08lx\n", -(cpu_khz*1000/nmi_hz));
-	wrmsr(MSR_P4_IQ_COUNTER0, -(cpu_khz*1000/nmi_hz), -1);
+	Dprintk("setting P4_IQ_COUNTER0 to 0x%08lx\n", nmi_perfctr_val);
+	wrmsr(MSR_P4_IQ_PERFCTR0, nmi_perfctr_val, -1);
 	apic_write(APIC_LVTPC, APIC_DM_NMI);
 	wrmsr(MSR_P4_IQ_CCCR0, P4_NMI_IQ_CCCR0, 0);
 	return 1;
 }
 
+void set_nmi_perfctr_val(void)
+{
+	/* must be recalculated after any modification to cpu_khz */
+	nmi_perfctr_val = -(long)(cpu_khz * 1000 / nmi_hz);
+}
+
 void __pminit setup_apic_nmi_watchdog (void)
 {
+	set_nmi_perfctr_val();
 	switch (boot_cpu_data.x86_vendor) {
 	case X86_VENDOR_AMD:
 		if (boot_cpu_data.x86 != 6 && boot_cpu_data.x86 != 15)
@@ -365,7 +367,7 @@ void nmi_watchdog_tick (struct pt_regs * regs)
 	if (last_irq_sums[cpu] == sum) {
 		/*
 		 * Ayiee, looks like this CPU is stuck ...
-		 * wait a few IRQs (5 seconds) before doing the oops ...
+		 * wait a few IRQs (30 seconds) before doing the oops ...
 		 */
 		alert_counter[cpu]++;
 		if (alert_counter[cpu] == 30*nmi_hz) {
@@ -388,7 +390,7 @@ void nmi_watchdog_tick (struct pt_regs * regs)
 		alert_counter[cpu] = 0;
 	}
 	if (nmi_perfctr_msr) {
-		if (nmi_perfctr_msr == MSR_P4_IQ_COUNTER0) {
+		if (nmi_perfctr_msr == MSR_P4_IQ_PERFCTR0) {
 			/*
 			 * P4 quirks:
 			 * - An overflown perfctr will assert its interrupt
@@ -399,6 +401,6 @@ void nmi_watchdog_tick (struct pt_regs * regs)
 			wrmsr(MSR_P4_IQ_CCCR0, P4_NMI_IQ_CCCR0, 0);
 			apic_write(APIC_LVTPC, APIC_DM_NMI);
 		}
-		wrmsr(nmi_perfctr_msr, -(cpu_khz*1000/nmi_hz), -1);
+		wrmsr(nmi_perfctr_msr, nmi_perfctr_val, -1);
 	}
 }

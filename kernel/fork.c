@@ -36,8 +36,6 @@
 #include <asm/mmu_context.h>
 #include <asm/processor.h>
 
-static kmem_cache_t *task_struct_cachep;
-
 extern int copy_semundo(unsigned long clone_flags, struct task_struct *tsk);
 extern void exit_semundo(struct task_struct *tsk);
 
@@ -151,13 +149,6 @@ void finish_wait(wait_queue_head_t *q, wait_queue_t *wait)
 
 void __init fork_init(unsigned long mempages)
 {
-	/* create a slab on which task_structs can be allocated */
-	task_struct_cachep =
-		kmem_cache_create("task_struct",
-				sizeof(struct task_struct),0,
-				SLAB_HWCACHE_ALIGN, NULL, NULL);
-	if (!task_struct_cachep)
-		panic("fork_init(): cannot create task_struct SLAB cache");
 	/*
 	 * The default maximum number of threads is set to a safe
 	 * value: the thread structures can take up at most half
@@ -1100,19 +1091,28 @@ int do_fork(unsigned long clone_flags,
 			p->sigpending = 1;
 		}
 
-		p->state = TASK_STOPPED;
+		/*
+		 * The task is in TASK_UNINTERRUPTIBLE right now, no-one
+		 * can wake it up. Either wake it up as a child, which
+		 * makes it TASK_RUNNING - or make it TASK_STOPPED, after
+		 * which signals can wake the child up.
+		 */
 		if (!(clone_flags & CLONE_STOPPED))
 			wake_up_forked_process(p);	/* do this last */
+		else
+			p->state = TASK_STOPPED;
 		++total_forks;
 
 		if (unlikely (trace)) {
 			current->ptrace_message = (unsigned long) pid;
-			ptrace_notify ((trace << 8) | SIGTRAP);
+			ptrace_notify((trace << 8) | SIGTRAP);
 		}
 
-		if (clone_flags & CLONE_VFORK)
+		if (clone_flags & CLONE_VFORK) {
 			wait_for_completion(&vfork);
-		else
+			if (unlikely(current->ptrace & PT_TRACE_VFORK_DONE))
+				ptrace_notify((PTRACE_EVENT_VFORK_DONE << 8) | SIGTRAP);
+		} else
 			/*
 			 * Let the child process run first, to avoid most of the
 			 * COW overhead when the child exec()s afterwards.

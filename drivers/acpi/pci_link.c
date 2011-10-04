@@ -65,6 +65,9 @@ static struct acpi_driver acpi_pci_link_driver = {
 
 struct acpi_pci_link_irq {
 	u8			active;			/* Current IRQ */
+	u8			edge_level;
+	u8			active_high_low;
+	u8			setonboot;
 	u8			possible_count;
 	u8			possible[ACPI_PCI_LINK_MAX_POSSIBLE];
 };
@@ -114,6 +117,8 @@ acpi_pci_link_check_possible (
 			link->irq.possible[i] = p->interrupts[i];
 			link->irq.possible_count++;
 		}
+		link->irq.edge_level = p->edge_level;
+		link->irq.active_high_low = p->active_high_low;
 		break;
 	}
 	case ACPI_RSTYPE_EXT_IRQ:
@@ -132,6 +137,8 @@ acpi_pci_link_check_possible (
 			link->irq.possible[i] = p->interrupts[i];
 			link->irq.possible_count++;
 		}
+		link->irq.edge_level = p->edge_level;
+		link->irq.active_high_low = p->active_high_low;
 		break;
 	}
 	default:
@@ -284,52 +291,84 @@ acpi_pci_link_set (
 	struct acpi_buffer	buffer = {sizeof(resource)+1, &resource};
 	int			i = 0;
 	int			valid = 0;
+	int			resource_type = 0;
 
 	ACPI_FUNCTION_TRACE("acpi_pci_link_set");
 
 	if (!link || !irq)
 		return_VALUE(-EINVAL);
 
-	/* See if we're already at the target IRQ. */
-	if (irq == link->irq.active)
-		return_VALUE(0);
+	/* We don't check irqs the first time around */
+	if (link->irq.setonboot) {
+		/* See if we're already at the target IRQ. */
+		if (irq == link->irq.active)
+			return_VALUE(0);
 
-	/* Make sure the target IRQ in the list of possible IRQs. */
-	for (i=0; i<link->irq.possible_count; i++) {
-		if (irq == link->irq.possible[i])
-			valid = 1;
+		/* Make sure the target IRQ in the list of possible IRQs. */
+		for (i=0; i<link->irq.possible_count; i++) {
+			if (irq == link->irq.possible[i])
+				valid = 1;
+		}
+		if (!valid) {
+			ACPI_DEBUG_PRINT((ACPI_DB_ERROR, "Target IRQ %d invalid\n", irq));
+			return_VALUE(-EINVAL);
+		}
 	}
-	if (!valid) {
-		ACPI_DEBUG_PRINT((ACPI_DB_ERROR, "Target IRQ %d invalid\n", irq));
-		return_VALUE(-EINVAL);
+
+	/* If IRQ <= 15, first try with a "normal" IRQ descriptor.  If that
+	 * fails, try with an extended one
+	 */
+
+	if (irq <= 15) {
+		resource_type = ACPI_RSTYPE_IRQ;
 	}
+	else {
+		resource_type = ACPI_RSTYPE_EXT_IRQ;
+	}
+
+retry_programming:
 
 	memset(&resource, 0, sizeof(resource));
 
-	/* NOTE: PCI interrupts are always level / active_low / shared. */
-	if (irq <= 15) {
+	/* NOTE: PCI interrupts are always level / active_low / shared. 
+	 * But not all interrupts > 15 are PCI interrupts.  Rely on the
+	 * APCI IRQ definition for parameters
+	 */
+	switch(resource_type) {
+	case ACPI_RSTYPE_IRQ:
 		resource.res.id = ACPI_RSTYPE_IRQ;
 		resource.res.length = sizeof(struct acpi_resource);
-		resource.res.data.irq.edge_level = ACPI_LEVEL_SENSITIVE;
-		resource.res.data.irq.active_high_low = ACPI_ACTIVE_LOW;
+		resource.res.data.irq.edge_level = link->irq.edge_level;
+		resource.res.data.irq.active_high_low = link->irq.active_high_low;
 		resource.res.data.irq.shared_exclusive = ACPI_SHARED;
 		resource.res.data.irq.number_of_interrupts = 1;
 		resource.res.data.irq.interrupts[0] = irq;
-	}
-	else {
+		break;
+	
+	case ACPI_RSTYPE_EXT_IRQ:
 		resource.res.id = ACPI_RSTYPE_EXT_IRQ;
 		resource.res.length = sizeof(struct acpi_resource);
 		resource.res.data.extended_irq.producer_consumer = ACPI_CONSUMER;
-		resource.res.data.extended_irq.edge_level = ACPI_LEVEL_SENSITIVE;
-		resource.res.data.extended_irq.active_high_low = ACPI_ACTIVE_LOW;
+		resource.res.data.extended_irq.edge_level = link->irq.edge_level;
+		resource.res.data.extended_irq.active_high_low = link->irq.active_high_low;
 		resource.res.data.extended_irq.shared_exclusive = ACPI_SHARED;
 		resource.res.data.extended_irq.number_of_interrupts = 1;
 		resource.res.data.extended_irq.interrupts[0] = irq;
 		/* ignore resource_source, it's optional */
+		break;
 	}
 	resource.end.id = ACPI_RSTYPE_END_TAG;
 
 	status = acpi_set_current_resources(link->handle, &buffer);
+
+	/* if we failed and IRQ <= 15, try again with an extended descriptor */
+	if (ACPI_FAILURE(status) && (resource_type == ACPI_RSTYPE_IRQ)) {
+		resource_type = ACPI_RSTYPE_EXT_IRQ;
+		printk(PREFIX "Retrying with extended IRQ descriptor\n");
+		goto retry_programming;
+	}
+
+	/* check for total failure */
 	if (ACPI_FAILURE(status)) {
 		ACPI_DEBUG_PRINT((ACPI_DB_ERROR, "Error evaluating _SRS\n"));
 		return_VALUE(-ENODEV);
@@ -356,6 +395,7 @@ acpi_pci_link_set (
 			"Attempt to enable at IRQ %d resulted in IRQ %d\n", 
 			irq, link->irq.active));
 		link->irq.active = 0;
+		acpi_ut_evaluate_object (link->handle, "_DIS", 0, NULL);
 		return_VALUE(-ENODEV);
 	}
 
@@ -468,7 +508,9 @@ acpi_pci_link_check (void)
 int
 acpi_pci_link_get_irq (
 	acpi_handle		handle,
-	int			index)
+	int			index,
+	int*			edge_level,
+	int*			active_high_low)
 {
 	int                     result = 0;
 	struct acpi_device	*device = NULL;
@@ -499,6 +541,8 @@ acpi_pci_link_get_irq (
 		return_VALUE(0);
 	}
 
+	if(edge_level) *edge_level = link->irq.edge_level;
+	if(active_high_low) *active_high_low = link->irq.active_high_low;
 	return_VALUE(link->irq.active);
 }
 

@@ -51,6 +51,14 @@ dump (const char *str, void *vp, size_t len)
 #define SIGN_EXT9		0xffffffffffffff00ul
 
 /*
+ *  sysctl settable hook which tells the kernel whether to honor the
+ *  IA64_THREAD_UAC_NOPRINT prctl.  Because this is user settable, we want
+ *  to allow the super user to enable/disable this for security reasons
+ *  (i.e. don't allow attacker to fill up logs with unaligned accesses).
+ */
+int honor_uac_noprint = 0;
+
+/*
  * For M-unit:
  *
  *  opcode |   m  |   x6    |
@@ -1331,7 +1339,8 @@ ia64_handle_unaligned (unsigned long ifa, struct pt_regs *regs)
 		if ((current->thread.flags & IA64_THREAD_UAC_SIGBUS) != 0)
 			goto force_sigbus;
 
-		if (!(current->thread.flags & IA64_THREAD_UAC_NOPRINT)
+		if (honor_uac_noprint &&
+		    !(current->thread.flags & IA64_THREAD_UAC_NOPRINT)
 		    && within_logging_rate_limit())
 		{
 			char buf[200];	/* comm[] is at most 16 bytes... */
@@ -1340,12 +1349,6 @@ ia64_handle_unaligned (unsigned long ifa, struct pt_regs *regs)
 			len = sprintf(buf, "%s(%d): unaligned access to 0x%016lx, "
 				      "ip=0x%016lx\n\r", current->comm, current->pid,
 				      ifa, regs->cr_iip + ipsr->ri);
-			/*
-			 * Don't call tty_write_message() if we're in the kernel; we might
-			 * be holding locks...
-			 */
-			if (user_mode(regs))
-				tty_write_message(current->tty, buf);
 			buf[len-1] = '\0';	/* drop '\r' */
 			printk(KERN_WARNING "%s", buf);	/* watch for command names containing %s */
 		}

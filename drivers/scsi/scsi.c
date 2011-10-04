@@ -546,17 +546,6 @@ inline void __scsi_release_command(Scsi_Cmnd * SCpnt)
 						SCpnt->host->in_recovery,
 						SCpnt->host->eh_active));
 	}
-	/*
-	 * If the host is having troubles, then look to see if this was the last
-	 * command that might have failed.  If so, wake up the error handler.
-	 */
-	if (SCpnt->host->in_recovery
-	    && !SCpnt->host->eh_active
-	    && atomic_read(&SCpnt->host->host_busy) == SCpnt->host->host_failed) {
-		SCSI_LOG_ERROR_RECOVERY(5, printk("Waking error handler thread (%d)\n",
-			     atomic_read(&SCpnt->host->eh_wait->count)));
-		up(SCpnt->host->eh_wait);
-	}
 
 	spin_unlock_irqrestore(&SDpnt->device_request_lock, flags);
 
@@ -1280,21 +1269,25 @@ void scsi_softirq_handler(struct softirq_action *not_used)
 				SCpnt->owner = SCSI_OWNER_ERROR_HANDLER;
 				SCpnt->state = SCSI_STATE_FAILED;
 				SCpnt->host->in_recovery = 1;
-				/*
-				 * If the host is having troubles, then look to see if this was the last
-				 * command that might have failed.  If so, wake up the error handler.
-				 */
-				if (atomic_read(&SCpnt->host->host_busy) == SCpnt->host->host_failed) {
-					SCSI_LOG_ERROR_RECOVERY(5, printk("Waking error handler thread (%d)\n",
-									  atomic_read(&SCpnt->host->eh_wait->count)));
-					up(SCpnt->host->eh_wait);
-				}
 			} else {
 				/*
 				 * We only get here if the error recovery thread has died.
 				 */
 				scsi_finish_command(SCpnt);
 			}
+		}
+		/*
+		 * Only wake the eh thread if there are no
+		 * timers set to go off.  If there are timers
+		 * set to go off, then when they go off the
+		 * scsi_timeout_block() routine will notice
+		 * that we are in recovery and wake the eh
+		 * thread for us.
+		 */
+		if (host->in_recovery && host->unblock_timer_active == 0 &&
+		    atomic_read(&host->host_busy) == host->host_failed) {
+			SCSI_LOG_ERROR_RECOVERY(5, printk("Waking error handler thread (%d)\n", atomic_read(&host->eh_wait->count)));
+			up(SCpnt->host->eh_wait);
 		}
 	}			/* while(1==1) */
 
@@ -1340,6 +1333,7 @@ void scsi_finish_command(Scsi_Cmnd * SCpnt)
 	Scsi_Request * SRpnt;
 	unsigned long flags;
 	request_queue_t *q = &SCpnt->device->request_queue;
+	int host_was_blocked = SCpnt->host->host_blocked;
 
 	ASSERT_LOCK(q->queue_lock, 0);
 
@@ -1396,6 +1390,38 @@ void scsi_finish_command(Scsi_Cmnd * SCpnt)
 	}
 
 	SCpnt->done(SCpnt);
+
+	if (host_was_blocked) {
+	/*
+	 * We don't really need to do this for normal block devices (sd)
+	 * since they use scsi_io_completion for their done routine and
+	 * it will goose the queue for us.  However, the character and
+	 * special devices that use scsi_do_req and scsi_do_cmd don't
+	 * typically goose the queue after a completion event.  This isn't
+	 * a bad thing as long as every time they submit a command to
+	 * scsi_do_{req,cmd}, the q is able to send the command to the host
+	 * immediately.  However, should the host ever return from
+	 * queuecommand with a non-0 status, signalling that the command
+	 * was *not* queued, the failure to goose the queue upon completion
+	 * could result in a hung device.  So, to avoid that, we goose the
+	 * queue here if we have a device hanging condition.
+	 */
+		for (device = host->host_queue; device; device = device->next) {
+			q = &device->request_queue;
+			if (!device->device_blocked &&
+			    !list_empty(&q->queue_head) &&
+			    atomic_read(&device->device_busy) == 0) {
+				spin_lock_irq(q->queue_lock);
+				q->request_fn(q);
+				spin_unlock_irq(q->queue_lock);
+			}
+		}
+	} else if (!list_empty(&q->queue_head) &&
+		   atomic_read(&device->device_busy) == 0) {
+		spin_lock_irq(q->queue_lock);
+		q->request_fn(q);
+		spin_unlock_irq(q->queue_lock);
+	}
 }
 
 static int scsi_register_host(Scsi_Host_Template *);
@@ -1419,7 +1445,6 @@ void scsi_release_commandblocks(Scsi_Device * SDpnt)
 	Scsi_Cmnd *SCpnt, *SCnext;
 	unsigned long flags;
 
- 	spin_lock_irqsave(SDpnt->request_queue.queue_lock, flags);
 	for (SCpnt = SDpnt->device_queue; SCpnt; SCpnt = SCnext) {
 		SDpnt->device_queue = SCnext = SCpnt->next;
 		list_del(&SCpnt->sc_list);
@@ -1427,7 +1452,6 @@ void scsi_release_commandblocks(Scsi_Device * SDpnt)
 	}
 	SDpnt->has_cmdblocks = 0;
 	SDpnt->queue_depth = 0;
-	spin_unlock_irqrestore(SDpnt->request_queue.queue_lock, flags);
 }
 
 /*
@@ -1451,7 +1475,20 @@ void scsi_build_commandblocks(Scsi_Device * SDpnt)
 	Scsi_Cmnd *SCpnt;
 	request_queue_t *q = &SDpnt->request_queue;
 
-	spin_lock_irqsave(q->queue_lock, flags);
+	/*
+	 * Init the spin lock that protects alloc/free of command blocks
+	 */
+	spin_lock_init(&SDpnt->device_request_lock);
+
+	/*
+	 * Init the list we keep free commands on
+	 */
+	INIT_LIST_HEAD(&SDpnt->sdev_free_q);
+
+        /*
+         * Initialize the object that we will use to wait for command blocks.
+         */
+	init_waitqueue_head(&SDpnt->scpnt_wait);
 
 	if (SDpnt->queue_depth == 0)
 	{
@@ -1460,7 +1497,6 @@ void scsi_build_commandblocks(Scsi_Device * SDpnt)
 			SDpnt->queue_depth = 1; /* live to fight another day */
 	}
 	SDpnt->device_queue = NULL;
-	INIT_LIST_HEAD(&SDpnt->sdev_free_q);
 
 	for (j = 0; j < SDpnt->queue_depth; j++) {
 		SCpnt = (Scsi_Cmnd *)
@@ -1500,7 +1536,6 @@ void scsi_build_commandblocks(Scsi_Device * SDpnt)
 	} else {
 		SDpnt->has_cmdblocks = 1;
 	}
-	spin_unlock_irqrestore(q->queue_lock, flags);
 }
 
 void __init scsi_host_no_insert(char *str, int n)
@@ -2693,17 +2728,12 @@ Scsi_Device * scsi_get_host_dev(struct Scsi_Host * SHpnt)
         SDpnt->id = SHpnt->this_id;
         SDpnt->type = -1;
         SDpnt->queue_depth = 1;
+	spin_lock_init(&SDpnt->device_request_lock);
         
+	scsi_build_commandblocks(SDpnt);
 	scsi_initialize_queue(SDpnt, SHpnt);
 
-	scsi_build_commandblocks(SDpnt);
-
 	SDpnt->online = TRUE;
-
-        /*
-         * Initialize the object that we will use to wait for command blocks.
-         */
-	init_waitqueue_head(&SDpnt->scpnt_wait);
         return SDpnt;
 }
 
@@ -2727,12 +2757,12 @@ void scsi_free_host_dev(Scsi_Device * SDpnt)
                 panic("Attempt to delete wrong device\n");
         }
 
+        blk_cleanup_queue(&SDpnt->request_queue);
         /*
          * We only have a single SCpnt attached to this device.  Free
          * it now.
          */
 	scsi_release_commandblocks(SDpnt);
-        blk_cleanup_queue(&SDpnt->request_queue);
 
         kfree(SDpnt);
 }

@@ -85,6 +85,9 @@ int xics_irq_8259_cascade_real = 0;
 unsigned int default_server = 0xFF;
 unsigned int default_distrib_server = 0;
 
+static inline u32 physmask(u32);
+extern unsigned int irq_affinity[];
+
 /* RTAS service tokens */
 int ibm_get_xive;
 int ibm_set_xive;
@@ -145,15 +148,18 @@ xics_enable_irq(
 	long	        call_status;
 	unsigned int    interrupt_server = default_server;
 
-	virq -= XICS_IRQ_OFFSET;
-	irq = virt_irq_to_real(virq);
+	irq = virt_irq_to_real(virq - XICS_IRQ_OFFSET);
 	if (irq == XICS_IPI)
 		return;
 
 #ifdef CONFIG_IRQ_ALL_CPUS
 	if((smp_num_cpus == systemcfg->processorCount) &&
 	   (smp_threads_ready)) {
-		interrupt_server = default_distrib_server;
+		/* Retain the affinity setting specified */
+		if (irq_affinity[virq] == 0xffffffff)
+			interrupt_server = default_distrib_server;
+		else
+			interrupt_server = physmask(irq_affinity[virq]);
 	}
 #endif
 	call_status = rtas_call(ibm_set_xive, 3, 1, (unsigned long*)&status,

@@ -133,6 +133,11 @@ struct machdep_calls {
 
 	/* this is for modules, since _machine can be a define -- Cort */
 	int ppc_machine;
+
+#ifndef __GENKSYMS__ /* preserve KMI/ABI ksyms compatibility for mod linkage */
+	/* Interface for platform error logging */
+	void (*log_error)(char *buf, unsigned int err_type, int fatal);
+#endif
 };
 
 extern struct machdep_calls ppc_md;
@@ -156,6 +161,11 @@ void ppc64_attention_msg(unsigned int src, const char *msg);
 /* Print a dump progress message. */
 void ppc64_dump_msg(unsigned int src, const char *msg);
 
+static inline void log_error(char *buf, unsigned int err_type, int fatal)
+{
+	if (ppc_md.log_error)
+		ppc_md.log_error(buf, err_type, fatal);
+}
 
 #endif /* _PPC_MACHDEP_H */
 #endif /* __KERNEL__ */

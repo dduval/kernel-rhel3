@@ -104,9 +104,7 @@ static int sock_send_actor (read_descriptor_t * desc, struct page *page,
 		char *kaddr = kmap(page);
 		__u32 in_len, out_len;
 		out_len = orig_size*101/100 + 12;
-		buf = kmalloc(out_len, GFP_KERNEL);
-		if (!buf)
-			BUG();
+		buf = tux_kmalloc(out_len);
 		in_len = orig_size;
 		size = out_len;
 		gzip_left = 0;

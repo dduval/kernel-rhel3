@@ -93,6 +93,8 @@ static struct ipc_ids msg_ids;
 
 #define msg_lock(id)	((struct msg_queue*)ipc_lock(&msg_ids,id))
 #define msg_unlock(id)	ipc_unlock(&msg_ids,id)
+#define msg_write_lock(id)	((struct msg_queue*)ipc_write_lock(&msg_ids,id))
+#define msg_write_unlock(id)	ipc_write_unlock(&msg_ids,id)
 #define msg_rmid(id)	((struct msg_queue*)ipc_rmid(&msg_ids,id))
 #define msg_checkid(msq, msgid)	\
 	ipc_checkid(&msg_ids,&msq->q_perm,msgid)
@@ -287,7 +289,7 @@ static void freeque (int id)
 
 	expunge_all(msq,-EIDRM);
 	ss_wakeup(&msq->q_senders,1);
-	msg_unlock(id);
+	msg_write_unlock(id);
 		
 	tmp = msq->q_messages.next;
 	while(tmp != &msq->q_messages) {
@@ -521,7 +523,7 @@ asmlinkage long sys_msgctl (int msqid, int cmd, struct msqid_ds *buf)
 	}
 
 	down(&msg_ids.sem);
-	msq = msg_lock(msqid);
+	msq = msg_write_lock(msqid);
 	err=-EINVAL;
 	if (msq == NULL)
 		goto out_up;
@@ -556,7 +558,7 @@ asmlinkage long sys_msgctl (int msqid, int cmd, struct msqid_ds *buf)
 		 * due to a larger queue size.
 		 */
 		ss_wakeup(&msq->q_senders,0);
-		msg_unlock(msqid);
+		msg_write_unlock(msqid);
 		break;
 	}
 	case IPC_RMID:
@@ -568,7 +570,7 @@ out_up:
 	up(&msg_ids.sem);
 	return err;
 out_unlock_up:
-	msg_unlock(msqid);
+	msg_write_unlock(msqid);
 	goto out_up;
 out_unlock:
 	msg_unlock(msqid);
@@ -613,7 +615,7 @@ static int inline pipelined_send(struct msg_queue* msq, struct msg_msg* msg)
 				wake_up_process(msr->r_tsk);
 			} else {
 				msr->r_msg = msg;
-				msq->q_lrpid = msr->r_tsk->pid;
+				msq->q_lrpid = msr->r_tsk->tgid;
 				msq->q_rtime = CURRENT_TIME;
 				wake_up_process(msr->r_tsk);
 				return 1;
@@ -683,7 +685,7 @@ retry:
 		goto retry;
 	}
 
-	msq->q_lspid = current->pid;
+	msq->q_lspid = current->tgid;
 	msq->q_stime = CURRENT_TIME;
 
 	if(!pipelined_send(msq,msg)) {
@@ -776,7 +778,7 @@ retry:
 		list_del(&msg->m_list);
 		msq->q_qnum--;
 		msq->q_rtime = CURRENT_TIME;
-		msq->q_lrpid = current->pid;
+		msq->q_lrpid = current->tgid;
 		msq->q_cbytes -= msg->m_ts;
 		atomic_sub(msg->m_ts,&msg_bytes);
 		atomic_dec(&msg_hdrs);

@@ -15,6 +15,8 @@
 #include <linux/mm.h>
 #include <linux/reboot.h>
 #include <linux/delay.h>
+#include <linux/init.h>
+#include <linux/sysrq.h>
 #include <asm/ptrace.h>
 #include <asm/string.h>
 #include <asm/prom.h>
@@ -192,6 +194,35 @@ extern inline void sync(void)
 	asm volatile("sync; isync");
 }
 
+/*
+ * xmon can only be enabled via the boot command line. If either
+ * "xmon=on" or "xmon=early" is set, xmon is turned on by setting
+ * xmon_enabled to true. Additionally, if "xmon=early" was set,
+ * xmon will be entered during setup_arch.
+ */
+static void sysrq_handle_xmon(int key, struct pt_regs *pt_regs, 
+			      struct kbd_struct *kbd, struct tty_struct *tty)
+{
+	xmon(pt_regs);
+}
+static struct sysrq_key_op sysrq_xmon_op =
+{
+	.handler =	sysrq_handle_xmon,
+	.help_msg =	"xmon",
+	.action_msg =	"Entering xmon\n",
+};
+
+int xmon_enabled = 0;
+
+int __init
+xmon_set_enabled(void)
+{
+	printk("Enabling xmon\n");
+	xmon_enabled = 1;
+	__sysrq_put_key_op('x', &sysrq_xmon_op);
+	return 1;
+}
+
 /* (Ref: 64-bit PowerPC ELF ABI Supplement; Ian Lance Taylor, Zembu Labs).
  A PPC stack frame looks like this:
 
@@ -218,6 +249,9 @@ xmon(struct pt_regs *excp)
 	struct pt_regs regs;
 	int cmd = 0;
 	unsigned long msr;
+
+	if (!xmon_enabled)
+		return;
 
 	if (excp == NULL) {
 		/* Ok, grab regs as they are now.

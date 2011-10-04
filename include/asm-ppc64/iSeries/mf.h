@@ -58,11 +58,11 @@ extern void mf_clearSrc( void );
 
 extern void mf_init( void );
 
-extern void mf_setSide(char side);
+extern int  mf_setSide(char side);
 
 extern char mf_getSide(void);
 
-extern void mf_setCmdLine(const char *cmdline, int size, u64 side);
+extern int  mf_setCmdLine(const char *cmdline, int size, u64 side);
 
 extern int  mf_getCmdLine(char *cmdline, int *size, u64 side);
 

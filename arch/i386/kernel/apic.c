@@ -951,6 +951,9 @@ void __init setup_APIC_clocks (void)
 
 	/* and update all other cpus */
 	smp_call_function(setup_APIC_timer, (void *)calibration_result, 1, 1);
+
+	if (nmi_watchdog == NMI_LOCAL_APIC)
+		check_nmi_watchdog();
 }
 
 void __init disable_APIC_timer(void)
@@ -990,13 +993,8 @@ int setup_profiling_timer(unsigned int multiplier)
 		return -EINVAL;
 
 	/* 
-	 * Set the new multiplier for each CPU. CPUs don't start using the
-	 * new values until the next timer interrupt in which they do process
-	 * accounting. At that time they also adjust their APIC timers
-	 * accordingly.
+	 * There is no longer support for prof_multiplier[] use.
 	 */
-	for (i = 0; i < NR_CPUS; ++i)
-		prof_multiplier[i] = multiplier;
 
 	return 0;
 }
@@ -1019,27 +1017,9 @@ inline void smp_local_timer_interrupt(struct pt_regs * regs)
 
 #ifndef CONFIG_SMP
 	x86_do_profile(regs);
+#else
+	update_process_times(user_mode(regs));
 #endif
-
-	if (--prof_counter[cpu] <= 0) {
-		/*
-		 * The multiplier may have changed since the last time we got
-		 * to this point as a result of the user writing to
-		 * /proc/profile. In this case we need to adjust the APIC
-		 * timer accordingly.
-		 *
-		 * Interrupts are already masked off at this point.
-		 */
-		prof_counter[cpu] = prof_multiplier[cpu];
-		if (prof_counter[cpu] != prof_old_multiplier[cpu]) {
-			__setup_APIC_LVTT(calibration_result/prof_counter[cpu]);
-			prof_old_multiplier[cpu] = prof_counter[cpu];
-		}
-
-#ifdef CONFIG_SMP
-		update_process_times(user_mode(regs));
-#endif
-	}
 
 	/*
 	 * We take the 'long' return path, and there every subsystem
@@ -1180,8 +1160,6 @@ int __init APIC_init_uniprocessor (void)
 
 	setup_local_APIC();
 
-	if (nmi_watchdog == NMI_LOCAL_APIC)
-		check_nmi_watchdog();
 #ifdef CONFIG_X86_IO_APIC
 	if (smp_found_config && !skip_ioapic_setup && nr_ioapics) {
 		setup_IO_APIC();

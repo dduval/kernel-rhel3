@@ -9,7 +9,7 @@
  *              as published by the Free Software Foundation; either version
  *              2 of the License, or (at your option) any later version.
  *
- * Version : v1.18j (July 7, 2003)
+ * Version : v1.18k (Aug 28, 2003)
  *
  * Description: Linux device driver for LSI Logic MegaRAID controller
  *
@@ -547,6 +547,13 @@
  *
  * Add support for ioctls on AMD-64 bit platforms
  *			- Sreenivas Bagalkote <sreenib@lsil.com>
+ *
+ * Version 1.18k
+ * Thu Aug 28 10:05:11 EDT 2003 - Atul Mukker <atulm@lsil.com>
+ *
+ * Make sure to read the correct status and command ids while in ISR. The
+ * numstatus and command id array is invalidated before issuing the commands.
+ * The ISR busy-waits till the correct values are updated in host memory.
  *
  * BUGS:
  *     Some older 2.1 kernels (eg. 2.1.90) have a bug in pci.c that
@@ -2288,12 +2295,13 @@ static void megaraid_isr (int irq, void *devp, struct pt_regs *regs)
 		while ((qCnt = megaCfg->mbox->numstatus) == 0xFF) ;
 		megaCfg->mbox->numstatus = 0xFF;
 
-		qStatus = megaCfg->mbox->status;
-
 		/* Get list of completed requests */
 		for (idx = 0; idx < qCnt; idx++) {
-			completed[idx] = megaCfg->mbox->completed[idx];
+			while ((completed[idx] = megaCfg->mbox->completed[idx]) == 0xFF);
+			megaCfg->mbox->completed[idx] = 0xFF;
 		}
+
+		qStatus = megaCfg->mbox->status;
 
 		if (megaCfg->flag & BOARD_QUARTZ) {
 			/* Acknowledge interrupt */
@@ -2424,6 +2432,7 @@ static int megaIssueCmd (mega_host_config * megaCfg, u_char * mboxData,
 	u32 phys_mbox;
 #endif
 	u8 retval = -1;
+	int	i;
 
 	mboxData[0x1] = (pScb ? pScb->idx + 1 : 0xFE);	/* Set cmdid */
 	mboxData[0xF] = 1;	/* Set busy */
@@ -2515,6 +2524,11 @@ static int megaIssueCmd (mega_host_config * megaCfg, u_char * mboxData,
 				TRACE (("Error: NULL pScb!\n"));
 			}
 		}
+
+		for (i = 0; i < MAX_FIRMWARE_STATUS; i++) {
+				mbox->completed[i] = 0xFF;
+		}
+
 		enable_irq (megaCfg->host->irq);
 		retval = mbox->status;
 	}
@@ -4271,7 +4285,6 @@ static int proc_read_config (char *page, char **start, off_t offset,
 static int proc_read_stat (char *page, char **start, off_t offset,
 		int count, int *eof, void *data)
 {
-	int i;
 	mega_host_config *megaCfg = (mega_host_config *) data;
 
 	*start = page;

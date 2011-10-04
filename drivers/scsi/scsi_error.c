@@ -201,10 +201,19 @@ void scsi_times_out(Scsi_Cmnd * SCpnt)
 
 	/* Set the serial_number_at_timeout to the current serial_number */
 	SCpnt->serial_number_at_timeout = SCpnt->serial_number;
-
 	SCpnt->eh_state = FAILED;
 	SCpnt->state = SCSI_STATE_TIMEOUT;
 	SCpnt->owner = SCSI_OWNER_ERROR_HANDLER;
+
+	if( SCpnt->host->eh_wait == NULL ) {
+	/*
+	 * This is too severe, try to survive.
+	 *	panic("Error handler thread not present at %p %p %s %d", 
+	 *		 SCpnt, SCpnt->host, __FILE__, __LINE__);
+	 */
+		scsi_finish_command(SCpnt);
+		return;
+	}
 
 	SCpnt->host->in_recovery = 1;
 	SCpnt->host->host_failed++;
@@ -215,14 +224,15 @@ void scsi_times_out(Scsi_Cmnd * SCpnt)
 				   SCpnt->host->host_failed));
 
 	/*
-	 * If the host is having troubles, then look to see if this was the last
-	 * command that might have failed.  If so, wake up the error handler.
+	 * Only wake the eh thread if there are no
+	 * timers set to go off.  If there are timers
+	 * set to go off, then when they go off the
+	 * scsi_timeout_block() routine will notice
+	 * that we are in recovery and wake the eh
+	 * thread for us.
 	 */
-	if( SCpnt->host->eh_wait == NULL ) {
-		panic("Error handler thread not present at %p %p %s %d", 
-		      SCpnt, SCpnt->host, __FILE__, __LINE__);
-	}
-	if (atomic_read(&SCpnt->host->host_busy) == SCpnt->host->host_failed) {
+	if (!SCpnt->host->unblock_timer_active &&
+	    atomic_read(&SCpnt->host->host_busy) == SCpnt->host->host_failed) {
 		up(SCpnt->host->eh_wait);
 	}
 }
@@ -1044,6 +1054,7 @@ int scsi_decide_disposition(Scsi_Cmnd * SCpnt)
 	 */
 	switch (status_byte(SCpnt->result)) {
 	case QUEUE_FULL:
+	case BUSY:
 		/*
 		 * The case of trying to send too many commands to a tagged queueing
 		 * device.
@@ -1065,8 +1076,6 @@ int scsi_decide_disposition(Scsi_Cmnd * SCpnt)
 		 * Who knows?  FIXME(eric)
 		 */
 		return SUCCESS;
-	case BUSY:
-		goto maybe_retry;
 
 	case RESERVATION_CONFLICT:
 		printk("scsi%d (%d,%d,%d) : RESERVATION CONFLICT\n", 
@@ -1251,12 +1260,18 @@ STATIC void scsi_restart_operations(struct Scsi_Host *host)
 	ASSERT_LOCK(host->host_lock, 0);
 
 	/*
+	 * We just completed error handling, we can't be blocked now or else
+	 * we hang forever.
+	 */
+	host->host_blocked = 0;
+	host->host_self_blocked = 0;
+
+	/*
 	 * Next free up anything directly waiting upon the host.  This will be
 	 * requests for character device operations, and also for ioctls to queued
 	 * block devices.
 	 */
 	SCSI_LOG_ERROR_RECOVERY(5, printk("scsi_error.c: Waking up host to restart\n"));
-
 	wake_up(&host->host_wait);
 
 	/*
@@ -1265,23 +1280,14 @@ STATIC void scsi_restart_operations(struct Scsi_Host *host)
 	 * now that error recovery is done, we will need to ensure that these
 	 * requests are started.
 	 */
-	spin_lock_irqsave(host->host_lock, flags);
 	for (SDpnt = host->host_queue; SDpnt; SDpnt = SDpnt->next) {
 		request_queue_t *q;
-		if ((host->can_queue > 0 && (atomic_read(&host->host_busy) >= host->can_queue))
-		    || (host->host_blocked)
-		    || (host->host_self_blocked)
-		    || (SDpnt->device_blocked)) {
-			break;
-		}
+		SDpnt->device_blocked = 0;
 		q = &SDpnt->request_queue;
-		spin_lock(q->queue_lock);
-		spin_unlock(host->host_lock);
+		spin_lock_irqsave(q->queue_lock, flags);
 		q->request_fn(q);
-		spin_lock(host->host_lock);
-		spin_unlock(q->queue_lock);
+		spin_unlock_irqrestore(q->queue_lock, flags);
 	}
-	spin_unlock_irqrestore(host->host_lock, flags);
 }
 
 /*
@@ -1342,7 +1348,8 @@ STATIC int scsi_unjam_host(struct Scsi_Host *host)
 			if (SCpnt->state == SCSI_STATE_FAILED
 			    || SCpnt->state == SCSI_STATE_TIMEOUT
 			    || SCpnt->state == SCSI_STATE_INITIALIZING
-			    || SCpnt->state == SCSI_STATE_UNUSED) {
+			    || SCpnt->state == SCSI_STATE_UNUSED
+			    || SCpnt->state == SCSI_STATE_MLQUEUE) {
 				continue;
 			}
 			/*

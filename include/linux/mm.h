@@ -330,6 +330,7 @@ typedef struct page {
 #define PG_sync			20
 #define PG_fresh_page		21	/* Page freshly read from disk */
 #define PG_compound		22	/* Part of a compound page */
+#define PG_wired		23	/* wired by ramfs */
 
 /* note: don't make page flags of values 24 or higher! */
 
@@ -361,6 +362,9 @@ typedef struct page {
 #define ClearPageReferenced(page) clear_bit(PG_referenced, &(page)->flags)
 #define ClearPageError(page)    clear_bit(PG_error, &(page)->flags)
 #define ClearPageArch1(page)    clear_bit(PG_arch_1, &(page)->flags)
+#define SetPageWired(page)	set_bit(PG_wired, &(page)->flags)
+#define ClearPageWired(page)	clear_bit(PG_wired, &(page)->flags)
+#define PageWired(page)		test_bit(PG_wired, &(page)->flags)
 
 /*
  * inlines for acquisition and release of PG_chainlock
@@ -828,6 +832,7 @@ extern struct page *filemap_nopage(struct vm_area_struct *, unsigned long, int);
 #define __GFP_IO	0x40	/* Can start low memory physical IO? */
 #define __GFP_HIGHIO	0x80	/* Can start high mem physical IO? */
 #define __GFP_FS	0x100	/* Can call down to low-level FS? */
+#define __GFP_WIRED	0x200   /* Highmem bias and wired */
 
 #define GFP_NOHIGHIO	(__GFP_HIGH | __GFP_WAIT | __GFP_IO)
 #define GFP_NOIO	(__GFP_HIGH | __GFP_WAIT)

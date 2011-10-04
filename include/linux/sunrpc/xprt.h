@@ -72,6 +72,7 @@ struct rpc_timeout {
 				to_maxval,		/* max timeout */
 				to_increment,		/* if !exponential */
 				to_resrvval;		/* reserve timeout */
+			/* to_resrvval no longer used, but retained for ABI */
 	short			to_retries;		/* max # of retries */
 	unsigned char		to_exponential;
 };
@@ -116,7 +117,11 @@ struct rpc_rqst {
 
 	long			rq_xtime;	/* when transmitted */
 	int			rq_ntimeo;
-	int			rq_nresend;
+#ifdef __GENKSYMS__ /* preserve KMI/ABI ksyms compatibility for linkage */
+	int			rq_nresend;	/* obsolete */
+#else
+	int			rq_ntrans;
+#endif
 };
 #define rq_svec			rq_snd_buf.head
 #define rq_slen			rq_snd_buf.len
@@ -193,7 +198,7 @@ void			xprt_default_timeout(struct rpc_timeout *, int);
 void			xprt_set_timeout(struct rpc_timeout *, unsigned int,
 					unsigned long);
 
-int			xprt_reserve(struct rpc_task *);
+void			xprt_reserve(struct rpc_task *);
 void			xprt_transmit(struct rpc_task *);
 void			xprt_receive(struct rpc_task *);
 int			xprt_adjust_timeout(struct rpc_timeout *);

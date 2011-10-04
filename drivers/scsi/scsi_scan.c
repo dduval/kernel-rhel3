@@ -37,6 +37,7 @@
 #define BLIST_ISDISK    	0x100	/* Treat as (removable) disk */
 #define BLIST_ISROM     	0x200	/* Treat as (removable) CD-ROM */
 #define BLIST_LARGELUN		0x400	/* LUNs larger than 7 despite reporting as SCSI 2 */
+#define BLIST_NOSTARTONADD	0x800	/* do not do automatic start on add */
 
 static void print_inquiry(unsigned char *data);
 static int scan_scsis_single(unsigned int channel, unsigned int dev,
@@ -146,7 +147,7 @@ static struct dev_info device_list[] =
 	{"EMULEX", "MD21/S2     ESDI", "*", BLIST_SINGLELUN},
 	{"CANON", "IPUBJD", "*", BLIST_SPARSELUN},
 	{"nCipher", "Fastness Crypto", "*", BLIST_FORCELUN},
-	{"DEC","HSG80","*", BLIST_SPARSELUN | BLIST_LARGELUN},
+	{"DEC","HSG80","*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_NOSTARTONADD},
 	{"COMPAQ","LOGICAL VOLUME","*", BLIST_FORCELUN},
 	{"COMPAQ","CR3500","*", BLIST_FORCELUN},
 	{"NEC", "PD-1 ODX654P", "*", BLIST_FORCELUN | BLIST_SINGLELUN},
@@ -174,9 +175,9 @@ static struct dev_info device_list[] =
 	{"HP", "NetRAID-4M", "*", BLIST_FORCELUN},
 	{"ADAPTEC", "AACRAID", "*", BLIST_FORCELUN},
 	{"ADAPTEC", "Adaptec 5400S", "*", BLIST_FORCELUN},
-	{"COMPAQ", "MSA1000", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
-	{"COMPAQ", "HSV110", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
-	{"HP", "HSV100", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
+	{"COMPAQ", "MSA1000", "*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_NOSTARTONADD},
+	{"COMPAQ", "HSV110", "*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_NOSTARTONADD},
+	{"HP", "HSV100", "*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_NOSTARTONADD},
 	{"HP", "C1557A", "*", BLIST_FORCELUN},
 	{"IBM", "AuSaV1S2", "*", BLIST_FORCELUN},
 	{"FSC", "CentricStor", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
@@ -204,6 +205,10 @@ static struct dev_info device_list[] =
 	{"SMSC", "USB 2 HS", "*", BLIST_SPARSELUN | BLIST_LARGELUN}, 
 	{"XYRATEX", "RS", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
 	{"SUN", "StorEdge", "*", BLIST_SPARSELUN},
+	{"IBM", "1742", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
+	{"CNSi", "JSS122", "*", BLIST_SPARSELUN}, 		// Chaparral SR0812 SR1422
+	{"CNSi", "JSS224", "*", BLIST_SPARSELUN}, 		// Chaparral FR1422
+	{"NEC","iStorage","*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_FORCELUN}, // NEC iStorage
 
 	/*
 	 * Must be at end of list...
@@ -362,7 +367,6 @@ void scan_scsis(struct Scsi_Host *shpnt,
 		 * Register the queue for the device.  All I/O requests will
 		 * come in through here.
 		 */
-		spin_lock_init(&SDpnt->device_request_lock);
 		scsi_initialize_queue(SDpnt, shpnt);
 		/* Make sure we have something that is valid for DMA purposes */
 		scsi_result = ((!shpnt->unchecked_isa_dma)
@@ -381,11 +385,6 @@ void scan_scsis(struct Scsi_Host *shpnt,
 	SDpnt->online = TRUE;
 
 	initialize_merge_fn(SDpnt);
-
-        /*
-         * Initialize the object that we will use to wait for command blocks.
-         */
-	init_waitqueue_head(&SDpnt->scpnt_wait);
 
 	/*
 	 * Next, hook the device to the host in question.
@@ -798,6 +797,13 @@ static int scan_scsis_single(unsigned int channel, unsigned int dev,
 		SDpnt->borken = 0;
 
 	/*
+	 * Some devices may not want to have a start command automatically
+	 * issued when a device is added.
+	 */
+	if (bflags & BLIST_NOSTARTONADD)
+		SDpnt->no_start_on_add = 1;
+
+	/*
 	 * If we want to only allow I/O to one of the luns attached to this device
 	 * at a time, then we set this flag.
 	 */
@@ -855,7 +861,6 @@ static int scan_scsis_single(unsigned int channel, unsigned int dev,
 	 * the queue actually represents.   We could look it up, but it
 	 * is pointless work.
 	 */
-	spin_lock_init(&SDpnt->device_request_lock);
 	scsi_initialize_queue(SDpnt, shpnt);
 	SDpnt->host = shpnt;
 	initialize_merge_fn(SDpnt);
@@ -864,11 +869,6 @@ static int scan_scsis_single(unsigned int channel, unsigned int dev,
 	 * Mark this device as online, or otherwise we won't be able to do much with it.
 	 */
 	SDpnt->online = TRUE;
-
-        /*
-         * Initialize the object that we will use to wait for command blocks.
-         */
-	init_waitqueue_head(&SDpnt->scpnt_wait);
 
 	/*
 	 * Since we just found one device, there had damn well better be one in the list

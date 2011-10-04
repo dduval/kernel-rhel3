@@ -139,7 +139,7 @@ EXPORT_SYMBOL(vmap);
 EXPORT_SYMBOL(vmalloc_to_page);
 EXPORT_SYMBOL(mem_map);
 EXPORT_SYMBOL(remap_page_range);
-EXPORT_SYMBOL_GPL(zap_page_range);
+EXPORT_SYMBOL(zap_page_range);
 EXPORT_SYMBOL(max_mapnr);
 EXPORT_SYMBOL(high_memory);
 EXPORT_SYMBOL(vmtruncate);
@@ -263,6 +263,7 @@ EXPORT_SYMBOL(generic_block_bmap);
 EXPORT_SYMBOL(generic_file_read);
 EXPORT_SYMBOL(do_generic_file_read);
 EXPORT_SYMBOL(generic_file_write);
+EXPORT_SYMBOL(do_generic_file_write);
 EXPORT_SYMBOL(generic_file_mmap);
 EXPORT_SYMBOL(generic_ro_fops);
 EXPORT_SYMBOL(generic_buffer_fdatasync);
@@ -418,7 +419,7 @@ EXPORT_SYMBOL(free_irq);
 #if !defined(CONFIG_IA64)	/* irq_stat is part of struct cpuinfo_ia64 */
 EXPORT_SYMBOL(irq_stat);
 #endif
-EXPORT_SYMBOL_GPL(do_no_page);
+EXPORT_SYMBOL(do_no_page);
 
 /* waitqueue handling */
 EXPORT_SYMBOL(add_wait_queue);

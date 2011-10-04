@@ -61,6 +61,9 @@ unsigned long num_mappedpages;
 void * high_memory;
 struct page *highmem_start_page;
 
+atomic_t lowmem_pagetables = ATOMIC_INIT(0);
+atomic_t highmem_pagetables = ATOMIC_INIT(0);
+
 static inline void vm_account(struct vm_area_struct *vma, pte_t pte, unsigned long address, long adj)
 {
 	struct mm_struct *mm = vma->vm_mm;
@@ -190,6 +193,12 @@ static inline void free_one_pmd(pmd_t * dir)
 	pte = pmd_page(*dir);
 	pmd_clear(dir);
 	pgtable_remove_rmap(pte);
+
+	if ((pte->flags >> ZONE_SHIFT) < 2)
+		atomic_dec(&lowmem_pagetables);
+	else
+		atomic_dec(&highmem_pagetables);
+
 	pte_free(pte);
 }
 
@@ -252,6 +261,12 @@ pte_t *pte_alloc_map(struct mm_struct *mm, pmd_t *pmd, unsigned long address)
 			pte_free(new);
 			goto out;
 		}
+
+		if ((new->flags >> ZONE_SHIFT) < 2)
+			atomic_inc(&lowmem_pagetables);
+		else
+			atomic_inc(&highmem_pagetables);
+
 		pgtable_add_rmap(new, mm, address);
 		pmd_populate(mm, pmd, new);
 	}

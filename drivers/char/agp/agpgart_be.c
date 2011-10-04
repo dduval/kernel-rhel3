@@ -49,9 +49,6 @@
 #include <asm/uaccess.h>
 #include <asm/io.h>
 #include <asm/page.h>
-#ifdef CONFIG_AGP_NVIDIA
-    #include <asm/msr.h>
-#endif
 
 #include <linux/agp_backend.h>
 #include "agp.h"
@@ -3854,6 +3851,164 @@ static int __init amd_8151_setup (struct pci_dev *pdev)
 	(void) pdev; /* unused */
 }
 
+/* NVIDIA x86-64 chipset support */
+ 
+
+static struct _nvidia_x86_64_private {
+	struct pci_dev *dev_1;
+} nvidia_x86_64_private;
+
+
+static aper_size_info_32 nvidia_x86_64_sizes[5] =
+{
+	{512,  131072, 7, 0x00000000 },
+	{256,  65536,  6, 0x00000008 },
+	{128,  32768,  5, 0x0000000C },
+	{64,   16384,  4, 0x0000000E },
+	{32,   8192,   3, 0x0000000F }
+};
+
+
+static int nvidia_x86_64_configure(void)
+{
+	struct pci_dev *dev, *hammer=NULL;
+	int i, current_size;
+	u32 tmp, apbase, apbar, aplimit;
+	unsigned long gatt_bus = virt_to_phys(agp_bridge.gatt_table_real);
+
+	if (!agp_bridge.dev) 
+		return -ENODEV;
+
+	/* configure AGP regs in each x86-64 host bridge */
+	pci_for_each_dev(dev) {
+		if (dev->bus->number==0 &&
+			PCI_FUNC(dev->devfn)==3 &&
+			PCI_SLOT(dev->devfn)>=24 && PCI_SLOT(dev->devfn)<=31) {
+			agp_bridge.gart_bus_addr = amd_x86_64_configure(dev,gatt_bus);
+			hammer = dev;
+		}
+	}
+	if (hammer == NULL)
+		return -ENODEV;
+
+	/* translate x86-64 aperture size to NVIDIA aperture size */
+	current_size = amd_x86_64_fetch_size();
+	for (i = 0 ; i < agp_bridge.num_aperture_sizes; i++) {
+		if (nvidia_x86_64_sizes[i].size == current_size)
+			break;
+	}
+	/* if x86-64 size does not match any NVIDIA size, exit here */
+	if (i == agp_bridge.num_aperture_sizes)
+		return -ENODEV;
+	pci_read_config_dword(nvidia_x86_64_private.dev_1, NVIDIA_X86_64_1_APSIZE, &tmp);
+	tmp &= ~(0xf);
+	tmp |= nvidia_x86_64_sizes[i].size_value;
+	pci_write_config_dword(nvidia_x86_64_private.dev_1, NVIDIA_X86_64_1_APSIZE, tmp);
+
+	/* shadow x86-64 registers into NVIDIA registers */
+	pci_read_config_dword (hammer, AMD_X86_64_GARTAPERTUREBASE, &apbase);
+	/* if x86-64 aperture base is beyond 4G, exit here */
+	if ( (apbase & 0x7fff) >> (32 - 25) )
+		 return -ENODEV;
+	apbase = (apbase & 0x7fff) << 25;
+
+	/* AK: most likely the shadow into the primary device is not needed */
+
+	pci_read_config_dword(agp_bridge.dev, NVIDIA_X86_64_0_APBASE, &apbar);
+	apbar &= ~PCI_BASE_ADDRESS_MEM_MASK;
+	apbar |= apbase;
+	pci_write_config_dword(agp_bridge.dev, NVIDIA_X86_64_0_APBASE, apbar);
+
+	/* Shadow into secondary device looks dubious, but we keep it for now.
+	   If these two could be dropped then the NForce3 code path could
+	   be just folded into the generic functions above. */
+
+	aplimit = apbase + (current_size * 1024 * 1024) - 1;
+	pci_write_config_dword(nvidia_x86_64_private.dev_1, NVIDIA_X86_64_1_APBASE1, apbase);
+	pci_write_config_dword(nvidia_x86_64_private.dev_1, NVIDIA_X86_64_1_APLIMIT1, aplimit);
+	pci_write_config_dword(nvidia_x86_64_private.dev_1, NVIDIA_X86_64_1_APBASE2, apbase);
+	pci_write_config_dword(nvidia_x86_64_private.dev_1, NVIDIA_X86_64_1_APLIMIT2, aplimit);
+
+	/* Original driver updated the IORR here, but AMD documentation
+	   explicitely discourages this for something already covered by the GART. */
+	
+	return 0;
+}
+
+
+static void nvidia_x86_64_cleanup(void)
+{
+	struct pci_dev *dev;
+	u32 tmp;
+
+	pci_for_each_dev(dev) {
+		/* disable gart translation */
+		if (dev->bus->number==0 && PCI_FUNC(dev->devfn)==3 &&
+		    (PCI_SLOT(dev->devfn) >=24) && (PCI_SLOT(dev->devfn) <=31)) {
+
+			pci_read_config_dword (dev, AMD_X86_64_GARTAPERTURECTL, &tmp);
+			tmp &= ~(AMD_X86_64_GARTEN);
+			pci_write_config_dword (dev, AMD_X86_64_GARTAPERTURECTL, tmp);
+		}
+	}
+}
+
+
+static unsigned long nvidia_x86_64_mask_memory(unsigned long addr, int type)
+{
+	return addr | agp_bridge.masks[0].mask;
+}
+
+
+static gatt_mask nvidia_x86_64_masks[] =
+{
+	{0x00000001, 0}
+};
+
+
+static int __init nvidia_x86_64_setup (struct pci_dev *pdev)
+{
+	nvidia_x86_64_private.dev_1 =
+		pci_find_slot((unsigned int)pdev->bus->number, PCI_DEVFN(11, 0));
+
+	if (nvidia_x86_64_private.dev_1 == NULL) {
+		printk(KERN_INFO PFX "agpgart: Detected an NVIDIA "
+			"nForce3 chipset, but could not find "
+			"the secondary device.\n");
+		agp_bridge.type = NOT_SUPPORTED;
+		return -ENODEV;
+	}
+
+	agp_bridge.masks = nvidia_x86_64_masks;
+	agp_bridge.aperture_sizes = (void *) nvidia_x86_64_sizes;
+	agp_bridge.size_type = U32_APER_SIZE;
+	agp_bridge.num_aperture_sizes = 5;
+	agp_bridge.dev_private_data = NULL;
+	agp_bridge.needs_scratch_page = FALSE;
+	agp_bridge.configure = nvidia_x86_64_configure;
+	agp_bridge.fetch_size = amd_x86_64_fetch_size;
+	agp_bridge.cleanup = nvidia_x86_64_cleanup;
+	agp_bridge.tlb_flush = amd_x86_64_tlbflush;
+	agp_bridge.mask_memory = nvidia_x86_64_mask_memory;
+	agp_bridge.agp_enable = agp_x86_64_agp_enable;
+	agp_bridge.cache_flush = global_cache_flush;
+	agp_bridge.create_gatt_table = agp_generic_create_gatt_table;
+	agp_bridge.free_gatt_table = agp_generic_free_gatt_table;
+	agp_bridge.insert_memory = x86_64_insert_memory;
+	agp_bridge.remove_memory = agp_generic_remove_memory;
+	agp_bridge.alloc_by_type = agp_generic_alloc_by_type;
+	agp_bridge.free_by_type = agp_generic_free_by_type;
+	agp_bridge.agp_alloc_page = agp_generic_alloc_page;
+	agp_bridge.agp_destroy_page = agp_generic_destroy_page;
+	agp_bridge.suspend = agp_generic_suspend;
+	agp_bridge.resume = agp_generic_resume;
+	agp_bridge.cant_use_aperture = 0;
+
+	return 0;
+	
+	(void) pdev; /* unused */
+}
+
 #endif /* CONFIG_AGP_AMD_8151 */
 
 #ifdef CONFIG_AGP_ALI
@@ -5811,6 +5966,16 @@ static struct {
 		"NVIDIA",
 		"nForce2",
 		nvidia_generic_setup },
+#endif
+#ifdef CONFIG_AGP_AMD_8151
+	{ PCI_DEVICE_ID_NVIDIA_NFORCE3,
+		PCI_VENDOR_ID_NVIDIA,
+		NVIDIA_NFORCE3,
+		"NVIDIA",
+		"nForce3/K8 On-CPU GART",
+		nvidia_x86_64_setup },
+#endif
+#ifdef CONFIG_AGP_NVIDIA
 	{ 0,
 		PCI_VENDOR_ID_NVIDIA,
 		NVIDIA_GENERIC,
@@ -5932,7 +6097,7 @@ static int __init agp_find_supported_device(void)
 	struct pci_dev *dev = NULL;
 	u8 cap_ptr = 0x00;
 
-#ifdef CONFIG_AGP_HP_ZX1
+#if defined(CONFIG_AGP_HP_ZX1) || defined(CONFIG_X86_64)
 	do {
 		dev = pci_find_class(PCI_CLASS_BRIDGE_HOST << 8, dev);
 	} while((dev) && !agp_check_supported_device(dev));
@@ -5950,6 +6115,33 @@ static int __init agp_find_supported_device(void)
 #endif
 
 	agp_bridge.dev = dev;
+
+
+#ifdef CONFIG_AGP_AMD_8151
+	/* If there is any K8 northbridge in the system always use the K8 driver */
+	if (agp_try_unsupported
+	    && pci_find_device(PCI_VENDOR_ID_AMD, 0x1103, NULL)
+	    && !pci_find_device(PCI_VENDOR_ID_NVIDIA, 
+				PCI_DEVICE_ID_NVIDIA_NFORCE3,
+				NULL)) { 
+
+		/* find capndx */
+		cap_ptr = pci_find_capability(dev, PCI_CAP_ID_AGP);
+		if (cap_ptr == 0x00)
+			return -ENODEV;
+		agp_bridge.capndx = cap_ptr;
+		
+		/* Fill in the mode register */
+		pci_read_config_dword(agp_bridge.dev,
+				      agp_bridge.capndx + 4,
+				      &agp_bridge.mode);
+		
+		printk(KERN_INFO PFX "Detected GART in AMD K8 Northbridge\n"); 
+		agp_bridge.type = AMD_8151; 
+		return amd_8151_setup(dev);
+	}					
+#endif
+
 
 	/* Need to test for I810 here */
 #ifdef CONFIG_AGP_I810

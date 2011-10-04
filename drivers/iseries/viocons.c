@@ -162,6 +162,37 @@ void hvlog(char *fmt, ...)
 
 }
 
+void hvlogOutput( const char *buf, int count )
+{
+	unsigned long flags;
+	int begin;
+	int index;
+	char cr;
+
+	cr = '\r';
+	begin = 0;
+	spin_lock_irqsave(&consoleloglock, flags);
+	for( index = 0; index < count; ++index ) {
+		if( buf[index] == 0x0a ) {
+			/* Start right after the last 0x0a or at the zeroth
+			 * array position and output the number of characters
+			 * including the newline.
+			 */
+			HvCall_writeLogBuffer(&buf[begin], index-begin+1);
+			begin = index+1;
+			HvCall_writeLogBuffer(&cr, 1);
+		}
+	}
+	if(index-begin > 0) {
+		HvCall_writeLogBuffer(&buf[begin], index-begin);
+	}
+	index = 0;
+	begin = 0;
+
+	spin_unlock_irqrestore(&consoleloglock, flags);
+}
+
+
 /* Our port information.  We store a pointer to one entry in the
  * tty_driver_data
  */
@@ -399,7 +430,6 @@ static void *viocons_get_cfu_buffer()
 	 */
 	for(i = 0; i < VIO_MAX_SUBTYPES; i++) {
 		if( atomic_dec_if_positive(&viocons_cfu_buffer_available[i]) == 0 ) {
-			hvlog("\n\rviocons: viocons_get_cfu_buffer : found space at viocons_get_buffer[%d]",i);
 			return viocons_cfu_buffer[i];
 		}
 	}
@@ -452,8 +482,7 @@ static int bufferAdd(u8 port, char *buf, size_t len)
 		 * buffer we would already have moved to the next one.
 		 */
 		if (pov->bufferBytes[pov->curbuf] == OVERFLOW_SIZE) {
-			hvlog ("\n\rviocons: No overflow buffer available for memcpy().\n",
-				pov->curbuf);
+			hvlog ("\n\rviocons: No overflow buffer available for memcpy().\n");
 			pov->bufferOverflow++;
 			pov->overflowMessage = 1;
 			break;
@@ -637,8 +666,11 @@ static int internal_write(HvLpIndex lp, u8 port, const char *buf,
 	unsigned long flags;
 	int copy_needed = (viochar == NULL);
 
-	if (port == 0)
-		HvCall_writeLogBuffer(buf, len);
+	/* Writes to the hvlog of inbound data are now done prior to
+	 * calling internal_write() since internal_write() is only called in
+	 * the event that an lp event path is active, which isn't the case for
+	 * logging attempts prior to console initialization.
+	 */
 
 	/*
 	 * If there is already data queued for this port, send it prior to
@@ -772,80 +804,53 @@ static void initDataEvent(struct viocharlpevent *viochar, HvLpIndex lp)
 	viochar->event.xTargetInstanceId = viopath_targetinst(lp);
 }
 
-
 /* console device write
  */
 static void viocons_write(struct console *co, const char *s,
 			  unsigned count)
 {
-	/* This parser will ensure that all single instances of either \n or \r are
-	 * matched into carriage return/line feed combinations.  It also allows for
-	 * instances where there already exist \n\r combinations as well as the
-	 * reverse, \r\n combinations.
-	 */
-
 	int index;
 	char charptr[1];
-	int foundcr;
-	int slicebegin;
-	int sliceend;
+	int begin;
 	HvLpIndex lp;
 	u8 port;
 
-	if (get_port_data(NULL, &lp, &port) || (!viopath_isactive(lp))) {
-		hvlog("\n\rviocons: in viocons_write unable to get port or event path to target lp is inactive.");
+	/* Check port data first because the target LP might be valid but
+	 * simply not active, in which case we want to hvlog the output.
+	 */
+	if (get_port_data(NULL, &lp, &port)) {
+		hvlog("\n\rviocons: in viocons_write unable to get port data.");
 		return;
 	}
 
-	foundcr = 0;
-	slicebegin = 0;
-	sliceend = 0;
+	hvlogOutput(s,count);
 
+	if(!viopath_isactive(lp)) {
+		return;
+	}
+
+	/* 
+	 * Any newline character (0x0a == '\n') found will cause a
+	 * carriage return character to be emitted as well. 
+	 */
+	begin = 0;
 	for (index = 0; index < count; index++) {
-		if (!foundcr && s[index] == 0x0a) {
-			if ((slicebegin - sliceend > 0)
-			    && sliceend < count) {
-				internal_write(lp, port, &s[slicebegin],
-					       sliceend - slicebegin, 0);
-				slicebegin = sliceend;
-			}
-			charptr[0] = '\r';
-			internal_write(lp, port, charptr, 1, 0);
-		}
-		if (foundcr && s[index] != 0x0a) {
-			if ((index - 2) >= 0) {
-				if (s[index - 2] != 0x0a) {
-					internal_write(lp, port,
-						       &s[slicebegin],
-						       sliceend -
-						       slicebegin, 0);
-					slicebegin = sliceend;
-					charptr[0] = '\n';
-					internal_write(lp, port, charptr, 1,
-						       0);
-				}
-			}
-		}
-		sliceend++;
-
-		if (s[index] == 0x0d)
-			foundcr = 1;
-		else
-			foundcr = 0;
-	}
-
-	internal_write(lp, port, &s[slicebegin], sliceend - slicebegin, 0);
-
-	if (count > 1) {
-		if (foundcr == 1 && s[count - 1] != 0x0a) {
-			charptr[0] = '\n';
-			internal_write(lp, port, charptr, 1, 0);
-		} else if (s[count - 1] == 0x0a && s[count - 2] != 0x0d) {
-
+		if (s[index] == 0x0a) {
+			/* 
+			 * Newline found. Print everything up to and 
+			 * including the newline
+			 */
+			internal_write(lp, port, &s[begin], index-begin+1, 0);
+			begin = index + 1;
+			/* Emit a carriage return as well */
 			charptr[0] = '\r';
 			internal_write(lp, port, charptr, 1, 0);
 		}
 	}
+
+	/* If any characters left to write, write them now */
+	if (index - begin > 0)
+		internal_write(lp, port, &s[begin], index - begin, 0);
 }
 
 /* Work out a the device associate with this console
@@ -959,6 +964,8 @@ static int viotty_write(struct tty_struct *tty, int from_user,
 		return -ENODEV;
 	}
 
+	hvlogOutput(buf,count);
+
 	/* If the path to this LP is closed, don't bother doing anything more.
 	 * just dump the data on the floor and return count.  For some reason some
 	 * user level programs will attempt to probe available tty's and they'll
@@ -967,7 +974,6 @@ static int viotty_write(struct tty_struct *tty, int from_user,
 	 * the viopath isn't active to this partition return count.
 	 */
 	if (!viopath_isactive(lp)) {
-		hvlog("\n\rviocons: in viotty_write: viopath NOT active for lp %d.",lp);
 		return count;
 	}
 
@@ -1021,8 +1027,18 @@ static void viotty_put_char(struct tty_struct *tty, unsigned char ch)
 	HvLpIndex lp;
 	u8 port;
 
-	if (get_port_data(tty, &lp, &port) || (!viopath_isactive(lp)))
+	if (get_port_data(tty, &lp, &port)) {
 		return;
+	}
+
+	/* This will append \r as well if the char is 0x0A ('\n') */
+	if (port==0) {
+		hvlogOutput(&ch,1);
+	}
+
+	if(!viopath_isactive(lp)) {
+		return;
+	}
 
 	internal_write(lp, port, &ch, 1, 0);
 }

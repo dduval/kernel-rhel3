@@ -402,7 +402,7 @@ static void sync_buffer(struct oprofile_cpu_buffer * cpu_buf)
 {
 	struct mm_struct * mm = 0;
 	struct task_struct * new;
-	unsigned long cookie;
+	unsigned long cookie = 0;
 	int in_kernel = 1;
 	unsigned int i;
  
@@ -419,13 +419,15 @@ static void sync_buffer(struct oprofile_cpu_buffer * cpu_buf)
 				in_kernel = s->event;
 				add_kernel_ctx_switch(s->event);
 			} else {
+				struct mm_struct * oldmm = mm;
+
 				/* userspace context switch */
 				new = (struct task_struct *)s->event;
 
-				release_mm(mm);
+				release_mm(oldmm);
 				mm = take_task_mm(new);
-
-				cookie = get_exec_dcookie(mm);
+				if (mm != oldmm)
+					cookie = get_exec_dcookie(mm);
 				add_user_ctx_switch(new->pid, cookie);
 			}
 		} else {

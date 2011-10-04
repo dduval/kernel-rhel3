@@ -37,6 +37,8 @@ struct multipath_private_data {
 	int			freer1_blocked;
 	int			freer1_cnt;
 	md_wait_queue_head_t	wait_buffer;
+	int			last_failover_event;
+	int			multipath_error_running;
 };
 
 typedef struct multipath_private_data multipath_conf_t;

@@ -229,6 +229,7 @@ void scsi_setup_cmd_retry(Scsi_Cmnd *SCpnt)
 	SCpnt->cmd_len = SCpnt->old_cmd_len;
 	SCpnt->sc_data_direction = SCpnt->sc_old_data_direction;
 	SCpnt->underflow = SCpnt->old_underflow;
+	SCpnt->result = 0;
 }
 
 /*
@@ -269,7 +270,6 @@ void scsi_setup_cmd_retry(Scsi_Cmnd *SCpnt)
  */
 void scsi_queue_next_request(request_queue_t * q, Scsi_Cmnd * SCpnt)
 {
-	int all_clear;
 	Scsi_Device *SDpnt;
 	struct Scsi_Host *SHpnt;
 	unsigned long flags;
@@ -287,15 +287,17 @@ void scsi_queue_next_request(request_queue_t * q, Scsi_Cmnd * SCpnt)
 		SCpnt->request.special = (void *) SCpnt;
 		spin_lock_irqsave(q->queue_lock, flags);
 		list_add(&SCpnt->request.queue, &q->queue_head);
+		q->request_fn(q);
+		spin_unlock_irqrestore(q->queue_lock, flags);
+	} else {
+
+		/*
+		 * Just hit the requeue function for the queue.
+		 */
+		spin_lock_irqsave(q->queue_lock, flags);
+		q->request_fn(q);
 		spin_unlock_irqrestore(q->queue_lock, flags);
 	}
-
-	/*
-	 * Just hit the requeue function for the queue.
-	 */
-	spin_lock_irqsave(q->queue_lock, flags);
-	q->request_fn(q);
-	spin_unlock_irqrestore(q->queue_lock, flags);
 
 	SDpnt = (Scsi_Device *) q->queuedata;
 	SHpnt = SDpnt->host;
@@ -332,32 +334,41 @@ void scsi_queue_next_request(request_queue_t * q, Scsi_Cmnd * SCpnt)
 
 	/*
 	 * Now see whether there are other devices on the bus which
-	 * might be starved.  If so, hit the request function.  If we
-	 * don't find any, then it is safe to reset the flag.  If we
-	 * find any device that it is starved, it isn't safe to reset the
-	 * flag as the queue function releases the lock and thus some
-	 * other device might have become starved along the way.
+	 * might be starved.  If so, hit the request function.  This
+	 * routine runs with no locks held, so it's entirely possible
+	 * for some other piece of code to set a device starved and
+	 * the some_device_starved flag while we are running.  In order
+	 * to avoid races, we first clear the flag, then scan the
+	 * device list, and if we don't clear the starved status on
+	 * all of the devices, then we turn the some_device_starved
+	 * flag back on ourselves.  If some other code turns the flag
+	 * back on while we are running, then that's perfectly fine.
+	 * If we haven't gotten to the device that caused the flag to
+	 * get turned back on yet then we will shortly, else it will
+	 * get taken care of the next time this function is called.
 	 */
-	all_clear = 1;
+	if (SHpnt->host_blocked || SHpnt->host_self_blocked)
+		return;
+
 	if (SHpnt->some_device_starved) {
+		SHpnt->some_device_starved = 0;
 		for (SDpnt = SHpnt->host_queue; SDpnt; SDpnt = SDpnt->next) {
 			request_queue_t *q;
-			if ((SHpnt->can_queue > 0 && (atomic_read(&SHpnt->host_busy) >= SHpnt->can_queue))
-			    || (SHpnt->host_blocked) 
-			    || (SHpnt->host_self_blocked)) {
+			if (SHpnt->can_queue > 0 &&
+			   (atomic_read(&SHpnt->host_busy) >= SHpnt->can_queue))
 				break;
-			}
-			if (SDpnt->device_blocked || !SDpnt->starved) {
+			if (SDpnt->device_blocked || !SDpnt->starved)
 				continue;
-			}
 			q = &SDpnt->request_queue;
 			spin_lock_irqsave(q->queue_lock, flags);
 			q->request_fn(q);
 			spin_unlock_irqrestore(q->queue_lock, flags);
-			all_clear = 0;
+			if (SDpnt->starved)
+				break;
 		}
-		if (SDpnt == NULL && all_clear) {
-			SHpnt->some_device_starved = 0;
+		if (SDpnt != NULL) {
+			/* We didn't get them all, turn the flag back on */
+			SHpnt->some_device_starved = 1;
 		}
 	}
 }
@@ -467,10 +478,12 @@ static Scsi_Cmnd *__scsi_end_request(Scsi_Cmnd * SCpnt,
 	add_blkdev_randomness(MAJOR(req->rq_dev));
 
 	/*
-	 * This will goose the queue request function at the end, so we don't
-	 * need to worry about launching another command.
+	 * This used to be a call to scsi_release_command, but that could
+	 * result in infinite recursion if link status went down during
+	 * I/O.  Instead, we goose the queue request function conditionally
+	 * below.
 	 */
-	scsi_release_command(SCpnt);
+	__scsi_release_command(SCpnt);
 
 	if (frequeue)
 		scsi_queue_next_request(q, NULL);
@@ -902,22 +915,11 @@ void scsi_request_fn(request_queue_t * q)
 		if (list_empty(&q->queue_head))
 			break;
 
+		if (SHpnt->host_blocked || SHpnt->host_self_blocked)
+			break;
+
 		spin_lock(SHpnt->host_lock);
-		if ((SHpnt->can_queue > 0 && (atomic_read(&SHpnt->host_busy) >= SHpnt->can_queue))
-		    || (SHpnt->host_blocked) 
-		    || (SHpnt->host_self_blocked)) {
-			/*
-			 * If we are unable to process any commands at all for
-			 * this device, then we consider it to be starved.
-			 * What this means is that there are no outstanding
-			 * commands for this device and hence we need a
-			 * little help getting it started again
-			 * once the host isn't quite so busy.
-			 */
-			if (atomic_read(&SDpnt->device_busy) == 0) {
-				SDpnt->starved = 1;
-				SHpnt->some_device_starved = 1;
-			}
+		if (SHpnt->can_queue > 0 && (atomic_read(&SHpnt->host_busy) >= SHpnt->can_queue)) {
 			spin_unlock(SHpnt->host_lock);
 			break;
 		} else {
@@ -1040,16 +1042,13 @@ void scsi_request_fn(request_queue_t * q)
 				 * probably we ran out of sgtable memory, or
 				 * __init_io() wanted to revert to a single
 				 * segment request. this would require bouncing
-				 * on highmem i/o, so mark the device as
-				 * starved and continue later instead
+				 * on highmem i/o, so tack the command onto the
+				 * request struct and drop out of the loop,
+				 * the test outside the loop will make sure
+				 * we set the device as starved if it's really
+				 * needed.
 				 */
-				spin_lock(SHpnt->host_lock);
 				atomic_dec(&SHpnt->host_busy);
-				if (atomic_read(&SDpnt->device_busy) == 0) {
-					SDpnt->starved = 1;
-					SHpnt->some_device_starved = 1;
-				}
-				spin_unlock(SHpnt->host_lock);
 				SCpnt->request.special = SCpnt;
 				break;
 			}
@@ -1109,11 +1108,16 @@ void scsi_request_fn(request_queue_t * q)
 		scsi_dispatch_cmd(SCpnt);
 		spin_lock_irq(q->queue_lock);
 	}
-	if (!list_empty(&q->queue_head) && atomic_read(&SDpnt->device_busy) == 0) {
+	/*
+	 * If the device is blocked then don't set it starved, that just
+	 * makes scsi_queue_next_request call our queue needlessly.  We
+	 * also only need to set it starved if there are 0 commands
+	 * outstanding and requests in the request queue.
+	 */
+	if (!SDpnt->device_blocked && !list_empty(&q->queue_head) &&
+	     atomic_read(&SDpnt->device_busy) == 0) {
 		SDpnt->starved = 1;
-		spin_lock(SHpnt->host_lock);
 		SHpnt->some_device_starved = 1;
-		spin_unlock(SHpnt->host_lock);
 	}
 }
 

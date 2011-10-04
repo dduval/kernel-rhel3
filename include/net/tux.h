@@ -778,4 +778,19 @@ static inline void put_data_sock (tux_req_t *req)
 	(!skb_queue_empty(&(sock)->sk->receive_queue) || \
 		!skb_queue_empty(&(sock)->sk->error_queue))
 
+#define tux_kmalloc(size)						\
+({									\
+	void *__ptr;							\
+									\
+	while (!(__ptr = kmalloc(size, GFP_KERNEL))) {			\
+		if (net_ratelimit())					\
+			printk(KERN_WARNING "tux: OOM at %s:%d.\n",	\
+				__FILE__, __LINE__);			\
+		current->state = TASK_UNINTERRUPTIBLE;			\
+		schedule_timeout(1);					\
+	}								\
+	__ptr;								\
+})
+
+
 #endif

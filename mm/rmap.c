@@ -42,7 +42,7 @@
  * We use an array of pte pointers in this structure to minimise cache misses
  * while traversing reverse maps.
  */
-#define NRPTE ((L1_CACHE_BYTES - sizeof(unsigned long))/sizeof(pte_addr_t))
+#define NRPTE ((L1_CACHE_BYTES - sizeof(unsigned long))/sizeof(chain_ptep_t))
 
 /*
  * next_and_idx encodes both the address of the next pte_chain and the
@@ -50,7 +50,7 @@
  */
 struct pte_chain {
 	unsigned long next_and_idx;
-	pte_addr_t ptes[NRPTE];
+	chain_ptep_t ptes[NRPTE];
 } ____cacheline_aligned;
 
 static kmem_cache_t	*pte_chain_cache;
@@ -172,12 +172,12 @@ int page_referenced(struct page * page, int * rsslimit)
 			int i;
 
 			for (i = NRPTE-1; i >= 0; i--) {
-				pte_addr_t pte_paddr = pc->ptes[i];
+				chain_ptep_t pte_paddr = pc->ptes[i];
 				pte_t *pte;
 
 				if (!pte_paddr)
 					break;
-				pte = rmap_ptep_map(pte_paddr);
+				pte = rmap_ptep_map(PTE_ADDR_C2D(pte_paddr));
 				if (ptep_test_and_clear_young(pte))
 					referenced++;
 				mm = ptep_to_mm(pte);
@@ -189,7 +189,7 @@ int page_referenced(struct page * page, int * rsslimit)
 		}
 		if (nr_chains == 1) {
 			pc = page->pte.chain;
-			page->pte.direct = pc->ptes[NRPTE-1];
+			page->pte.direct = PTE_ADDR_C2D(pc->ptes[NRPTE-1]);
 			SetPageDirect(page);
 			pc->ptes[NRPTE-1] = 0;
 			__pte_chain_free(pc);
@@ -227,7 +227,7 @@ int page_referenced_lock(struct page * page, int * rsslimit)
 struct pte_chain *
 page_add_rmap(struct page * page, pte_t * ptep, struct pte_chain * pte_chain)
 {
-	pte_addr_t pte_paddr = ptep_to_paddr(ptep);
+	chain_ptep_t pte_paddr = ptep_to_paddr(ptep);
 	struct pte_chain * cur_pte_chain;
 
 #ifdef DEBUG_RMAP
@@ -252,12 +252,12 @@ page_add_rmap(struct page * page, pte_t * ptep, struct pte_chain * pte_chain)
 		struct pte_chain * pc;
 		int i;
 		if (PageDirect(page)) {
-			if (page->pte.direct == pte_paddr)
+			if (page->pte.direct == PTE_ADDR_C2D(pte_paddr))
 				BUG();
 		} else {
 			for (pc = page->pte.chain; pc; pc = pc->next) {
 				for (i = 0; i < NRPTE; i++) {
-					pte_addr_t pte = pc->ptes[i];
+					chain_ptep_t pte = pc->ptes[i];
 
 					if (pte && pte == pte_paddr)
 						BUG();
@@ -268,7 +268,7 @@ page_add_rmap(struct page * page, pte_t * ptep, struct pte_chain * pte_chain)
 #endif
 
 	if (page->pte.direct == 0) {
-		page->pte.direct = pte_paddr;
+		page->pte.direct = PTE_ADDR_C2D(pte_paddr);
 		SetPageDirect(page);
 		goto out;
 	}
@@ -276,7 +276,7 @@ page_add_rmap(struct page * page, pte_t * ptep, struct pte_chain * pte_chain)
 	if (PageDirect(page)) {
 		/* Convert a direct pointer into a pte_chain */
 		ClearPageDirect(page);
-		pte_chain->ptes[NRPTE-1] = page->pte.direct;
+		pte_chain->ptes[NRPTE-1] = PTE_ADDR_D2C(page->pte.direct);
 		pte_chain->ptes[NRPTE-2] = pte_paddr;
 		pte_chain->next_and_idx = pte_chain_encode(NULL, NRPTE-2);
 		page->pte.direct = 0;
@@ -313,7 +313,7 @@ out:
  */
 void page_remove_rmap(struct page * page, pte_t * ptep)
 {
-	pte_addr_t pte_paddr = ptep_to_paddr(ptep);
+	chain_ptep_t pte_paddr = ptep_to_paddr(ptep);
 	struct pte_chain *pc;
 
 	if (!page || !ptep)
@@ -330,7 +330,7 @@ void page_remove_rmap(struct page * page, pte_t * ptep)
 		printk("page_remove_rmap: reserved page with rmap...\n");
 
 	if (PageDirect(page)) {
-		if (page->pte.direct == pte_paddr) {
+		if (page->pte.direct == PTE_ADDR_C2D(pte_paddr)) {
 			page->pte.direct = 0;
 			ClearPageDirect(page);
 			goto out;
@@ -347,7 +347,7 @@ void page_remove_rmap(struct page * page, pte_t * ptep)
 			if (next)
 				prefetch(next);
 			for (i = pte_chain_idx(pc); i < NRPTE; i++) {
-				pte_addr_t pa = pc->ptes[i];
+				chain_ptep_t pa = pc->ptes[i];
 
 				if (victim_i == -1)
 					victim_i = i;
@@ -509,14 +509,15 @@ int try_to_unmap(struct page * page)
 		if (next_pc)
 			prefetch(next_pc);
 		for (i = pte_chain_idx(pc); i < NRPTE; i++) {
-			pte_addr_t pte_paddr = pc->ptes[i];
+			chain_ptep_t pte_paddr = pc->ptes[i];
 
 			if (!pte_paddr)
 				continue;
 			if (victim_i == -1) 
 				victim_i = i;
 
-			switch (try_to_unmap_one(page, pte_paddr)) {
+			switch (try_to_unmap_one(page,
+				PTE_ADDR_C2D(pte_paddr))) {
 			case SWAP_SUCCESS:
 				/*
 				 * Release a slot.  If we're releasing the

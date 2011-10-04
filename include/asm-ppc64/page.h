@@ -124,9 +124,13 @@ typedef unsigned long pgprot_t;
 #ifdef CONFIG_XMON
 #include <asm/ptrace.h>
 extern void xmon(struct pt_regs *excp);
+extern int xmon_enabled;
 #define BUG() do { \
 	printk("kernel BUG at %s:%d!\n", __FILE__, __LINE__); \
-	xmon(0); \
+	if (xmon_enabled) \
+		xmon(0); \
+	else \
+		__asm__ __volatile__(".long " BUG_ILLEGAL_INSTR); \
 } while (0)
 #elif defined(CONFIG_KDB)
 #include <asm/ptrace.h>

@@ -6,7 +6,7 @@
 
 
 #define MEGARAID_VERSION	\
-	"v2.00.5 (Release Date: Thu Apr 24 14:06:55 EDT 2003)\n"
+	"v2.00.9 (Release Date: Thu Sep  4 17:49:42 EDT 2003)\n"
 
 /*
  * Driver features - change the values to enable or disable features in the
@@ -145,7 +145,8 @@
 	.eh_device_reset_handler =	megaraid_reset,		\
 	.eh_bus_reset_handler =		megaraid_reset,		\
 	.eh_host_reset_handler =	megaraid_reset,		\
-	.highmem_io =			1			\
+	.highmem_io =			1,			\
+	.vary_io =			1			\
 }
 
 
@@ -510,6 +511,70 @@ typedef struct {
 	phys_drv	pdrv[MAX_PHYSICAL_DRIVES];
 }__attribute__ ((packed)) disk_array_8ld;
 
+/*
+ *    FW Definitions & Data Structures for 8LD 4-Span and 8-Span Controllers
+ */
+#define	MAX_STRIPES	8
+#define SPAN4_DEPTH	4
+#define SPAN8_DEPTH	8
+#define MAX_PHYDRVS	5 * 16	/* 5 Channels * 16 Targets */
+
+typedef struct  {
+	unsigned char	channel;
+	unsigned char	target; 
+}__attribute__ ((packed)) device_t;
+
+typedef struct { 
+	unsigned long	start_blk;
+	unsigned long	total_blks;
+	device_t	device[ MAX_STRIPES ];
+}__attribute__ ((packed)) span_t;
+
+typedef struct {
+	unsigned char	type;
+	unsigned char	curr_status;
+	unsigned char	tag_depth;
+	unsigned char	resvd1;
+	unsigned long	size;
+}__attribute__ ((packed)) phydrv_t;
+
+typedef struct { 
+	unsigned char	span_depth;
+	unsigned char	raid;
+	unsigned char	read_ahead;	/* 0=No rdahead,1=RDAHEAD,2=adaptive */ 
+	unsigned char	stripe_sz;
+	unsigned char	status;
+	unsigned char	write_policy;	/* 0=wrthru,1=wrbak */ 
+	unsigned char	direct_io;   	/* 1=directio,0=cached */ 
+	unsigned char	no_stripes;
+	span_t		span[ SPAN4_DEPTH ];
+}__attribute__ ((packed)) ld_span4_t;
+
+typedef struct { 
+	unsigned char	span_depth;
+	unsigned char	raid;
+	unsigned char	read_ahead;	/* 0=No rdahead,1=RDAHEAD,2=adaptive */ 
+	unsigned char	stripe_sz;
+	unsigned char	status;
+	unsigned char	write_policy;	/* 0=wrthru,1=wrbak */ 
+	unsigned char	direct_io;   	/* 1=directio,0=cached */ 
+	unsigned char	no_stripes;
+	span_t		span[ SPAN8_DEPTH ];
+}__attribute__ ((packed)) ld_span8_t;
+
+typedef struct { 
+	unsigned char	no_log_drives;
+	unsigned char	pad[3];
+	ld_span4_t	log_drv[ MAX_LOGICAL_DRIVES_8LD ];
+	phydrv_t	phys_drv[ MAX_PHYDRVS ];
+}__attribute__ ((packed)) diskarray_span4_t;
+
+typedef struct { 
+	unsigned char	no_log_drives;
+	unsigned char	pad[3];
+	ld_span8_t	log_drv[ MAX_LOGICAL_DRIVES_8LD ];
+	phydrv_t	phys_drv[ MAX_PHYDRVS ];
+}__attribute__ ((packed)) diskarray_span8_t;
 
 /*
  * User ioctl structure.
@@ -848,8 +913,8 @@ typedef struct {
 	u8		max_cmds;
 	scb_t		*scb_list;
 
-	atomic_t	pend_cmds;	/* maintain a counter for pending
-					   commands in firmware */
+	atomic_t	pend_cmds;	/* maintain a counter for
+					pending commands in firmware */
 
 #if MEGA_HAVE_STATS
 	u32	nreads[MAX_LOGICAL_DRIVES_40LD];
@@ -900,6 +965,7 @@ typedef struct {
 					   sending requests to the hba till
 					   delete operation is completed */
 	spinlock_t	lock;
+	spinlock_t	*host_lock;	// pointer to appropriate lock
 
 	u8	logdrv_chan[MAX_CHANNELS+NVIRT_CHAN]; /* logical drive are on
 							what channels. */
@@ -1050,7 +1116,6 @@ static int megaraid_command (Scsi_Cmnd *);
 static int megaraid_abort(Scsi_Cmnd *);
 static int megaraid_reset(Scsi_Cmnd *);
 static int megaraid_biosparam (Disk *, kdev_t, int *);
-static int mega_print_inquiry(char *, char *);
 
 static int mega_build_sglist (adapter_t *adapter, scb_t *scb,
 			      u32 *buffer, u32 *length);
@@ -1093,12 +1158,13 @@ static int proc_rdrv_20(char *, char **, off_t, int, int *, void *);
 static int proc_rdrv_30(char *, char **, off_t, int, int *, void *);
 static int proc_rdrv_40(char *, char **, off_t, int, int *, void *);
 static int proc_rdrv(adapter_t *, char *, int, int);
-#endif
 
 static int mega_adapinq(adapter_t *, dma_addr_t);
 static int mega_internal_dev_inquiry(adapter_t *, u8, u8, dma_addr_t);
 static inline caddr_t mega_allocate_inquiry(dma_addr_t *, struct pci_dev *);
 static inline void mega_free_inquiry(caddr_t, dma_addr_t, struct pci_dev *);
+static int mega_print_inquiry(char *, char *);
+#endif
 
 static int mega_support_ext_cdb(adapter_t *);
 static mega_passthru* mega_prepare_passthru(adapter_t *, scb_t *,

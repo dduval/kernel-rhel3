@@ -60,6 +60,13 @@
 #include <linux/if_vlan.h>
 #include <linux/mii.h>
 
+/* For 2.6.x compatibility */
+typedef void irqreturn_t;
+#define IRQ_NONE
+#define IRQ_HANDLED
+#define IRQ_RETVAL(x)
+
+
 #define E100_CABLE_UNKNOWN	0
 #define E100_CABLE_OK		1		
 #define E100_CABLE_OPEN_NEAR	2	/* Open Circuit Near End  */

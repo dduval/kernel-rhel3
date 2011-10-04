@@ -445,7 +445,7 @@ static int unix_listen(struct socket *sock, int backlog)
 	sk->max_ack_backlog=backlog;
 	sk->state=TCP_LISTEN;
 	/* set credentials so connect can copy them */
-	sk->peercred.pid = current->pid;
+	sk->peercred.pid = current->tgid;
 	sk->peercred.uid = current->euid;
 	sk->peercred.gid = current->egid;
 	err = 0;
@@ -970,7 +970,7 @@ restart:
 	unix_peer(newsk)=sk;
 	newsk->state=TCP_ESTABLISHED;
 	newsk->type=SOCK_STREAM;
-	newsk->peercred.pid = current->pid;
+	newsk->peercred.pid = current->tgid;
 	newsk->peercred.uid = current->euid;
 	newsk->peercred.gid = current->egid;
 	newsk->sleep = &newsk->protinfo.af_unix.peer_wait;
@@ -1031,7 +1031,7 @@ static int unix_socketpair(struct socket *socka, struct socket *sockb)
 	sock_hold(skb);
 	unix_peer(ska)=skb;
 	unix_peer(skb)=ska;
-	ska->peercred.pid = skb->peercred.pid = current->pid;
+	ska->peercred.pid = skb->peercred.pid = current->tgid;
 	ska->peercred.uid = skb->peercred.uid = current->euid;
 	ska->peercred.gid = skb->peercred.gid = current->egid;
 

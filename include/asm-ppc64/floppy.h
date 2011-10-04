@@ -82,7 +82,7 @@ static int FDC2 = -1;
 /*
  * Again, the CMOS information not available
  */
-#define FLOPPY0_TYPE 6
+#define FLOPPY0_TYPE 4
 #define FLOPPY1_TYPE 0
 
 #define N_FDC 2			/* Don't change this! */

@@ -110,6 +110,8 @@ paddr_to_local_pfn(unsigned long phys_addr, struct page **mem_map, int check)
 	} else { 
 		nid = phys_to_nid(phys_addr); 
 	} 			   
+	if (nid > maxnode)
+		return BAD_PAGE;
 	plat_pg_data_t *plat_pgdat = plat_node_data[nid]; 
 	unsigned long pfn = phys_addr >> PAGE_SHIFT; 
 	VIRTUAL_BUG_ON(pfn >= plat_pgdat->end_pfn);
@@ -156,6 +158,7 @@ paddr_to_local_pfn(unsigned long phys_addr, struct page **mem_map, int check)
 
 extern void setup_node_bootmem(int nodeid, unsigned long start_, unsigned long end_);
 
+#define pfn_valid(pfn)          ((pfn) < num_physpages)
 
 #ifdef CONFIG_NUMA
 extern int fake_node;

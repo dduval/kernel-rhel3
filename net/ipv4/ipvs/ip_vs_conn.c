@@ -1222,7 +1222,8 @@ static void ip_vs_conn_expire(unsigned long data)
 	 */
 	if (likely(atomic_read(&cp->refcnt) == 1)) {
 		/* make sure that there is no timer on it now */
-		del_timer_sync(&cp->conn_timer);
+		if (timer_pending(&cp->conn_timer))
+			del_timer(&cp->conn_timer);
 
 		/* does anybody control me? */
 		if (cp->control)

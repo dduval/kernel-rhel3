@@ -2218,6 +2218,7 @@ static u32 ace_handle_event(struct net_device *dev, u32 evtcsm, u32 evtprd)
 
 			ap->jumbo = 0;
 			ap->rx_jumbo_skbprd = 0;
+			atomic_set(&ap->cur_jumbo_bufs, 0);
 			printk(KERN_INFO "%s: Jumbo ring flushed\n",
 			       dev->name);
 			clear_bit(0, &ap->jumbo_refill_busy);
@@ -2597,6 +2598,9 @@ static int ace_open(struct net_device *dev)
 	}
 
 	writel(dev->mtu + ETH_HLEN + 4, &regs->IfMtu);
+
+	if (dev->mtu > ACE_STD_MTU)
+		ap->jumbo = 1;
 
 	cmd.evt = C_CLEAR_STATS;
 	cmd.code = 0;

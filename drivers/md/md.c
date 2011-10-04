@@ -246,6 +246,15 @@ struct mdstat_info {
 static LIST_HEAD(readers);
 static spinlock_t readers_lock = SPIN_LOCK_UNLOCKED;
 
+/*
+ * WARNING: There is no guarantee that this will ever return true.  If a
+ * daemon were to signal that it wants to read events, then get an event
+ * signal, then go into some sort of infinite loop (possibly intentionally)
+ * where it didn't ever call poll again but also didn't close the file
+ * handle, then this forever return false.  That in turn makes every place
+ * that does wait_event(md_event_waiters, md_event_reached(some_event)); a
+ * possible hang condition.
+ */
 int md_event_reached(unsigned long ev)
 {
 	/* returns true when all readers have acknowledged event 'ev' */

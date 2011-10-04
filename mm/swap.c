@@ -123,6 +123,8 @@ void __lru_cache_del(struct page * page)
 		del_page_from_inactive_laundry_list(page);
 	} else if (PageInactiveClean(page)) {
 		del_page_from_inactive_clean_list(page);
+	} else if (PageWired(page)) {
+		del_page_from_wired_list(page);
 	}
 	ClearPageLRU(page);
 }

@@ -32,6 +32,7 @@
 #include <asm/io.h>
 #include <asm/smp.h>
 #include <asm/desc.h>
+#include <asm/acpi.h>
 
 #undef APIC_LOCKUP_DEBUG
 
@@ -1046,6 +1047,10 @@ static void __init setup_ioapic_ids_from_mpc (void)
 	unsigned char old_id;
 	unsigned long flags;
 
+	if (acpi_ioapic)
+		/* This gets done during IOAPIC enumeration for ACPI. */
+		return;
+
 	/*
 	 * Set the IOAPIC ID to the value stored in the MPC table.
 	 */
@@ -1757,7 +1762,7 @@ int __init io_apic_get_redir_entries (int ioapic)
 }
 
 
-int io_apic_set_pci_routing (int ioapic, int pin, int irq)
+int io_apic_set_pci_routing (int ioapic, int pin, int irq, int edge_level, int active_high_low)
 {
 	struct IO_APIC_route_entry entry;
 	unsigned long flags;
@@ -1780,18 +1785,21 @@ int io_apic_set_pci_routing (int ioapic, int pin, int irq)
 	entry.dest_mode = INT_DELIVERY_MODE;
 	entry.dest.logical.logical_dest = TARGET_CPUS;
 	entry.mask = 1;					 /* Disabled (masked) */
-	entry.trigger = 1;				   /* Level sensitive */
-	entry.polarity = 1;					/* Low active */
+	entry.trigger = edge_level;
+	entry.polarity = active_high_low;
 
 	add_pin_to_irq(irq, ioapic, pin);
 
 	entry.vector = assign_irq_vector(irq);
 
 	printk(KERN_DEBUG "IOAPIC[%d]: Set PCI routing entry (%d-%d -> 0x%x -> "
-		"IRQ %d)\n", ioapic, 
-		mp_ioapics[ioapic].mpc_apicid, pin, entry.vector, irq);
+		"IRQ %d) Mode:%i Active:%i\n", ioapic, 
+		mp_ioapics[ioapic].mpc_apicid, pin, entry.vector, irq, edge_level, active_high_low);
 
-	irq_desc[irq].handler = &ioapic_level_irq_type;
+	if (edge_level)
+		irq_desc[irq].handler = &ioapic_level_irq_type;
+	else
+		irq_desc[irq].handler = &ioapic_edge_irq_type;
 
 	set_intr_gate(entry.vector, interrupt[irq]);
 

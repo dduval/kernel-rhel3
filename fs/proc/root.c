@@ -86,6 +86,34 @@ static struct dentry *proc_root_lookup(struct inode * dir, struct dentry * dentr
 	return proc_pid_lookup(dir, dentry);
 }
 
+/*
+ * This is a verbatim copy of default_llseek which also kills
+ * the cursor in file->private_data. See fs/proc/base.c:get_pid_list().
+ */
+static loff_t proc_root_llseek(struct file *file, loff_t offset, int origin)
+{
+	long long retval;
+
+	switch (origin) {
+		case 2:
+			offset += file->f_dentry->d_inode->i_size;
+			break;
+		case 1:
+			offset += file->f_pos;
+	}
+	retval = -EINVAL;
+	if (offset >= 0) {
+		if (offset != file->f_pos) {
+			file->f_pos = offset;
+			file->f_reada = 0;
+			file->f_version = ++event;
+			file->private_data = 0;		/* kill cursor */
+		}
+		retval = offset;
+	}
+	return retval;
+}
+
 static int proc_root_readdir(struct file * filp,
 	void * dirent, filldir_t filldir)
 {
@@ -107,6 +135,7 @@ static int proc_root_readdir(struct file * filp,
  * directory handling functions for that..
  */
 static struct file_operations proc_root_operations = {
+	llseek:		 proc_root_llseek,
 	read:		 generic_read_dir,
 	readdir:	 proc_root_readdir,
 };

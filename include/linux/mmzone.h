@@ -125,6 +125,13 @@ typedef struct zone_struct {
 #define ZONE_HIGHMEM		2
 #define MAX_NR_ZONES		3
 
+typedef struct zone_wired_struct {
+        struct list_head        wired_list;
+        unsigned long           wired_pages;
+} zone_wired_t;
+
+extern zone_wired_t zone_wired[];
+
 /*
  * One allocation request operates on a zonelist. A zonelist
  * is a list of zones, the first one is the 'goal' of the

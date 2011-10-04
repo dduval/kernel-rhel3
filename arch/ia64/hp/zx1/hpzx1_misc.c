@@ -50,7 +50,16 @@ static int hp_cfg_read##sz (struct pci_dev *dev, int where, u##bits *value) \
 		fake_dev->sizing = 0; \
 		return PCIBIOS_SUCCESSFUL; \
 	} \
-	*value = read##sz(fake_dev->mapped_csrs + where); \
+	switch (where & ~0x7) { \
+		case 0x48: \
+			/* reading this register can initiate config cycles */ \
+		case 0x78: \
+			/* reading this register can put elroys in susepnd mode */ \
+			*value = 0; \
+			break; \
+		default: \
+			*value = read##sz(fake_dev->mapped_csrs + where); \
+	} \
 	if (where == PCI_COMMAND) \
 		*value |= PCI_COMMAND_MEMORY; /* SBA omits this */ \
 	return PCIBIOS_SUCCESSFUL; \
@@ -68,8 +77,16 @@ static int hp_cfg_write##sz (struct pci_dev *dev, int where, u##bits value) \
 		if (value == (u##bits) ~0) \
 			fake_dev->sizing = 1; \
 		return PCIBIOS_SUCCESSFUL; \
-	} else \
-		write##sz(value, fake_dev->mapped_csrs + where); \
+	} \
+	switch (where & ~0x7) { \
+		case 0x48: \
+			/* writing this register can initiate config cycles */ \
+		case 0x78: \
+			/* writing this register plays with elroy suspend mode */ \
+			break; \
+		default: \
+			write##sz(value, fake_dev->mapped_csrs + where); \
+	} \
 	return PCIBIOS_SUCCESSFUL; \
 }
 

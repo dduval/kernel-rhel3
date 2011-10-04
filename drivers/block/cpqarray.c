@@ -41,13 +41,13 @@
 
 #define SMART2_DRIVER_VERSION(maj,min,submin) ((maj<<16)|(min<<8)|(submin))
 
-#define DRIVER_NAME "Compaq SMART2 Driver (v 2.4.26)"
-#define DRIVER_VERSION SMART2_DRIVER_VERSION(2,4,26)
+#define DRIVER_NAME "Compaq SMART2 Driver (v 2.4.27)"
+#define DRIVER_VERSION SMART2_DRIVER_VERSION(2,4,27)
 
 /* Embedded module documentation macros - see modules.h */
 /* Original author Chris Frantz - Compaq Computer Corporation */
-MODULE_AUTHOR("Compaq Computer Corporation");
-MODULE_DESCRIPTION("Driver for Compaq Smart2 Array Controllers version 2.4.26");
+MODULE_AUTHOR("Hewlett-Packard Company");
+MODULE_DESCRIPTION("Driver for Compaq Smart2 Array Controllers version 2.4.27");
 MODULE_LICENSE("GPL");
 
 #define MAJOR_NR COMPAQ_SMART2_MAJOR
@@ -618,7 +618,7 @@ int __init cpqarray_init(void)
 
 	/* detect controllers */
 	printk(DRIVER_NAME "\n");
-	pci_register_driver(&cpqarray_pci_driver);
+	pci_module_init(&cpqarray_pci_driver);
 	cpqarray_eisa_detect();
 
 	for(i=0; i< MAX_CTLR; i++) {

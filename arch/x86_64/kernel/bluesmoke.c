@@ -125,7 +125,68 @@ static struct pci_dev *find_k8_nb(void)
 	return NULL;
 }
 
-static void check_k8_nb(void)
+static char *transaction[] = { 
+	"instruction", "data", "generic", "reserved"
+}; 
+static char *cachelevel[] = { 
+	"level 0", "level 1", "level 2", "level generic"
+};
+static char *memtrans[] = { 
+	"generic error", "generic read", "generic write", "data read",
+	"data write", "instruction fetch", "prefetch", "snoop",
+	"?", "?", "?", "?", "?", "?", "?"
+};
+static char *partproc[] = { 
+	"local node origin", "local node response", 
+	"local node observed", "generic" 
+};
+static char *timeout[] = { 
+	"request didn't time out",
+	"request timed out"
+};
+static char *memoryio[] = { 
+	"memory access", "res.", "i/o access", "generic"
+}; 
+static char *extendederr[] = { 
+	"ecc error", 
+	"crc error",
+	"sync error",
+	"mst abort",
+	"tgt abort",
+	"gart error",
+	"rmw error",
+	"wdog error",
+	"chipkill ecc error", 
+	"<9>","<10>","<11>","<12>",
+	"<13>","<14>","<15>"
+}; 
+static char *highbits[32] = { 
+	[31] = "previous error lost", 
+	[30] = "error overflow",
+	[29] = "error uncorrected",
+	[28] = "error enable",
+	[27] = "misc error valid",
+	[26] = "error address valid", 
+	[25] = "processor context corrupt", 
+	[24] = "res24",
+	[23] = "res23",
+	/* 22-15 ecc syndrome bits */
+	[14] = "corrected ecc error",
+	[13] = "uncorrected ecc error",
+	[12] = "res12",
+	[11] = "res11",
+	[10] = "res10",
+	[9] = "res9",
+	[8] = "dram scrub error", 
+	[7] = "res7",
+	/* 6-4 ht link number of error */ 
+	[3] = "res3",
+	[2] = "res2",
+	[1] = "err cpu0",
+	[0] = "err cpu1",
+};
+
+static void check_k8_nb(int header)
 {
 	struct pci_dev *nb;
 	nb = find_k8_nb(); 
@@ -137,22 +198,57 @@ static void check_k8_nb(void)
 	pci_read_config_dword(nb, 0x4c, &statushigh);
 	if (!(statushigh & (1<<31)))
 		return;
+	if (header) 
+		printk(KERN_ERR "CPU %d: Silent Northbridge MCE\n", smp_processor_id());
+
 	printk(KERN_ERR "Northbridge status %08x%08x\n",
-	       statushigh,statuslow); 
-	if (statuslow & 0x10) 
-		printk(KERN_ERR "GART error %d\n", statuslow & 0xf); 
-	if (statushigh & (1<<31))
-		printk(KERN_ERR "Lost an northbridge error\n"); 
-	if (statushigh & (1<<25))
-		printk(KERN_EMERG "NB status: unrecoverable\n"); 
+	       statushigh,statuslow);
+
+	unsigned short errcode = statuslow & 0xffff;	
+	switch (errcode >> 8) { 
+	case 0: 					
+		printk(KERN_ERR "    GART TLB error %s %s\n", 
+		       transaction[(errcode >> 2) & 3], 
+		       cachelevel[errcode & 3]);
+		break;
+	case 1: 
+		if (errcode & (1<<11)) { 
+			printk(KERN_ERR "    bus error %s %s %s %s %s\n",
+			       partproc[(errcode >> 10) & 0x3],
+			       timeout[(errcode >> 9) & 1],
+			       memtrans[(errcode >> 4) & 0xf],
+			       memoryio[(errcode >> 2) & 0x3], 
+			       cachelevel[(errcode & 0x3)]); 
+		} else if (errcode & (1<<8)) { 
+			printk(KERN_ERR "    memory error %s %s %s\n",
+			       memtrans[(errcode >> 4) & 0xf],
+			       transaction[(errcode >> 2) & 0x3],
+			       cachelevel[(errcode & 0x3)]);
+		} else {
+			printk(KERN_ERR "    unknown error code %x\n", errcode); 
+		}
+		break;
+	} 
+	if (statushigh & ((1<<14)|(1<<13)))
+		printk(KERN_ERR "    ECC syndrome bits %x\n", 
+		       (((statuslow >> 24) & 0xff)  << 8) | ((statushigh >> 15) & 0x7f));
+	errcode = (statuslow >> 16) & 0xf;
+	printk(KERN_ERR "    extended error %s\n", extendederr[(statuslow >> 16) & 0xf]); 
+	
+	/* should only print when it was a HyperTransport related error. */
+	printk(KERN_ERR "    link number %x\n", (statushigh >> 4) & 3);
+
+	int i;
+	for (i = 0; i < 32; i++) 
+		if (highbits[i] && (statushigh & (1<<i)))
+			printk(KERN_ERR "    %s\n", highbits[i]); 
+
 	if (statushigh & (1<<26)) { 
 		u32 addrhigh, addrlow; 
 		pci_read_config_dword(nb, 0x54, &addrhigh); 
 		pci_read_config_dword(nb, 0x50, &addrlow); 
-		printk(KERN_ERR "NB error address %08x%08x\n", addrhigh,addrlow); 
+		printk(KERN_ERR "    error address %08x%08x\n", addrhigh,addrlow); 
 	}
-	if (statushigh & (1<<29))
-		printk(KERN_EMERG "Error uncorrected\n"); 
 	statushigh &= ~(1<<31); 
 	pci_write_config_dword(nb, 0x4c, statushigh); 		
 }
@@ -164,9 +260,11 @@ static void k8_machine_check(struct pt_regs * regs, long error_code)
 	rdmsrl(MSR_IA32_MCG_STATUS, status); 
 	if ((status & (1<<2)) == 0) { 
 		if (!regs) 
-			check_k8_nb();
+			check_k8_nb(1);
 		return; 
 	}
+	printk(KERN_EMERG "CPU %d: Machine Check Exception: %016Lx\n", smp_processor_id(), status);
+
 	if (status & 1)
 		printk(KERN_EMERG "MCG_STATUS: unrecoverable\n"); 
 
@@ -184,7 +282,7 @@ static void k8_machine_check(struct pt_regs * regs, long error_code)
 	if (nbstatus & (1UL<57))
 		printk(KERN_EMERG "Unrecoverable condition\n"); 
 		
-	check_k8_nb();
+	check_k8_nb(0);
 
 	if (nbstatus & (1UL<<58)) { 
 		u64 adr;
@@ -245,7 +343,6 @@ static void __init k8_mcheck_init(struct cpuinfo_x86 *c)
 {
 	u64 cap;
 	int i;
-	struct pci_dev *nb; 
 
 	if (!test_bit(X86_FEATURE_MCE, &c->x86_capability) || 
 	    !test_bit(X86_FEATURE_MCA, &c->x86_capability))
@@ -256,21 +353,11 @@ static void __init k8_mcheck_init(struct cpuinfo_x86 *c)
 	machine_check_vector = k8_machine_check; 
 	for (i = 0; i < banks; i++) { 
 		u64 val = ((1UL<<i) & disabled_banks) ? 0 : ~0UL; 
+		if (val && i == 4)
+			val = k8_nb_flags;
 		wrmsrl(MSR_IA32_MC0_CTL+4*i, val);
 		wrmsrl(MSR_IA32_MC0_STATUS+4*i,0); 
 	}
-
-	nb = find_k8_nb(); 
-	if (nb != NULL) {
-		u32 reg, reg2;
-		pci_read_config_dword(nb, 0x40, &reg); 
-		pci_write_config_dword(nb, 0x40, k8_nb_flags);
-		pci_read_config_dword(nb, 0x44, &reg2);
-		pci_write_config_dword(nb, 0x44, reg2); 
-		printk(KERN_INFO "Machine Check for K8 Northbridge %d enabled (%x,%x)\n",
-		       nb->devfn, reg, reg2);
-		ignored_banks |= (1UL<<4); 
-	} 
 
 	set_in_cr4(X86_CR4_MCE);	   	
 

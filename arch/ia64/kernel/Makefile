@@ -25,5 +25,6 @@ obj-$(CONFIG_PCI) += pci.o
 obj-$(CONFIG_SMP) += smp.o smpboot.o
 obj-$(CONFIG_IA64_MCA) += mca.o mca_asm.o
 obj-$(CONFIG_IA64_BRL_EMU) += brl_emu.o
+obj-$(CONFIG_IA64_CYCLONE) += cyclone.o
 
 include $(TOPDIR)/Rules.make

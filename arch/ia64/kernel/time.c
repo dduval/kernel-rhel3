@@ -23,6 +23,7 @@
 #include <asm/ptrace.h>
 #include <asm/sal.h>
 #include <asm/system.h>
+#include <asm/cyclone.h>
 
 extern unsigned long wall_jiffies;
 
@@ -43,6 +44,9 @@ gettimeoffset (void)
 	unsigned long elapsed_cycles, lost = jiffies - wall_jiffies;
 	unsigned long now, last_tick;
 #	define time_keeper_id	0	/* smp_processor_id() of time-keeper */
+
+	if (use_cyclone)
+		return do_gettimeoffset_cyclone() + lost * (1000000 / HZ);
 
 	last_tick = (cpu_data(time_keeper_id)->itm_next
 		     - (lost + 1)*cpu_data(time_keeper_id)->itm_delta);
@@ -152,6 +156,8 @@ timer_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 			br_write_lock(BR_XTIME_LOCK);
 			do_timer(regs);
 			local_cpu_data->itm_next = new_itm;
+			if (use_cyclone)
+				mark_timeoffset_cyclone();
 			br_write_unlock(BR_XTIME_LOCK);
 		} else
 			local_cpu_data->itm_next = new_itm;
@@ -266,4 +272,6 @@ time_init (void)
 	register_percpu_irq(IA64_TIMER_VECTOR, &timer_irqaction);
 	efi_gettimeofday((struct timeval *) &xtime);
 	ia64_init_itm();
+	if (use_cyclone)
+		init_cyclone_clock();
 }

@@ -41,6 +41,8 @@
 
 #if defined(CONFIG_SYSCTL)
 
+int sercons_escape_char = -1;
+
 /* External variables not in a header file. */
 extern int panic_timeout;
 extern int dcache_priority;
@@ -102,7 +104,9 @@ extern int sysctl_ieee_emulation_warnings;
 extern int sysctl_userprocess_debug;
 #endif
 
-int sercons_escape_char = -1;
+#ifdef CONFIG_IA64
+extern int honor_uac_noprint;
+#endif
 
 #ifdef CONFIG_PPC32
 extern unsigned long zero_paged_on, powersave_nap;
@@ -301,11 +305,17 @@ static ctl_table kern_table[] = {
 	 &sysctl_userprocess_debug,sizeof(int),0644,NULL,&proc_dointvec},
 #endif
 #ifdef CONFIG_SERIAL_CONSOLE
-	{KERN_SERCONS_ESC, "sercons_esc", &sercons_escape_char, sizeof(int), 0644,
-			NULL, &proc_dointvec},
+	{KERN_SERCONS_ESC, "sercons_esc", &sercons_escape_char,
+	 sizeof(int), 0644, NULL, &proc_dointvec},
+#endif
+#ifdef CONFIG_IA64
+	{KERN_HONOR_UAC_NOPRINT, "honor_uac_noprint_prctl", &honor_uac_noprint,
+	 sizeof(int), 0644, NULL, &proc_dointvec},
 #endif
 	{0}
 };
+
+extern int inactive_clean_percent;
 
 static ctl_table vm_table[] = {
 	{VM_BDFLUSH, "bdflush", &bdf_prm, 9*sizeof(int), 0644, NULL,
@@ -335,6 +345,9 @@ static ctl_table vm_table[] = {
 #endif
 	{VM_DCACHE_PRIORITY, "dcache_priority", &dcache_priority,
 	 sizeof(dcache_priority), 0644, NULL, &proc_dointvec},
+	{VM_INACTIVE_CLEAN_PERCENT, "inactive_clean_percent",
+		&inactive_clean_percent, sizeof(inactive_clean_percent),
+		0644, NULL, &proc_dointvec},
 	{0}
 };
 

@@ -6528,8 +6528,6 @@ ssize_t zfcp_add_map_proc_write(struct file *file,
                              size_t user_len, 
                              loff_t *offset)
 {
-#if 0 /* P3: disallow hotplugging of adapters. */
-
 #define ZFCP_LOG_AREA			ZFCP_LOG_AREA_SCSI
 #define ZFCP_LOG_AREA_PREFIX		ZFCP_LOG_AREA_PREFIX_SCSI
 
@@ -6665,10 +6663,6 @@ out:
         
 #undef ZFCP_LOG_AREA
 #undef ZFCP_LOG_AREA_PREFIX
-
-#else /* 0 */
-	return -EIO;
-#endif /* 0 */
 }
 
 

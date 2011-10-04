@@ -13,6 +13,7 @@ agpgart-objs := agpgart_fe.o agpgart_be.o
 obj-$(CONFIG_AGP) += agpgart.o
 
 include $(TOPDIR)/Rules.make
+MOD_DESTDIR:=$(subst -hp_ia64,,$(MOD_DESTDIR))
 
 agpgart.o: $(agpgart-objs)
 	$(LD) $(LD_RFLAG) -r -o $@ $(agpgart-objs)

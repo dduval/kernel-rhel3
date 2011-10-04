@@ -7,6 +7,7 @@
  * Author(s): Fritz Elfert (elfert@de.ibm.com, felfert@millenux.com)
  * Fixes by : Jochen Röhrig (roehrig@de.ibm.com)
  *            Arnaldo Carvalho de Melo <acme@conectiva.com.br>
+ *            Pete Zaitcev <zaitcev@yahoo.com>
  *
  * Documentation used:
  *  - Principles of Operation (IBM doc#: SA22-7201-06)
@@ -242,11 +243,6 @@ typedef struct channel_t {
 	devstat_t           *devstat;
 
 	/**
-	 * Bottom half task queue.
-	 */
-	struct tq_struct    tq;
-
-	/**
 	 * RX/TX buffer size
 	 */
 	int                 max_bufsize;
@@ -272,15 +268,10 @@ typedef struct channel_t {
 	int                 collect_len;
 
 	/**
-	 * spinlock for collect_queue and collect_len
-	 */
-	spinlock_t          collect_lock;
-
-	/**
 	 * Timer for detecting unresposive
 	 * I/O operations.
 	 */
-	fsm_timer           timer;
+	struct timer_list   ch_timer;
 
 	/**
 	 * Retry counter for misc. operations.
@@ -329,9 +320,8 @@ static int activated;
 
 typedef struct ctc_priv_t {
 	struct net_device_stats stats;
-#if LINUX_VERSION_CODE >= 0x02032D
-	unsigned long           tbusy;
-#endif
+	spinlock_t		devlock;
+
 	/**
 	 * The finite state machine of this interface.
 	 */
@@ -348,8 +338,10 @@ typedef struct ctc_priv_t {
 
 	/**
 	 * Timer for restarting after I/O Errors
+	 * This is replacement for fsm_timer, needed to insert locking.
 	 */
-	fsm_timer               restart_timer;
+	struct timer_list	rst_timer;
+	int			rst_event;	// enum dev_events
 } ctc_priv;
 
 /**
@@ -361,39 +353,6 @@ typedef struct ll_header_t {
 	__u16	      unused;
 } ll_header;
 #define LL_HEADER_LENGTH (sizeof(ll_header))
-
-/**
- * Compatibility macros for busy handling
- * of network devices.
- */
-#if LINUX_VERSION_CODE < 0x02032D
-static __inline__ void ctc_clear_busy(net_device *dev)
-{
-	clear_bit(0 ,(void *)&dev->tbusy);
-	mark_bh(NET_BH);
-}
-
-static __inline__ int ctc_test_and_set_busy(net_device *dev)
-{
-	return(test_and_set_bit(0, (void *)&dev->tbusy));
-}
-
-#define SET_DEVICE_START(device, value) dev->start = value
-#else
-static __inline__ void ctc_clear_busy(net_device *dev)
-{
-	clear_bit(0, &(((ctc_priv *)dev->priv)->tbusy));
-	netif_wake_queue(dev);
-}
-
-static __inline__ int ctc_test_and_set_busy(net_device *dev)
-{
-	netif_stop_queue(dev);
-	return test_and_set_bit(0, &((ctc_priv *)dev->priv)->tbusy);
-}
-
-#define SET_DEVICE_START(device, value)
-#endif
 
 /**
  * Print Banner.
@@ -737,6 +696,76 @@ static void ctc_dump_skb(struct sk_buff *skb, int offset)
 #endif
 
 /**
+ * The function for the rst_timer. It locks the instance and posts an event.
+ */
+static void ctc_expire_rst_timer(unsigned long arg)
+{
+	net_device *dev = (net_device *) arg;
+	ctc_priv *privptr = dev->priv;
+	unsigned long saveflags;
+
+	spin_lock_irqsave(&privptr->devlock, saveflags);
+	fsm_event(privptr->fsm, privptr->rst_event, dev);
+	spin_unlock_irqrestore(&privptr->devlock, saveflags);
+}
+
+/**
+ * Add the rst_timer.
+ */
+static void ctc_add_rst_timer(net_device *dev, unsigned int msec,
+    enum dev_events evnum)
+{
+	ctc_priv *privptr = dev->priv;
+
+	privptr->rst_event = evnum;
+	privptr->rst_timer.expires = jiffies + (msec * HZ) / 1000;
+	privptr->rst_timer.function = ctc_expire_rst_timer;
+	privptr->rst_timer.data = (unsigned long) dev;
+	add_timer(&privptr->rst_timer);
+}
+
+/**
+ * Delete the rst_timer.
+ */
+static inline void ctc_del_rst_timer(ctc_priv *privptr)
+{
+	del_timer(&privptr->rst_timer);
+}
+
+/**
+ * Expiration function for a channel timer.
+ */
+static void ch_expire_timer(unsigned long arg)
+{
+	channel *ch = (channel *)arg;
+	ctc_priv *privptr = ch->netdev->priv;
+	unsigned long saveflags;
+
+	spin_lock_irqsave(&privptr->devlock, saveflags);
+	fsm_event(ch->fsm, CH_EVENT_TIMER, ch);
+	spin_unlock_irqrestore(&privptr->devlock, saveflags);
+}
+
+/**
+ * Add the channel timer.
+ */
+static void ch_addtimer(channel *ch, unsigned int msec)
+{
+	ch->ch_timer.expires = jiffies + (msec * HZ) / 1000;
+	ch->ch_timer.data = (unsigned long) ch;
+	ch->ch_timer.function = ch_expire_timer;
+	add_timer(&ch->ch_timer);
+}
+
+/**
+ * Delete the channel timer.
+ */
+static inline void ch_deltimer(channel *ch)
+{
+	del_timer(&ch->ch_timer);
+}
+
+/**
  * Unpack a just received skb and hand it over to
  * upper layers.
  *
@@ -828,11 +857,15 @@ static __inline__ void ctc_unpack_skb(channel *ch, struct sk_buff *pskb)
 			privptr->stats.rx_length_errors++;
 			return;
 		}
+
+		spin_unlock(&privptr->devlock);
+
 		skb_put(pskb, header->length);
 		pskb->mac.raw = pskb->data;
 		len -= (LL_HEADER_LENGTH + header->length);
 		skb = dev_alloc_skb(pskb->len);
 		if (!skb) {
+			spin_lock(&privptr->devlock);
 #ifndef DEBUG
 		        if (!(ch->logflags & LOG_FLAG_NOMEM)) {
 #endif
@@ -855,9 +888,11 @@ static __inline__ void ctc_unpack_skb(channel *ch, struct sk_buff *pskb)
 			ctc_tty_netif_rx(skb);
 		else
 			netif_rx(skb);
+
 		/**
 		 * Successful rx; reset logflags
 		 */
+		spin_lock(&privptr->devlock);
 		ch->logflags = 0;
 		privptr->stats.rx_packets++;
 		privptr->stats.rx_bytes += skb->len;
@@ -866,19 +901,6 @@ static __inline__ void ctc_unpack_skb(channel *ch, struct sk_buff *pskb)
 			skb_put(pskb, LL_HEADER_LENGTH);
 		}
 	}
-}
-
-/**
- * Bottom half routine.
- *
- * @param ch The channel to work on.
- */
-static void ctc_bh(channel *ch)
-{
-	struct sk_buff *skb;
-
-	while ((skb = skb_dequeue(&ch->io_queue)))
-		ctc_unpack_skb(ch, skb);
 }
 
 /**
@@ -1034,7 +1056,7 @@ static void fsm_action_nop(fsm_instance *fi, int event, void *arg)
 
 /**
  * Normal data has been send. Free the corresponding
- * skb (it's in io_queue), reset dev->tbusy and
+ * skb (it's in io_queue), reset dev->tbusy (or wake queue in 2.4) and
  * revert to idle state.
  *
  * @param fi    An instance of a channel statemachine.
@@ -1061,7 +1083,7 @@ static void ch_action_txdone(fsm_instance *fi, int event, void *arg)
 		printk(KERN_DEBUG "%s: TX not complete, remaining %d bytes\n",
 		       dev->name, ch->devstat->rescnt);
 	
-	fsm_deltimer(&ch->timer);
+	ch_deltimer(ch);
 	while ((skb = skb_dequeue(&ch->io_queue))) {
 		privptr->stats.tx_packets++;
 		privptr->stats.tx_bytes += skb->len - LL_HEADER_LENGTH;
@@ -1072,13 +1094,12 @@ static void ch_action_txdone(fsm_instance *fi, int event, void *arg)
 		atomic_dec(&skb->users);
 		dev_kfree_skb_irq(skb);
 	}
-	spin_lock(&ch->collect_lock);
 	clear_normalized_cda(&ch->ccw[4]);
 	if (ch->collect_len > 0) {
 		int rc;
 
 		if (ctc_checkalloc_buffer(ch, 1)) {
-			spin_unlock(&ch->collect_lock);
+			netif_wake_queue(dev);
 			return;
 		}
 		ch->trans_skb->tail = ch->trans_skb->data = ch->trans_skb_data;
@@ -1099,23 +1120,21 @@ static void ch_action_txdone(fsm_instance *fi, int event, void *arg)
 			i++;
 		}
 		ch->collect_len = 0;
-		spin_unlock(&ch->collect_lock);
 		ch->ccw[1].count = ch->trans_skb->len;
-		fsm_addtimer(&ch->timer, CTC_TIMEOUT_5SEC, CH_EVENT_TIMER, ch);
+		ch_addtimer(ch, CTC_TIMEOUT_5SEC);
 		ch->prof.send_stamp = xtime;
 		rc = do_IO(ch->irq, &ch->ccw[0], (intparm_t)ch, 0xff, 0);
 		ch->prof.doios_multi++;
 		if (rc != 0) {
 			privptr->stats.tx_dropped += i;
 			privptr->stats.tx_errors += i;
-			fsm_deltimer(&ch->timer);
+			ch_deltimer(ch);
 			ccw_check_return_code(ch, rc);
 		}
 	} else {
-		spin_unlock(&ch->collect_lock);
 		fsm_newstate(fi, CH_STATE_TXIDLE);
 	}
-	ctc_clear_busy(dev);
+	netif_wake_queue(dev);
 }
 
 /**
@@ -1131,7 +1150,7 @@ static void ch_action_txidle(fsm_instance *fi, int event, void *arg)
 {
 	channel *ch = (channel *)arg;
 
-	fsm_deltimer(&ch->timer);
+	ch_deltimer(ch);
 	fsm_newstate(fi, CH_STATE_TXIDLE);
 	fsm_event(((ctc_priv *)ch->netdev->priv)->fsm, DEV_EVENT_TXUP,
 		  ch->netdev);
@@ -1156,7 +1175,7 @@ static void ch_action_rx(fsm_instance *fi, int event, void *arg)
 	int            check_len;
 	int            rc;
 
-	fsm_deltimer(&ch->timer);
+	ch_deltimer(ch);
 	if (len < 8) {
 		printk(KERN_DEBUG "%s: got packet with length %d < 8\n",
 		       dev->name, len);
@@ -1228,7 +1247,7 @@ static void ch_action_firstio(fsm_instance *fi, int event, void *arg)
 	if (fsm_getstate(fi) == CH_STATE_TXIDLE)
 		printk(KERN_DEBUG "ch-%04x: remote side issued READ?, "
 		       "init ...\n", ch->devno);
-	fsm_deltimer(&ch->timer);
+	ch_deltimer(ch);
 	if (ctc_checkalloc_buffer(ch, 1))
 		return;
 	if ((fsm_getstate(fi) == CH_STATE_SETUPWAIT) &&
@@ -1236,8 +1255,7 @@ static void ch_action_firstio(fsm_instance *fi, int event, void *arg)
 		/* OS/390 resp. z/OS */
 		if (CHANNEL_DIRECTION(ch->flags) == READ) {
 			*((__u16 *)ch->trans_skb->data) = CTC_INITIAL_BLOCKLEN;
-			fsm_addtimer(&ch->timer, CTC_TIMEOUT_5SEC,
-				     CH_EVENT_TIMER, ch);
+			ch_addtimer(ch, CTC_TIMEOUT_5SEC);
 			ch_action_rxidle(fi, event, arg);
 		} else {
 			net_device *dev = ch->netdev;
@@ -1255,7 +1273,7 @@ static void ch_action_firstio(fsm_instance *fi, int event, void *arg)
 	 */
 	if ((CHANNEL_DIRECTION(ch->flags) == WRITE) ||
 	    (ch->protocol != CTC_PROTO_S390))
-		fsm_addtimer(&ch->timer, CTC_TIMEOUT_5SEC, CH_EVENT_TIMER, ch);
+		ch_addtimer(ch, CTC_TIMEOUT_5SEC);
 
 	*((__u16 *)ch->trans_skb->data) = CTC_INITIAL_BLOCKLEN;
 	ch->ccw[1].count = 2; /* Transfer only length */
@@ -1264,7 +1282,7 @@ static void ch_action_firstio(fsm_instance *fi, int event, void *arg)
 		     ? CH_STATE_RXINIT : CH_STATE_TXINIT);
 	rc = do_IO(ch->irq, &ch->ccw[0], (intparm_t)ch, 0xff, 0);
 	if (rc != 0) {
-		fsm_deltimer(&ch->timer);
+		ch_deltimer(ch);
 		fsm_newstate(fi, CH_STATE_SETUPWAIT);
 		ccw_check_return_code(ch, rc);
 	}
@@ -1298,7 +1316,7 @@ static void ch_action_rxidle(fsm_instance *fi, int event, void *arg)
 	__u16      buflen;
 	int        rc;
 
-	fsm_deltimer(&ch->timer);
+	ch_deltimer(ch);
 	buflen = *((__u16 *)ch->trans_skb->data);
 #ifdef DEBUG
 	printk(KERN_DEBUG "%s: Initial RX count %d\n", dev->name, buflen);
@@ -1335,8 +1353,8 @@ static void ch_action_setmode(fsm_instance *fi, int event, void *arg)
 	int     rc;
 	unsigned long saveflags;
 
-	fsm_deltimer(&ch->timer);
-	fsm_addtimer(&ch->timer, CTC_TIMEOUT_5SEC, CH_EVENT_TIMER, ch);
+	ch_deltimer(ch);
+	ch_addtimer(ch, CTC_TIMEOUT_5SEC);
 	fsm_newstate(fi, CH_STATE_SETUPWAIT);
 	if (event == CH_EVENT_TIMER)
 		s390irq_spin_lock_irqsave(ch->irq, saveflags);
@@ -1344,7 +1362,7 @@ static void ch_action_setmode(fsm_instance *fi, int event, void *arg)
 	if (event == CH_EVENT_TIMER)
 		s390irq_spin_unlock_irqrestore(ch->irq, saveflags);
 	if (rc != 0) {
-		fsm_deltimer(&ch->timer);
+		ch_deltimer(ch);
 		fsm_newstate(fi, CH_STATE_STARTWAIT);
 		ccw_check_return_code(ch, rc);
 	} else
@@ -1402,15 +1420,6 @@ static void ch_action_start(fsm_instance *fi, int event, void *arg)
 		       dev->name, 
 		       (CHANNEL_DIRECTION(ch->flags) == READ) ? "RX" : "TX");
 
-#if LINUX_VERSION_CODE >= 0x020400
-	INIT_LIST_HEAD(&ch->tq.list);
-#else
-	ch->tq.next = NULL;
-#endif
-	ch->tq.sync    = 0;
-	ch->tq.routine = (void *)(void *)ctc_bh;
-	ch->tq.data    = ch;
-
 	ch->ccw[0].cmd_code = CCW_CMD_PREPARE;
 	ch->ccw[0].flags    = CCW_FLAG_SLI | CCW_FLAG_CC;
 	ch->ccw[0].count    = 0;
@@ -1424,12 +1433,12 @@ static void ch_action_start(fsm_instance *fi, int event, void *arg)
 	ch->ccw[4].flags    &= ~CCW_FLAG_IDA;
 
 	fsm_newstate(fi, CH_STATE_STARTWAIT);
-	fsm_addtimer(&ch->timer, 1000, CH_EVENT_TIMER, ch);
+	ch_addtimer(ch, 1000);
 	s390irq_spin_lock_irqsave(ch->irq, saveflags);
 	rc = halt_IO(ch->irq, (intparm_t)ch, 0);
 	s390irq_spin_unlock_irqrestore(ch->irq, saveflags);
 	if (rc != 0) {
-		fsm_deltimer(&ch->timer);
+		ch_deltimer(ch);
 		ccw_check_return_code(ch, rc);
 	}
 #ifdef DEBUG
@@ -1451,8 +1460,8 @@ static void ch_action_haltio(fsm_instance *fi, int event, void *arg)
 	int     rc;
 	int     oldstate;
 
-	fsm_deltimer(&ch->timer);
-	fsm_addtimer(&ch->timer, CTC_TIMEOUT_5SEC, CH_EVENT_TIMER, ch);
+	ch_deltimer(ch);
+	ch_addtimer(ch, CTC_TIMEOUT_5SEC);
 	if (event == CH_EVENT_STOP)
 		s390irq_spin_lock_irqsave(ch->irq, saveflags);
 	oldstate = fsm_getstate(fi);
@@ -1461,7 +1470,7 @@ static void ch_action_haltio(fsm_instance *fi, int event, void *arg)
 	if (event == CH_EVENT_STOP)
 		s390irq_spin_unlock_irqrestore(ch->irq, saveflags);
 	if (rc != 0) {
-		fsm_deltimer(&ch->timer);
+		ch_deltimer(ch);
 		fsm_newstate(fi, oldstate);
 		ccw_check_return_code(ch, rc);
 	}
@@ -1480,7 +1489,7 @@ static void ch_action_stopped(fsm_instance *fi, int event, void *arg)
 	channel *ch = (channel *)arg;
 	net_device *dev = ch->netdev;
 
-	fsm_deltimer(&ch->timer);
+	ch_deltimer(ch);
 	fsm_newstate(fi, CH_STATE_STOPPED);
 	if (ch->trans_skb != NULL) {
 		clear_normalized_cda(&ch->ccw[1]);
@@ -1492,10 +1501,8 @@ static void ch_action_stopped(fsm_instance *fi, int event, void *arg)
 		fsm_event(((ctc_priv *)dev->priv)->fsm, DEV_EVENT_RXDOWN, dev);
 	} else {
 		ctc_purge_skb_queue(&ch->io_queue);
-		spin_lock(&ch->collect_lock);
 		ctc_purge_skb_queue(&ch->collect_queue);
 		ch->collect_len = 0;
-		spin_unlock(&ch->collect_lock);
 		fsm_event(((ctc_priv *)dev->priv)->fsm, DEV_EVENT_TXDOWN, dev);
 	}
 }
@@ -1527,17 +1534,15 @@ static void ch_action_fail(fsm_instance *fi, int event, void *arg)
 	channel *ch = (channel *)arg;
 	net_device *dev = ch->netdev;
 
-	fsm_deltimer(&ch->timer);
+	ch_deltimer(ch);
 	fsm_newstate(fi, CH_STATE_NOTOP);
 	if (CHANNEL_DIRECTION(ch->flags) == READ) {
 		skb_queue_purge(&ch->io_queue);
 		fsm_event(((ctc_priv *)dev->priv)->fsm, DEV_EVENT_RXDOWN, dev);
 	} else {
 		ctc_purge_skb_queue(&ch->io_queue);
-		spin_lock(&ch->collect_lock);
 		ctc_purge_skb_queue(&ch->collect_queue);
 		ch->collect_len = 0;
-		spin_unlock(&ch->collect_lock);
 		fsm_event(((ctc_priv *)dev->priv)->fsm, DEV_EVENT_TXDOWN, dev);
 	}
 }
@@ -1563,8 +1568,8 @@ static void ch_action_setuperr(fsm_instance *fi, int event, void *arg)
 	    ((event == CH_EVENT_UC_RCRESET) ||
 	     (event == CH_EVENT_UC_RSRESET)   )         ) {
 		fsm_newstate(fi, CH_STATE_STARTRETRY);
-		fsm_deltimer(&ch->timer);
-		fsm_addtimer(&ch->timer, CTC_TIMEOUT_5SEC, CH_EVENT_TIMER, ch);
+		ch_deltimer(ch);
+		ch_addtimer(ch, CTC_TIMEOUT_5SEC);
 		if (CHANNEL_DIRECTION(ch->flags) == READ) {
 			int rc = halt_IO (ch->irq, (intparm_t)ch, 0);
 			if (rc != 0)
@@ -1602,10 +1607,10 @@ static void ch_action_restart(fsm_instance *fi, int event, void *arg)
 	channel *ch = (channel *)arg;
 	net_device *dev = ch->netdev;
 
-	fsm_deltimer(&ch->timer);
+	ch_deltimer(ch);
 	printk(KERN_DEBUG "%s: %s channel restart\n", dev->name,
 	       (CHANNEL_DIRECTION(ch->flags) == READ) ? "RX" : "TX");
-	fsm_addtimer(&ch->timer, CTC_TIMEOUT_5SEC, CH_EVENT_TIMER, ch);
+	ch_addtimer(ch, CTC_TIMEOUT_5SEC);
 	oldstate = fsm_getstate(fi);
 	fsm_newstate(fi, CH_STATE_STARTWAIT);
 	if (event == CH_EVENT_TIMER)
@@ -1614,7 +1619,7 @@ static void ch_action_restart(fsm_instance *fi, int event, void *arg)
 	if (event == CH_EVENT_TIMER)
 		s390irq_spin_unlock_irqrestore(ch->irq, saveflags);
 	if (rc != 0) {
-		fsm_deltimer(&ch->timer);
+		ch_deltimer(ch);
 		fsm_newstate(fi, oldstate);
 		ccw_check_return_code(ch, rc);
 	}
@@ -1634,7 +1639,7 @@ static void ch_action_rxiniterr(fsm_instance *fi, int event, void *arg)
 	net_device *dev = ch->netdev;
 
 	if (event == CH_EVENT_TIMER) {
-		fsm_deltimer(&ch->timer);
+		ch_deltimer(ch);
 		printk(KERN_DEBUG "%s: Timeout during RX init handshake\n",
 		       dev->name);
 		if (ch->retry++ < 3)
@@ -1681,7 +1686,7 @@ static void ch_action_rxdisc(fsm_instance *fi, int event, void *arg)
 	channel    *ch2;
 	net_device *dev = ch->netdev;
 
-	fsm_deltimer(&ch->timer);
+	ch_deltimer(ch);
 	printk(KERN_DEBUG "%s: Got remote disconnect, re-initializing ...\n",
 	       dev->name);
 
@@ -1712,7 +1717,7 @@ static void ch_action_txiniterr(fsm_instance *fi, int event, void *arg)
 	net_device *dev = ch->netdev;
 
 	if (event == CH_EVENT_TIMER) {
-		fsm_deltimer(&ch->timer);
+		ch_deltimer(ch);
 		printk(KERN_DEBUG "%s: Timeout during TX init handshake\n",
 		       dev->name);
 		if (ch->retry++ < 3)
@@ -1740,7 +1745,7 @@ static void ch_action_txretry(fsm_instance *fi, int event, void *arg)
 	net_device *dev = ch->netdev;
 	unsigned long saveflags;
 
-	fsm_deltimer(&ch->timer);
+	ch_deltimer(ch);
 	if (ch->retry++ > 3) {
 		printk(KERN_DEBUG "%s: TX retry failed, restarting channel\n",
 		       dev->name);
@@ -1764,7 +1769,7 @@ static void ch_action_txretry(fsm_instance *fi, int event, void *arg)
 				ch_action_restart(fi, event, arg);
 				return;
 			}
-			fsm_addtimer(&ch->timer, 1000, CH_EVENT_TIMER, ch);
+			ch_addtimer(ch, 1000);
 			if (event == CH_EVENT_TIMER)
 				s390irq_spin_lock_irqsave(ch->irq, saveflags);
 			rc = do_IO(ch->irq, &ch->ccw[3], (intparm_t)ch, 0xff, 0);
@@ -1772,7 +1777,7 @@ static void ch_action_txretry(fsm_instance *fi, int event, void *arg)
 				s390irq_spin_unlock_irqrestore(ch->irq,
 							       saveflags);
 			if (rc != 0) {
-				fsm_deltimer(&ch->timer);
+				ch_deltimer(ch);
 				ccw_check_return_code(ch, rc);
 				ctc_purge_skb_queue(&ch->io_queue);
 			}
@@ -1793,7 +1798,7 @@ static void ch_action_iofatal(fsm_instance *fi, int event, void *arg)
 	channel *ch = (channel *)arg;
 	net_device *dev = ch->netdev;
 
-	fsm_deltimer(&ch->timer);
+	ch_deltimer(ch);
 	if (CHANNEL_DIRECTION(ch->flags) == READ) {
 		printk(KERN_DEBUG "%s: RX I/O error\n", dev->name);
 		fsm_newstate(fi, CH_STATE_RXERR);
@@ -1812,7 +1817,7 @@ static void ch_action_reinit(fsm_instance *fi, int event, void *arg)
 	ctc_priv   *privptr = dev->priv;
 
 	ch_action_iofatal(fi, event, arg);
-	fsm_addtimer(&privptr->restart_timer, 1000, DEV_EVENT_RESTART, dev);
+	ctc_add_rst_timer(dev, 1000, DEV_EVENT_RESTART);
 }
 
 /**
@@ -2020,7 +2025,7 @@ static int add_channel(int irq, __u16 devno, channel_type_t type)
 		kfree(ch);
 		return 0;
 	}
-	fsm_settimer(ch->fsm, &ch->timer);
+	init_timer(&ch->ch_timer);
 	skb_queue_head_init(&ch->io_queue);
 	skb_queue_head_init(&ch->collect_queue);
 	ch->next = *c;
@@ -2108,7 +2113,7 @@ static void channel_remove(channel *ch)
 	while (*c) {
 		if (*c == ch) {
 			*c = ch->next;
-			fsm_deltimer(&ch->timer);
+			ch_deltimer(ch);
 			kfree_fsm(ch->fsm);
 			clear_normalized_cda(&ch->ccw[4]);
 			if (ch->trans_skb != NULL) {
@@ -2247,6 +2252,8 @@ static void ctc_irq_handler (int irq, void *intparm, struct pt_regs *regs)
 	devstat_t  *devstat = (devstat_t *)intparm;
 	channel    *ch = (channel *)devstat->intparm;
 	net_device *dev;
+	ctc_priv   *privptr;
+	unsigned long saveflags;
 
 	/**
 	 * Check for unsolicited interrupts.
@@ -2291,27 +2298,43 @@ static void ctc_irq_handler (int irq, void *intparm, struct pt_regs *regs)
 		goto done;
 	}
 
+	privptr = dev->priv;
+
+	/*
+	 * We need to unlock inside ctc_unpack_skb, so let's split
+	 * masking and locking explicitly.
+	 *
+	 * Timer cannot interrupt us, so we only need to mask
+	 * the sister channel, but the API limitations are somewhat unclear.
+	 * For the moment, we mask everything.
+	 */
+	local_irq_save(saveflags);
+	spin_lock(&privptr->devlock);
+
 	/* Check the reason-code of a unit check */
 	if (devstat->dstat & DEV_STAT_UNIT_CHECK) {
 		ccw_unit_check(ch, devstat->ii.sense.data[0]);
-		goto done;
+		goto done_unlock;
 	}
 	if (devstat->dstat & DEV_STAT_BUSY) {
 		if (devstat->dstat & DEV_STAT_ATTENTION)
 			fsm_event(ch->fsm, CH_EVENT_ATTNBUSY, ch);
 		else
 			fsm_event(ch->fsm, CH_EVENT_BUSY, ch);
-		goto done;
+		goto done_unlock;
 	}
 	if (devstat->dstat & DEV_STAT_ATTENTION) {
 		fsm_event(ch->fsm, CH_EVENT_ATTN, ch);
-		goto done;
+		goto done_unlock;
 	}
 	if (devstat->flag & DEVSTAT_FINAL_STATUS)
 		fsm_event(ch->fsm, CH_EVENT_FINSTAT, ch);
 	else
 		fsm_event(ch->fsm, CH_EVENT_IRQ, ch);
 
+ done_unlock:
+	spin_unlock(&privptr->devlock);
+	local_irq_restore(saveflags);
  done:
 	;
 }
@@ -2333,7 +2356,7 @@ static void dev_action_start(fsm_instance *fi, int event, void *arg)
 	ctc_priv   *privptr = dev->priv;
 	int        direction;
 
-	fsm_deltimer(&privptr->restart_timer);
+	ctc_del_rst_timer(privptr);
 	fsm_newstate(fi, DEV_STATE_STARTWAIT_RXTX);
 	for (direction = READ; direction <= WRITE; direction++) {
 		channel *ch = privptr->channel[direction];
@@ -2363,6 +2386,15 @@ static void dev_action_stop(fsm_instance *fi, int event, void *arg)
 	}
 }
 
+/*
+ * The dev_action_restart seems to be an afterthought which highlights
+ * nicely the limitations of the state machine design. To implement
+ * this in the state machine, one would need to replicate all stop
+ * states (adding XXX_STOP_FOR_RESTART_TXTX, etc.)
+ *
+ * This is the only function formatted for 4 spaces,
+ * just to show how much an oddball it is, apparently.
+ */
 static void dev_action_restart(fsm_instance *fi, int event, void *arg)
 {
     net_device *dev = (net_device *)arg;
@@ -2371,8 +2403,7 @@ static void dev_action_restart(fsm_instance *fi, int event, void *arg)
     printk(KERN_DEBUG "%s: Restarting\n", dev->name);
     dev_action_stop(fi, event, arg);
     fsm_event(privptr->fsm, DEV_EVENT_STOP, dev);
-    fsm_addtimer(&privptr->restart_timer, CTC_TIMEOUT_5SEC,
-		 DEV_EVENT_START, dev);
+    ctc_add_rst_timer(dev, CTC_TIMEOUT_5SEC, DEV_EVENT_START);
 }
 
 /**
@@ -2405,7 +2436,7 @@ static void dev_action_chup(fsm_instance *fi, int event, void *arg)
 					ctc_tty_setcarrier(dev, 1);
 				else
 					netif_carrier_on(dev);
-				ctc_clear_busy(dev);
+				netif_wake_queue(dev);
 			}
 			break;
 		case DEV_STATE_STARTWAIT_TX:
@@ -2418,7 +2449,7 @@ static void dev_action_chup(fsm_instance *fi, int event, void *arg)
 					ctc_tty_setcarrier(dev, 1);
 				else
 					netif_carrier_on(dev);
-				ctc_clear_busy(dev);
+				netif_wake_queue(dev);
 			}
 			break;
 		case DEV_STATE_STOPWAIT_TX:
@@ -2549,10 +2580,9 @@ static int transmit_skb(channel *ch, struct sk_buff *skb) {
 	if (fsm_getstate(ch->fsm) != CH_STATE_TXIDLE) {
 		int l = skb->len + LL_HEADER_LENGTH;
 
-		spin_lock_irqsave(&ch->collect_lock, saveflags);
-		if (ch->collect_len + l > ch->max_bufsize - 2)
+		if (ch->collect_len + l > ch->max_bufsize - 2) {
 			rc = -EBUSY;
-		else {
+		} else {
 			atomic_inc(&skb->users);
 			header.length = l;
 			header.type = skb->protocol;
@@ -2562,7 +2592,6 @@ static int transmit_skb(channel *ch, struct sk_buff *skb) {
 			skb_queue_tail(&ch->collect_queue, skb);
 			ch->collect_len += l;
 		}
-		spin_unlock_irqrestore(&ch->collect_lock, saveflags);
 	} else {
 		__u16 block_len;
 		int ccw_idx;
@@ -2635,8 +2664,7 @@ static int transmit_skb(channel *ch, struct sk_buff *skb) {
 		}
 		ch->retry = 0;
 		fsm_newstate(ch->fsm, CH_STATE_TX);
-		fsm_addtimer(&ch->timer, CTC_TIMEOUT_5SEC,
-			     CH_EVENT_TIMER, ch);
+		ch_addtimer(ch, CTC_TIMEOUT_5SEC);
 		s390irq_spin_lock_irqsave(ch->irq, saveflags);
 		ch->prof.send_stamp = xtime;
 		rc = do_IO(ch->irq, &ch->ccw[ccw_idx], (intparm_t)ch, 0xff, 0);
@@ -2644,7 +2672,7 @@ static int transmit_skb(channel *ch, struct sk_buff *skb) {
 		if (ccw_idx == 3)
 			ch->prof.doios_single++;
 		if (rc != 0) {
-			fsm_deltimer(&ch->timer);
+			ch_deltimer(ch);
 			ccw_check_return_code(ch, rc);
 			if (ccw_idx == 3)
 				skb_dequeue_tail(&ch->io_queue);
@@ -2680,8 +2708,13 @@ static int transmit_skb(channel *ch, struct sk_buff *skb) {
  * @return 0 on success, -ERRNO on failure. (Never fails.)
  */
 static int ctc_open(net_device *dev) {
+	ctc_priv *privptr = dev->priv;
+	unsigned long saveflags;
+
 	MOD_INC_USE_COUNT;
-	fsm_event(((ctc_priv *)dev->priv)->fsm, DEV_EVENT_START, dev);
+	spin_lock_irqsave(&privptr->devlock, saveflags);
+	fsm_event(privptr->fsm, DEV_EVENT_START, dev);
+	spin_unlock_irqrestore(&privptr->devlock, saveflags);
 	return 0;
 }
 
@@ -2694,8 +2727,12 @@ static int ctc_open(net_device *dev) {
  * @return 0 on success, -ERRNO on failure. (Never fails.)
  */
 static int ctc_close(net_device *dev) {
-	SET_DEVICE_START(dev, 0);
-	fsm_event(((ctc_priv *)dev->priv)->fsm, DEV_EVENT_STOP, dev);
+	ctc_priv *privptr = dev->priv;
+	unsigned long saveflags;
+
+	spin_lock_irqsave(&privptr->devlock, saveflags);
+	fsm_event(privptr->fsm, DEV_EVENT_STOP, dev);
+	spin_unlock_irqrestore(&privptr->devlock, saveflags);
 	MOD_DEC_USE_COUNT;
 	return 0;
 }
@@ -2715,6 +2752,7 @@ static int ctc_tx(struct sk_buff *skb, net_device *dev)
 {
 	int       rc = 0;
 	ctc_priv  *privptr = (ctc_priv *)dev->priv;
+	unsigned long saveflags;
 
 	/**
 	 * Some sanity checks ...
@@ -2733,28 +2771,39 @@ static int ctc_tx(struct sk_buff *skb, net_device *dev)
 		return 0;
 	}
 
+	spin_lock_irqsave(&privptr->devlock, saveflags);
+
 	/**
 	 * If channels are not running, try to restart them
 	 * and throw away packet. 
 	 */
 	if (fsm_getstate(privptr->fsm) != DEV_STATE_RUNNING) {
 		fsm_event(privptr->fsm, DEV_EVENT_START, dev);
-		if (privptr->protocol == CTC_PROTO_LINUX_TTY)
+		if (privptr->protocol == CTC_PROTO_LINUX_TTY) {
+			spin_unlock_irqrestore(&privptr->devlock, saveflags);
 			return -EBUSY;
+		}
 		dev_kfree_skb(skb);
 		privptr->stats.tx_dropped++;
 		privptr->stats.tx_errors++;
 		privptr->stats.tx_carrier_errors++;
+		spin_unlock_irqrestore(&privptr->devlock, saveflags);
 		return 0;
 	}
 
-	if (ctc_test_and_set_busy(dev))
-		return -EBUSY;
+	/*
+	 * Basically, we can handle only one packet at a time,
+	 * the so-called collect_queue is too wimpy to even consider...
+	 * It goes into a linear buffer anyway. XXX
+	 */
+	netif_stop_queue(dev);
 
 	dev->trans_start = jiffies;
-	if (transmit_skb(privptr->channel[WRITE], skb) != 0)
-		rc = 1;
-	ctc_clear_busy(dev);
+	rc = transmit_skb(privptr->channel[WRITE], skb);
+	if (fsm_getstate(privptr->channel[WRITE]->fsm) != CH_STATE_TX)
+		netif_wake_queue(dev);
+
+	spin_unlock_irqrestore(&privptr->devlock, saveflags);
 	return rc;
 }
 
@@ -3586,7 +3635,7 @@ ctc_init_netdevice(net_device *dev, int alloc_device)
 		return NULL;
 	}
 	fsm_newstate(privptr->fsm, DEV_STATE_STOPPED);
-	fsm_settimer(privptr->fsm, &privptr->restart_timer);
+	init_timer(&privptr->rst_timer);
 	/*
 	 * The (no-)carrier flag is invariant with DEV_STATE_RUNNING.
 	 * When state is RUNNING, carrier is present, otherwise not.
@@ -3604,7 +3653,6 @@ ctc_init_netdevice(net_device *dev, int alloc_device)
 	dev->addr_len            = 0;
 	dev->type                = ARPHRD_SLIP;
 	dev->tx_queue_len        = 100;
-	SET_DEVICE_START(dev, 1);
 	dev_init_buffers(dev);
 	dev->flags	         = IFF_POINTOPOINT | IFF_NOARP;
 	return dev;

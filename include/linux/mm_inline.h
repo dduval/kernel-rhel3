@@ -170,6 +170,16 @@ static inline void add_page_to_inactive_clean_list(struct page * page)
 	zone->inactive_clean_pages++;
 }
 
+static inline void add_page_to_wired_list(struct page * page)
+{
+        struct zone_struct * zone = page_zone(page);
+        DEBUG_LRU_PAGE(page);
+        SetPageWired(page);
+        BUG_ON(PageCompound(page));
+        list_add(&page->lru, &zone_wired[page->flags>>ZONE_SHIFT].wired_list);
+        zone_wired[page->flags>>ZONE_SHIFT].wired_pages++;
+}
+
 static inline void del_page_from_active_anon_list(struct page * page)
 {
 	struct zone_struct * zone = page_zone(page);
@@ -231,6 +241,17 @@ static inline void del_page_from_inactive_clean_list(struct page * page)
 	ClearPageInactiveClean(page);
 	zone->inactive_clean_pages--;
 	DEBUG_LRU_PAGE(page);
+}
+
+static inline void del_page_from_wired_list(struct page * page)
+{
+        struct zone_struct * zone = page_zone(page);
+
+        BUG_ON(PageCompound(page));
+        list_del(&page->lru);
+        ClearPageWired(page);
+        zone_wired[page->flags>>ZONE_SHIFT].wired_pages--;
+        DEBUG_LRU_PAGE(page);
 }
 
 /*

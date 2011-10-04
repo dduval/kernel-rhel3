@@ -314,7 +314,9 @@ extern void __handle_bad_pmd_kernel(pmd_t * pmd);
 
 #define pages_to_mb(x) ((x) >> (20-PAGE_SHIFT))
 
+#ifndef CONFIG_DISCONTIGMEM
 #define pte_page(x) (pfn_to_page((pte_val(x) & PHYSICAL_PAGE_MASK) >> PAGE_SHIFT))
+#endif
 #define pte_pfn(x) ((pte_val(x) & PHYSICAL_PAGE_MASK) >> PAGE_SHIFT)
 
 /*

@@ -105,11 +105,10 @@ void HvCall_writeLogBuffer(const void *buffer, u64 bufLen)
 			bytesLeft -= leftThisPage;
 		}
 
+		HvCall2(HvCallBaseWriteLogBuffer,
+			virt_to_absolute((unsigned long)&bufList), 
+			bufList.len);
+
 		curPtr = (curPtr & PAGE_MASK) + PAGE_SIZE;
 	}
-
-
-	HvCall2(HvCallBaseWriteLogBuffer,
-		virt_to_absolute((unsigned long)&bufList), bufLen);
-
 }

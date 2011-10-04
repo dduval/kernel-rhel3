@@ -225,6 +225,8 @@ typedef struct {
  * just lazyness here */
 static int qeth_reinit_thread(void*);
 static void qeth_schedule_recovery(qeth_card_t *card);
+int qeth_fake_header(struct sk_buff *skb, struct net_device *dev,
+    unsigned short type, void *daddr, void *saddr, unsigned len);
 
 inline static int QETH_IP_VERSION(struct sk_buff *skb)
 {
@@ -241,6 +243,20 @@ static inline int qeth_min(int a,int b)
 		return a;
 	else
 		return b;
+}
+
+/*                                                                             
+ * This is our local skb_unshare, only with pskb_copy instead of skb_copy.
+ * We place our headers whare Ethernet MAC was, so we do not need full skb_copy.
+ */
+static inline struct sk_buff *qeth_pskb_unshare(struct sk_buff *skb, int pri)
+{
+	struct sk_buff *nskb;
+	if (!skb_cloned(skb))
+		return skb;
+	nskb = skb_copy(skb, pri);
+	kfree_skb(skb);		/* Free our shared copy */
+	return nskb;
 }
 
 static inline unsigned int qeth_get_millis(void)
@@ -1283,8 +1299,9 @@ static inline struct sk_buff *qeth_get_skb(unsigned int len)
 	return skb;
 }
 
-static struct sk_buff *qeth_get_next_skb(qeth_card_t *card,
-	       				 int *element_ptr,int *pos_in_el_ptr,
+static inline struct sk_buff *qeth_get_next_skb(qeth_card_t *card,
+		     				int *element_ptr,
+						int *pos_in_el_ptr,
 			       		 void **hdr_ptr,
 					 qdio_buffer_t *buffer)
 {
@@ -1643,7 +1660,7 @@ static void qeth_read_in_buffer(qeth_card_t *card,int buffer_no)
 			} else {
 				/* clear source MAC for security reasons */
 				memset(skb->mac.raw+
-				       QETH_FAKE_LL_DEST_MAC_POS,0,
+				       QETH_FAKE_LL_SRC_MAC_POS,0,
 				       QETH_FAKE_LL_ADDR_LEN);
 			}
 			memcpy(skb->mac.raw+
@@ -1654,13 +1671,20 @@ static void qeth_read_in_buffer(qeth_card_t *card,int buffer_no)
 			skb->mac.raw=skb->data;
 		}
 
-		skb->ip_summed=card->options.checksum_type;
 		if (card->options.checksum_type==HW_CHECKSUMMING) {
 			/* do we have a checksummed packet? */
-			if (*(__u8*)(hdr_ptr+11)&
-			    QETH_EXT_HEADER_CSUM_TRANSP_REQ) {
-				/* skb->ip_summed is set already */
 
+			/* we only check for TCP/UDP checksums when the
+			 * pseudo header was also checked sucessfully -- for
+			 * the rest of the packets, it's not clear, whether
+			 * the upper layer csum is alright. And they
+			 * shouldn't occur too often anyway in real life */
+			if ( (*(__u8*)(hdr_ptr+11)&
+			      (QETH_EXT_HEADER_CSUM_HDR_REQ|
+			       QETH_EXT_HEADER_CSUM_TRANSP_REQ)) ==
+			      (QETH_EXT_HEADER_CSUM_HDR_REQ|
+			       QETH_EXT_HEADER_CSUM_TRANSP_REQ) ) {
+#if 0 /* csum does not need to be set inbound anyway */
 				/* vlan is not an issue here, it's still in
 				 * the QDIO header, not pushed in the
 				 * skb yet */
@@ -1678,10 +1702,14 @@ static void qeth_read_in_buffer(qeth_card_t *card,int buffer_no)
 						(&skb->data[ip_len+
 						 QETH_TCP_CSUM_OFFSET]);
 				}
+#endif /* csum */
+				skb->ip_summed=CHECKSUM_UNNECESSARY;
 			} else {
 				/* make the stack check it */
-				skb->ip_summed=SW_CHECKSUMMING;
+				skb->ip_summed=CHECKSUM_NONE;
 			}
+		} else {
+			skb->ip_summed=card->options.checksum_type;
 		}
 
 #ifdef QETH_VLAN
@@ -1735,7 +1763,7 @@ static void qeth_read_in_buffer(qeth_card_t *card,int buffer_no)
 				   buffer_no]);
 }
 
-static void qeth_fill_header(qeth_hdr_t *hdr,struct sk_buff *skb,
+static inline void qeth_fill_header(qeth_hdr_t *hdr,struct sk_buff *skb,
 	       		     int version,int multicast)
 {
 #ifdef QETH_DBF_LIKE_HELL
@@ -1836,7 +1864,7 @@ static void qeth_fill_header(qeth_hdr_t *hdr,struct sk_buff *skb,
 #endif /* QETH_DBF_LIKE_HELL */
 }
 
-static int inline qeth_fill_buffer(qdio_buffer_t *buffer,char *dataptr,
+static inline int qeth_fill_buffer(qdio_buffer_t *buffer,char *dataptr,
 		       		   int length,int element)
 {
 	int length_here;
@@ -1891,7 +1919,7 @@ static int inline qeth_fill_buffer(qdio_buffer_t *buffer,char *dataptr,
 	return element;
 }
 
-static void qeth_flush_packed_packets(qeth_card_t *card,int queue,
+static inline void qeth_flush_packed_packets(qeth_card_t *card,int queue,
 				      int under_int)
 {
 	qdio_buffer_t *buffer;
@@ -2055,7 +2083,7 @@ static inline int qeth_determine_send_error(int cc,int qdio_error,int sbalf15)
 	return ERROR_LINK_FAILURE; /* should never happen */
 }
 
-static void qeth_free_buffer(qeth_card_t *card,int queue,int bufno,
+static inline void qeth_free_buffer(qeth_card_t *card,int queue,int bufno,
 	       		     int qdio_error,int siga_error)
 {
 	struct sk_buff *skb;
@@ -2164,7 +2192,7 @@ static void qeth_free_buffer(qeth_card_t *card,int queue,int bufno,
 	card->send_retries[queue][bufno]=0;
 }
 
-static void qeth_free_all_skbs(qeth_card_t *card)
+static inline void qeth_free_all_skbs(qeth_card_t *card)
 {
 	int q,b;
 
@@ -2199,7 +2227,7 @@ static inline void qeth_flush_buffer(qeth_card_t *card,int queue,
 }
 #ifdef QETH_VLAN
 
-void qeth_insert_ipv6_vlan_tag(struct sk_buff *__skb)
+static inline void qeth_insert_ipv6_vlan_tag(struct sk_buff *__skb)
 {
 
 	/* Move the mac addresses to the beginning of the new header.
@@ -2230,7 +2258,7 @@ void qeth_insert_ipv6_vlan_tag(struct sk_buff *__skb)
 
 
 
-static void qeth_send_packet_fast(qeth_card_t *card,struct sk_buff *skb,
+static inline void qeth_send_packet_fast(qeth_card_t *card,struct sk_buff *skb,
 				  struct net_device *dev,
 				  int queue,int version,int multicast)
 {
@@ -2327,9 +2355,11 @@ static void qeth_send_packet_fast(qeth_card_t *card,struct sk_buff *skb,
 
 /* no checks, if all elements are used, as then we would not be here (at most
    127 buffers are enqueued) */
-static void qeth_send_packet_packed(qeth_card_t *card,struct sk_buff *skb,
+static inline void qeth_send_packet_packed(qeth_card_t *card,
+					   struct sk_buff *skb,
        				    struct net_device *dev,
-       				    int queue,int version,int multicast)
+					   int queue,int version,
+					   int multicast)
 {
 	qeth_ringbuffer_element_t *mybuffer;
 	int elements_needed;
@@ -2490,7 +2520,7 @@ static __inline__ int atomic_return_sub(int i, atomic_t *v)
 	return old_val;
 }
 
-static int qeth_do_send_packet(qeth_card_t *card,struct sk_buff *skb,
+static inline int qeth_do_send_packet(qeth_card_t *card,struct sk_buff *skb,
        			       struct net_device *dev)
 {
         int queue,result=0;
@@ -2640,6 +2670,23 @@ static int qeth_hard_start_xmit(struct sk_buff *skb,struct net_device *dev)
 		dst_link_failure(skb);
 		dev_kfree_skb_irq(skb);
 		return 0;
+	}
+
+	if (dev->hard_header == qeth_fake_header) {
+		/*
+		 * In theory, if we run in undef-ed QETH_IPV6, we should always
+		 * unshare, because we do skb_push, then overwrite that place
+		 * with OSA header in qeth_send_packet_fast().
+		 * But it is only visible to one application - tcpdump.
+		 * Nobody else cares if (fake) MAC header gets smashed.
+		 * So, we only do it if fake_ll is in effect.
+		 */
+		if ((skb = qeth_pskb_unshare(skb, GFP_ATOMIC)) == NULL) {
+			card->stats->tx_dropped++;
+			dev_kfree_skb_irq(skb);
+			return 0;
+		}
+		skb_pull(skb, QETH_FAKE_LL_LEN);
 	}
 
 	result=qeth_do_send_packet(card,skb,dev);
@@ -2962,6 +3009,15 @@ static int qeth_send_ipa_cmd(qeth_card_t *card,ipa_cmd_t *cmd,int update_cmd,
 		}
 		if ((ipa_cmd==IPA_CMD_SETADAPTERPARMS)&&(result==0)) {
 			result=reply->data.setadapterparms.return_code;
+		}
+		if ( (ipa_cmd==IPA_CMD_SETASSPARMS) &&
+		     (result==0) &&
+		     (reply->data.setassparms.assist_no==
+		      IPA_INBOUND_CHECKSUM) &&
+		     (reply->data.setassparms.command_code==
+		      IPA_CMD_ASS_START) ) {
+			card->csum_enable_mask=
+				reply->data.setassparms.data.flags_32bit;
 		}
 	}
         return result;
@@ -4440,7 +4496,11 @@ static int qeth_do_ioctl(struct net_device *dev,struct ifreq *rq,int cmd)
 
 	my_spin_lock(&card->ioctl_lock);
 
-	if (atomic_read(&card->shutdown_phase)) return -ENODEV;
+	if (atomic_read(&card->shutdown_phase)) {
+		ret_val=-ENODEV;
+		goto out;
+	}
+
 	if ( (!atomic_read(&card->is_registered))||
 	     (!atomic_read(&card->is_hardsetup))||
 	     (atomic_read(&card->is_gone)) ) {
@@ -4510,7 +4570,8 @@ static int qeth_do_ioctl(struct net_device *dev,struct ifreq *rq,int cmd)
 		break;
 
 	default:
-		return -EOPNOTSUPP;
+		ret_val=-EOPNOTSUPP;
+		goto out;
 	}
 out:
 	my_spin_unlock(&card->ioctl_lock);
@@ -5494,7 +5555,7 @@ go_on_filt:
 				result=qeth_send_setassparms_simple_with_data(
 					card,IPA_INBOUND_CHECKSUM,
 					IPA_CMD_ASS_ENABLE,
-					IPA_CHECKSUM_ENABLE_MASK);
+					card->csum_enable_mask);
 				if (result) {
 					PRINT_WARN("Could not enable inbound " \
 						   "checksumming on %s: " \
@@ -7388,6 +7449,35 @@ static int qeth_verify_card(qeth_card_t *card)
 	return result;
 }
 
+/*
+ * This function is needed to tell af_packet.c to process headers.
+ * It is not called from there, but only from the transmit path,
+ * when we do not need any actual header.
+ *
+ * N.B. Why do we insist on kludging here instead of fixing tcpdump?
+ * Because tcpdump is shared among gazillions of platforms, and
+ * there is a) no reliable way to identify qeth or its packets
+ * in pcap-linux.c (sll->sll_halen is the only hope); b) no easy
+ * way to pass this information from libpcap to tcpdump proper.
+ *
+ * XXX This fails with TR: traffic flows ok, but tcpdump remains confused.
+ */
+int qeth_fake_header(struct sk_buff *skb, struct net_device *dev,
+    unsigned short type, void *daddr, void *saddr, unsigned len)
+{
+	unsigned char *hdr;
+
+	hdr = skb_push(skb, QETH_FAKE_LL_LEN);
+	memcpy(hdr, "FAKELLFAKELL", ETH_ALEN*2);
+	if (type != ETH_P_802_3)
+		*(u16 *)(hdr + ETH_ALEN*2) = htons(type);
+	else
+		*(u16 *)(hdr + ETH_ALEN*2) = htons(len);
+
+	/* XXX Maybe dev->hard_header_len here? Then skb_pull by same size. */
+	return QETH_FAKE_LL_LEN;
+}
+
 #ifdef QETH_IPV6
 extern struct neigh_table arp_tbl;
 int (*qeth_old_arp_constructor)(struct neighbour *);
@@ -7567,6 +7657,8 @@ static int qeth_init_dev(struct net_device *dev)
 		(!(qeth_get_additional_dev_flags(card->type)&IFF_NOARP))?
 		(qeth_get_hard_header(card->link_type)?
 		 qeth_hard_header:NULL):
+#else
+		(card->options.fake_ll==FAKE_LL)? qeth_fake_header:
 #endif /* QETH_IPV6 */
 		NULL;
 	dev->header_cache_update=
@@ -8345,6 +8437,8 @@ static qeth_card_t *qeth_alloc_card(void)
 	card->ip_mc_current_state.ipm6_ifa=NULL;
 	card->ip_mc_new_state.ipm6_ifa=NULL;
 #endif /* QETH_IPV6 */
+
+	card->csum_enable_mask=IPA_CHECKSUM_DEFAULT_ENABLE_MASK;
 
         /* setup net_device stuff */
 	card->dev->priv=card;
@@ -9584,22 +9678,20 @@ static int qeth_procfile_open(struct inode *inode, struct file *file)
 		}
 
 #ifdef QETH_IPV6
-		if (atomic_read(&card->rt4fld) &&
-		    atomic_read(&card->rt6fld))
-			strcpy(router_str, "no");
-		else if (atomic_read(&card->rt4fld) ||
+		if (atomic_read(&card->rt4fld) ||
 			 atomic_read(&card->rt6fld))
-			strcpy(router_str, "mix");
+			strcpy(router_str, "FLD");
 #else /* QETH_IPV6 */
 		if (atomic_read(&card->rt4fld))
-			strcpy(router_str, "no");
+			strcpy(router_str, "FLD");
 #endif /* QETH_IPV6 */		
 		else if ( ((card->options.routing_type4&ROUTER_MASK)==
 		      PRIMARY_ROUTER) 
 #ifdef QETH_IPV6
 		     &&
-		     ((card->options.routing_type6&ROUTER_MASK)==
-		      PRIMARY_ROUTER) 
+		     ( ((card->options.routing_type6&ROUTER_MASK)==
+			PRIMARY_ROUTER)||
+		       (!qeth_is_supported(IPA_IPv6)) )
 #endif /* QETH_IPV6 */
 		     ) {
 			strcpy(router_str,"pri");
@@ -9608,8 +9700,9 @@ static int qeth_procfile_open(struct inode *inode, struct file *file)
 		      SECONDARY_ROUTER) 
 #ifdef QETH_IPV6
 		     &&
-		     ((card->options.routing_type6&ROUTER_MASK)==
-		      SECONDARY_ROUTER) 
+		     ( ((card->options.routing_type6&ROUTER_MASK)==
+			SECONDARY_ROUTER)||
+		       (!qeth_is_supported(IPA_IPv6)) )
 #endif /* QETH_IPV6 */
 		     ) {
 			strcpy(router_str,"sec");
@@ -9618,8 +9711,9 @@ static int qeth_procfile_open(struct inode *inode, struct file *file)
 		      MULTICAST_ROUTER) 
 #ifdef QETH_IPV6
 		     &&
-		     ((card->options.routing_type6&ROUTER_MASK)==
-		      MULTICAST_ROUTER) 
+		     ( ((card->options.routing_type6&ROUTER_MASK)==
+			MULTICAST_ROUTER)||
+		       (!qeth_is_supported(IPA_IPv6)) )
 #endif /* QETH_IPV6 */
 		     ) {
 			strcpy(router_str,"mc");
@@ -9628,8 +9722,9 @@ static int qeth_procfile_open(struct inode *inode, struct file *file)
 		      PRIMARY_CONNECTOR) 
 #ifdef QETH_IPV6
 		     &&
-		     ((card->options.routing_type6&ROUTER_MASK)==
-		      PRIMARY_CONNECTOR) 
+		     ( ((card->options.routing_type6&ROUTER_MASK)==
+			PRIMARY_CONNECTOR)||
+		       (!qeth_is_supported(IPA_IPv6)) )
 #endif /* QETH_IPV6 */
 		     ) {
 			strcpy(router_str,"p.c");
@@ -9638,8 +9733,9 @@ static int qeth_procfile_open(struct inode *inode, struct file *file)
 		      SECONDARY_CONNECTOR)
 #ifdef QETH_IPV6
 		     &&
-		     ((card->options.routing_type6&ROUTER_MASK)==
-		      SECONDARY_CONNECTOR) 
+		     ( ((card->options.routing_type6&ROUTER_MASK)==
+			SECONDARY_CONNECTOR)||
+		       (!qeth_is_supported(IPA_IPv6)) )
 #endif /* QETH_IPV6 */
 		     ) {
 			strcpy(router_str,"s.c");
@@ -9648,8 +9744,9 @@ static int qeth_procfile_open(struct inode *inode, struct file *file)
 		      NO_ROUTER) 
 #ifdef QETH_IPV6
 		     &&
-		     ((card->options.routing_type6&ROUTER_MASK)==
-		      NO_ROUTER) 
+		     ( ((card->options.routing_type6&ROUTER_MASK)==
+			NO_ROUTER)||
+		       (!qeth_is_supported(IPA_IPv6)) )
 #endif /* QETH_IPV6 */
 		     ) {
 			strcpy(router_str,"no");
@@ -10598,6 +10695,7 @@ static int qeth_procfile_ioctl(struct inode *inode, struct file *file,
 {
 
      int result;
+     MOD_INC_USE_COUNT;
      down_interruptible(&qeth_procfile_ioctl_lock);
      switch (cmd) {
 
@@ -10605,12 +10703,13 @@ static int qeth_procfile_ioctl(struct inode *inode, struct file *file,
 	     result = qeth_procfile_getinterfaces(arg);
 	     break;
      case QETH_IOCPROC_INTERFACECHANGES:
-	     result = qeth_procfile_interfacechanges(arg);
-	     break;
+	      result = qeth_procfile_interfacechanges(arg);
+	      break;
      default:
 	     result = -EOPNOTSUPP;	     
      }
      up(&qeth_procfile_ioctl_lock);
+     MOD_DEC_USE_COUNT;	
      return result;
 };
 

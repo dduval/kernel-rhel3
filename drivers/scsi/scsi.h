@@ -613,6 +613,11 @@ struct scsi_device {
 	unsigned remap:1;	/* support remapping  */
 	unsigned starved:1;	/* unable to process commands because
 				   host busy */
+#ifndef __GENKSYMS__ /* preserve KMI/ABI ksyms compatibility for mod linkage */
+	unsigned no_start_on_add:1;	/* do not issue start on add */
+	unsigned unblock_timer_active:1; /* we've set a timer on this device
+					    to unblock it */
+#endif
 
 	// Flag to allow revalidate to succeed in sd_open
 	int allow_revalidate;

@@ -252,9 +252,7 @@ void list_directory (tux_req_t *req, int cachemiss)
 		return;
 	}
 
-	dirp0 = kmalloc(DIRENT_SIZE, GFP_KERNEL);
-	if (!dirp0)
-		TUX_BUG();
+	dirp0 = tux_kmalloc(DIRENT_SIZE);
 
 	buf.current_dir = dirp0;
 	buf.previous = NULL;

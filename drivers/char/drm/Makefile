@@ -27,6 +27,7 @@ obj-$(CONFIG_DRM_FFB)   += ffb.o
 obj-$(CONFIG_DRM_SIS)   += sis.o
 
 include $(TOPDIR)/Rules.make
+MOD_DESTDIR:=$(subst -hp_ia64,,$(MOD_DESTDIR))
 
 gamma.o: $(gamma-objs) $(lib)
 	$(LD) -r -o $@ $(gamma-objs) $(lib)

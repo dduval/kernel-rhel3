@@ -892,7 +892,7 @@ shmem_file_write(struct file *file,const char *buf,size_t count,loff_t *ppos)
 	struct page	*page;
 	unsigned long	written;
 	long		status;
-	int		err;
+	ssize_t		err;
 	loff_t		maxpos;
 
 	if ((ssize_t) count < 0)

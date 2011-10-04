@@ -37,9 +37,11 @@
 
 #include <linux/major.h>
 #include <linux/config.h>
-
 #include <linux/fs.h>
 #include <linux/blkpg.h>
+#include <linux/types.h>
+#include <asm/semaphore.h>
+#include <linux/seq_file.h>
 
 /* Changelog:
 	2001-11-27	devilbis	Added first pass at complete IDE emulation
@@ -265,52 +267,73 @@ static LIST_HEAD(reqlist);
 
 /* Handle reads from the proc file system
  */
-static int proc_read(char *buf, char **start, off_t offset,
-		     int blen, int *eof, void *data)
+static int show_viodasd(struct seq_file *m, void *v)
 {
-	int len = 0;
 	int i;
 	int j;
 
 #if defined(MODULE)
-	len +=
-	    sprintf(buf + len,
+	    seq_printf(m,
 		    "viod Module opened %d times.  Major number %d\n",
 		    MOD_IN_USE, major_table[0]);
 #endif
-	len +=
-	    sprintf(buf + len, "viod %d possible devices\n", MAX_DISKNO);
+	seq_printf(m, "viod %d possible devices\n", MAX_DISKNO);
 
 	for (i = 0; i <= viodasd_max_disk && i < MAX_DISKNO; i++) {
 		if (viod_stats[i][0].tot || viod_stats[i][1].tot) {
-			len +=
-			    sprintf(buf + len,
+			seq_printf(m,
 				    "DISK %2.2d: rd %-10.10ld wr %-10.10ld (no buffer list rd %-10.10ld wr %-10.10ld\n",
 				    i, viod_stats[i][0].tot,
 				    viod_stats[i][1].tot,
 				    viod_stats[i][0].nobh,
 				    viod_stats[i][1].nobh);
 
-			len += sprintf(buf + len, "rd DMA: ");
+			seq_printf(m, "rd DMA: ");
 
 			for (j = 0; j < VIOMAXBLOCKDMA; j++)
-				len += sprintf(buf + len, " [%2.2d] %ld",
+				seq_printf(m, " [%2.2d] %ld",
 					       j,
 					       viod_stats[i][0].ntce[j]);
 
-			len += sprintf(buf + len, "\nwr DMA: ");
+			seq_printf(m, "\nwr DMA: ");
 
 			for (j = 0; j < VIOMAXBLOCKDMA; j++)
-				len += sprintf(buf + len, " [%2.2d] %ld",
+				seq_printf(m, " [%2.2d] %ld",
 					       j,
 					       viod_stats[i][1].ntce[j]);
-			len += sprintf(buf + len, "\n");
+			seq_printf(m, "\n");
 		}
 	}
 
-	*eof = 1;
-	return len;
+	return 0;
 }
+
+/* associate proc_viodasd_sops with this seq_file */
+static int viodasd_proc_open(struct inode *inode, struct file *file)
+{
+	size_t size = PAGE_SIZE;
+	char *buf = kmalloc(size, GFP_KERNEL);
+	struct seq_file *m;
+	int status;
+
+	if (!buf)
+		return -ENOMEM;
+	status = single_open(file, show_viodasd, NULL);
+	if (!status) {
+		m = file->private_data;
+		m->buf = buf;
+		m->size = size;
+	} else
+		kfree(buf);
+	return status;
+}
+
+static struct file_operations proc_viodasd_fops = {
+        .open = viodasd_proc_open,
+        .read = seq_read,
+        .llseek = seq_lseek,
+        .release = single_release,
+};
 
 /* setup our proc file system entries
  */
@@ -322,10 +345,7 @@ void viodasd_proc_init(struct proc_dir_entry *iSeries_proc)
 	if (!ent)
 		return;
 	ent->owner = THIS_MODULE;
-	ent->nlink = 1;
-	ent->data = NULL;
-	ent->read_proc = proc_read;
-	ent->write_proc = NULL;
+	ent->proc_fops = &proc_viodasd_fops;
 }
 
 /* clean up our proc file system entries
@@ -1235,10 +1255,19 @@ static int viodasd_handleReadWrite(struct vioblocklpevent *bevent)
 			viodasd_end_request(req, 1);
 		}
 	} else {
+		int success = (event->xRc == HvLpEvent_Rc_Good);
+		if (!success) {
+			const struct vio_error_entry *err =
+			    vio_lookup_rc(viodasd_err_table,
+					  bevent->mSubTypeRc);
+			printk(KERN_WARNING_VIO
+			       "read/write error %d:0x%04x (%s)\n",
+			       event->xRc, bevent->mSubTypeRc, err->msg);
+		}
 		/* record having received the answers we did */
 		while ((num_sect > 0) && (req->bh)) {
 			num_sect -= req->current_nr_sectors;
-			viodasd_end_request(req, 1);
+			viodasd_end_request(req, success);
 		}
 		/* if they somehow answered _more_ than we asked for,
 		 * data corruption has occurred */

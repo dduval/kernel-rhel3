@@ -43,6 +43,7 @@
 #include <asm/machvec.h>
 #include <asm/page.h>
 #include <asm/system.h>
+#include <asm/cyclone.h>
 
 
 #define PREFIX			"ACPI: "
@@ -58,7 +59,7 @@ void (*pm_power_off) (void);
 
 unsigned char acpi_kbd_controller_present = 1;
 
-int acpi_disabled __initdata = 0;
+int acpi_disabled = 0;
 
 const char *
 acpi_get_sysname (void)
@@ -271,6 +272,17 @@ acpi_hp_csr_space(acpi_handle obj, u64 *csr_base, u64 *csr_length)
 	acpi_os_free(buf.pointer);
 	return status;
 }
+
+/* Hook from generic ACPI tables.c */
+void __init acpi_madt_oem_check(char *oem_id, char *oem_table_id)
+{
+		 if (!strncmp(oem_id, "IBM", 3) &&
+		     (!strncmp(oem_table_id, "SERMOW", 6))){
+		 		 /*Start cyclone clock*/
+		 		 cyclone_setup(0);
+		 }
+}
+
 #endif /* CONFIG_ACPI */
 
 #ifdef CONFIG_ACPI_BOOT
@@ -556,6 +568,9 @@ acpi_parse_madt (unsigned long phys_addr, unsigned long size)
 		ipi_base_addr = (unsigned long) ioremap(acpi_madt->lapic_address, 0);
 
 	printk(KERN_INFO PREFIX "Local APIC address 0x%lx\n", ipi_base_addr);
+
+	acpi_madt_oem_check(acpi_madt->header.oem_id,
+			acpi_madt->header.oem_table_id);
 	return 0;
 }
 

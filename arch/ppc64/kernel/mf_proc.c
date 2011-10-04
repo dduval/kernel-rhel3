@@ -43,8 +43,6 @@ int proc_mf_dump_side
 int proc_mf_change_side
 (struct file *file, const char *buffer, unsigned long count, void *data);
 
-int proc_mf_dump_src
-(char *page, char **start, off_t off, int count, int *eof, void *data);
 int proc_mf_change_src (struct file *file, const char *buffer, unsigned long count, void *data);
 int proc_mf_change_cmdline(struct file *file, const char *buffer, unsigned long count, void *data);
 int proc_mf_change_vmlinux(struct file *file, const char *buffer, unsigned long count, void *data);
@@ -141,7 +139,7 @@ void mf_proc_init(struct proc_dir_entry *iSeries_proc)
 	if (!ent) return;
 	ent->nlink = 1;
 	ent->data = (void *)0;
-	ent->read_proc = proc_mf_dump_src;
+	ent->read_proc = NULL;
 	ent->write_proc = proc_mf_change_src;
 }
 
@@ -220,78 +218,69 @@ int proc_mf_dump_side
 
 int proc_mf_change_side(struct file *file, const char *buffer, unsigned long count, void *data)
 {
+	char side;
+	int rc;
+
 	if (!capable(CAP_SYS_ADMIN))
 		return -EACCES;
-
-	if ((*buffer != 'A') &&
-	    (*buffer != 'B') &&
-	    (*buffer != 'C') &&
-	    (*buffer != 'D'))
-	{
-		printk(KERN_ERR "mf_proc.c: proc_mf_change_side: invalid side\n");
+	if ((count != 1) && (count != 2)) 
+		return -EINVAL;
+	if (copy_from_user (&side, buffer, 1)) {
+		return -EFAULT;
+	}
+	if ((side < 'A') || (side > 'D')) {
+		printk(KERN_INFO "proc_mf_change_side: invalid side\n");
 		return -EINVAL;
 	}
-
-	mf_setSide(*buffer);
-
-	return count;			
-}
-
-int proc_mf_dump_src
-(char *page, char **start, off_t off, int count, int *eof, void *data)
-{
-	int		len = 0;
-	mf_getSrcHistory(page, count);
-	len = count;
-	len -= off;			
-	if (len < count) {		
-		*eof = 1;		
-		if (len <= 0)		
-			return 0;	
-	} else				
-		len = count;		
-	*start = page + off;		
-	return len;			
+	rc = mf_setSide(side);
+	return rc ? rc : count;			
 }
 
 int proc_mf_change_src(struct file *file, const char *buffer, unsigned long count, void *data)
 {
+	char source[4];
+
 	if (!capable(CAP_SYS_ADMIN))
 		return -EACCES;
-
-	if ((count < 4) && (count != 1))
-	{
-		printk(KERN_ERR "mf_proc: invalid src\n");
+	if ((count < 4) && (count != 1)) {
+		printk(KERN_INFO "proc_mf_change_src: invalid src\n");
 		return -EINVAL;
 	}
-
-	if ((count == 1) && ((*buffer) == '\0'))
-	{
+	if (count > 4) count = 4;
+	if (copy_from_user (source, buffer, count)) {
+		return -EFAULT;
+	}
+	if ((count == 1) && ((*source) == '\0')) {
 		mf_clearSrc();
 	} else {
-		mf_displaySrc(*(u32 *)buffer);
+		mf_displaySrc(*(u32 *)source);
 	}
-
 	return count;			
 }
 
 int proc_mf_change_cmdline(struct file *file, const char *buffer, unsigned long count, void *data)
 {
+	int rc;
+
 	if (!capable(CAP_SYS_ADMIN))
 		return -EACCES;
 
-	mf_setCmdLine(buffer, count, (u64)data);
+	rc = mf_setCmdLine(buffer, count, (u64)data);
 
-	return count;			
+	return rc ? rc : count;			
 }
 
 int proc_mf_change_vmlinux(struct file *file, const char *buffer, unsigned long count, void *data)
 {
+	int rc;
+
 	if (!capable(CAP_SYS_ADMIN))
 		return -EACCES;
 
-	mf_setVmlinuxChunk(buffer, count, file->f_pos, (u64)data);
-	file->f_pos += count;
+	rc = mf_setVmlinuxChunk(buffer, count, file->f_pos, (u64)data);
+	if (rc)
+		return rc;
 
+	file->f_pos += count;
 	return count;			
 }

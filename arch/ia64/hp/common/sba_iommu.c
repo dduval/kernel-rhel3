@@ -962,7 +962,7 @@ sba_alloc_consistent(struct pci_dev *hwdev, size_t size, dma_addr_t *dma_handle)
 		return 0;
 	}
 
-        ret = (void *) __get_free_pages(GFP_ATOMIC, get_order(size));
+	ret = (void *) __get_free_pages(GFP_ATOMIC|GFP_DMA, get_order(size));
 
 	if (ret) {
 		memset(ret, 0, size);

@@ -871,6 +871,13 @@ static int sd_init_onedisk(int i)
 			break;
 		}
 
+		/*
+		 * The device does not want the automatic start to be issued.
+		 */
+		if (rscsi_disks[i].device->no_start_on_add) {
+			break;
+		}
+
 		/* Look for non-removable devices that return NOT_READY,
 		 * and don't require manual intervention.
 		 * Issue command to spin up drive for these cases. */
@@ -891,7 +898,7 @@ static int sd_init_onedisk(int i)
 				SRpnt->sr_sense_buffer[0] = 0;
 				SRpnt->sr_sense_buffer[2] = 0;
 
-				SRpnt->sr_data_direction = SCSI_DATA_READ;
+				SRpnt->sr_data_direction = SCSI_DATA_NONE;
 				scsi_wait_req(SRpnt, (void *) cmd, (void *) buffer,
 					    0/*512*/, SD_TIMEOUT, MAX_RETRIES);
 				spintime_value = jiffies;

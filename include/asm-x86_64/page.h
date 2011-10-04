@@ -141,8 +141,6 @@ extern __inline__ int get_order(unsigned long size)
 #define page_to_pfn(page)	((unsigned long)((page) - mem_map))
 #define pfn_valid(pfn)		((pfn) < max_mapnr)
 #define VALID_PAGE(page)	(((page) - mem_map) < max_mapnr)
-#else
-#include <asm/mmzone.h>
 #endif
 
 #define pfn_to_phys(pfn)	((unsigned long)(pfn) << PAGE_SHIFT)

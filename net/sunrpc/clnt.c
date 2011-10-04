@@ -395,8 +395,6 @@ call_start(struct rpc_task *task)
 static void
 call_reserve(struct rpc_task *task)
 {
-	struct rpc_clnt	*clnt = task->tk_client;
-
 	dprintk("RPC: %4d call_reserve\n", task->tk_pid);
 
 	if (!rpcauth_uptodatecred(task)) {
@@ -406,7 +404,6 @@ call_reserve(struct rpc_task *task)
 
 	task->tk_status  = 0;
 	task->tk_action  = call_reserveresult;
-	task->tk_timeout = clnt->cl_timeout.to_resrvval;
 	xprt_reserve(task);
 }
 
@@ -420,38 +417,46 @@ call_reserveresult(struct rpc_task *task)
 
 	dprintk("RPC: %4d call_reserveresult (status %d)\n",
 				task->tk_pid, task->tk_status);
+
 	/*
 	 * After a call to xprt_reserve(), we must have either
 	 * a request slot or else an error status.
 	 */
-	if ((task->tk_status >= 0 && !task->tk_rqstp) ||
-	    (task->tk_status < 0 && task->tk_rqstp))
-		printk(KERN_ERR "call_reserveresult: status=%d, request=%p??\n",
-		 task->tk_status, task->tk_rqstp);
+	task->tk_status = 0;
+	if (status >= 0) {
+		if (task->tk_rqstp) {
+			task->tk_action = call_allocate;
+			return;
+		}
 
-	if (task->tk_status >= 0) {
-		task->tk_action = call_allocate;
+		printk(KERN_ERR "%s: status=%d, but no request slot, exiting\n",
+				__FUNCTION__, status);
+		rpc_exit(task, -EIO);
 		return;
 	}
 
-	task->tk_status = 0;
+	/*
+	 * Even though there was an error, we may have acquired
+	 * a request slot somehow.  Make sure not to leak it.
+	 */
+	if (task->tk_rqstp) {
+		printk(KERN_ERR "%s: status=%d, request allocated anyway\n",
+				__FUNCTION__, status);
+		xprt_release(task);
+	}
+
 	switch (status) {
-	case -EAGAIN:
-	case -ENOBUFS:
-		task->tk_timeout = task->tk_client->cl_timeout.to_resrvval;
+	case -EAGAIN:	/* woken up; retry */
 		task->tk_action = call_reserve;
-		break;
-	case -ETIMEDOUT:
-		dprintk("RPC: task timed out\n");
-		task->tk_action = call_timeout;
+		return;
+	case -EIO:	/* probably a shutdown */
 		break;
 	default:
-		if (!task->tk_rqstp) {
-			printk(KERN_INFO "RPC: task has no request, exit EIO\n");
-			rpc_exit(task, -EIO);
-		} else
-			rpc_exit(task, status);
+		printk(KERN_ERR "%s: unrecognized error %d, exiting\n",
+				__FUNCTION__, status);
+		break;
 	}
+	rpc_exit(task, status);
 }
 
 /*
@@ -545,6 +550,9 @@ call_bind(struct rpc_task *task)
 {
 	struct rpc_clnt	*clnt = task->tk_client;
 	struct rpc_xprt *xprt = clnt->cl_xprt;
+
+	dprintk("RPC: %4d call_bind xprt %p %s connected\n", task->tk_pid,
+		xprt, (xprt_connected(xprt) ? "is" : "is not"));
 
 	task->tk_action = (xprt_connected(xprt)) ? call_transmit : call_connect;
 
@@ -694,54 +702,34 @@ static void
 call_timeout(struct rpc_task *task)
 {
 	struct rpc_clnt	*clnt = task->tk_client;
-	struct rpc_rqst	*req = task->tk_rqstp;
+	struct rpc_timeout *to = &task->tk_rqstp->rq_timeout;
 
-	if (req) {
-		struct rpc_timeout *to = &req->rq_timeout;
-
-		if (xprt_adjust_timeout(to)) {
-			dprintk("RPC: %4d call_timeout (minor timeo)\n",
-				task->tk_pid);
-			goto minor_timeout;
-		}
-		to->to_retries = clnt->cl_timeout.to_retries;
+	if (xprt_adjust_timeout(to)) {
+		dprintk("RPC: %4d call_timeout (minor)\n",
+			task->tk_pid);
+		goto retry;
 	}
+	to->to_retries = clnt->cl_timeout.to_retries;
 
-	dprintk("RPC: %4d call_timeout (major timeo)\n", task->tk_pid);
+	dprintk("RPC: %4d call_timeout (major)\n", task->tk_pid);
 	if (clnt->cl_softrtry) {
-		if (clnt->cl_chatty && !task->tk_exit)
+		if (clnt->cl_chatty)
 			printk(KERN_NOTICE "%s: server %s not responding, timed out\n",
 				clnt->cl_protname, clnt->cl_server);
 		rpc_exit(task, -EIO);
 		return;
 	}
-	if (clnt->cl_chatty && !(task->tk_flags & RPC_CALL_MAJORSEEN) && rpc_ntimeo(&clnt->cl_rtt) > 7) {
+	if (clnt->cl_chatty && !(task->tk_flags & RPC_CALL_MAJORSEEN)) {
 		task->tk_flags |= RPC_CALL_MAJORSEEN;
-		if (req)
-			printk(KERN_NOTICE "%s: server %s not responding, still trying\n",
-				clnt->cl_protname, clnt->cl_server);
-#ifdef RPC_DEBUG				
-		else
-			printk(KERN_NOTICE "%s: task %d can't get a request slot\n",
-				clnt->cl_protname, task->tk_pid);
-#endif				
+		printk(KERN_NOTICE "%s: server %s not responding, still trying\n",
+			clnt->cl_protname, clnt->cl_server);
 	}
 	if (clnt->cl_autobind)
 		clnt->cl_port = 0;
 
-minor_timeout:
-	if (!req)
-		task->tk_action = call_reserve;
-	else if (!clnt->cl_port) {
-		task->tk_action = call_bind;
-		clnt->cl_stats->rpcretrans++;
-	} else if (!xprt_connected(clnt->cl_xprt)) {
-		task->tk_action = call_connect;
-		clnt->cl_stats->rpcretrans++;
-	} else {
-		task->tk_action = call_transmit;
-		clnt->cl_stats->rpcretrans++;
-	}
+retry:
+	clnt->cl_stats->rpcretrans++;
+	task->tk_action = call_bind;
 	task->tk_status = 0;
 }
 

@@ -167,7 +167,7 @@ out:
 		addr = *stack++;
 		if (kernel_text_address(addr)) {
 			lookup_symbol(addr, buffer, 512);
-			printk("[<%08lx>] %s (0x%x)\n", addr,buffer,stack-1);
+			printk("[<%08lx>] %s (0x%p)\n", addr,buffer,stack-1);
 			i++;
 		}
 	}
@@ -216,6 +216,12 @@ void dump_stack(void)
 	show_stack(0);
 }
 
+#ifdef CONFIG_MK7
+#define ARCHIT "/athlon"
+#else
+#define ARCHIT "/i686"
+#endif
+
 void show_registers(struct pt_regs *regs)
 {
 	int i;
@@ -236,7 +242,7 @@ void show_registers(struct pt_regs *regs)
 	lookup_symbol(regs->eip, buffer, 512);
 	printk("CPU:    %d\nEIP:    %04x:[<%08lx>]    %s\nEFLAGS: %08lx\n",
 		smp_processor_id(), 0xffff & regs->xcs, regs->eip, print_tainted(), regs->eflags);
-	printk("\nEIP is at %s (" UTS_RELEASE ")\n",buffer);
+	printk("\nEIP is at %s (" UTS_RELEASE ARCHIT ")\n",buffer);
 	printk("eax: %08lx   ebx: %08lx   ecx: %08lx   edx: %08lx\n",
 		regs->eax, regs->ebx, regs->ecx, regs->edx);
 	printk("esi: %08lx   edi: %08lx   ebp: %08lx   esp: %08lx\n",

@@ -145,9 +145,7 @@ static tux_req_t * kmalloc_req (threadinfo_t * ti)
 		spin_unlock_irqrestore(&ti->free_requests_lock, flags);
 	} else {
 		spin_unlock_irqrestore(&ti->free_requests_lock, flags);
-		req = kmalloc(sizeof(*req), GFP_KERNEL); 
-		if (!req)
-			return NULL;
+		req = tux_kmalloc(sizeof(*req));
 		ti->nr_requests++;
 		memset (req, 0, sizeof(*req));
 		list_add(&req->all, &ti->all_requests);

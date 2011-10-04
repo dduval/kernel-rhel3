@@ -26,6 +26,7 @@
 #include <linux/highmem.h>
 #include <linux/file.h>
 #include <linux/mm_inline.h>
+#include <linux/kernel.h>
 
 #include <asm/pgalloc.h>
 
@@ -206,10 +207,6 @@ struct page * reclaim_page(zone_t * zone)
 		 * a reference is held, we end up here with the
 		 * page->count == 1 (the temp ref), but no mapping.
 		 */
-		printk(KERN_WARNING
-		       "%s got unmapped page %p (count %d), "
-		       "let's see if we survive!\n",
-		       __FUNCTION__, page, page_count(page));
 		del_page_from_inactive_clean_list(page);
 		add_page_to_inactive_dirty_list(page);
 		zone->inactive_clean_pages--;
@@ -235,17 +232,20 @@ found_page:
 	return page;
 }
 
+int inactive_clean_percent = 5;
+
 /**
  * need_rebalance_dirty - do we need to write inactive stuff to disk?
  * @zone: the zone in question
  *
- * Returns true if the zone in question has an inbalance between inactive
- * dirty on one side and inactive laundry + inactive clean on the other
- * Right now set the balance at 50%; may need tuning later on
+ * Returns true if the zone in question has too few inactive laundry
+ * and inactive clean pages. 
+ *
  */
 static inline int need_rebalance_dirty(zone_t * zone)
 {
-	if (zone->inactive_dirty_pages > zone->inactive_laundry_pages + zone->inactive_clean_pages)
+	if ((zone->inactive_dirty_pages*inactive_clean_percent/100) > 
+		(zone->inactive_laundry_pages + zone->inactive_clean_pages))
 		return 1;
 
 	return 0;
@@ -255,13 +255,14 @@ static inline int need_rebalance_dirty(zone_t * zone)
  * need_rebalance_laundry - does the zone have too few inactive_clean pages?
  * @zone: the zone in question
  *
- * Returns true if the zone in question has too few pages in inactive clean
- * + free
+ * Returns true if the zone in question has too few pages in inactive clean pages.
+ * 
  */
 static inline int need_rebalance_laundry(zone_t * zone)
 {
-	if (free_high(zone) >= 0)
+	if (zone->inactive_laundry_pages > zone->inactive_clean_pages)
 		return 1;
+
 	return 0;
 }
 
@@ -421,10 +422,11 @@ int launder_page(zone_t * zone, int gfp_mask, struct page *page)
 	 * the page as well.
 	 */
 	if (page->buffers) {
+		int ret;
 		/* To avoid freeing our page before we're done. */
 		lru_unlock(zone);
 
-		try_to_release_page(page, gfp_mask);
+		ret = try_to_release_page(page, gfp_mask);
 		UnlockPage(page);
 
 		/* 
@@ -435,7 +437,7 @@ int launder_page(zone_t * zone, int gfp_mask, struct page *page)
 		page_cache_release(page);
 
 		lru_lock(zone);
-		return 1;
+		return ret;
 	}
 
 	/*
@@ -562,115 +564,130 @@ struct cache_limits cache_limits = {
  */
 int refill_inactive_zone(struct zone_struct * zone, int priority, int target)
 {
-	int maxscan = (zone->active_anon_pages + zone->active_cache_pages) >> priority;
 	struct list_head * page_lru;
 	struct page * page;
 	int over_rsslimit;
 	int progress = 0;
-	int reclaim_anon = 0;
-	int reclaim_cache = 1;
+	int cache_percent, total_active, cache_work, anon_work, cache_goal, maxscan;
 
-	/* Take the lock while messing with the list... */
-	lru_lock(zone);
 	if (target < BATCH_WORK_AMOUNT)
 		target = BATCH_WORK_AMOUNT;
 
-	if (cache_ratio(zone) < cache_limits.borrow)
-		reclaim_anon = 1;
-	if (cache_ratio(zone) < cache_limits.min)
-		reclaim_cache = 0;
-	/* Could happen if the sysadmin sets borrow below min... */
-	if (!reclaim_anon && !reclaim_cache)
-		reclaim_cache = reclaim_anon = 1;
+	/* Take the lock while messing with the list... */
+	lru_lock(zone);
 
-	while (maxscan-- && zone->active_anon_pages + zone->active_cache_pages > 0 && target > 0) {
-		int anon_work = 0, cache_work = 0;
-		if (reclaim_anon)
-			anon_work = BATCH_WORK_AMOUNT;
-		if (reclaim_cache)
-			cache_work = BATCH_WORK_AMOUNT;
+	/* active cache should be at cache_limits.borrow */
+	total_active = zone->active_anon_pages + zone->active_cache_pages;
+	cache_goal = total_active * cache_limits.borrow/100;
+	cache_goal = min(cache_goal, (total_active * cache_limits.max / 100));
+	cache_goal = max(cache_goal, (total_active * cache_limits.min / 100));
 
-		while (--anon_work >= 0 && zone->active_anon_pages) {
-			if (list_empty(&zone->active_anon_list[0])) {
-				kachunk_anon(zone);
-				continue;
-			}
+	/* Calculate number of cache pages to deactivate so it's at cache_limits.borrow.
+	 * -If the cache is currently at cache_limits.borrow then deactivate 50% from cache 
+	 *  and 50% from anon to keep it that way.
+	 * -Otherwise deactivate a number of pages from the cache thats proportional to
+	 *  how far it's currently above or below cache_limits.borrow.
+	 * -The difference is then deactivated from the anon active lists.
+	 * -Finally, we always attempt to deactivate something from both cache and anon.
+	 */
+	if (zone->active_cache_pages >= cache_goal)
+		cache_percent = 50 + ((zone->active_cache_pages-cache_goal)*50/(total_active-cache_goal+1));
+	else
+		cache_percent = 50 - ((cache_goal-zone->active_cache_pages)*50/cache_goal+1);
+	cache_work = cache_percent * target/100;
 
-			page_lru = zone->active_anon_list[0].prev;
-			page = list_entry(page_lru, struct page, lru);
+	/* never below min or above max */
+	if (zone->active_cache_pages < (total_active * cache_limits.min / 100))
+		cache_work = 0;
+	if (zone->active_cache_pages > (total_active * cache_limits.max / 100))
+		cache_work = target;
 
-			/* Wrong page on list?! (list corruption, should not happen) */
-			BUG_ON(unlikely(!PageActiveAnon(page)));
-		
-			/* Needed to follow page->mapping */
-			if (TryLockPage(page)) {
-				/* The page is already locked. This for sure means
-				 * someone is doing stuff with it which makes it
-				 * active by definition ;)
-				 */
-				del_page_from_active_anon_list(page);
-				add_page_to_active_anon_list(page, INITIAL_AGE);
-				continue;
-			}
+	/* anon pages makes up the rest */
+	anon_work = target - cache_work;
 
-			/*
-			 * Do aging on the pages.
-			 */
-			pte_chain_lock(page);
-			if (page_referenced(page, &over_rsslimit) && !over_rsslimit) {
-				pte_chain_unlock(page);
-				age_page_up_nolock(page, 0);
-				UnlockPage(page);
-				continue;
-			}
-			pte_chain_unlock(page);
-
-			deactivate_page_nolock(page);
-			target--;
-			progress++;
-			UnlockPage(page);
+	/* anon first */
+	maxscan = zone->active_anon_pages;
+	while (maxscan-- > 0 && anon_work > 0 && zone->active_anon_pages) {
+		if (list_empty(&zone->active_anon_list[0])) {
+			kachunk_anon(zone);
+			continue;
 		}
 
-		while (--cache_work >= 0 && zone->active_cache_pages) {
-			if (list_empty(&zone->active_cache_list[0])) {
-				kachunk_cache(zone);
-				continue;
-			}
+		page_lru = zone->active_anon_list[0].prev;
+		page = list_entry(page_lru, struct page, lru);
 
-			page_lru = zone->active_cache_list[0].prev;
-			page = list_entry(page_lru, struct page, lru);
-
-			/* Wrong page on list?! (list corruption, should not happen) */
-			BUG_ON(unlikely(!PageActiveCache(page)));
-		
-			/* Needed to follow page->mapping */
-			if (TryLockPage(page)) {
-				/* The page is already locked. This for sure means
-				 * someone is doing stuff with it which makes it
-				 * active by definition ;)
-				 */
-				del_page_from_active_cache_list(page);
-				add_page_to_active_cache_list(page, INITIAL_AGE);
-				continue;
-			}
-
-			/*
-			 * Do aging on the pages.
+		/* Wrong page on list?! (list corruption, should not happen) */
+		BUG_ON(unlikely(!PageActiveAnon(page)));
+	
+		/* Needed to follow page->mapping */
+		if (TryLockPage(page)) {
+			/* The page is already locked. This for sure means
+			 * someone is doing stuff with it which makes it
+			 * active by definition ;)
 			 */
-			pte_chain_lock(page);
-			if (page_referenced(page, &over_rsslimit) && !over_rsslimit) {
-				pte_chain_unlock(page);
-				age_page_up_nolock(page, 0);
-				UnlockPage(page);
-				continue;
-			}
-			pte_chain_unlock(page);
-
-			deactivate_page_nolock(page);
-			target--;
-			progress++;
-			UnlockPage(page);
+			del_page_from_active_anon_list(page);
+			add_page_to_active_anon_list(page, INITIAL_AGE);
+			continue;
 		}
+
+		/*
+		 * Do aging on the pages.
+		 */
+		pte_chain_lock(page);
+		if (page_referenced(page, &over_rsslimit) && !over_rsslimit) {
+			pte_chain_unlock(page);
+			age_page_up_nolock(page, 0);
+			UnlockPage(page);
+			continue;
+		}
+		pte_chain_unlock(page);
+
+		deactivate_page_nolock(page);
+		anon_work--;
+		progress++;
+		UnlockPage(page);
+	}
+	/* then cache */
+	maxscan = zone->active_cache_pages;
+	while (maxscan-- > 0 && cache_work > 0 && zone->active_cache_pages) {
+		if (list_empty(&zone->active_cache_list[0])) {
+			kachunk_cache(zone);
+			continue;
+		}
+
+		page_lru = zone->active_cache_list[0].prev;
+		page = list_entry(page_lru, struct page, lru);
+
+		/* Wrong page on list?! (list corruption, should not happen) */
+		BUG_ON(unlikely(!PageActiveCache(page)));
+	
+		/* Needed to follow page->mapping */
+		if (TryLockPage(page)) {
+			/* The page is already locked. This for sure means
+			 * someone is doing stuff with it which makes it
+			 * active by definition ;)
+			 */
+			del_page_from_active_cache_list(page);
+			add_page_to_active_cache_list(page, INITIAL_AGE);
+			continue;
+		}
+
+		/*
+		 * Do aging on the pages.
+		 */
+		pte_chain_lock(page);
+		if (page_referenced(page, &over_rsslimit) && !over_rsslimit) {
+			pte_chain_unlock(page);
+			age_page_up_nolock(page, 0);
+			UnlockPage(page);
+			continue;
+		}
+		pte_chain_unlock(page);
+
+		deactivate_page_nolock(page);
+		cache_work--;
+		progress++;
+		UnlockPage(page);
 	}
 	lru_unlock(zone);
 
@@ -949,7 +966,7 @@ static inline void background_aging(int priority)
 		if (inactive_low(zone) > 0)
 			refill_inactive_zone(zone, priority, BATCH_WORK_AMOUNT);
 	for_each_zone(zone)
-		if (free_plenty(zone) > 0)
+		if (need_rebalance_dirty(zone))
 			rebalance_dirty_zone(zone, BATCH_WORK_AMOUNT, GFP_KSWAPD);
 }
 
@@ -998,7 +1015,9 @@ static int do_try_to_free_pages(unsigned int gfp_mask)
 	/*
 	 * Mhwahahhaha! This is the part I really like. Giggle.
 	 */
-	if (!ret && free_min(ANY_ZONE) > 0 && (gfp_mask & __GFP_FS))
+	if (!ret && free_min(ANY_ZONE) > 0 && (gfp_mask & __GFP_FS) &&
+	    !((gfp_mask & __GFP_WIRED) &&
+	      free_min(&pgdat_list->node_zones[ZONE_NORMAL]) < 0))
 		out_of_memory();
 
 	return ret;
@@ -1029,9 +1048,9 @@ static int do_try_to_free_pages_kswapd(unsigned int gfp_mask)
 
 		if (need_rebalance_dirty(zone))
 			rebalance_dirty_zone(zone, 4 * worktodo,  gfp_mask);
-	}
 
-	rebalance_inactive(20);
+		rebalance_inactive_zone(zone, max(worktodo, 4*BATCH_WORK_AMOUNT), 20);
+	}
 
 	for_each_pgdat(pgdat) {
 		zone_t *zone = pgdat->node_zones;
@@ -1310,7 +1329,7 @@ int kscand(void *unused)
 				continue;
 
 			if (need_active_anon_scan(zone)) {
-				for (age = 0; age < MAX_AGE; age++)  {
+				for (age = MAX_AGE-1; age >= 0; age--)  {
 					scan_active_list(zone, age,
 						&zone->active_anon_list[age]);
 					if (current->need_resched)
@@ -1319,7 +1338,7 @@ int kscand(void *unused)
 			}
 
 			if (need_active_cache_scan(zone)) {
-				for (age = 0; age < MAX_AGE; age++)  {
+				for (age = MAX_AGE-1; age >= 0; age--)  {
 					scan_active_list(zone, age,
 						&zone->active_cache_list[age]);
 					if (current->need_resched)

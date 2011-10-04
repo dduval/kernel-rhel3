@@ -13,6 +13,6 @@ obj-$(CONFIG_DISCONTIGMEM) += numa.o
 obj-$(CONFIG_K8_NUMA) += k8topology.o
 obj-$(CONFIG_HUGETLB_PAGE) += hugetlbpage.o
 
-export-objs := pageattr.o
+export-objs := pageattr.o numa.o
 
 include $(TOPDIR)/Rules.make

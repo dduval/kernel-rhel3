@@ -535,6 +535,7 @@ static int olympic_open(struct net_device *dev)
 
 		if(readb(init_srb+2)== OLYMPIC_CLEAR_RET_CODE) {
 			printk(KERN_WARNING "%s: Adapter Open time out or error.\n", dev->name) ; 
+			free_irq(dev->irq, dev);
 			return -EIO ; 
 		}	
 

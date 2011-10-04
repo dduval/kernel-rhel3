@@ -952,8 +952,8 @@ asmlinkage long sys32_fcntl(unsigned int fd, unsigned int cmd, unsigned long arg
 			ret = sys_fcntl(fd, cmd, (unsigned long)&f);
 			set_fs (old_fs);
 			if (ret) return ret;
-			if (f.l_start >= 0x7fffffffUL ||
-			    f.l_start + f.l_len >= 0x7fffffffUL)
+			if (f.l_start >= 0x7fffffffL ||
+			    f.l_start + f.l_len >= 0x7fffffffL)
 				return -EOVERFLOW;
 			if(put_flock(&f, (struct flock32 *)A(arg)))
 				return -EFAULT;
@@ -1223,7 +1223,11 @@ static long do_readv_writev32(int type, struct file *file,
 
 		__get_user(len, &vector->iov_len);
 		__get_user(buf, &vector->iov_base);
-		tot_len += len;
+		if ((int)len < 0 || (tot_len += len) >= 0x7fffffff) {
+			if (iov != iovstack)
+				kfree(iov);
+			return -EINVAL;
+		}
 		ivp->iov_base = (void *)A(buf);
 		ivp->iov_len = (__kernel_size_t) len;
 		vector++;

@@ -180,3 +180,7 @@ EXPORT_SYMBOL_GPL(iosapic_fixup_pci_interrupt);
 
 #include <linux/efi.h>
 EXPORT_SYMBOL(efi_mem_type);
+
+#include <linux/acpi.h>
+extern acpi_status acpi_hp_csr_space(acpi_handle obj, u64 *csr_base, u64 *csr_length);
+EXPORT_SYMBOL(acpi_hp_csr_space);

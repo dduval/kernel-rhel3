@@ -546,128 +546,42 @@ static int dev_ifconf(unsigned int fd, unsigned int cmd, unsigned long arg)
 	return err;
 }
 
+static inline void *alloc_user_space(long len)
+{
+	struct pt_regs *regs = current->thread.regs;
+	unsigned long usp = regs->gpr[1];
+
+	/*
+	 * We cant access below the stack pointer in the 32bit ABI and
+	 * can access 288 bytes in the 64bit ABI
+	 */
+	if (!(current->thread.flags & PPC_FLAG_32BIT))
+		usp -= 288;
+
+	return (void *)(usp - len);
+}
+
 static int ethtool_ioctl(unsigned int fd, unsigned int cmd, unsigned long arg)
 {
-	struct ifreq ifr;
-	mm_segment_t old_fs;
-	int err, len;
-	u32 data, ethcmd;
-	struct ethtool_drvinfo drvinfo;
+	struct ifreq *ifr;
+	struct ifreq32 *ifr32;
+	u32 data;
+	void *datap;
 
-	if (copy_from_user(&ifr, (struct ifreq32 *)arg, sizeof(struct ifreq32)))
+	ifr = alloc_user_space(sizeof(*ifr));
+	ifr32 = (struct ifreq32 *)arg;
+
+	if (copy_in_user(&ifr->ifr_name, &ifr32->ifr_name, IFNAMSIZ))
 		return -EFAULT;
 
-	__get_user(data, &(((struct ifreq32 *)arg)->ifr_ifru.ifru_data));
-
-	if (get_user(ethcmd, (u32 *)A(data)))
+	if (get_user(data, &ifr32->ifr_ifru.ifru_data))
 		return -EFAULT;
 
-	switch (ethcmd) {
-	case ETHTOOL_GDRVINFO:
-		len = sizeof(struct ethtool_drvinfo);
-		break;
-	case ETHTOOL_GMSGLVL:
-	case ETHTOOL_SMSGLVL:
-	case ETHTOOL_GLINK:
-	case ETHTOOL_NWAY_RST:
-		len = sizeof(struct ethtool_value);
-		break;
-	case ETHTOOL_GREGS:
-	case ETHTOOL_GEEPROM:
-	case ETHTOOL_SEEPROM:
-		/*
-		 * These commands permit the specification of variable
-		 * sized requests so obtain the maximum size from the driver
-		 * via ETHTOOL_GETDRVINFO and guarantee that the kernel
-		 * buffer allocated does not exceed this value.
-		 */
-		drvinfo.cmd = ETHTOOL_GDRVINFO;
-		drvinfo.regdump_len = 0;
-		drvinfo.eedump_len = 0;
-		ifr.ifr_data = (__kernel_caddr_t)&drvinfo;
-		old_fs = get_fs();
-		set_fs(KERNEL_DS);
-		err = sys_ioctl(fd, cmd, (unsigned long)&ifr);	
-		set_fs(old_fs);
-		if (!err) {
-			if (ethcmd == ETHTOOL_GREGS)
-				len = drvinfo.regdump_len;
-			else
-				len = drvinfo.eedump_len;
-		}
-		if (err)
-			return err;
-		if (len == 0)
-			return -EOPNOTSUPP;
-		if (ethcmd == ETHTOOL_GREGS) {
-			struct ethtool_regs *regaddr = (struct ethtool_regs *)A(data);
-			int ulen;
+	datap = (void *)(unsigned long)data;
+	if (put_user(datap, &ifr->ifr_ifru.ifru_data))
+		return -EFAULT;
 
-			if (get_user(ulen, (u32 *)&regaddr->len))
-				return -EFAULT;
-			if (len == 0)
-				return 0;
-			if (ulen < len)
-				len = ulen;
-			len += sizeof(struct ethtool_regs);
-		} else if (ethcmd == ETHTOOL_GEEPROM ||
-			   ethcmd == ETHTOOL_SEEPROM) {
-			struct ethtool_eeprom *promaddr = (struct ethtool_eeprom *)A(data); 
-			int ulen;
-
-			if (get_user(ulen, (u32 *)&promaddr->len))
-				return -EFAULT; 
-			if (len == 0)
-				return 0;
-			if (ulen < len)
-				len = ulen;
-			len += sizeof(struct ethtool_eeprom); 
-		}
-		break;
-	case ETHTOOL_GSET:
-	case ETHTOOL_SSET:
-		len = sizeof(struct ethtool_cmd);
-		break;
-	default:
-		return -EOPNOTSUPP;
-	}
-
-	ifr.ifr_data = kmalloc(len, GFP_KERNEL);
-	if (!ifr.ifr_data)
-		return -EAGAIN;
-
-	if (copy_from_user(ifr.ifr_data, (char *)A(data), len)) {
-		err = -EFAULT;
-		goto out;
-	}
-
-	if (ethcmd == ETHTOOL_GREGS) {
-		struct ethtool_regs *p;
-
-		p = (struct ethtool_regs *)ifr.ifr_data;
-		p->len = len - sizeof(struct ethtool_regs);
-	} else if (ethcmd == ETHTOOL_GEEPROM ||
-		   ethcmd == ETHTOOL_SEEPROM) {
-		struct ethtool_eeprom *p;
-
-		p = (struct ethtool_eeprom *)ifr.ifr_data;
-		p->len = len - sizeof(struct ethtool_eeprom);
-	}
-
-	old_fs = get_fs();
-	set_fs (KERNEL_DS);
-	err = sys_ioctl (fd, cmd, (unsigned long)&ifr);
-	set_fs (old_fs);
-
-	if (!err) {
-		len = copy_to_user((char *)A(data), ifr.ifr_data, len);
-		if (len)
-			err = -EFAULT;
-	}
-
-out:
-	kfree(ifr.ifr_data);
-	return err;
+	return sys_ioctl(fd, cmd, (unsigned long)ifr);
 }
 
 static int bond_ioctl(unsigned long fd, unsigned int cmd, unsigned long arg)
@@ -4717,13 +4631,15 @@ int unregister_ioctl32_conversion(unsigned int cmd)
 	    (unsigned long)t < ((unsigned long)additional_ioctls) + PAGE_SIZE) {
 		ioctl32_hash_table[hash] = t->next;
 		t->cmd = 0;
+		t->next = 0;
 		return 0;
 	} else while (t->next) {
 		t1 = (struct ioctl_trans *)t->next;
 		if (t1->cmd == cmd && t1 >= additional_ioctls &&
 		    (unsigned long)t1 < ((unsigned long)additional_ioctls) + PAGE_SIZE) {
-			t1->cmd = 0;
 			t->next = t1->next;
+			t1->cmd = 0;
+			t1->next = 0;
 			return 0;
 		}
 		t = t1;

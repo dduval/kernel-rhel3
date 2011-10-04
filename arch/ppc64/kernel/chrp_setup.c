@@ -91,9 +91,10 @@ extern void iSeries_pcibios_fixup(void);
 extern void pSeries_get_rtc_time(struct rtc_time *rtc_time);
 extern int  pSeries_set_rtc_time(struct rtc_time *rtc_time);
 void pSeries_calibrate_decr(void);
-static void fwnmi_init(void);
+static void machine_check_init(void);
 extern void SystemReset_FWNMI(void), MachineCheck_FWNMI(void);	/* from head.S */
-int fwnmi_active;  /* TRUE if an FWNMI handler is present */
+int fwnmi_active = 0;  /* TRUE if an FWNMI handler is present */
+int check_exception_flag = 0;  /* TRUE if a check-exception handler present */
 
 kdev_t boot_dev;
 unsigned long  virtPython0Facilities = 0;  // python0 facility area (memory mapped io) (64-bit format) VIRTUAL address.
@@ -160,7 +161,7 @@ chrp_setup_arch(void)
 
 	printk("Boot arguments: %s\n", cmd_line);
 
-	fwnmi_init();
+	machine_check_init();
 
 #ifndef CONFIG_PPC_ISERIES
 	/* Find and initialize PCI host bridges */
@@ -202,20 +203,26 @@ chrp_init2(void)
 }
 
 /* Initialize firmware assisted non-maskable interrupts if
- * the firmware supports this feature.
- *
+ * the firmware supports this feature.  If it does not, 
+ * look for the check-exception property.
  */
-static void __init fwnmi_init(void)
+static void __init machine_check_init(void)
 {
 	long ret;
+	int check_ex_token;
 	int ibm_nmi_register = rtas_token("ibm,nmi-register");
-	if (ibm_nmi_register == RTAS_UNKNOWN_SERVICE)
-		return;
-	ret = rtas_call(ibm_nmi_register, 2, 1, NULL,
-			__pa((unsigned long)SystemReset_FWNMI),
-			__pa((unsigned long)MachineCheck_FWNMI));
-	if (ret == 0)
-		fwnmi_active = 1;
+
+	if (ibm_nmi_register != RTAS_UNKNOWN_SERVICE) {
+		ret = rtas_call(ibm_nmi_register, 2, 1, NULL,
+				__pa((unsigned long)SystemReset_FWNMI),
+				__pa((unsigned long)MachineCheck_FWNMI));
+		if (ret == 0)
+			fwnmi_active = 1;
+	} else {
+		check_ex_token = rtas_token("check-exception");
+		if (check_ex_token != RTAS_UNKNOWN_SERVICE)
+			check_exception_flag = 1;
+	}
 }
 
 
@@ -274,9 +281,11 @@ chrp_init(unsigned long r3, unsigned long r4, unsigned long r5,
 
  	#ifndef CONFIG_PPC_ISERIES
  		ppc_md.pcibios_fixup = pSeries_pcibios_fixup;
+		ppc_md.log_error     = pSeries_log_error;
  	#else 
  		ppc_md.pcibios_fixup = NULL;
  		// ppc_md.pcibios_fixup = iSeries_pcibios_fixup;
+		ppc_md.log_error     = NULL;
  	#endif
 
 

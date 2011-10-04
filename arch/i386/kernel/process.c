@@ -409,7 +409,7 @@ void machine_restart(char * __unused)
 	 * Stop all CPUs and turn off local APICs and the IO-APIC, so
 	 * other OSs see a clean IRQ state.
 	 */
-	if (!netdump_func)
+	if (!netdump_mode)
 		smp_send_stop();
 	disable_IO_APIC();
 #endif

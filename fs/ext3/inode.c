@@ -85,7 +85,7 @@ int ext3_forget(handle_t *handle, int is_metadata,
 	    (!is_metadata && !ext3_should_journal_data(inode))) {
 		if (bh) {
 			BUFFER_TRACE(bh, "call journal_forget");
-			ext3_journal_forget(handle, bh);
+			return ext3_journal_forget(handle, bh);
 		}
 		return 0;
 	}
@@ -2328,8 +2328,6 @@ void ext3_read_inode(struct inode * inode)
 		inode->u.ext3_i.i_data[block] = iloc.raw_inode->i_block[block];
 	INIT_LIST_HEAD(&inode->u.ext3_i.i_orphan);
 
-	brelse (iloc.bh);
-
 	if (S_ISREG(inode->i_mode)) {
 		inode->i_op = &ext3_file_inode_operations;
 		inode->i_fop = &ext3_file_operations;
@@ -2349,6 +2347,7 @@ void ext3_read_inode(struct inode * inode)
 		init_special_inode(inode, inode->i_mode,
 				   le32_to_cpu(iloc.raw_inode->i_block[0]));
 	}
+	brelse (iloc.bh);
 	ext3_set_inode_flags(inode);
 #ifdef CONFIG_EXT3_FS_XATTR
 	init_rwsem(&inode->u.ext3_i.xattr_sem);

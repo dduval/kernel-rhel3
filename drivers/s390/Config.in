@@ -33,6 +33,11 @@ fi
 
 endmenu
 
+# To include everything would be correct, but disruptive:
+#source drivers/block/Config.in
+# So, we just add missing parts by value here, as a bugfix.
+bool 'Per partition statistics in /proc/partitions' CONFIG_BLK_STATS
+
 source drivers/md/Config.in
 
 mainmenu_option next_comment
@@ -116,3 +121,7 @@ if [ "$CONFIG_NET" = "y" ]; then
   endmenu
 fi
 
+mainmenu_option next_comment
+comment 'Miscellaneous'
+	tristate 'Z90CRYPT support' CONFIG_Z90CRYPT
+endmenu

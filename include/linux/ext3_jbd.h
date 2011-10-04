@@ -84,31 +84,14 @@ int ext3_reserve_inode_write(handle_t *handle, struct inode *inode,
 
 int ext3_mark_inode_dirty(handle_t *handle, struct inode *inode);
 
+void ext3_journal_abort_handle(const char *caller, const char *err_fn, struct buffer_head *bh, handle_t *handle, int err);
+
 /*
  * Wrapper functions with which ext3 calls into JBD.  The intent here is
  * to allow these to be turned into appropriate stubs so ext3 can control
  * ext2 filesystems, so ext2+ext3 systems only nee one fs.  This work hasn't
  * been done yet.
  */
-
-static inline void ext3_journal_abort_handle(const char *caller, 
-					     const char *err_fn,
-					     struct buffer_head *bh,
-					     handle_t *handle,
-					     int err)
-{
-	char nbuf[16];
-	const char *errstr = ext3_decode_error(NULL, err, nbuf);
-	
-	printk(KERN_ERR "%s: aborting transaction: %s in %s", 
-	       caller, errstr, err_fn);
-
-	if (bh)
-		BUFFER_TRACE(bh, "abort");
-	journal_abort_handle(handle);
-	if (!handle->h_err)
-		handle->h_err = err;
-}
 
 static inline int
 __ext3_journal_get_undo_access(const char *where,
@@ -140,10 +123,13 @@ __ext3_journal_dirty_data(const char *where,
 	return err;
 }
 
-static inline void
-ext3_journal_forget(handle_t *handle, struct buffer_head *bh)
+static inline int
+__ext3_journal_forget(const char *where, handle_t *handle, struct buffer_head *bh)
 {
-	journal_forget(handle, bh);
+	int err = journal_forget(handle, bh);
+	if (err)
+		ext3_journal_abort_handle(where, __FUNCTION__, bh, handle,err);
+	return err;
 }
 
 static inline int
@@ -189,6 +175,8 @@ __ext3_journal_dirty_metadata(const char *where,
 	__ext3_journal_get_create_access(__FUNCTION__, (handle), (bh))
 #define ext3_journal_dirty_metadata(handle, bh) \
 	__ext3_journal_dirty_metadata(__FUNCTION__, (handle), (bh))
+#define ext3_journal_forget(handle, bh) \
+	__ext3_journal_forget(__FUNCTION__, (handle), (bh))
 
 
 

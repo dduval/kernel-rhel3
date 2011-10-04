@@ -9,7 +9,7 @@ obj-m           :=
 obj-n           :=
 obj-            :=
 
-mod-subdirs     := cipe qla2200 aep bcm megarac
+mod-subdirs     := cipe qla2200 aep bcm megarac ips_60026 cmpci_564
 
 O_TARGET := addon.o
 
@@ -22,6 +22,8 @@ list-multi	:=
 
 subdir-$(CONFIG_CIPE) += cipe
 subdir-$(CONFIG_MEGARAC) += megarac
+subdir-$(CONFIG_SCSI_IPS) += ips_60026
+subdir-$(CONFIG_SOUND_CMPCI) += cmpci_564
 
 subdir-$(CONFIG_CRYPTO_AEP) += aep
 subdir-$(CONFIG_CRYPTO_BROADCOM) += bcm

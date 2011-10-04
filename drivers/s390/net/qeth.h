@@ -907,6 +907,8 @@ typedef struct qeth_card_t {			/* pointed to by dev->priv */
 	__u32 ipa6_enabled;
 	__u32 adp_supported;
 
+	__u32 csum_enable_mask;
+
 	atomic_t startlan_attempts;
 	atomic_t enable_routing_attempts4;
 	atomic_t rt4fld;

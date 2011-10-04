@@ -1040,6 +1040,12 @@ lcs_alloc_drvr_globals(void)
 	if (!drvr_globals)
 		return (NULL);
 	atomic_set(&drvr_globals->usage_cnt, 1);
+#if LINUX_VERSION_CODE>=KERNEL_VERSION(2,3,0)
+	init_waitqueue_head(&drvr_globals->lanstat_wait);
+#else
+	drvr_globals->lanstat_wait = NULL;
+#endif
+
 	drvr_globals->rel_adapter_no = lcs_invalid_adapter_no;
 	read = drvr_globals->read = (lcs_read_globals *) (drvr_globals + 1);
 	write = drvr_globals->write =
@@ -3543,18 +3549,23 @@ lcs_set_multicast_list(struct net_device *dev)
 	}
 	drvr_globals = (lcs_drvr_globals *) dev->priv;
 	oldstate = drvr_globals->state;
+
+	spin_lock(&drvr_globals->ipm_lock);
 #if LINUX_VERSION_CODE >=KERNEL_VERSION(2,3,0)
-	if ((in4_dev = in_dev_get(dev)) == NULL)
+	if ((in4_dev = in_dev_get(dev)) == NULL) {
+		spin_unlock(&drvr_globals->ipm_lock);
 		return;
+	}
 	read_lock(&in4_dev->lock);
 #else
-	if ((in4_dev = dev->ip_ptr) == NULL)
+	if ((in4_dev = dev->ip_ptr) == NULL) {
+		spin_unlock(&drvr_globals->ipm_lock);
 		return;
+	}
 #endif
 	/* Pass 1 find the entries to be deleted */
 	/* This is done first to avoid overflowing the cards */
 	/* onboard multicast list. */
-	spin_lock(&drvr_globals->ipm_lock);
 	for (curr_lmem = drvr_globals->ipm_list; curr_lmem;
 	     curr_lmem = curr_lmem->next) {
 		addr_in_list = FALSE;
@@ -3604,20 +3615,23 @@ lcs_set_multicast_list(struct net_device *dev)
 				    (list *) new_lmem);
 		}
 	}
+done:
 #if LINUX_VERSION_CODE >=KERNEL_VERSION(2,3,0)
 	read_unlock(&in4_dev->lock);
 	in_dev_put(in4_dev);
 #endif
 #if 0				/* LCS doesn't do IPV6 yet */
-	if ((in6_dev = in6_dev_get(dev)) == NULL)
+	if ((in6_dev = in6_dev_get(dev)) == NULL) {
+		spin_unlock(&drvr_globals->ipm_lock);
 		return;
+	}
 	read_lock_bh(&in6_dev->lock);
 	for (im6 = in6_dev->mc_list; im6; im6 = im6->next) {
 	}
 	read_unlock(&in4_dev->lock);
 	in6_dev_put(idev);
 #endif
-done:
+
 	spin_unlock(&drvr_globals->ipm_lock);
 	lcs_queue_thread(lcs_fix_multicast_list, drvr_globals);
 }

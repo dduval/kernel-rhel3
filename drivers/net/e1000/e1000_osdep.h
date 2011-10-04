@@ -54,7 +54,6 @@
 #define PCI_COMMAND_REGISTER   PCI_COMMAND
 #define CMD_MEM_WRT_INVALIDATE PCI_COMMAND_INVALIDATE
 
-
 typedef enum {
 #undef FALSE
     FALSE = 0,
@@ -62,8 +61,6 @@ typedef enum {
     TRUE = 1
 } boolean_t;
 
-#undef ASSERT
-#define ASSERT(x)	if(!(x)) BUG()
 #define MSGOUT(S, A, B)	printk(KERN_DEBUG S "\n", A, B)
 
 #if DBG

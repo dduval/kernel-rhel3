@@ -26,6 +26,29 @@
  */
 #include <linux/mm.h>
 
+/*
+ * The pte_addr_t is the type of the pte.direct field of the page
+ * structure, whereas the chain_ptep_t is the type of the ptes[]
+ * array elements in the pte_chain structure.  The PTE_ADDR_C2D()
+ * macro converts from a chain_ptep_t to a pte_addr_t, and the
+ * PTE_ADDR_D2C() macro converts from a pte_addr_t to a chain_ptep_t.
+ *
+ * Typically, these mappings are no-ops.  But for certain x86
+ * configurations, the pte_addr_t is 64 bits and the chain_ptep_t
+ * is 32 bits, thus more than doubling the number of pte addresses
+ * that can be stored in a pte_chain structure.  In this case, the
+ * definitions for CHAIN_PTEP_T, PTE_ADDR_C2D(), and PTE_ADDR_D2C()
+ * must occur in an architecture-dependent header file before this
+ * header file is included.
+ */
+#ifdef CHAIN_PTEP_T
+typedef CHAIN_PTEP_T	chain_ptep_t;
+#else
+typedef pte_addr_t	chain_ptep_t;
+#define PTE_ADDR_C2D(x) ((pte_addr_t)(x))
+#define PTE_ADDR_D2C(x) ((chain_ptep_t)(x))
+#endif
+
 static inline void pgtable_add_rmap(struct page * page, struct mm_struct * mm, unsigned long address)
 {
 #ifdef BROKEN_PPC_PTE_ALLOC_ONE
@@ -62,16 +85,16 @@ static inline unsigned long ptep_to_address(pte_t * ptep)
 }
 
 #if CONFIG_HIGHPTE
-static inline pte_addr_t ptep_to_paddr(pte_t *ptep)
+static inline chain_ptep_t ptep_to_paddr(pte_t *ptep)
 {
-	pte_addr_t paddr;
-	paddr = ((pte_addr_t)page_to_pfn(kmap_atomic_to_page(ptep))) << PAGE_SHIFT;
-	return paddr + (pte_addr_t)((unsigned long)ptep & ~PAGE_MASK);
+	u64 paddr;
+	paddr = (u64)page_to_pfn(kmap_atomic_to_page(ptep)) << PAGE_SHIFT;
+	return PTE_ADDR_D2C(paddr + ((u64)ptep & ~PAGE_MASK));
 }
 #else
-static inline pte_addr_t ptep_to_paddr(pte_t *ptep)
+static inline chain_ptep_t ptep_to_paddr(pte_t *ptep)
 {
-	return (pte_addr_t)ptep;
+	return (chain_ptep_t)ptep;
 }
 #endif
 

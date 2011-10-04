@@ -150,8 +150,8 @@ static void nmi_cpu_shutdown(void * dummy)
 static void nmi_shutdown(void)
 {
 	unset_nmi_pm_callback(oprofile_pmdev);
-	unset_nmi_callback();
 	on_each_cpu(nmi_cpu_shutdown, NULL, 0, 1);
+	unset_nmi_callback();
 }
 
  
@@ -279,8 +279,18 @@ int __init nmi_init(struct oprofile_operations ** ops)
 			/* Needs to be at least an Athlon (or hammer in 32bit mode) */
 			if (family < 6)
 				return 0;
-			model = &op_athlon_spec;
-			nmi_ops.cpu_type = "i386/athlon";
+			switch (family) {
+			default:
+				return 0;
+			case 6:
+				model = &op_athlon_spec;
+				nmi_ops.cpu_type = "i386/athlon";
+				break;
+			case 0xf:
+				model = &op_athlon_spec;
+				nmi_ops.cpu_type = "x86-64/hammer";
+				break;
+			}
 			break;
  
 #if !defined(CONFIG_X86_64)

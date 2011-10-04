@@ -26,7 +26,11 @@ export-objs     :=	busmouse.o console.o keyboard.o sysrq.o \
 			sonypi.o tty_io.o tty_ioctl.o generic_serial.o \
 			au1000_gpio.o hp_psaux.o nvram.o scx200.o icom.o
 
+ifdef CONFIG_IA64
+mod-subdirs	:=	joystick ftape drm-hp_ia64 pcmcia
+else
 mod-subdirs	:=	joystick ftape drm drm-4.0 pcmcia
+endif
 
 list-multi	:=	
 
@@ -264,10 +268,15 @@ obj-$(CONFIG_COBALT_LCD) += lcd.o
 obj-$(CONFIG_QIC02_TAPE) += tpqic02.o
 
 subdir-$(CONFIG_FTAPE) += ftape
+subdir-$(CONFIG_PCMCIA) += pcmcia
+ifdef CONFIG_IA64
+subdir-$(CONFIG_DRM_NEW) += drm-hp_ia64
+subdir-$(CONFIG_AGP) += agp-hp_ia64
+else
 subdir-$(CONFIG_DRM_OLD) += drm-4.0
 subdir-$(CONFIG_DRM_NEW) += drm
-subdir-$(CONFIG_PCMCIA) += pcmcia
 subdir-$(CONFIG_AGP) += agp
+endif
 
 ifeq ($(CONFIG_FTAPE),y)
 obj-y       += ftape/ftape.o

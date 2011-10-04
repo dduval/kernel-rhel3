@@ -1296,7 +1296,7 @@ void update_mctime (struct inode *inode)
 	if (IS_RDONLY(inode))
 		return;
 	inode->i_ctime = inode->i_mtime = CURRENT_TIME;
-	mark_inode_dirty (inode);
+	mark_inode_dirty_sync (inode);
 }
 
 

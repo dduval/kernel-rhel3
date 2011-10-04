@@ -1554,6 +1554,15 @@ found_page:
 			goto page_not_up_to_date;
 		generic_file_readahead(reada_ok, filp, inode, page, flags);
 page_ok:
+		if (!(filp->f_mode & FMODE_WRITE) &&
+		    page->buffers &&
+		    !PageDirty(page) &&
+		    !TryLockPage(page)) {
+			if (page->buffers)
+				try_to_release_page(page, 0);
+			UnlockPage(page);
+		}
+
 		/* If users can be writing to this page using arbitrary
 		 * virtual addresses, take care about potential aliasing
 		 * before reading the page on the kernel side.
@@ -1628,6 +1637,8 @@ page_not_up_to_date:
 			UnlockPage(page);
 			goto page_ok;
 		}
+		/* Get rid of any stale I/O errors */
+		ClearPageError(page);
 
 readpage:
 		/* ... and start the actual read. The read will unlock the page. */
@@ -1729,8 +1740,8 @@ static inline int get_min_io_size(struct inode *inode)
 
 static ssize_t generic_file_direct_IO(int rw, struct file * filp, char * buf, size_t count, loff_t offset)
 {
-	ssize_t retval;
-	int new_iobuf, chunk_size, blocksize_mask, blocksize, blocksize_bits, iosize, progress;
+	ssize_t retval, progress;
+	int new_iobuf, chunk_size, blocksize_mask, blocksize, blocksize_bits, iosize;
 	struct kiobuf * iobuf;
 	struct address_space * mapping = filp->f_dentry->d_inode->i_mapping;
 	struct inode * inode = mapping->host;
@@ -2216,6 +2227,14 @@ retry_find:
 		goto page_not_uptodate;
 
 success:
+	if (!(file->f_mode & FMODE_WRITE) &&
+	    page->buffers &&
+	    !PageDirty(page) &&
+	    !TryLockPage(page)) {
+		if (page->buffers)
+			try_to_release_page(page, 0);
+		UnlockPage(page);
+	}
  	/*
 	 * Try read-ahead for sequential areas.
 	 */
@@ -3300,7 +3319,7 @@ do_generic_file_write(struct file *file,const char *buf,size_t count, loff_t *pp
 	struct page	*page, *cached_page;
 	ssize_t		written;
 	long		status = 0;
-	int		err;
+	ssize_t		err;
 	unsigned	bytes;
 
 	cached_page = NULL;
@@ -3423,7 +3442,7 @@ do_generic_direct_write(struct file *file,const char *buf,size_t count, loff_t *
 	loff_t		pos;
 	ssize_t		written;
 	long		status = 0;
-	int		err;
+	ssize_t		err;
 
 	pos = *ppos;
 	written = 0;
@@ -3457,10 +3476,11 @@ out:
 	return err;
 }
 
-static int do_odirect_fallback(struct file *file, struct inode *inode,
-			       const char *buf, size_t count, loff_t *ppos)
+static ssize_t do_odirect_fallback(struct file *file, struct inode *inode,
+				   const char *buf, size_t count, loff_t *ppos)
 {
-	int ret, err;
+	int err;
+	ssize_t ret;
 
 	down(&inode->i_sem);
 	ret = do_generic_file_write(file, buf, count, ppos);
@@ -3477,7 +3497,7 @@ ssize_t
 generic_file_write(struct file *file,const char *buf,size_t count, loff_t *ppos)
 {
 	struct inode	*inode = file->f_dentry->d_inode->i_mapping->host;
-	int		err;
+	ssize_t		err;
 
 	if ((ssize_t) count < 0)
 		return -EINVAL;

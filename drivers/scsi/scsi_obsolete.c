@@ -358,6 +358,7 @@ void scsi_old_done(Scsi_Cmnd * SCpnt)
 #define MAYREDO  1
 #define REDO     3
 #define PENDING  4
+#define DELAYED_REDO 8
 
 #ifdef DEBUG
 	printk("In scsi_done(host = %d, result = %06x)\n", host->host_no, result);
@@ -498,8 +499,7 @@ void scsi_old_done(Scsi_Cmnd * SCpnt)
 
 				case BUSY:
 				case QUEUE_FULL:
-					update_timeout(SCpnt, oldto);
-					status = REDO;
+					status = DELAYED_REDO;
 					break;
 
 				case RESERVATION_CONFLICT:
@@ -554,6 +554,8 @@ void scsi_old_done(Scsi_Cmnd * SCpnt)
 		}
 		break;
 	case DID_BUS_BUSY:
+		status = DELAYED_REDO;
+		break;
 	case DID_PARITY:
 		status = REDO;
 		break;
@@ -644,27 +646,20 @@ void scsi_old_done(Scsi_Cmnd * SCpnt)
 		if (SCpnt->flags & WAS_SENSE)
 			scsi_request_sense(SCpnt);
 		else {
-			memcpy((void *) SCpnt->cmnd,
-			       (void *) SCpnt->data_cmnd,
-			       sizeof(SCpnt->data_cmnd));
-			memset((void *) SCpnt->sense_buffer, 0,
-			       sizeof(SCpnt->sense_buffer));
-			SCpnt->request_buffer = SCpnt->buffer;
-			SCpnt->request_bufflen = SCpnt->bufflen;
-			SCpnt->use_sg = SCpnt->old_use_sg;
-			SCpnt->cmd_len = SCpnt->old_cmd_len;
-			SCpnt->sc_data_direction = SCpnt->sc_old_data_direction;
-			SCpnt->underflow = SCpnt->old_underflow;
-			SCpnt->result = 0;
                         /*
                          * Ugly, ugly.  The newer interfaces all
                          * assume that the lock isn't held.  Mustn't
                          * disappoint, or we deadlock the system.  
                          */
                         spin_unlock_irq(host->host_lock);
-			scsi_dispatch_cmd(SCpnt);
+			scsi_retry_command(SCpnt);
                         spin_lock_irq(host->host_lock);
 		}
+		break;
+	case DELAYED_REDO:
+		spin_unlock_irq(host->host_lock);
+		scsi_mlqueue_insert(SCpnt, SCSI_MLQUEUE_DEVICE_BUSY);
+		spin_lock_irq(host->host_lock);
 		break;
 	default:
 		INTERNAL_ERROR;
@@ -672,11 +667,14 @@ void scsi_old_done(Scsi_Cmnd * SCpnt)
 
 	if (status == CMD_FINISHED) {
 		Scsi_Request *SRpnt;
+		int host_was_blocked = host->host_blocked;
 #ifdef DEBUG
 		printk("Calling done function - at address %p\n", SCpnt->done);
 #endif
 		atomic_dec(&host->host_busy);	/* Indicate that we are free */
                 atomic_dec(&device->device_busy);/* Decrement device usage counter. */
+		host->host_blocked = 0;
+		device->device_blocked = 0;
 
 		SCpnt->result = result | ((exit & 0xff) << 24);
 		SCpnt->use_sg = SCpnt->old_use_sg;
@@ -701,12 +699,48 @@ void scsi_old_done(Scsi_Cmnd * SCpnt)
 		}
 
 		SCpnt->done(SCpnt);
+	/*
+	 * We don't really need to do this for normal block devices (sd)
+	 * since they use scsi_io_completion for their done routine and
+	 * it will goose the queue for us.  However, the character and
+	 * special devices that use scsi_do_req and scsi_do_cmd don't
+	 * typically goose the queue after a completion event.  This isn't
+	 * a bad thing as long as every time they submit a command to
+	 * scsi_do_{req,cmd}, the q is able to send the command to the host
+	 * immediately.  However, should the host ever return from
+	 * queuecommand with a non-0 status, signalling that the command
+	 * was *not* queued, the failure to goose the queue upon completion
+	 * could result in a hung device.  So, to avoid that, we goose the
+	 * queue here if we have a device hanging condition.
+	 */
+		if (host_was_blocked) {
+			for (device = host->host_queue;
+			     device;
+			     device = device->next) {
+				struct request_queue *q = &device->request_queue;
+				if (!device->device_blocked &&
+		    		    !list_empty(&q->queue_head) &&
+				    atomic_read(&device->device_busy) == 0) {
+					spin_lock_irq(q->queue_lock);
+					q->request_fn(q);
+					spin_unlock_irq(q->queue_lock);
+				}
+			}
+		} else if (!host->host_blocked && !device->device_blocked &&
+		    !list_empty(&device->request_queue.queue_head) &&
+		     atomic_read(&device->device_busy) == 0) {
+			struct request_queue *q = &device->request_queue;
+			spin_lock_irq(q->queue_lock);
+			q->request_fn(q);
+			spin_unlock_irq(q->queue_lock);
+		}
                 spin_lock_irq(host->host_lock);
 	}
 #undef CMD_FINISHED
 #undef REDO
 #undef MAYREDO
 #undef PENDING
+#undef DELAYED_REDO
 }
 
 /*

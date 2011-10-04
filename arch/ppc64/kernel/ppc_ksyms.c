@@ -291,6 +291,7 @@ EXPORT_SYMBOL(get_wchan);
 EXPORT_SYMBOL(console_drivers);
 #ifdef CONFIG_XMON
 EXPORT_SYMBOL(xmon);
+EXPORT_SYMBOL(xmon_enabled);
 #endif
 
 #if defined(CONFIG_KGDB) || defined(CONFIG_XMON)

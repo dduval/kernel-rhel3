@@ -1337,7 +1337,7 @@ Scsi_Host_Template aic7xxx_driver_template = {
 	.select_queue_depths	= ahc_linux_select_queue_depth,
 	.use_new_eh_code	= 1,
 #endif
-	.vary_io                = 0,
+	.vary_io                = 1,
 };
 
 /**************************** Tasklet Handler *********************************/

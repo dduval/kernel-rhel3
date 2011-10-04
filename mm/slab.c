@@ -146,6 +146,8 @@ typedef unsigned int kmem_bufctl_t;
  */
 static unsigned long offslab_limit;
 
+int slabpages = 0;
+
 /*
  * slab_t
  *
@@ -495,7 +497,8 @@ static inline void * kmem_getpages (kmem_cache_t *cachep, unsigned long flags)
 	 * would be relatively rare and ignorable.
 	 */
 	flags |= cachep->gfpflags;
-	addr = (void*) __get_free_pages(flags, cachep->gfporder);
+	if ((addr = (void *)__get_free_pages(flags, cachep->gfporder)) != NULL)
+		slabpages += 1 << cachep->gfporder;
 	/* Assume that now we have the pages no one else can legally
 	 * messes with the 'struct page's.
 	 * However vm_scan() might try to test the structure to see if
@@ -516,6 +519,7 @@ static inline void kmem_freepages (kmem_cache_t *cachep, void *addr)
 	 * but their 'struct page's might be accessed in
 	 * vm_scan(). Shouldn't be a worry.
 	 */
+	slabpages -= i;
 	while (i--) {
 		PageClearSlab(page);
 		page++;
@@ -751,6 +755,9 @@ cal_wastage:
 
 		if ((left_over*8) <= (PAGE_SIZE<<cachep->gfporder))
 			break;	/* Acceptable internal fragmentation. */
+
+		if (size < PAGE_SIZE && cachep->gfporder == 1)
+			break;  /* no larger than 2 page slabs for kernel structs */
 next:
 		cachep->gfporder++;
 	} while (1);

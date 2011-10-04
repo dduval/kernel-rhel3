@@ -650,7 +650,7 @@ out:
 
 static int __init async_poll_init(void)
 {
-	async_poll_table_cache = kmem_cache_create("async poll table",
+	async_poll_table_cache = kmem_cache_create("async_poll_table",
                         sizeof(async_poll_table), 0, 0, NULL, NULL);
 	if (!async_poll_table_cache)
 		panic("unable to alloc poll_table_cache");

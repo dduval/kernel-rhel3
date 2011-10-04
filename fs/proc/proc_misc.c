@@ -341,7 +341,7 @@ static int kstat_read_proc(char *page, char **start, off_t off,
 		iowait += kernel_timeval_to_clock_t(&kstat_percpu[cpu].iowait);
 		irq += kernel_timeval_to_clock_t(&kstat_percpu[cpu].irq);
 		softirq += kernel_timeval_to_clock_t(&kstat_percpu[cpu].softirq);
-#if !defined(CONFIG_ARCH_S390) && !defined(CONFIG_PPC64)
+#if !defined(CONFIG_ARCH_S390)
 		for (j = 0 ; j < NR_IRQS ; j++)
 			intr_sum += kstat_percpu[cpu].irqs[j];
 #endif

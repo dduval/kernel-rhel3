@@ -226,6 +226,15 @@ copy_to_user(void *to, const void *from, unsigned long n)
 	return n;
 }
 
+static inline unsigned long
+copy_in_user(void *to, const void *from, unsigned long n)
+{
+	if (likely(access_ok(VERIFY_READ, from, n) &&
+	    access_ok(VERIFY_WRITE, to, n)))
+		n = __copy_tofrom_user(to, from, n);
+	return n;
+}
+
 #define __copy_from_user(to, from, size) \
 	__copy_tofrom_user((to), (from), (size))
 #define __copy_to_user(to, from, size) \

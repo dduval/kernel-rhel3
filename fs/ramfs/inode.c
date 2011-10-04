@@ -29,6 +29,7 @@
 #include <linux/init.h>
 #include <linux/string.h>
 #include <linux/locks.h>
+#include <linux/mm_inline.h>
 
 #include <asm/uaccess.h>
 
@@ -109,6 +110,10 @@ struct inode *ramfs_get_inode(struct super_block *sb, int mode, int dev)
 		inode->i_blocks = 0;
 		inode->i_rdev = NODEV;
 		inode->i_mapping->a_ops = &ramfs_aops;
+#ifdef CONFIG_HIGHMEM
+		/* try really hard to alloc the pages from highmem */
+		inode->i_mapping->gfp_mask |= __GFP_WIRED;
+#endif
 		inode->i_atime = inode->i_mtime = inode->i_ctime = CURRENT_TIME;
 		switch (mode & S_IFMT) {
 		default:
@@ -309,6 +314,21 @@ repeat:
 	return 0;
 }
 
+static int ramfs_writepage(struct page *page)
+{
+
+	lru_lock(page_zone(page));
+	if (PageLaunder(page) && PageInactiveLaundry(page)) {
+		del_page_from_inactive_laundry_list(page);
+		add_page_to_wired_list(page);
+		 lru_unlock(page_zone(page));
+		 UnlockPage(page);
+		return 0;
+	} else
+		lru_unlock(page_zone(page));
+	return fail_writepage(page);
+}
+
 static struct vm_operations_struct ramfs_vm_ops = {
 	nopage: filemap_nopage,
 	populate: ramfs_populate,
@@ -316,7 +336,7 @@ static struct vm_operations_struct ramfs_vm_ops = {
 
 static struct address_space_operations ramfs_aops = {
 	readpage:	ramfs_readpage,
-	writepage:	fail_writepage,
+	writepage:	ramfs_writepage,
 	prepare_write:	ramfs_prepare_write,
 	commit_write:	ramfs_commit_write,
 };

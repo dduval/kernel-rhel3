@@ -87,6 +87,37 @@ extern inline void ipc_unlock(struct ipc_ids* ids, int id)
 	br_read_unlock(BR_SEMAPHORE_LOCK);
 }
 
+extern inline struct kern_ipc_perm* ipc_write_lock(struct ipc_ids* ids, int id)
+{
+	struct kern_ipc_perm* out;
+	int lid = id % SEQ_MULTIPLIER;
+	if(lid >= ids->size)
+		return NULL;
+
+	br_write_lock(BR_SEMAPHORE_LOCK);
+	out = ids->entries[lid].p;
+	if (!out) {
+		br_write_unlock(BR_SEMAPHORE_LOCK);
+		return NULL;
+	}
+	spin_lock(&out->lock);
+	return out;
+}
+
+extern inline void ipc_write_unlock(struct ipc_ids* ids, int id)
+{
+	int lid = id % SEQ_MULTIPLIER;
+	struct kern_ipc_perm* out;
+
+	if (lid >= ids->size)
+		return;
+	out = ids->entries[lid].p;
+	if (out)
+		spin_unlock(&out->lock);
+	br_write_unlock(BR_SEMAPHORE_LOCK);
+}
+
+
 extern inline int ipc_buildid(struct ipc_ids* ids, int id, int seq)
 {
 	return SEQ_MULTIPLIER*seq + id;

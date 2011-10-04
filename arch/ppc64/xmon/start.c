@@ -8,7 +8,6 @@
  */
 #include <linux/string.h>
 #include <linux/kernel.h>
-#include <linux/sysrq.h>
 #include <linux/fs.h>
 #include <asm/machdep.h>
 #include <asm/io.h>
@@ -53,22 +52,9 @@ void buf_access(void)
 }
 #endif
 
-static void sysrq_handle_xmon(int key, struct pt_regs *pt_regs, struct kbd_struct *kbd, struct tty_struct *tty) 
-{
-  xmon(pt_regs);
-}
-static struct sysrq_key_op sysrq_xmon_op = 
-{
-	.handler =	sysrq_handle_xmon,
-	.help_msg =	"xmon",
-	.action_msg =	"Entering xmon\n",
-};
-
 void
 xmon_map_scc(void)
 {
-	/* This maybe isn't the best place to register sysrq 'x' */
-	__sysrq_put_key_op('x', &sysrq_xmon_op);
 #ifndef USE_UDBG
 	/* should already be mapped by the kernel boot */
 	sccd = (volatile unsigned char *) (((unsigned long)comport1));

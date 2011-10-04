@@ -143,7 +143,6 @@ void pda_init(int cpu)
 	wrmsrl(MSR_GS_BASE, cpu_pda + cpu);
 } 
 
-#define EXCEPTION_STK_ORDER 0 /* >= N_EXCEPTION_STACKS*EXCEPTION_STKSZ */
 char boot_exception_stacks[N_EXCEPTION_STACKS*EXCEPTION_STKSZ];
 
 /*
@@ -162,16 +161,11 @@ void __init cpu_init (void)
 #endif
 	struct tss_struct * t = &init_tss[cpu];
 	unsigned long v, efer; 	
-	char *estacks; 
+	char *estack;
 
 	/* CPU 0 is initialised in head64.c */
-	if (cpu != 0) {
+	if (cpu != 0)
 		pda_init(cpu);
-		estacks = (char *)__get_free_pages(GFP_ATOMIC, EXCEPTION_STK_ORDER); 
-		if (!estacks)
-			panic("Can't allocate exception stacks for CPU %d\n",cpu);
-	} else 
-		estacks = boot_exception_stacks; 
 
 	if (test_and_set_bit(cpu, &cpu_initialized))
 		panic("CPU#%d already initialized!\n", cpu);
@@ -231,10 +225,18 @@ void __init cpu_init (void)
 	/*
 	 * set up and load the per-CPU TSS
 	 */
-	estacks += EXCEPTION_STKSZ;
+	estack = (char *)boot_exception_stacks + EXCEPTION_STKSZ;
 	for (v = 0; v < N_EXCEPTION_STACKS; v++) {
-		t->ist[v] = (unsigned long)estacks;
-		estacks += EXCEPTION_STKSZ;
+		if(cpu == 0) {
+			t->ist[v] = estack;
+			estack += EXCEPTION_STKSZ;
+		}
+		else {
+			estack = __get_free_pages(GFP_ATOMIC, EXCEPTION_STK_ORDER);
+			if(!estack) 
+				panic("Can't allocate exception stack %d for CPU %d\n", v, cpu);
+			t->ist[v] = estack + EXCEPTION_STKSZ;		
+		}
 	}
 
 	atomic_inc(&init_mm.mm_count);

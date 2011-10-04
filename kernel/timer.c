@@ -498,9 +498,10 @@ repeat:
  			fn = timer->function;
  			data = timer->data;
 
+			set_running_timer(base, timer);
+			smp_wmb();
 			list_del(&timer->entry);
 			timer->base = NULL;
-			set_running_timer(base, timer);
 			spin_unlock_irq(&base->lock);
 			fn(data);
 			spin_lock_irq(&base->lock);
@@ -704,6 +705,9 @@ static void update_wall_time(unsigned long ticks)
 	    xtime.tv_sec++;
 	    second_overflow();
 	}
+#ifdef ARCH_UPDATE_WALL_TIME
+	ARCH_UPDATE_WALL_TIME();
+#endif
 }
 
 static inline void do_process_times(struct task_struct *p,

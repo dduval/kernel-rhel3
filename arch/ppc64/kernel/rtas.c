@@ -222,7 +222,10 @@ rtas_flash_firmware(void)
 			image_size += f->blocks[i].length;
 		}
 		next = f->next;
-		f->next = (struct flash_block_list *)virt_to_absolute((unsigned long)f->next);
+		/* Don't translate final NULL pointer */
+		if (next)
+			f->next = (struct flash_block_list *)virt_to_absolute((unsigned long)next);
+
 		/* make num_blocks into the version/length field */
 		f->num_blocks = (FLASH_BLOCK_LIST_VERSION << 56) | ((f->num_blocks+1)*16);
 	}

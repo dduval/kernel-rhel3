@@ -83,7 +83,7 @@
  */
 static void	xprt_request_init(struct rpc_task *, struct rpc_xprt *);
 static void	do_xprt_transmit(struct rpc_task *);
-static void	xprt_reserve_status(struct rpc_task *task);
+static inline void	do_xprt_reserve(struct rpc_task *);
 static void	xprt_disconnect(struct rpc_xprt *);
 static void	xprt_connect_status(struct rpc_task *task);
 static struct socket *xprt_create_socket(int, struct rpc_timeout *, int);
@@ -138,18 +138,21 @@ xprt_from_sock(struct sock *sk)
 static int
 __xprt_lock_write(struct rpc_xprt *xprt, struct rpc_task *task)
 {
+	struct rpc_rqst *req = task->tk_rqstp;
 	if (!xprt->snd_task) {
 		if (xprt->nocong || __xprt_get_cong(xprt, task)) {
 			xprt->snd_task = task;
-			if (task->tk_rqstp)
-				task->tk_rqstp->rq_bytes_sent = 0;
+			if (req) {
+				req->rq_bytes_sent = 0;
+				req->rq_ntrans++;
+			}
 		}
 	}
 	if (xprt->snd_task != task) {
 		dprintk("RPC: %4d TCP write queue full\n", task->tk_pid);
 		task->tk_timeout = 0;
 		task->tk_status = -EAGAIN;
-		if (task->tk_rqstp && task->tk_rqstp->rq_nresend)
+		if (req && req->rq_ntrans)
 			rpc_sleep_on(&xprt->resend, task, NULL, NULL);
 		else
 			rpc_sleep_on(&xprt->sending, task, NULL, NULL);
@@ -183,9 +186,12 @@ __xprt_lock_write_next(struct rpc_xprt *xprt)
 			return;
 	}
 	if (xprt->nocong || __xprt_get_cong(xprt, task)) {
+		struct rpc_rqst *req = task->tk_rqstp;
 		xprt->snd_task = task;
-		if (task->tk_rqstp)
-			task->tk_rqstp->rq_bytes_sent = 0;
+		if (req) {
+			req->rq_bytes_sent = 0;
+			req->rq_ntrans++;
+		}
 	}
 }
 
@@ -590,14 +596,14 @@ xprt_complete_rqst(struct rpc_xprt *xprt, struct rpc_rqst *req, int copied)
 
 	/* Adjust congestion window */
 	if (!xprt->nocong) {
+		int timer = rpcproc_timer(clnt, task->tk_msg.rpc_proc);
 		xprt_adjust_cwnd(xprt, copied);
 		__xprt_put_cong(xprt, req);
-	       	if (!req->rq_nresend) {
-			int timer = rpcproc_timer(clnt, task->tk_msg.rpc_proc);
+	       	if (req->rq_ntrans == 1) {
 			if (timer)
 				rpc_update_rtt(&clnt->cl_rtt, timer, (long)jiffies - req->rq_xtime);
 		}
-		rpc_clear_timeo(&clnt->cl_rtt);
+		rpc_set_timeo(&clnt->cl_rtt, timer, req->rq_ntrans - 1);
 	}
 
 #ifdef RPC_PROFILE
@@ -1050,21 +1056,6 @@ out:
 }
 
 /*
- * Exponential backoff for UDP retries
- */
-static inline int
-xprt_expbackoff(struct rpc_task *task, struct rpc_rqst *req)
-{
-	int backoff;
-
-	req->rq_ntimeo++;
-	backoff = min(rpc_ntimeo(&task->tk_client->cl_rtt), XPRT_MAX_BACKOFF);
-	if (req->rq_ntimeo < (1 << backoff))
-		return 1;
-	return 0;
-}
-
-/*
  * RPC receive timeout handler.
  */
 static void
@@ -1077,15 +1068,8 @@ xprt_timer(struct rpc_task *task)
 	if (req->rq_received)
 		goto out;
 
-	if (!xprt->nocong) {
-		if (xprt_expbackoff(task, req)) {
-			rpc_add_timer(task, xprt_timer);
-			goto out_unlock;
-		}
-		rpc_inc_timeo(&task->tk_client->cl_rtt);
-		xprt_adjust_cwnd(req->rq_xprt, -ETIMEDOUT);
-	}
-	req->rq_nresend++;
+	xprt_adjust_cwnd(req->rq_xprt, -ETIMEDOUT);
+	__xprt_put_cong(xprt, req);
 
 	dprintk("RPC: %4d xprt_timer (%s request)\n",
 		task->tk_pid, req ? "pending" : "backlogged");
@@ -1094,7 +1078,6 @@ xprt_timer(struct rpc_task *task)
 out:
 	task->tk_timeout = 0;
 	rpc_wake_up_task(task);
-out_unlock:
 	spin_unlock(&xprt->sock_lock);
 }
 
@@ -1237,16 +1220,18 @@ do_xprt_transmit(struct rpc_task *task)
 	return;
  out_receive:
 	dprintk("RPC: %4d xmit complete\n", task->tk_pid);
+	spin_lock_bh(&xprt->sock_lock);
 	/* Set the task's receive timeout value */
 	if (!xprt->nocong) {
-		task->tk_timeout = rpc_calc_rto(&clnt->cl_rtt,
-				rpcproc_timer(clnt, task->tk_msg.rpc_proc));
-		req->rq_ntimeo = 0;
+		int timer = rpcproc_timer(clnt, task->tk_msg.rpc_proc);
+		task->tk_timeout = rpc_calc_rto(&clnt->cl_rtt, timer);
+		task->tk_timeout <<= rpc_ntimeo(&clnt->cl_rtt, timer);
+		task->tk_timeout <<= clnt->cl_timeout.to_retries
+			- req->rq_timeout.to_retries;
 		if (task->tk_timeout > req->rq_timeout.to_maxval)
 			task->tk_timeout = req->rq_timeout.to_maxval;
 	} else
 		task->tk_timeout = req->rq_timeout.to_current;
-	spin_lock_bh(&xprt->sock_lock);
 	/* Don't race with disconnect */
 	if (!xprt_connected(xprt))
 		task->tk_status = -ENOTCONN;
@@ -1259,61 +1244,39 @@ do_xprt_transmit(struct rpc_task *task)
 /*
  * Reserve an RPC call slot.
  */
-int
+void
 xprt_reserve(struct rpc_task *task)
 {
 	struct rpc_xprt	*xprt = task->tk_xprt;
 
-	/* We already have an initialized request. */
-	if (task->tk_rqstp)
-		return 0;
-
-	spin_lock(&xprt->xprt_lock);
-	xprt_reserve_status(task);
-	if (task->tk_rqstp) {
-		task->tk_timeout = 0;
-	} else if (!task->tk_timeout) {
-		task->tk_status = -ENOBUFS;
-	} else {
-		dprintk("RPC:      xprt_reserve waiting on backlog\n");
-		task->tk_status = -EAGAIN;
-		rpc_sleep_on(&xprt->backlog, task, NULL, NULL);
+	task->tk_status = -EIO;
+	if (!xprt->shutdown) {
+		spin_lock(&xprt->xprt_lock);
+		do_xprt_reserve(task);
+		spin_unlock(&xprt->xprt_lock);
 	}
-	spin_unlock(&xprt->xprt_lock);
-	dprintk("RPC: %4d xprt_reserve returns %d\n",
-				task->tk_pid, task->tk_status);
-	return task->tk_status;
 }
 
-/*
- * Reservation callback
- */
-static void
-xprt_reserve_status(struct rpc_task *task)
+static inline void
+do_xprt_reserve(struct rpc_task *task)
 {
 	struct rpc_xprt	*xprt = task->tk_xprt;
-	struct rpc_rqst	*req;
 
-	if (xprt->shutdown) {
-		task->tk_status = -EIO;
-	} else if (task->tk_status < 0) {
-		/* NOP */
-	} else if (task->tk_rqstp) {
-		/* We've already been given a request slot: NOP */
-	} else {
-		if (!(req = xprt->free))
-			goto out_nofree;
-		/* OK: There's room for us. Grab a free slot */
-		xprt->free     = req->rq_next;
-		req->rq_next   = NULL;
+	task->tk_status = 0;
+	if (task->tk_rqstp)
+		return;
+	if (xprt->free) {
+		struct rpc_rqst	*req = xprt->free;
+		xprt->free = req->rq_next;
+		req->rq_next = NULL;
 		task->tk_rqstp = req;
 		xprt_request_init(task, xprt);
+		return;
 	}
-
-	return;
-
-out_nofree:
+	dprintk("RPC:      waiting for request slot\n");
 	task->tk_status = -EAGAIN;
+	task->tk_timeout = 0;
+	rpc_sleep_on(&xprt->backlog, task, NULL, NULL);
 }
 
 /*
@@ -1406,7 +1369,6 @@ xprt_set_timeout(struct rpc_timeout *to, unsigned int retr, unsigned long incr)
 	to->to_initval   = 
 	to->to_increment = incr;
 	to->to_maxval    = incr * retr;
-	to->to_resrvval  = incr * retr;
 	to->to_retries   = retr;
 	to->to_exponential = 0;
 }
@@ -1446,7 +1408,6 @@ xprt_setup(int proto, struct sockaddr_in *ap, struct rpc_timeout *to)
 	if (to) {
 		xprt->timeout = *to;
 		xprt->timeout.to_current = to->to_initval;
-		xprt->timeout.to_resrvval = to->to_maxval << 1;
 	} else
 		xprt_default_timeout(&xprt->timeout, xprt->prot);
 

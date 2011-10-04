@@ -56,6 +56,75 @@
 
 static const char RCSid[] = "$Header: /mnt/ide/home/eric/CVSROOT/linux/drivers/scsi/scsi_queue.c,v 1.1 1997/10/21 11:16:38 eric Exp $";
 
+/*
+ * Function:	scsi_timeout_block()
+ *
+ * Purpose:	Unblock a host or device after a time interval has passed
+ *
+ * Arguments:	cmd    - command that provides reference to either the host
+ *			 or device to be unblocked.
+ *
+ * Lock Status: No locks held (called by core timer expiration code)
+ *
+ * Returns:	Nothing
+ *
+ * Note:	We enter here for either a blocked host or device.  We simply
+ *		unblock both and then call the request queue for the
+ *		device passed in.  That will get things going again.  If
+ *		it was the host that was blocked, then we'll be nice and
+ *		call request_fn for all the device queues.
+ */
+void scsi_timeout_block(Scsi_Cmnd * cmd)
+{
+	int host_was_blocked = cmd->host->host_blocked;
+	struct scsi_device *device = cmd->device;
+	struct request_queue *q = &device->request_queue;
+	struct request *req;
+
+	device->device_blocked = 0;
+	device->unblock_timer_active = 0;
+	cmd->host->host_blocked = 0;
+	for (device = cmd->host->host_queue; device; device = device->next)
+		if (device->unblock_timer_active)
+			break;
+	if (!device)
+		cmd->host->unblock_timer_active = 0;
+
+	if (cmd->host->eh_wait != NULL && cmd->host->in_recovery) {
+		/*
+		 * We don't goose any queues if we are in recovery.
+		 * Instead we wait until all timers that are already set
+		 * have fired and host_busy == host_failed.  If all the
+		 * commands have already finished, then we have to start
+		 * the eh thread (it's normally started at the end of
+		 * command completion processing, but it won't get started
+		 * if one of these timers is active).
+		 */
+		if (cmd->host->unblock_timer_active == 0 &&
+		    atomic_read(&cmd->host->host_busy) == cmd->host->host_failed)
+			up(cmd->host->eh_wait);
+	} else if (!host_was_blocked) {
+		spin_lock_irq(q->queue_lock);
+		q->request_fn(q);
+		spin_unlock_irq(q->queue_lock);
+	} else {
+		/*
+		 * OK, the host was blocked.  Walk the device queue and kick
+		 * any devices that aren't blocked.
+		 */
+		for (device = cmd->host->host_queue;
+		     device;
+		     device = device->next) {
+			if (device->device_blocked)
+				continue;
+			q = &device->request_queue;
+			spin_lock_irq(q->queue_lock);
+			q->request_fn(q);
+			spin_unlock_irq(q->queue_lock);
+		}
+	}
+}
+		
 
 /*
  * Function:    scsi_mlqueue_insert()
@@ -79,70 +148,67 @@ static const char RCSid[] = "$Header: /mnt/ide/home/eric/CVSROOT/linux/drivers/s
 int scsi_mlqueue_insert(Scsi_Cmnd * cmd, int reason)
 {
 	struct Scsi_Host *host;
+	struct scsi_device *device;
+	struct request_queue *q;
+	struct request *rq;
 	unsigned long flags;
 
 	SCSI_LOG_MLQUEUE(1, printk("Inserting command %p into mlqueue\n", cmd));
 
-	/*
-	 * We are inserting the command into the ml queue.  First, we
-	 * cancel the timer, so it doesn't time out.
-	 */
-	scsi_delete_timer(cmd);
-
 	host = cmd->host;
+	device = cmd->device;
+	q = &device->request_queue;
+	rq = &cmd->request;
 
 	/*
-	 * Next, set the appropriate busy bit for the device/host.
+	 * Decrement the counters, since these commands are no longer
+	 * active on the host/device.
 	 */
-	if (reason == SCSI_MLQUEUE_HOST_BUSY) {
-		/*
-		 * Protect against race conditions.  If the host isn't busy,
-		 * assume that something actually completed, and that we should
-		 * be able to queue a command now.  Note that there is an implicit
-		 * assumption that every host can always queue at least one command.
-		 * If a host is inactive and cannot queue any commands, I don't see
-		 * how things could possibly work anyways.
-		 */
-		if (atomic_read(&host->host_busy) == 0) {
-			if (scsi_retry_command(cmd) == 0) {
-				return 0;
-			}
-		}
-		host->host_blocked = TRUE;
-	} else {
-		/*
-		 * Protect against race conditions.  If the device isn't busy,
-		 * assume that something actually completed, and that we should
-		 * be able to queue a command now.  Note that there is an implicit
-		 * assumption that every host can always queue at least one command.
-		 * If a host is inactive and cannot queue any commands, I don't see
-		 * how things could possibly work anyways.
-		 */
-		if (atomic_read(&cmd->device->device_busy) == 0) {
-			if (scsi_retry_command(cmd) == 0) {
-				return 0;
-			}
-		}
-		cmd->device->device_blocked = TRUE;
-	}
+	atomic_dec(&host->host_busy);
+	atomic_dec(&device->device_busy);
 
 	/*
 	 * Register the fact that we own the thing for now.
 	 */
 	cmd->state = SCSI_STATE_MLQUEUE;
 	cmd->owner = SCSI_OWNER_MIDLEVEL;
+	rq->special = cmd;
 
-	/*
-	 * Decrement the counters, since these commands are no longer
-	 * active on the host/device.
-	 */
-	atomic_dec(&cmd->host->host_busy);
-	atomic_dec(&cmd->device->device_busy);
+	if (host->eh_wait != NULL && host->in_recovery) {
+		/*
+		 * We don't goose any queues if we are in recovery.
+		 * We don't need to start the eh thread either,
+		 * scsi_softirq_handler will do so if we are ready.
+		 */
+		spin_lock_irqsave(q->queue_lock, flags);
+		list_add(&rq->queue, &q->queue_head);
+		spin_unlock_irqrestore(q->queue_lock, flags);
+	} else if (reason == SCSI_MLQUEUE_HOST_BUSY) {
+		/*
+		 * Next, set the appropriate busy bit for the device/host.
+		 */
+		spin_lock_irqsave(host->host_lock, flags);
+		host->host_blocked = TRUE;
+		if (atomic_read(&host->host_busy) == 0 &&
+		    !host->unblock_timer_active) {
+			scsi_add_timer(cmd, HZ/5, scsi_timeout_block);
+			host->unblock_timer_active = 1;
+		}
+		spin_unlock(host->host_lock);
+		spin_lock(q->queue_lock);
+		list_add(&rq->queue, &q->queue_head);
+		spin_unlock_irqrestore(q->queue_lock, flags);
+	} else {
+		spin_lock_irqsave(q->queue_lock, flags);
+		device->device_blocked = TRUE;
+		list_add(&rq->queue, &q->queue_head);
+		if (atomic_read(&device->device_busy) == 0) {
+			scsi_add_timer(cmd, HZ/5, scsi_timeout_block);
+			device->unblock_timer_active = 1;
+			host->unblock_timer_active = 1;
+		}
+		spin_unlock_irqrestore(q->queue_lock, flags);
+	}
 
-	/*
-	 * Insert this command at the head of the queue for it's device.
-	 * It will go before all other commands that are already in the queue.
-	 */
-	scsi_insert_special_cmd(cmd, 1);
 	return 0;
 }

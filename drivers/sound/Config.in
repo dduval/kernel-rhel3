@@ -19,7 +19,7 @@ if [ "$CONFIG_SOUND_CMPCI" = "y" -o "$CONFIG_SOUND_CMPCI" = "m" ]; then
     if [ "$CONFIG_SOUND_CMPCI_MIDI" = "y" ]; then
         hex '    MPU-401 I/O 330, 320, 310, 300' CONFIG_SOUND_CMPCI_MPUIO 330
     fi
-    bool '    Enable joystick' CONFIG_SOUND_CMPCI_JOYSTICK
+    dep_mbool '    Enable joystick' CONFIG_SOUND_CMPCI_JOYSTICK $CONFIG_INPUT_GAMEPORT
     bool '    Support CMI8738 based audio cards' CONFIG_SOUND_CMPCI_CM8738
     if [ "$CONFIG_SOUND_CMPCI_CM8738" = "y" ]; then
 	bool '      Inverse S/PDIF in for CMI8738' CONFIG_SOUND_CMPCI_SPDIFINVERSE

@@ -1074,7 +1074,7 @@ int sys32_ioctl(unsigned int fd, unsigned int cmd, unsigned long arg)
 		error = handler(fd, cmd, arg, filp);
 	} else {
 		error = -EINVAL;
-		printk("unknown ioctl: %08x\n", cmd);
+		printk(KERN_DEBUG "unknown ioctl: %08x (%s)\n", cmd, current->comm);
 	}
 out:
 	fput(filp);

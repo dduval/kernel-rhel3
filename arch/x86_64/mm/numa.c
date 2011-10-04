@@ -9,6 +9,7 @@
 #include <linux/init.h>
 #include <linux/bootmem.h>
 #include <linux/mmzone.h>
+#include <linux/mm_inline.h>
 #include <linux/blk.h>
 #include <asm/e820.h>
 #include <asm/proto.h>
@@ -75,6 +76,8 @@ void __init setup_node_bootmem(int nodeid, unsigned long start, unsigned long en
 		maxnode = nodeid;
 	nodes_present |= (1UL << nodeid); 
 } 
+
+EXPORT_SYMBOL(maxnode);
 
 /* Initialize final allocator for a zone */
 void __init setup_node_zones(int nodeid)

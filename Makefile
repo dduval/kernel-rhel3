@@ -144,9 +144,14 @@ DRIVERS-y += drivers/char/char.o \
 	drivers/misc/misc.o \
 	drivers/net/net.o
 
+ifdef CONFIG_IA64
+DRIVERS-$(CONFIG_AGP) += drivers/char/agp-hp_ia64/agp.o
+DRIVERS-$(CONFIG_DRM_NEW) += drivers/char/drm-hp_ia64/drm.o
+else
 DRIVERS-$(CONFIG_AGP) += drivers/char/agp/agp.o
 DRIVERS-$(CONFIG_DRM_NEW) += drivers/char/drm/drm.o
 DRIVERS-$(CONFIG_DRM_OLD) += drivers/char/drm-4.0/drm.o
+endif
 DRIVERS-$(CONFIG_NUBUS) += drivers/nubus/nubus.a
 DRIVERS-$(CONFIG_NET_FC) += drivers/net/fc/fc.o
 DRIVERS-$(CONFIG_DEV_APPLETALK) += drivers/net/appletalk/appletalk.o

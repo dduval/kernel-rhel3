@@ -761,9 +761,8 @@ void mf_init( void )
 	iSeries_proc_callback(&mf_proc_init);
 }
 
-void mf_setSide(char side)
+int mf_setSide(char side)
 {
-	int rc = 0;
 	u64 newSide = 0;
 	struct VspCmdData myVspCmd;
 
@@ -780,7 +779,7 @@ void mf_setSide(char side)
 	myVspCmd.xSubData.xFunction02SelectIplTypeIn.xIplType = newSide;
 	myVspCmd.xCmd = 10;
 
-	rc = signalVspInstruction(&myVspCmd);
+	return signalVspInstruction(&myVspCmd);
 }
 
 char mf_getSide(void)
@@ -871,7 +870,7 @@ void mf_getSrcHistory(char *buffer, int size)
      kfree(pages[3]);*/
 }
 
-void mf_setCmdLine(const char *cmdline, int size, u64 side)
+int mf_setCmdLine(const char *cmdline, int size, u64 side)
 {
 	struct VspCmdData myVspCmd;
 	int rc = 0;
@@ -879,11 +878,14 @@ void mf_setCmdLine(const char *cmdline, int size, u64 side)
 	char *page = pci_alloc_consistent(iSeries_vio_dev, size, &dma_addr);
 
 	if (page == NULL) {
-		printk(KERN_ERR "mf.c: couldn't allocate memory to set command line\n");
-		return;
+		printk(KERN_INFO "mf_setCmdLine: memory allocation failed\n");
+		return -ENOMEM;
 	}
 
-	copy_from_user(page, cmdline, size);
+	if (copy_from_user(page, cmdline, size)) {
+		pci_free_consistent(iSeries_vio_dev, size, page, dma_addr);
+		return -EFAULT;
+	}
 
 	memset(&myVspCmd, 0, sizeof(myVspCmd));
 	myVspCmd.xCmd = 31;
@@ -895,6 +897,8 @@ void mf_setCmdLine(const char *cmdline, int size, u64 side)
 	rc = signalVspInstruction(&myVspCmd);
 
 	pci_free_consistent(iSeries_vio_dev, size, page, dma_addr);
+
+	return rc;
 }
 
 int mf_getCmdLine(char *cmdline, int *size, u64 side)
@@ -943,11 +947,15 @@ int mf_setVmlinuxChunk(const char *buffer, int size, int offset, u64 side)
 	char *page = pci_alloc_consistent(iSeries_vio_dev, size, &dma_addr);
 
 	if (page == NULL) {
-		printk(KERN_ERR "mf.c: couldn't allocate memory to set vmlinux chunk\n");
+		printk(KERN_INFO "mf_setVmlinuxChunk: memory allocation failed\n");
 		return -ENOMEM;
 	}
 
-	copy_from_user(page, buffer, size);
+	if (copy_from_user(page, buffer, size)) {
+		pci_free_consistent(iSeries_vio_dev, size, page, dma_addr);
+		return -EFAULT;
+	}
+
 	memset(&myVspCmd, 0, sizeof(myVspCmd));
 
 	myVspCmd.xCmd = 30;

@@ -129,21 +129,32 @@ static ssize_t scanlog_read(struct file *file, char *buf,
 static ssize_t scanlog_write(struct file * file, const char * buf,
 			     size_t count, loff_t *ppos)
 {
+	char cmdbuf[10];
 	unsigned long status;
 
-	if (buf) {
-		if (strncmp(buf, "reset", 5) == 0) {
-			DEBUG("reset scanlog\n");
-			status = rtas_call(ibm_scan_log_dump, 2, 1, NULL, NULL, 0);
-			DEBUG("rtas returns %ld\n", status);
-		} else if (strncmp(buf, "debugon", 7) == 0) {
-			printk(KERN_ERR "scanlog: debug on\n");
-			scanlog_debug = 1;
-		} else if (strncmp(buf, "debugoff", 8) == 0) {
-			printk(KERN_ERR "scanlog: debug off\n");
-			scanlog_debug = 0;
+	if (count > 9) count = 9;
+	if (copy_from_user (cmdbuf, buf, count)) 
+		return -EFAULT;
+	cmdbuf[count] = '\0';
+
+	if (strncmp(cmdbuf, "reset", 5) == 0) {
+		printk(KERN_INFO "scanlog: reset\n");
+		status = rtas_call(ibm_scan_log_dump, 2, 1, NULL, NULL, 0);
+		if (status) {
+			printk(KERN_INFO "scanlog: reset failed with code %ld\n", 
+				status);
+			return -EIO;
 		}
+	} else if (strncmp(cmdbuf, "debugon", 7) == 0) {
+		printk(KERN_INFO "scanlog: debug on\n");
+		scanlog_debug = 1;
+	} else if (strncmp(cmdbuf, "debugoff", 8) == 0) {
+		printk(KERN_INFO "scanlog: debug off\n");
+		scanlog_debug = 0;
 	}
+	else 
+		return -EINVAL;
+
 	return count;
 }
 

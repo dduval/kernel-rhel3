@@ -436,6 +436,14 @@ struct Scsi_Host
      * when the device becomes less busy that we need to feed them.
      */
     unsigned some_device_starved:1;
+#ifndef __GENKSYMS__ /* preserve KMI/ABI ksyms compatibility for mod linkage */
+
+    /*
+     * This becomes true any time we have a timer active because either a
+     * device or host is blocked.
+     */
+    unsigned unblock_timer_active:1;
+#endif
    
     void (*select_queue_depths)(struct Scsi_Host *, Scsi_Device *);
 

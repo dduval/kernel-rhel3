@@ -839,6 +839,10 @@ static unsigned long fast_gettimeoffset_ref = 0;
 static unsigned long cpu_khz_ref = 0;
 #endif
 
+#ifdef CONFIG_X86_LOCAL_APIC
+void set_nmi_perfctr_val(void);
+#endif
+
 static int
 time_cpufreq_notifier(struct notifier_block *nb, unsigned long val,
 		       void *data)
@@ -861,6 +865,9 @@ time_cpufreq_notifier(struct notifier_block *nb, unsigned long val,
 		if (use_tsc) {
 			fast_gettimeoffset_quotient = cpufreq_scale(fast_gettimeoffset_ref, freq->new, ref_freq);
 			cpu_khz = cpufreq_scale(cpu_khz_ref, ref_freq, freq->new);
+#ifdef CONFIG_X86_LOCAL_APIC
+			set_nmi_perfctr_val();
+#endif
 		}
 #endif
 	}

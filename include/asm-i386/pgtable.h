@@ -227,7 +227,7 @@ extern void pgtable_cache_init(void);
 #define _KERNPG_TABLE	(_PAGE_PRESENT | _PAGE_RW | _PAGE_ACCESSED | _PAGE_DIRTY)
 #define _PAGE_CHG_MASK	(PTE_MASK | _PAGE_ACCESSED | _PAGE_DIRTY)
 
-#define PAGE_NONE	__pgprot(_PAGE_PROTNONE | _PAGE_ACCESSED)
+#define PAGE_NONE	__pgprot(_PAGE_PROTNONE | _PAGE_USER | _PAGE_ACCESSED)
 #define PAGE_SHARED	__pgprot(_PAGE_PRESENT | _PAGE_RW | _PAGE_USER | _PAGE_ACCESSED)
 #define PAGE_COPY	__pgprot(_PAGE_PRESENT | _PAGE_USER | _PAGE_ACCESSED)
 #define PAGE_READONLY	__pgprot(_PAGE_PRESENT | _PAGE_USER | _PAGE_ACCESSED)
@@ -418,6 +418,11 @@ typedef u32 pte_addr_t;
 
 #if defined(CONFIG_HIGHPTE) && defined(CONFIG_HIGHMEM64G)
 typedef u64 pte_addr_t;
+#if !defined(CONFIG_X86_4G)
+#define CHAIN_PTEP_T	u32
+#define PTE_ADDR_D2C(x)	((u32)((x) >> 3))
+#define PTE_ADDR_C2D(x)	((pte_addr_t)(x) << 3)
+#endif
 #endif
 
 #if !defined(CONFIG_HIGHPTE)

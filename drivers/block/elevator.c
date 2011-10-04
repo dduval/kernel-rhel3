@@ -323,3 +323,9 @@ void elevator_init(elevator_t * elevator, elevator_t type)
 	*elevator = type;
 	elevator->queue_ID = queue_ID++;
 }
+
+EXPORT_SYMBOL_GPL(elevator_init);
+EXPORT_SYMBOL_GPL(elevator_linus_merge);
+EXPORT_SYMBOL_GPL(elevator_linus_merge_req);
+EXPORT_SYMBOL_GPL(elevator_noop_merge);
+EXPORT_SYMBOL_GPL(elevator_noop_merge_req);

@@ -73,6 +73,7 @@ unsigned long decr_overclock_proc0_set = 0;
 
 #ifdef CONFIG_XMON
 extern void xmon_map_scc(void);
+extern int xmon_set_enabled(void);
 #endif
 
 #ifdef CONFIG_KDB
@@ -492,7 +493,9 @@ void __init setup_arch(char **cmdline_p)
 	ppc64_boot_msg(0x12, "Setup Arch");
 #ifdef CONFIG_XMON
 	xmon_map_scc();
-	if (strstr(cmd_line, "xmon"))
+	if (strstr(cmd_line, "xmon=on") || strstr(cmd_line, "xmon=early"))
+		xmon_set_enabled();
+	if (strstr(cmd_line, "xmon=early"))
 		xmon(0);
 #endif /* CONFIG_XMON */
 
@@ -606,18 +609,31 @@ void exception_trace(unsigned long trap)
 	udbg_puts("   "); udbg_puthex(srr1); udbg_puts("\n");
 }
 
-int set_spread_lpevents( char * str )
+void do_spread_lpevents(unsigned long n)
 {
-	/* The parameter is the number of processors to share in processing lp events */
 	unsigned long i;
+
+	for (i=1; i < n; i++)
+		paca[i].lpQueuePtr = paca[0].lpQueuePtr;
+	for (i=n; i < MAX_PACAS; i++)
+		paca[i].lpQueuePtr = NULL;
+}
+
+/* 
+ * The parameter is the number of processors to share in 
+ * processing lp events 
+ */
+int set_spread_lpevents(char * str)
+{
 	unsigned long val = simple_strtoul( str, NULL, 0 );
-	if ( ( val > 0 ) && ( val <= MAX_PACAS ) ) {
-		for ( i=1; i<val; ++i )
-			paca[i].lpQueuePtr = paca[0].lpQueuePtr;
-		printk("lpevent processing spread over %ld processors\n", val);
-	}
-	else
-		printk("invalid spreaqd_lpevents %ld\n", val);
+
+	if ((val > 0) && (val <= MAX_PACAS)) {
+		do_spread_lpevents(val);
+		printk("lpevent processing spread over %ld processor(s)\n", 
+			val);
+	} else
+		printk("invalid spread_lpevents %ld\n", val);
+
 	return 1;
 }	
 

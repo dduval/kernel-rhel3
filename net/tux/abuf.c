@@ -46,7 +46,13 @@ char * get_abuf (tux_req_t *req, unsigned int max_size)
 		BUG();
 	page = ti->header_cache;
 	if ((left < max_size) || !page) {
-		page = alloc_pages(GFP_KERNEL, 0);
+		while (!(page = alloc_pages(GFP_KERNEL, 0))) {
+			if (net_ratelimit())
+				printk(KERN_WARNING "tux: OOM in get_abuf()!\n");
+			current->state = TASK_UNINTERRUPTIBLE;
+			schedule_timeout(1);
+		}
+
 		if (ti->header_cache)
 			__free_page(ti->header_cache);
 		ti->header_cache = page;

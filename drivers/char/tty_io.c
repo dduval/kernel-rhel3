@@ -453,8 +453,6 @@ void do_tty_hangup(void *data)
 		redirect = NULL;
 	}
 	spin_unlock(&redirect_lock);
-	if (f)
-		fput(f);
 	
 	check_tty_count(tty, "do_tty_hangup");
 	file_list_lock();
@@ -541,6 +539,8 @@ void do_tty_hangup(void *data)
 	} else if (tty->driver.hangup)
 		(tty->driver.hangup)(tty);
 	unlock_kernel();
+	if (f)
+		fput(f);
 }
 
 void tty_hangup(struct tty_struct * tty)
@@ -1495,7 +1495,7 @@ static int tty_fasync(int fd, struct file * filp, int on)
 		if (!waitqueue_active(&tty->read_wait))
 			tty->minimum_to_wake = 1;
 		if (filp->f_owner.pid == 0) {
-			filp->f_owner.pid = (-tty->pgrp) ? : current->pid;
+			filp->f_owner.pid = (-tty->pgrp) ? : current->tgid;
 			filp->f_owner.uid = current->uid;
 			filp->f_owner.euid = current->euid;
 		}

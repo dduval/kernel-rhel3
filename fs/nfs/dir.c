@@ -402,16 +402,29 @@ static int nfs_readdir(struct file *filp, void *dirent, filldir_t filldir)
 {
 	struct dentry	*dentry = filp->f_dentry;
 	struct inode	*inode = dentry->d_inode;
-	nfs_readdir_descriptor_t my_desc,
-			*desc = &my_desc;
-	struct nfs_entry my_entry;
-	struct nfs_fh	fh;
-	struct nfs_fattr fattr;
+	nfs_readdir_descriptor_t *desc;
+	struct nfs_entry *my_entry;
+	struct nfs_fh	*fh;
+	struct nfs_fattr *fattr;
 	long		res;
+	void *mem;
+	int error, memlen = sizeof(struct nfs_fh) +
+		sizeof(struct nfs_fattr) + sizeof(struct nfs_entry) +
+		sizeof(nfs_readdir_descriptor_t);
 
 	res = nfs_revalidate_inode(NFS_SERVER(inode), inode);
 	if (res < 0)
 		return res;
+
+	if ((mem = kmalloc(memlen, GFP_USER)) == NULL)
+		return -ENOMEM;
+	memset(mem, 0, memlen);
+	fattr = (struct nfs_fattr *)mem;
+	my_entry = (struct nfs_entry *)(mem + sizeof(struct nfs_fattr));
+	desc = (nfs_readdir_descriptor_t *)(mem + sizeof(struct nfs_fattr) +
+		sizeof(struct nfs_entry));
+	fh = (struct nfs_fh *)(mem + sizeof(struct nfs_fattr) +
+		sizeof(struct nfs_entry) + sizeof(nfs_readdir_descriptor_t));
 
 	/*
 	 * filp->f_pos points to the file offset in the page cache.
@@ -419,17 +432,14 @@ static int nfs_readdir(struct file *filp, void *dirent, filldir_t filldir)
 	 * read from the last dirent to revalidate f_pos
 	 * itself.
 	 */
-	memset(desc, 0, sizeof(*desc));
 	desc->file = filp;
 	desc->target = filp->f_pos;
 	desc->decode = NFS_PROTO(inode)->decode_dirent;
 	desc->plus = NFS_USE_READDIRPLUS(inode);
 
-	my_entry.cookie = my_entry.prev_cookie = 0;
-	my_entry.eof = 0;
-	my_entry.fh = &fh;
-	my_entry.fattr = &fattr;
-	desc->entry = &my_entry;
+	my_entry->fh = fh;
+	my_entry->fattr = fattr;
+	desc->entry = my_entry;
 
 	while(!desc->entry->eof) {
 		res = readdir_search_pagecache(desc);
@@ -452,8 +462,11 @@ static int nfs_readdir(struct file *filp, void *dirent, filldir_t filldir)
 			break;
 		}
 	}
-	if (desc->error < 0)
-		return desc->error;
+
+	error = desc->error;
+	kfree(mem);
+	if (error < 0)
+		return error;
 	if (res < 0)
 		return res;
 	return 0;
@@ -1217,6 +1230,12 @@ go_ahead:
 	nfs_zap_caches(old_dir);
 	error = NFS_PROTO(old_dir)->rename(old_dir, &old_dentry->d_name,
 					   new_dir, &new_dentry->d_name);
+	/*
+	 * Invalidate the attribute cache so we pick up attributes changed
+	 * by the server during the RENAME operation.  Note that attributes
+	 * can change even if an error is returned (NFSERR_MLINK, eg).
+	 */
+	NFS_CACHEINV(old_inode);
 out:
 	if (rehash)
 		d_rehash(rehash);

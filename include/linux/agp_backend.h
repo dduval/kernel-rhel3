@@ -58,6 +58,9 @@ enum chipset_type {
 	INTEL_7505,
 	INTEL_7205,
 	INTEL_I875,
+#ifdef __ia64__
+	INTEL_460GX,
+#endif
 	VIA_GENERIC,
 	VIA_VP3,
 	VIA_MVP3,
@@ -92,6 +95,9 @@ enum chipset_type {
 	NVIDIA_NFORCE2,
 	NVIDIA_GENERIC,
 	HP_ZX1,
+#ifndef __GENKSYMS__ /* preserve KMI/ABI ksyms compatibility for mod linkage */
+	NVIDIA_NFORCE3,
+#endif
 };
 
 typedef struct _agp_version {
@@ -137,6 +143,9 @@ typedef struct _agp_memory {
 	u32 physical;
 	u8 is_bound;
 	u8 is_flushed;
+#ifdef __ia64__
+	void *vmptr;
+#endif
 } agp_memory;
 
 #define AGP_NORMAL_MEMORY 0
