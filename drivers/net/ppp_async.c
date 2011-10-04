@@ -150,6 +150,9 @@ ppp_asynctty_open(struct tty_struct *tty)
 {
 	struct asyncppp *ap;
 	int err;
+	
+	if (!tty->driver.write)
+		return -EOPNOTSUPP;
 
 	MOD_INC_USE_COUNT;
 	err = -ENOMEM;

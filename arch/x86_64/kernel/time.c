@@ -30,6 +30,7 @@ unsigned long hpet_address;
 unsigned long hpet_period;				/* fsecs / HPET clock */
 unsigned int hpet_tick;					/* HPET clocks / interrupt */
 unsigned long vxtime_hz = 1193182;
+int disable_lost_ticks = 0;                             /* command line option */
 int report_lost_ticks;					/* command line option */
 
 struct vxtime_data __vxtime __section_vxtime;		/* data for vsyscall */
@@ -287,7 +288,7 @@ static void timer_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 
 		if (vxtime.mode == VXTIME_HPET) {
 
-			if (offset - vxtime.last > hpet_tick) {
+			if (!disable_lost_ticks && (offset - vxtime.last > hpet_tick)) {
 				if (report_lost_ticks)
 					printk(KERN_WARNING "time.c: Lost %d timer tick(s)! (rip %016lx)\n",
 						(offset - vxtime.last) / hpet_tick - 1, regs->rip);
@@ -303,7 +304,8 @@ static void timer_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 
 			pmtmr = read_pmtmr();
 			offset = ((pmtmr - vxtime.last_pmtmr) & ACPI_PM_MASK) - PMTMR_TICK;
-			if (offset > PMTMR_TICK) {
+
+			if (!disable_lost_ticks && (offset > PMTMR_TICK)) {
 				if (report_lost_ticks)
 					printk(KERN_WARNING "time.c: lost %ld tick(s) (rip %016lx)\n",
 						 offset / PMTMR_TICK, regs->rip);
@@ -322,7 +324,7 @@ static void timer_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 
 			offset = (((tsc - vxtime.last_tsc) * vxtime.tsc_quot) >> 32) - tick;
 
-			if (offset > tick) {
+			if (!disable_lost_ticks && (offset > tick)) {
 				if (report_lost_ticks)
 					printk(KERN_WARNING "time.c: lost %ld tick(s) (rip %016lx)\n",
 						 offset / tick, regs->rip);
@@ -611,6 +613,14 @@ void __init pit_init(void)
 	spin_unlock_irq(&i8253_lock);
 }
 
+static int __init lost_ticks_setup(char *str)
+{
+	printk(KERN_INFO "time.c: disabling lost tick accounting\n");
+	disable_lost_ticks = 1;
+	return 1;
+	
+}
+
 static int __init time_setup(char *str)
 {
 	report_lost_ticks = 1;
@@ -728,5 +738,6 @@ void __init time_init_smp(void)
 }
 
 __setup("tsc", tsc_setup);
+__setup("disable_lost_ticks", lost_ticks_setup);
 __setup("report_lost_ticks", time_setup);
 

@@ -38,6 +38,7 @@
 #include "isdn_concap.h"
 #endif
 
+# define strlcpy(s1,s2,n) strncpy(s1,s2,n);s1[n-1]='\0'
 
 /*
  * Outline of new tbusy handling: 
@@ -2159,7 +2160,7 @@ isdn_net_find_icall(int di, int ch, int idx, setup_parm *setup)
 	isdn_net_dev *p;
 	isdn_net_phone *n;
 	ulong flags;
-	char nr[32];
+	char nr[ISDN_MSNLEN];
 	char *my_eaz;
 
 	/* Search name in netdev-chain */
@@ -2170,7 +2171,7 @@ isdn_net_find_icall(int di, int ch, int idx, setup_parm *setup)
 		nr[1] = '\0';
 		printk(KERN_INFO "isdn_net: Incoming call without OAD, assuming '0'\n");
 	} else
-		strcpy(nr, setup->phone);
+		strlcpy(nr, setup->phone, ISDN_MSNLEN);
 	si1 = (int) setup->si1;
 	si2 = (int) setup->si2;
 	if (!setup->eazmsn[0]) {
@@ -2855,7 +2856,7 @@ isdn_net_setcfg(isdn_net_ioctl_cfg * cfg)
 				chidx = -1;
 			}
 		}
-		strcpy(lp->msn, cfg->eaz);
+		strlcpy(lp->msn, cfg->eaz, sizeof(lp->msn));
 		lp->pre_device = drvidx;
 		lp->pre_channel = chidx;
 		lp->onhtime = cfg->onhtime;
@@ -3004,7 +3005,7 @@ isdn_net_addphone(isdn_net_ioctl_phone * phone)
 	if (p) {
 		if (!(n = (isdn_net_phone *) kmalloc(sizeof(isdn_net_phone), GFP_KERNEL)))
 			return -ENOMEM;
-		strcpy(n->num, phone->phone);
+		strlcpy(n->num, phone->phone, sizeof(n->num));
 		n->next = p->local->phone[phone->outgoing & 1];
 		p->local->phone[phone->outgoing & 1] = n;
 		return 0;

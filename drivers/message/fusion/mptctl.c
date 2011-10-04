@@ -1745,9 +1745,10 @@ mptctl_gettargetinfo (unsigned long arg)
 						goto next_id;
 					} else {
 						pIoc3 = ioc->spi_data.pIocPg3;
-            					for ( jj = 0; jj < pIoc3->NumPhysDisks; jj++ ) {
-                    					if ( pIoc3->PhysDisk[jj].PhysDiskID == id )
-								goto next_id;
+						if (pIoc3)
+							for ( jj = 0; jj < pIoc3->NumPhysDisks; jj++ ) {
+								if ( pIoc3->PhysDisk[jj].PhysDiskID == id )
+									goto next_id;
 						}
 					}
 				}

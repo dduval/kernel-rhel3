@@ -204,6 +204,9 @@ ppp_sync_open(struct tty_struct *tty)
 	struct syncppp *ap;
 	int err;
 
+	if (!tty->driver.write)
+		return -EOPNOTSUPP;
+
 	MOD_INC_USE_COUNT;
 	ap = kmalloc(sizeof(*ap), GFP_KERNEL);
 	err = -ENOMEM;

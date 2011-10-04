@@ -487,9 +487,14 @@ static void sl_tx_timeout(struct net_device *dev)
 			/* 20 sec timeout not reached */
 			goto out;
 		}
-		printk("%s: transmit timed out, %s?\n", dev->name,
-		       (sl->tty->driver.chars_in_buffer(sl->tty) || sl->xleft) ?
-		       "bad line quality" : "driver error");
+		{
+			int cib = 0;
+			if (sl->tty->driver.chars_in_buffer)
+				cib = sl->tty->driver.chars_in_buffer(sl->tty);
+			printk(KERN_WARNING "%s: transmit timed out, %s?\n",
+				dev->name, (cib || sl->xleft) ?
+				       "bad line quality" : "driver error");
+		}	
 		sl->xleft = 0;
 		sl->tty->flags &= ~(1 << TTY_DO_WRITE_WAKEUP);
 		sl_unlock(sl);

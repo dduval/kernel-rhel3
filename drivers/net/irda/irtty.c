@@ -416,7 +416,8 @@ static int irtty_change_speed(struct irda_task *task)
 		 * Make sure all data is sent before changing the speed of the
 		 * serial port.
 		 */
-		if (self->tty->driver.chars_in_buffer(self->tty)) {
+		if (self->tty->driver.chars_in_buffer 
+		    && self->tty->driver.chars_in_buffer(self->tty)) {
 			/* Keep state, and try again later */
 			ret = MSECS_TO_JIFFIES(10);
 			break;
