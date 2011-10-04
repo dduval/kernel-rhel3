@@ -585,6 +585,7 @@ struct task_struct {
 #if defined(CONFIG_AUDIT) || defined(CONFIG_AUDIT_MODULE)
 	void *audit;
 #endif
+	struct list_head *scm_work_list;
 #endif /* !__GENKSYMS__ */
 };
 

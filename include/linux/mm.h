@@ -141,6 +141,7 @@ struct vm_area_struct {
 /* read ahead limits */
 extern int vm_min_readahead;
 extern int vm_max_readahead;
+extern unsigned long mmap_min_addr;
 
 /*
  * mapping from the currently active vm_flags protection bits (the
@@ -600,6 +601,19 @@ do {									\
 static inline int page_mapped(struct page *page)
 {
 	return page->pte.direct != 0;
+}
+
+/*
+ * If a hint addr is less than mmap_min_addr change hint to be as
+ * low as possible but still greater than mmap_min_addr
+ */
+static inline unsigned long round_hint_to_min(unsigned long hint)
+{
+        hint &= PAGE_MASK;
+        if (((void *)hint != NULL) &&
+            (hint < mmap_min_addr))
+                return PAGE_ALIGN(mmap_min_addr);
+        return hint;
 }
 
 /*

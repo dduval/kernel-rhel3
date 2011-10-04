@@ -417,7 +417,9 @@ static ctl_table vm_table[] = {
 #endif
 	{VM_DEFRAGMENT, "vm-defragment", &vm_defragment,
 		sizeof(vm_defragment), 0644, NULL, &proc_dointvec},
-	{0}
+	{VM_MMAP_MIN_ADDR, "mmap_min_addr", &mmap_min_addr, 
+	        sizeof(unsigned long), 0644, NULL, &proc_doulongvec_minmax},
+ 	{0}
 };
 
 static ctl_table proc_table[] = {

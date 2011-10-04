@@ -390,14 +390,17 @@ void mm_release(void)
 		complete(vfork_done);
 	}
 	if (tsk->clear_child_tid) {
-		u32 * tidptr = tsk->clear_child_tid;
+		if (!(tsk->flags & PF_SIGNALED) &&
+		    atomic_read(&tsk->mm->mm_users) > 1) {
+			/*
+			 * We dont check the error code - if userspace has
+			 * not set up a proper pointer then tough luck.
+			 */
+			put_user(0, tsk->clear_child_tid);
+			sys_futex(tsk->clear_child_tid, FUTEX_WAKE,
+				  1, NULL, NULL, 0);
+		}
 		tsk->clear_child_tid = NULL;
-		/*
-		 * We dont check the error code - if userspace has
-		 * not set up a proper pointer then tough luck.
-		 */
-		put_user(0, tidptr);
-		sys_futex(tidptr, FUTEX_WAKE, 1, NULL, NULL, 0);
 	}
 }
 

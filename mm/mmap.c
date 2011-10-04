@@ -70,6 +70,8 @@ pgprot_t protection_map[16] = {
 
 int sysctl_overcommit_memory = 0;	/* default is heuristic overcommit */
 int sysctl_overcommit_ratio = 50;	/* default is 50% */
+unsigned long mmap_min_addr;           /* defaults to 0 = no protection */
+
 int max_map_count = DEFAULT_MAX_MAP_COUNT;
 atomic_t vm_committed_space = ATOMIC_INIT(0);
 
@@ -519,6 +521,9 @@ unsigned long do_mmap_pgoff(struct file * file, unsigned long addr, unsigned lon
 	if (!len)
 		return addr;
 
+	if (!(flags & MAP_FIXED))
+		addr = round_hint_to_min(addr);
+	
 	error = arch_mmap_check(addr, len, flags);
 	if (error)
 		return error;
@@ -813,6 +818,13 @@ unsigned long get_unmapped_area(struct file *file, unsigned long addr, unsigned 
 			return -ENOMEM;
 		if (addr & ~PAGE_MASK)
 			return -EINVAL;
+
+               /* Ensure a non-privileged process is not trying to map
+                * lower pages.
+                */
+		if (addr < mmap_min_addr && !capable(CAP_SYS_RAWIO))
+			return -EPERM;
+
 		if (file && is_file_hugepages(file))  {
 			/*
 			 * Make sure that addr and length are properly aligned.
@@ -832,9 +844,14 @@ unsigned long get_unmapped_area(struct file *file, unsigned long addr, unsigned 
 	}
 
 	if (file && file->f_op && file->f_op->get_unmapped_area)
-		return file->f_op->get_unmapped_area(file, addr, len, pgoff, flags);
-
-	return arch_get_unmapped_area(file, addr, len, pgoff, flags, exec);
+		addr = file->f_op->get_unmapped_area(file, addr, len, pgoff, flags);
+	else
+		addr = arch_get_unmapped_area(file, addr, len, pgoff, flags, exec);
+	
+	if (addr < mmap_min_addr && !capable(CAP_SYS_RAWIO))
+		return -ENOMEM;
+	
+	return addr;
 }
 
 /* Look up the first VMA which satisfies  addr < vm_end,  NULL if none. */
@@ -938,6 +955,11 @@ int expand_stack(struct vm_area_struct * vma, unsigned long address)
 	 * before relocating the vma range ourself.
 	 */
 	address &= PAGE_MASK;
+	
+	/* ensure a non-privileged process is not trying to mmap lower pages */
+	if (address < mmap_min_addr && !capable(CAP_SYS_RAWIO))
+		return -EPERM;
+
  	spin_lock(&vma->vm_mm->page_table_lock);
 
 	/* check if another thread has already expanded the stack */
@@ -1333,6 +1355,9 @@ unsigned long do_brk(unsigned long addr, unsigned long len)
 
 	if ((addr + len) > TASK_SIZE || (addr + len) < addr)
 		return -EINVAL;
+
+	if (addr < mmap_min_addr && !capable(CAP_SYS_RAWIO))
+		return -ENOMEM;
 
 	flags = VM_DATA_DEFAULT_FLAGS | VM_ACCOUNT | mm->def_flags;
 	

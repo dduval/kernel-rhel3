@@ -784,6 +784,10 @@ int flush_old_exec(struct linux_binprm * bprm)
 		current->mm->dumpable = 1;
 		current->task_dumpable = 1;
 	}
+
+	if (mmap_min_addr)
+		current->personality &= ~(unsigned long)MMAP_PAGE_ZERO;
+
 	name = bprm->filename;
 	for (i=0; (ch = *(name++)) != '\0';) {
 		if (ch == '/')

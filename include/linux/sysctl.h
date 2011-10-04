@@ -166,6 +166,7 @@ enum
 	VM_KSCAND_WORK_PERCENT=29, /* int: % of work on each kscand iteration */
 	VM_NUMA_ALLOCATOR=30,	/* NUMA memory allocation policy */
 	VM_DEFRAGMENT=31,	/* Tunable defragmentation iterations */
+	VM_MMAP_MIN_ADDR=32,    /* prevent mapping of low addresses by mmap() */
 };
 
 

@@ -385,6 +385,7 @@ static int unix_release_sock (unix_socket *sk, int embrion)
 			read_lock(&skpair->callback_lock);
 			sk_wake_async(skpair,1,POLL_HUP);
 			read_unlock(&skpair->callback_lock);
+			yield(); /* let the other side wake up */
 		}
 		sock_put(skpair); /* It may now die */
 		unix_peer(sk) = NULL;
@@ -1172,6 +1173,8 @@ static int unix_dgram_sendmsg(struct socket *sock, struct msghdr *msg, int len,
 	struct sk_buff *skb;
 	long timeo;
 
+	wait_for_unix_gc();
+
 	err = -EOPNOTSUPP;
 	if (msg->msg_flags&MSG_OOB)
 		goto out;
@@ -1301,6 +1304,8 @@ static int unix_stream_sendmsg(struct socket *sock, struct msghdr *msg, int len,
 	int err,size;
 	struct sk_buff *skb;
 	int sent=0;
+
+	wait_for_unix_gc();
 
 	err = -EOPNOTSUPP;
 	if (msg->msg_flags&MSG_OOB)
