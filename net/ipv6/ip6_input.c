@@ -185,11 +185,12 @@ resubmit:
 		if (!raw_sk) {
 			if (xfrm6_policy_check(NULL, XFRM_POLICY_IN, skb)) {
 				IP6_INC_STATS_BH(Ip6InUnknownProtos);
-				icmpv6_param_prob(skb, ICMPV6_UNK_NEXTHDR, nhoff);
+				icmpv6_send(skb, ICMPV6_PARAMPROB,
+					    ICMPV6_UNK_NEXTHDR, nhoff,
+					    skb->dev);
 			}
-		} else {
-			kfree_skb(skb);
 		}
+		kfree_skb(skb);
 	}
 
 	return 0;

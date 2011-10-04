@@ -1385,6 +1385,8 @@ int remap_page_range(struct vm_area_struct *vma, unsigned long from,
 	unsigned long end = from + size;
 	struct mm_struct *mm = current->mm;
 
+	vma->vm_flags |= VM_IO | VM_RESERVED;
+	
 	phys_addr -= from;
 	dir = pgd_offset(mm, from);
 	flush_cache_range(vma, beg, end);

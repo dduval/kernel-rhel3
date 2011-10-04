@@ -29,6 +29,7 @@
 #include <linux/list.h>
 
 struct file;
+struct completion;
 
 #define CTL_MAXNAME 10
 
@@ -843,6 +844,10 @@ struct ctl_table_header
 {
 	ctl_table *ctl_table;
 	struct list_head ctl_entry;
+#ifndef __GENKSYMS__ /* preserve KMI/ABI ksyms compatibility for mod linkage */
+	int used;
+	struct completion *unregistering;
+#endif
 };
 
 struct ctl_table_header * register_sysctl_table(ctl_table * table, 

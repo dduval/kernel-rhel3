@@ -63,8 +63,6 @@
 #include <net/bluetooth/rfcomm.h>
 #if defined(CONFIG_BLK_DEV_LVM) || defined(CONFIG_BLK_DEV_LVM_MODULE)
 /* Ugh. This header really is not clean */
-#define min min
-#define max max
 #include <linux/lvm.h>
 #endif /* LVM */
 
@@ -2795,19 +2793,21 @@ static int ioc_settimeout(unsigned int fd, unsigned int cmd, unsigned long arg)
 #endif
 static int tiocgdev(unsigned fd, unsigned cmd,  unsigned int *ptr) 
 { 
-
 	struct file *file = fget(fd);
 	struct tty_struct *real_tty;
+	int err;
 
-	if (!fd)
+	if (!file)
 		return -EBADF;
-	if (file->f_op->ioctl != tty_ioctl)
-		return -EINVAL; 
-	real_tty = (struct tty_struct *)file->private_data;
-	if (!real_tty) 	
-		return -EINVAL; 
-	return put_user(kdev_t_to_nr(real_tty->device), ptr); 
-} 
+
+	if (file->f_op->ioctl != tty_ioctl ||
+	    !(real_tty = (struct tty_struct *)file->private_data))
+		err = -EINVAL;
+	else
+		err = put_user(kdev_t_to_nr(real_tty->device), ptr);
+	fput(file);
+	return err;
+}
 
 
 struct raw32_config_request 

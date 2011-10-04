@@ -878,7 +878,8 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 		if (BAD_ADDR(elf_entry)) {
 			printk(KERN_ERR "Unable to load interpreter\n");
 			send_sig(SIGSEGV, current, 0);
-			retval = -ENOEXEC; /* Nobody gets to see this, but.. */
+			retval = IS_ERR((void *)elf_entry) ?
+					(int)elf_entry : -ENOEXEC;
 			goto out_free_dentry;
 		}
 		reloc_func_desc = interp_load_addr;

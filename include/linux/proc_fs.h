@@ -70,6 +70,9 @@ struct proc_dir_entry {
 	atomic_t count;		/* use count */
 	int deleted;		/* delete flag */
 	kdev_t	rdev;
+#ifndef __GENKSYMS__ /* preserve KMI/ABI ksyms compatibility for mod linkage */
+	void *set;
+#endif
 };
 
 #define PROC_INODE_SHIFT         16
