@@ -40,6 +40,7 @@
 #include <linux/proc_fs.h>
 #include <acpi/acpi_drivers.h>
 #include <acpi/acpi_bus.h>
+#include <asm/uaccess.h>
 
 #define ASUS_ACPI_VERSION "0.24a"
 
@@ -313,7 +314,21 @@ proc_read_mled(char *page, char **start, off_t off, int count, int *eof,
 
 	return len;
 }
-
+ 
+static int parse_arg(const char *buf, unsigned long count, int *val)
+{
+	char s[32];
+	if (!count)
+		return 0;
+	if (count > 31)
+		return -EINVAL;
+	if (copy_from_user(s, buf, count))
+		return -EFAULT;
+	s[count] = 0;
+	if (sscanf(s, "%i", val) != 1)
+		return -EINVAL;
+	return count;
+}
 
 static int
 proc_write_mled(struct file *file, const char *buffer,
@@ -323,10 +338,8 @@ proc_write_mled(struct file *file, const char *buffer,
 	int led_out = 0;
 	struct asus_hotk *hotk = (struct asus_hotk *) data;
 
-
-
-	/* scan expression.  Multiple expressions may be delimited with ; */
-	if (sscanf(buffer, "%i", &value) == 1)
+	count = parse_arg(buffer, count, &value);
+	if (count > 0)
 		led_out = ~value & 1;
 
 	hotk->status =
@@ -378,7 +391,8 @@ proc_write_wled(struct file *file, const char *buffer,
 	struct asus_hotk *hotk = (struct asus_hotk *) data;
 
 	/* scan expression.  Multiple expressions may be delimited with ; */
-	if (sscanf(buffer, "%i", &value) == 1)
+	count = parse_arg(buffer, count, &value);
+	if (count > 0)
 		led_out = value & 1;
 
 	hotk->status =
@@ -428,7 +442,8 @@ proc_write_lcd(struct file *file, const char *buffer,
 	struct asus_hotk *hotk = (struct asus_hotk *) data;
 
 	/* scan expression.  Multiple expressions may be delimited with ; */
-	if (sscanf(buffer, "%i", &value) == 1)
+	count = parse_arg(buffer, count, &value);
+	if (count > 0)
 		lcd = value & 1;
 
 	lcd_status = get_lcd_state(hotk);
@@ -508,7 +523,8 @@ proc_write_brn(struct file *file, const char *buffer,
 	struct asus_hotk *hotk = (struct asus_hotk *) data;
 
 	/* scan expression.  Multiple expressions may be delimited with ; */
-	if (sscanf(buffer, "%d", &value) == 1) {
+	count = parse_arg(buffer, count, &value);
+	if (count > 0) {
 		value = (0 < value) ? ((15 < value) ? 15 : value) : 0;
 			/* 0 <= value <= 15 */
 		set_brightness(value, hotk);
@@ -560,7 +576,8 @@ proc_write_disp(struct file *file, const char *buffer,
 	struct asus_hotk *hotk = (struct asus_hotk *) data;
 
 	/* scan expression.  Multiple expressions may be delimited with ; */
-	if (sscanf(buffer, "%d", &value) == 1)
+	count = parse_arg(buffer, count, &value);
+	if (count > 0)
 		set_display(value, hotk);
 	else {
 		printk(KERN_NOTICE "Asus ACPI: Error reading user input\n");

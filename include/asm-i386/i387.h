@@ -32,9 +32,16 @@ extern void kernel_fpu_begin(void);
 		save_init_fpu( tsk ); \
 } while (0)
 
+/*
+ * There might be some pending exceptions in the FP state at this point.
+ * However, it is too late to report them: this code is called during execve()
+ * (when the original executable is already gone) and during sigreturn() (when
+ * the signal handler context is already lost).  So just clear them to prevent
+ * problems later.
+ */
 #define clear_fpu( tsk ) do { \
 	if ( tsk->flags & PF_USEDFPU ) { \
-		asm volatile("fwait"); \
+		asm volatile("fnclex; fwait"); \
 		tsk->flags &= ~PF_USEDFPU; \
 		stts(); \
 	} \
