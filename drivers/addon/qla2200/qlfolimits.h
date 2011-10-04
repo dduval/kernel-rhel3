@@ -83,6 +83,7 @@
 #define FO_NOTIFY_TYPE_LOGOUT_OR_LUN_RESET    3
 #define FO_NOTIFY_TYPE_LOGOUT_OR_CDB          4
 #define FO_NOTIFY_TYPE_SPINUP		      5
+#define FO_NOTIFY_TYPE_TPGROUP_CDB            6 /* Set Target Port Group Cdb */
 
 #define FO_NOTIFY_TYPE_MIN                FO_NOTIFY_TYPE_NONE
 #define FO_NOTIFY_TYPE_MAX                FO_NOTIFY_TYPE_LOGOUT_OR_CDB

@@ -77,7 +77,7 @@
 #define PAGE_OFF(addr)		((addr) & ~PAGE_MASK)
 #define MINSIGSTKSZ_IA32	2048
 
-extern asmlinkage long sys_execve (char *, char **, char **, struct pt_regs *);
+extern long sys_execve (char *, char **, char **, struct pt_regs *);
 extern asmlinkage long sys_mprotect (unsigned long, size_t, unsigned long);
 extern asmlinkage long sys_munmap (unsigned long, size_t);
 extern unsigned long arch_get_unmapped_area (struct file *, unsigned long, unsigned long,
@@ -95,7 +95,7 @@ asmlinkage unsigned long sys_brk(unsigned long);
 static DECLARE_MUTEX(ia32_mmap_sem);
 
 static int
-nargs (unsigned int arg, char **ap)
+nargs (unsigned int arg, char **ap, int max)
 {
 	unsigned int addr;
 	int n, err;
@@ -108,6 +108,8 @@ nargs (unsigned int arg, char **ap)
 		err = get_user(addr, (unsigned int *)A(arg));
 		if (err)
 			return err;
+		if (n > max)
+			return -E2BIG;
 		if (ap)
 			*ap++ = (char *) A(addr);
 		arg += sizeof(unsigned int);
@@ -127,10 +129,11 @@ sys32_execve (char *filename, unsigned int argv, unsigned int envp,
 	int na, ne, len;
 	long r;
 
-	na = nargs(argv, NULL);
+	/* can actually allocate up to 2*MAX_ARG_PAGES */
+	na = nargs(argv, NULL, (MAX_ARG_PAGES*PAGE_SIZE) / sizeof(char *) - 1);
 	if (na < 0)
 		return na;
-	ne = nargs(envp, NULL);
+	ne = nargs(envp, NULL, (MAX_ARG_PAGES*PAGE_SIZE) / sizeof(char *) - 1);
 	if (ne < 0)
 		return ne;
 	len = (na + ne + 2) * sizeof(*av);
@@ -142,10 +145,10 @@ sys32_execve (char *filename, unsigned int argv, unsigned int envp,
 	av[na] = NULL;
 	ae[ne] = NULL;
 
-	r = nargs(argv, av);
+	r = nargs(argv, av, na);
 	if (r < 0)
 		goto out;
-	r = nargs(envp, ae);
+	r = nargs(envp, ae, ne);
 	if (r < 0)
 		goto out;
 
@@ -1423,7 +1426,7 @@ get_cmsghdr32 (struct msghdr *kmsg, unsigned char *stackbuf, struct sock *sk, si
 	__kernel_size_t kcmlen, tmp;
 	__kernel_size_t32 ucmlen;
 	struct cmsghdr32 *ucmsg;
-	long err;
+	int err = -EFAULT;
 
 	kcmlen = 0;
 	kcmsg_base = kcmsg = (struct cmsghdr *)stackbuf;
@@ -1438,6 +1441,7 @@ get_cmsghdr32 (struct msghdr *kmsg, unsigned char *stackbuf, struct sock *sk, si
 
 		tmp = ((ucmlen - CMSG32_ALIGN(sizeof(*ucmsg))) +
 		       CMSG_ALIGN(sizeof(struct cmsghdr)));
+		tmp = CMSG_ALIGN(tmp);
 		kcmlen += tmp;
 		ucmsg = CMSG32_NXTHDR(kmsg, ucmsg, ucmlen);
 	}
@@ -1460,21 +1464,23 @@ get_cmsghdr32 (struct msghdr *kmsg, unsigned char *stackbuf, struct sock *sk, si
 	memset(kcmsg, 0, kcmlen);
 	ucmsg = CMSG32_FIRSTHDR(kmsg);
 	while (ucmsg != NULL) {
-		err = get_user(ucmlen, &ucmsg->cmsg_len);
+		if (get_user(ucmlen, &ucmsg->cmsg_len))
+			goto Efault;
 		tmp = ((ucmlen - CMSG32_ALIGN(sizeof(*ucmsg))) +
 		       CMSG_ALIGN(sizeof(struct cmsghdr)));
+		if ((char *)kcmsg_base + kcmlen - (char *)kcmsg < CMSG_ALIGN(tmp))
+			goto Einval;
 		kcmsg->cmsg_len = tmp;
-		err |= get_user(kcmsg->cmsg_level, &ucmsg->cmsg_level);
-		err |= get_user(kcmsg->cmsg_type, &ucmsg->cmsg_type);
-
-		/* Copy over the data. */
-		err |= copy_from_user(CMSG_DATA(kcmsg), CMSG32_DATA(ucmsg),
-				      (ucmlen - CMSG32_ALIGN(sizeof(*ucmsg))));
-		if (err)
-			goto out_free_efault;
+		tmp = CMSG_ALIGN(tmp);
+		if (__get_user(kcmsg->cmsg_level, &ucmsg->cmsg_level) ||
+		    __get_user(kcmsg->cmsg_type, &ucmsg->cmsg_type) ||
+		    copy_from_user(CMSG_DATA(kcmsg),
+				   CMSG32_DATA(ucmsg),
+				   (ucmlen - CMSG32_ALIGN(sizeof(*ucmsg)))))
+			goto Efault;
 
 		/* Advance. */
-		kcmsg = (struct cmsghdr *)((char *)kcmsg + CMSG_ALIGN(tmp));
+		kcmsg = (struct cmsghdr *)((char *)kcmsg + tmp);
 		ucmsg = CMSG32_NXTHDR(kmsg, ucmsg, ucmlen);
 	}
 
@@ -1483,10 +1489,12 @@ get_cmsghdr32 (struct msghdr *kmsg, unsigned char *stackbuf, struct sock *sk, si
 	kmsg->msg_controllen = kcmlen;
 	return 0;
 
-out_free_efault:
+Einval:
+	err = -EINVAL;
+Efault:
 	if (kcmsg_base != (struct cmsghdr *)stackbuf)
 		sock_kfree_s(sk, kcmsg_base, kcmlen);
-	return -EFAULT;
+	return err;
 }
 
 /*

@@ -47,7 +47,7 @@ void journal_commit_transaction(journal_t *journal)
 	struct buffer_head *wbuf[64];
 	int bufs;
 	int flags;
-	int err;
+	int err = 0;
 	unsigned long blocknr;
 	char *tagp = NULL;
 	journal_header_t *header;
@@ -496,6 +496,8 @@ start_journal_io:
 		if (buffer_locked(bh)) {
 			unlock_journal(journal);
 			wait_on_buffer(bh);
+			if (unlikely(!buffer_uptodate(bh)))
+				err = -EIO;
 			lock_journal(journal);
 			goto wait_for_iobuf;
 		}
@@ -557,6 +559,8 @@ start_journal_io:
 		if (buffer_locked(bh)) {
 			unlock_journal(journal);
 			wait_on_buffer(bh);
+			if (unlikely(!buffer_uptodate(bh)))
+				err = -EIO;
 			lock_journal(journal);
 			goto wait_for_ctlbuf;
 		}
@@ -605,6 +609,8 @@ start_journal_io:
 		bh->b_end_io = journal_end_buffer_io_sync;
 		submit_bh(WRITE, bh);
 		wait_on_buffer(bh);
+		if (unlikely(!buffer_uptodate(bh)))
+			err = -EIO;
 		put_bh(bh);		/* One for getblk() */
 		journal_unlock_journal_head(descriptor);
 	}
@@ -616,6 +622,12 @@ start_journal_io:
 
 skip_commit: /* The journal should be unlocked by now. */
 
+	if (err) {
+		printk(KERN_ERR "Error (%d) on journal on device %s\n",
+		       err, kdevname(journal->j_dev));
+		__journal_abort_hard(journal);
+	}
+	
 	/* Call any callbacks that had been registered for handles in this
 	 * transaction.  It is up to the callback to free any allocated
 	 * memory.

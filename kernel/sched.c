@@ -702,7 +702,7 @@ asmlinkage void schedule_tail(task_t *prev)
  * context_switch - switch to the new MM and the new
  * thread's register state.
  */
-static inline task_t * context_switch(runqueue_t *rq, task_t *prev, task_t *next)
+static inline __attribute__((always_inline)) task_t * context_switch(runqueue_t *rq, task_t *prev, task_t *next)
 {
 	struct mm_struct *mm = next->mm;
 	struct mm_struct *oldmm = prev->active_mm;

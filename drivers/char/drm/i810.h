@@ -114,4 +114,13 @@
 #define DRIVER_AGP_BUFFERS_MAP( dev )					\
 	((drm_i810_private_t *)((dev)->dev_private))->buffer_map
 
+#define LOCK_TEST_WITH_RETURN( dev )					\
+do {									\
+	if (!_DRM_LOCK_IS_HELD((dev)->lock.hw_lock->lock) ||		\
+	    (dev)->lock.pid != current->pid) {				\
+		DRM_ERROR("%s called without lock held\n", __FUNCTION__);\
+		return -EINVAL;						\
+	}								\
+} while (0)
+
 #endif

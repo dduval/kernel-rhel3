@@ -905,6 +905,8 @@ static int moxa_ioctl(struct tty_struct *tty, struct file *file,
 	case TIOCSSERIAL:
 		return (moxa_set_serial_info(ch, (struct serial_struct *) arg));
 	default:
+		if (!capable(CAP_SYS_ADMIN))
+			return -EPERM;
 		retval = MoxaDriverIoctl(cmd, arg, port);
 	}
 	return (retval);
@@ -1766,15 +1768,21 @@ int MoxaDriverIoctl(unsigned int cmd, unsigned long arg, int port)
 	switch(cmd)
 	{
 	case MOXA_LOAD_BIOS:
+	 	if (!capable(CAP_SYS_RAWIO))
+			return -EPERM;
 		i = moxaloadbios(dltmp.cardno, dltmp.buf, dltmp.len);
 		return (i);
 	case MOXA_FIND_BOARD:
 		return moxafindcard(dltmp.cardno);
 	case MOXA_LOAD_C320B:
+		if (!capable(CAP_SYS_RAWIO))
+			return -EPERM;
 		moxaload320b(dltmp.cardno, dltmp.buf, dltmp.len);
 	default: /* to keep gcc happy */
 		return (0);
 	case MOXA_LOAD_CODE:
+		if (!capable(CAP_SYS_RAWIO))
+			return -EPERM;
 		i = moxaloadcode(dltmp.cardno, dltmp.buf, dltmp.len);
 		if (i == -1)
 			return (-EFAULT);

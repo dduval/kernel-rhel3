@@ -625,13 +625,13 @@ sys_init_module(const char *name_user, struct module *mod_user)
 err3:
 	put_mod_name(n_name);
 err2:
-	if (mod2)
-		vfree(mod2);
 	*mod = mod_tmp;
 	strcpy((char *)mod->name, name_tmp);	/* We know there is room for this */
 err1:
 	put_mod_name(name);
 err0:
+	if (mod2)
+		vfree(mod2);
 	unlock_kernel();
 	kfree(name_tmp);
 	return error;

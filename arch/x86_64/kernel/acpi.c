@@ -47,6 +47,12 @@
 
 #define PREFIX			"ACPI: "
 
+#ifdef CONFIG_ACPI_PMTMR
+extern unsigned int acpi_pmtmr_port;
+extern unsigned char acpi_pmtmr_len;
+extern int use_pmtmr;
+#endif
+
 extern int acpi_disabled;
 
 acpi_interrupt_flags acpi_sci_flags __initdata;
@@ -336,6 +342,14 @@ acpi_parse_fadt(unsigned long phys, unsigned long size)
 #ifdef	CONFIG_ACPI_INTERPRETER
 	/* initialize sci_int early for INT_SRC_OVR MADT parsing */
 	acpi_fadt.sci_int = fadt->sci_int;
+#endif
+#ifdef CONFIG_ACPI_PMTMR
+	if (use_pmtmr) {
+		acpi_pmtmr_port = fadt->V1_pm_tmr_blk;
+		acpi_pmtmr_len = fadt->pm_tm_len;
+		printk(KERN_INFO "ACPI PM tmr found at I/O 0x%x-0x%x\n",
+			acpi_pmtmr_port, acpi_pmtmr_port+acpi_pmtmr_len-1);
+	}
 #endif
 
 	return 0;

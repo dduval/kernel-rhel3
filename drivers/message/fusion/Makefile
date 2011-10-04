@@ -21,6 +21,7 @@
 #EXTRA_CFLAGS += -gstabs+
 
 EXTRA_CFLAGS += -I. ${MPT_CFLAGS}
+EXTRA_CFLAGS += -DCPQ_CIM
 
 # Fusion MPT drivers; recognized debug defines...
 #  MPT general:
@@ -28,7 +29,6 @@ EXTRA_CFLAGS += -I. ${MPT_CFLAGS}
 #EXTRA_CFLAGS += -DMPT_DEBUG
 #EXTRA_CFLAGS += -DMPT_DEBUG_MSG_FRAME
 #EXTRA_CFLAGS += -DMPT_DEBUG_SG
-#EXTRA_CFLAGS += -DMPTSCSIH_DBG_TIMEOUT
 #
 # driver/module specifics...
 #

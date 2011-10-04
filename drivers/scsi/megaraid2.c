@@ -342,6 +342,7 @@ mega_find_card(Scsi_Host_Template *host_template, u16 pci_vendor,
 				(subsysvid != INTEL_SUBSYS_VID) &&
 				(subsysvid != FSC_SUBSYS_VID) &&
 				(subsysvid != ACER_SUBSYS_VID) &&
+				(subsysvid != NEC_SUBSYS_VID) &&
 				(subsysvid != LSI_SUBSYS_VID) ) continue;
 
 

@@ -2303,6 +2303,25 @@ static struct _cache_table cache_table[] __initdata =
 	{ 0x00, 0, 0}
 };
 
+
+/*
+ * find out the number of processor cores on the die
+ */
+static int __init num_cpu_cores(struct cpuinfo_x86 *c)
+{
+	unsigned int eax;
+	if (c->cpuid_level < 4)
+		return 1;
+	__asm__("cpuid"
+		: "=a" (eax)
+		: "0" (4), "c" (0)
+		: "bx", "dx");
+	if (eax & 0x1f)
+		return ((eax >> 26) + 1);
+	else
+		return 1;
+}
+
 static void __init init_intel(struct cpuinfo_x86 *c)
 {
 	unsigned int trace = 0, l1i = 0, l1d = 0, l2 = 0, l3 = 0; /* Cache sizes */
@@ -2443,6 +2462,7 @@ static void __init init_intel(struct cpuinfo_x86 *c)
 #ifdef CONFIG_SMP
 	if (test_bit(X86_FEATURE_HT, &c->x86_capability) && !disable_x86_ht) {
 		extern	int phys_proc_id[NR_CPUS];
+		extern	int cpu_core_id[NR_CPUS];
 		extern int acpi_proc_id[NR_CPUS];
 		extern int acpi_provides_cpus;
 		static int warned_mismatch;
@@ -2457,12 +2477,14 @@ static void __init init_intel(struct cpuinfo_x86 *c)
 		if (smp_num_siblings == 1) {
 			printk(KERN_INFO  "CPU: Hyper-Threading is disabled\n");
 		} else if (smp_num_siblings > 1 ) {
+			smp_num_cores = num_cpu_cores(c);
+			smp_num_siblings /= smp_num_cores;
 			/*
 			 * At this point we only support two siblings per
 			 * processor package.
 			 */
 #define NR_SIBLINGS	2
-			if (smp_num_siblings != NR_SIBLINGS) {
+			if (smp_num_siblings > NR_SIBLINGS) {
 				printk(KERN_WARNING "CPU: Unsupported number of the siblings %d", smp_num_siblings);
 				smp_num_siblings = 1;
 				return;
@@ -2493,13 +2515,34 @@ static void __init init_intel(struct cpuinfo_x86 *c)
 				if (index_lsb != index_msb )
 					index_msb++;
 				initial_apic_id = ebx >> 24 & 0xff;
+				cpu_core_id[cpu] = initial_apic_id >> index_msb;
+
+				index_lsb = 0;
+				index_msb = 31;
+
+				tmp = smp_num_siblings * smp_num_cores;
+				while ((tmp & 1) == 0) {
+					tmp >>=1 ;
+					index_lsb++;
+				}
+				tmp = smp_num_siblings * smp_num_cores;
+				while ((tmp & 0x80000000 ) == 0) {
+					tmp <<=1 ;
+					index_msb--;
+				}
+				if (index_lsb != index_msb )
+					index_msb++;
 				phys_proc_id[cpu] = initial_apic_id >> index_msb;
 			} else {
-				phys_proc_id[cpu] = hard_smp_processor_id() & ~(smp_num_siblings - 1);
+				cpu_core_id[cpu] = hard_smp_processor_id() & ~(smp_num_siblings - 1);
+				phys_proc_id[cpu] = hard_smp_processor_id() & ~(smp_num_siblings * smp_num_cores - 1);
 			}
 
 			printk(KERN_INFO  "CPU: Physical Processor ID: %d\n",
-                               phys_proc_id[cpu]);
+			       phys_proc_id[cpu]);
+			if (smp_num_cores > 1)
+				printk(KERN_INFO  "CPU: Processor Core ID: %d\n",
+				       cpu_core_id[cpu]);
 		}
 
 	}
@@ -3065,6 +3108,7 @@ static int show_cpuinfo(struct seq_file *m, void *v)
 	 * /dev/cpu/<cpu_nr>/cpuid instead.
 	 */
 	extern	int phys_proc_id[NR_CPUS];
+	extern	int cpu_core_id[NR_CPUS];
 	static char *x86_cap_flags[] = {
 		/* Intel-defined */
 	        "fpu", "vme", "de", "pse", "tsc", "msr", "pae", "mce",
@@ -3125,7 +3169,11 @@ static int show_cpuinfo(struct seq_file *m, void *v)
 
 #ifdef CONFIG_SMP
 	seq_printf(m, "physical id\t: %d\n",phys_proc_id[n]);
-	seq_printf(m, "siblings\t: %d\n",smp_num_siblings);
+	seq_printf(m, "siblings\t: %d\n",smp_num_siblings * smp_num_cores);
+	if (smp_num_cores > 1) {
+		seq_printf(m, "core id\t\t: %d\n",cpu_core_id[n]);
+		seq_printf(m, "cpu cores\t: %d\n",smp_num_cores);
+	}
 #if CONFIG_SHARE_RUNQUEUE
 {
 	extern long __rq_idx[NR_CPUS];

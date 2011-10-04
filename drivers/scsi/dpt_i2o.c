@@ -415,9 +415,20 @@ static int adpt_queue(Scsi_Cmnd * cmd, void (*done) (Scsi_Cmnd *))
 		return 1;
 	}
 
-	if(!dpti_crashdump_mode() && (cmd->eh_state != SCSI_STATE_QUEUED)){
-		// If we are not doing error recovery
-		mod_timer(&cmd->eh_timeout, timeout);
+	/* Assuming we are not doing error recovery, "timeout" is the max.
+	 * time the controller will hold a disk command.  Use this for the
+	 * disk command timeout.  Tape commands may take longer.
+	 */
+	if (!dpti_crashdump_mode() && cmd->eh_state != SCSI_STATE_QUEUED) {
+		if (cmd->device->type == TYPE_DISK)
+			mod_timer(&cmd->eh_timeout, timeout);
+		else {
+			if (del_timer(&cmd->eh_timeout)) {
+				if (time_before(cmd->eh_timeout.expires, timeout))
+					cmd->eh_timeout.expires = timeout;
+				add_timer(&cmd->eh_timeout);
+			}
+		}
 	}
 
 	// TODO if the cmd->device if offline then I may need to issue a bus rescan
@@ -503,6 +514,9 @@ static int adpt_bios_param(Disk* disk, kdev_t dev, int geom[])
 static const char *adpt_info(struct Scsi_Host *host)
 {
 	adpt_hba* pHba;
+
+	if (host->hostdata[0] == 0UL)
+		return host->hostt->name;
 
 	pHba = (adpt_hba *) host->hostdata[0];
 	return (char *) (pHba->detail);

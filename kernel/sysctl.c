@@ -357,6 +357,8 @@ static ctl_table kern_table[] = {
 
 extern int inactive_clean_percent;
 extern int skip_mapped_pages;
+extern int oom_kill_limit;
+extern int kscand_work_percent;
 
 static ctl_table vm_table[] = {
 	{VM_BDFLUSH, "bdflush", &bdf_prm, 9*sizeof(int), 0644, NULL,
@@ -395,6 +397,10 @@ static ctl_table vm_table[] = {
 	{VM_SKIP_MAPPED_PAGES, "skip_mapped_pages",
 		&skip_mapped_pages, sizeof(skip_mapped_pages),
 		0644, NULL, &proc_dointvec},
+	{VM_OOM_KILL, "oom-kill", &oom_kill_limit, sizeof(oom_kill_limit),
+		0644, NULL, &proc_dointvec},
+	{VM_KSCAND_WORK_PERCENT, "kscand_work_percent", &kscand_work_percent,
+		sizeof(kscand_work_percent), 0644, NULL, &proc_dointvec},
 	{0}
 };
 

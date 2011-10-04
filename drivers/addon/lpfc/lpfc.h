@@ -1,9 +1,9 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
- * Enterprise Fibre Channel Host Bus Adapters.                     *
+ * Fibre Channel Host Bus Adapters.                                *
  * Refer to the README file included with this package for         *
  * driver version and adapter support.                             *
- * Copyright (C) 2004 Emulex Corporation.                          *
+ * Copyright (C) 2003-2005 Emulex.  All rights reserved.           *
  * www.emulex.com                                                  *
  *                                                                 *
  * This program is free software; you can redistribute it and/or   *
@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc.h 1.55.1.9 2004/09/08 17:53:46EDT sf_support Exp  $
+ * $Id: lpfc.h 1.6 2005/05/03 11:21:15EDT sf_support Exp  $
  */
 
 #ifndef _H_LPFC
@@ -310,6 +310,7 @@ typedef struct lpfcHBA {
 	uint32_t fc_rscn_id_cnt;	/* count of RSCNs payloads in list */
 	DMABUF_t *fc_rscn_id_list[FC_MAX_HOLD_RSCN];
 
+	uint32_t lmt;
 	uint32_t fc_flag;	/* FC flags */
 #define FC_FCP_WWNN             0x0	/* Match FCP targets on WWNN */
 #define FC_FCP_WWPN             0x1	/* Match FCP targets on WWPN */
@@ -347,7 +348,6 @@ typedef struct lpfcHBA {
 						   login */
 #define FC_RSCN_DISCOVERY       0x10000000	/* Authenticate all devices
 						   after RSCN */
-#define FC_2G_CAPABLE           0x20000000	/* HBA is 2 Gig capable */
 #define FC_POLL_MODE        0x40000000	/* [SYNC] I/O is in the polling mode */
 #define FC_BYPASSED_MODE        0x80000000	/* Interface is offline for
 						   diag */
@@ -436,8 +436,19 @@ typedef struct lpfcHBA {
 
 	char adaptermsg[FC_MAX_ADPTMSG];	/* adapter printf messages */
 
-	char SerialNumber[32];	/* adapter Serial Number */
+	char SerialNumber[32];		/* adapter Serial Number */
 	char OptionROMVersion[32];	/* adapter BIOS / Fcode version */
+	char ModelDesc[256];		/* Model Description */
+	char ModelName[80];		/* Model Name */
+	char ProgramType[256];		/* Program type */
+	char Port[20];			/* Port No */
+	uint8_t vpd_flag;               /* VPD data flag */
+
+#define VPD_MODEL_DESC      0x1         /* valid vpd model description */
+#define VPD_MODEL_NAME      0x2         /* valid vpd model name */
+#define VPD_PROGRAM_TYPE    0x4         /* valid vpd program type */
+#define VPD_PORT            0x8         /* valid vpd port data */
+#define VPD_MASK            0xf         /* mask for any vpd data */
 
 	struct lpfcScsiLun *(*lpfc_tran_find_lun) (struct lpfc_scsi_buf *);
 	struct timer_list dqfull_clk;
@@ -473,6 +484,8 @@ struct clk_data {
 	lpfcHBA_t     *phba; 
 	unsigned long clData1;
 	unsigned long clData2;
+	unsigned long flags;
+#define TM_CANCELED	0x1	/* timer has been canceled */
 };
 
 typedef struct fcEVT {		/* Kernel level Event structure */

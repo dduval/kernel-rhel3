@@ -33,6 +33,7 @@ obj-$(CONFIG_BLK_DEV_UMEM)	+= umem.o
 obj-$(CONFIG_BLK_DEV_NBD)	+= nbd.o
 obj-$(CONFIG_BLK_DEV_SX8)	+= sx8.o
 obj-$(CONFIG_DISKDUMP)		+= diskdump.o diskdumplib.o
+obj-$(CONFIG_BLOCKDUMP)		+= block_dump.o
 
 subdir-$(CONFIG_PARIDE) += paride
 

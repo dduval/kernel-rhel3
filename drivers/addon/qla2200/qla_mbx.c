@@ -678,7 +678,8 @@ qla2x00_mailbox_command(scsi_qla_host_t *ha, mbx_cmd_t *mcp)
 #endif
 			spin_unlock_irqrestore(&ha->hardware_lock, flags);
 
-			udelay(10); /* v4.27 */
+			set_current_state(TASK_UNINTERRUPTIBLE);
+			schedule_timeout(10);
 		} /* while */
 	}
 

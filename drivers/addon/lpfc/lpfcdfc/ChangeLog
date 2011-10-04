@@ -1,0 +1,22 @@
+Changes from 20050401 to 20050503:
+
+	* Changed version to 1.2.1.
+	* Updated copyright messages.
+	* Added printk of copyright string at driver load.
+
+Changes from 1.1.1 to 20050401:
+
+	* Changed version to 1.2.0.
+
+Changes from 1.0.13 to 1.1.1:
+
+	* Changed version to 1.1.1.
+	* Added INC_TOP definition for dkms module support.
+	* Removed code wrapped by USE_SCHEDULER and IPFC definitions.
+	* Removed references to IPFC in Makefile.
+	* Removed references to KERNEL_VERSION(2,6,0) macro.
+	* Changed lpfc_ioctl_port_attributes to examine nlp_type rather
+	  than nlp_flags.
+	* Corrected link speeds.
+	* Added VPD support.
+	* Reworked IssueMbox error codes.

@@ -22,10 +22,12 @@
 #define	QL_IOCTL_BASE(idx)	\
     _IOWR(QLMULTIPATH_MAGIC, idx, sizeof(EXT_IOCTL))
 
+#if !defined(QL_IOCTL_CMD)
 #if defined(QLA_CONFIG_COMPAT)
 #define	QL_IOCTL_CMD(idx)	(QL_IOCTL_BASE(idx) - 0x40000)
 #else
 #define	QL_IOCTL_CMD(idx)	QL_IOCTL_BASE(idx)
+#endif
 #endif
 
 /*************************************************************

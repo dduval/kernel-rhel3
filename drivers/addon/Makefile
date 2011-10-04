@@ -11,8 +11,8 @@ obj-            :=
 
 mod-subdirs     := cipe megarac ips_70015 cmpci_564 aep bcm \
 		   qla2200 qla2200_70003RH1 lpfc lpfc_703 \
-		   megaraid_2106 fusion_20505 fusion_20511 \
-		   aacraid_10102 iscsi_sfnet 3w-xxxx_10200033
+		   megaraid_2106 fusion_20511 aacraid_10102 \
+		   iscsi_sfnet 3w-xxxx_10200033
 
 O_TARGET := addon.o
 
@@ -38,7 +38,6 @@ subdir-$(CONFIG_SCSI_LPFC) += lpfc
 subdir-$(CONFIG_SCSI_LPFC) += lpfc_703
 subdir-$(CONFIG_SCSI_IPR) += ipr
 subdir-$(CONFIG_SCSI_MEGARAID2) += megaraid_2106
-subdir-$(CONFIG_FUSION) += fusion_20505
 subdir-$(CONFIG_FUSION) += fusion_20511
 subdir-$(CONFIG_SCSI_AACRAID) += aacraid_10102
 subdir-$(CONFIG_SCSI_ISCSI) += iscsi_sfnet

@@ -62,6 +62,7 @@ int main(void)
 
 
 	outconst("#define thread_flags %0" , offsetof(struct thread_struct, flags));
+	outconst("#define thread_rsp0 %0" , offsetof(struct thread_struct, rsp0));
 	outconst("#define ASM_THREAD_IA32 %0", THREAD_IA32);
 	outconst("#define PER_CPU_GDT_SIZE %0", sizeof(struct desc_struct));
 

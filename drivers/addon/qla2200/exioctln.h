@@ -148,6 +148,14 @@ typedef struct  track_instance {
 #define	QL_IOCTL_BASE(idx)	\
     _IOWR(QLMULTIPATH_MAGIC, idx, sizeof(EXT_IOCTL))
 
+/* It seems we cannot depend on CONFIG_COMPAT (RH) since it is 
+ * defined for the ia64 platform, yet does not define the 
+ * (un)register_ioctl32_*() functions.
+ */
+#if defined(CONFIG_PPC64) || defined(CONFIG_X86_64)
+#define	QLA_CONFIG_COMPAT
+#endif
+
 #ifndef APILIB
   #if defined(QLA_CONFIG_COMPAT)
   #define	QL_IOCTL_CMD(idx)	(QL_IOCTL_BASE(idx) - 0x40000)

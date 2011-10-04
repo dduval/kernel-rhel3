@@ -23,6 +23,7 @@
 #include <linux/smp_lock.h>
 #include <linux/nls.h>
 #include <linux/seq_file.h>
+#include <linux/highuid.h>
 
 #include <linux/smb_fs.h>
 #include <linux/smbno.h>
@@ -478,10 +479,16 @@ smb_read_super(struct super_block *sb, void *raw_data, int silent)
 	if (ver == SMB_MOUNT_OLDVERSION) {
 		mnt->version = oldmnt->version;
 
-		/* FIXME: is this enough to convert uid/gid's ? */
-		mnt->mounted_uid = oldmnt->mounted_uid;
-		mnt->uid = oldmnt->uid;
-		mnt->gid = oldmnt->gid;
+#ifndef low2highuid
+#define low2highuid(uid) ((uid) == (__kernel_uid_t)-1 ? (uid_t)-1 : \
+							(uid_t)(uid))
+#endif
+		mnt->uid = low2highuid(oldmnt->uid);
+#ifndef low2highgid
+#define low2highgid(gid) ((gid) == (__kernel_gid_t)-1 ? (gid_t)-1 : \
+							(gid_t)(gid))
+#endif
+		mnt->gid = low2highgid(oldmnt->gid);
 
 		mnt->file_mode = (oldmnt->file_mode & S_IRWXUGO) | S_IFREG;
 		mnt->dir_mode = (oldmnt->dir_mode & S_IRWXUGO) | S_IFDIR;
@@ -490,9 +497,8 @@ smb_read_super(struct super_block *sb, void *raw_data, int silent)
 	} else {
 		if (parse_options(mnt, raw_data))
 			goto out_bad_option;
-
-		mnt->mounted_uid = current->uid;
 	}
+	mnt->mounted_uid = current->uid;
 	smb_setcodepage(server, &mnt->codepage);
 
 	/*

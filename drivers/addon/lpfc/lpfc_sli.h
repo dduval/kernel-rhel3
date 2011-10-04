@@ -1,9 +1,9 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
- * Enterprise Fibre Channel Host Bus Adapters.                     *
+ * Fibre Channel Host Bus Adapters.                                *
  * Refer to the README file included with this package for         *
  * driver version and adapter support.                             *
- * Copyright (C) 2004 Emulex Corporation.                          *
+ * Copyright (C) 2003-2005 Emulex.  All rights reserved.           *
  * www.emulex.com                                                  *
  *                                                                 *
  * This program is free software; you can redistribute it and/or   *
@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_sli.h 1.18 2004/04/20 15:03:41EDT sf_support Exp  $
+ * $Id: lpfc_sli.h 1.3 2005/05/03 11:22:16EDT sf_support Exp  $
  */
 
 #ifndef _H_LPFC_SLI
@@ -153,7 +153,6 @@ typedef struct {
 	LPFC_RING_INIT_t ringinit[LPFC_MAX_RING]; /* ring initialization info */
 	uint32_t num_rings;
 	uint32_t sli_flag;
-#define LPFC_HGP_HOSTSLIM    1	/* Use Host Group pointers in HOST SLIM */
 } LPFC_SLI_INIT_t;
 
 /* Structure used to hold SLI statistical counters and info */

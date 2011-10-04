@@ -1,40 +1,14 @@
 /*
  *  linux/drivers/message/fusion/mptctl.c
- *      Fusion MPT misc device (ioctl) driver.
- *      For use with PCI chip/adapter(s):
- *          LSIFC9xx/LSI409xx Fibre Channel
+ *      mpt Ioctl driver.
+ *      For use with LSI Logic PCI chip/adapters
  *      running LSI Logic Fusion MPT (Message Passing Technology) firmware.
  *
- *  Credits:
- *      This driver would not exist if not for Alan Cox's development
- *      of the linux i2o driver.
- *
- *      A special thanks to Pamela Delaney (LSI Logic) for tons of work
- *      and countless enhancements while adding support for the 1030
- *      chip family.  Pam has been instrumental in the development of
- *      of the 2.xx.xx series fusion drivers, and her contributions are
- *      far too numerous to hope to list in one place.
- *
- *      A huge debt of gratitude is owed to David S. Miller (DaveM)
- *      for fixing much of the stupid and broken stuff in the early
- *      driver while porting to sparc64 platform.  THANK YOU!
- *
- *      A big THANKS to Eddie C. Dost for fixing the ioctl path
- *      and most importantly f/w download on sparc64 platform!
- *      (plus Eddie's other helpful hints and insights)
- *
- *      Thanks to Arnaldo Carvalho de Melo for finding and patching
- *      a potential memory leak in mptctl_do_fw_download(),
- *      and for some kmalloc insight:-)
- *
- *      (see also mptbase.c)
- *
- *  Copyright (c) 1999-2004 LSI Logic Corporation
- *  Originally By: Steven J. Ralston, Noah Romer
- *  (mailto:sjralston1@netscape.net)
+ *  Copyright (c) 1999-2005 LSI Logic Corporation
  *  (mailto:mpt_linux_developer@lsil.com)
+ *  For support, send a description of issues to: support@lsil.com.
  *
- *  $Id: mptctl.c,v 1.66 2003/05/07 14:08:32 pdelaney Exp $
+ *  $Id: mptctl.c,v 1.66 2003/05/07 14:08:32 Exp $
  */
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
 /*
@@ -93,10 +67,16 @@
 #include "../../scsi/scsi.h"
 #include "../../scsi/hosts.h"
 
-#define COPYRIGHT	"Copyright (c) 1999-2004 LSI Logic Corporation"
-#define MODULEAUTHOR	"Steven J. Ralston, Noah Romer, Pamela Delaney"
+#include <linux/delay.h>
+
+#define COPYRIGHT	"Copyright (c) 1999-2005 LSI Logic Corporation"
+#define MODULEAUTHOR	"LSI Logic"
+#include "linux_compat.h"	/* linux-2.2.x (vs. -2.4.x) tweaks */
 #include "mptbase.h"
 #include "mptctl.h"
+#if defined(CPQ_CIM)
+#include "csmisas.h"
+#endif // CPQ_CIM
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
 #define my_NAME		"Fusion MPT misc device (ioctl) driver"
@@ -112,8 +92,9 @@ MODULE_LICENSE("GPL");
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
 
+extern	int mpt_downloadboot(MPT_ADAPTER *ioc, MpiFwHeader_t *pFwHeader, int sleepFlag);
+
 static int mptctl_id = -1;
-static struct semaphore mptctl_syscall_sem_ioc[MPT_MAX_ADAPTERS];
 
 static DECLARE_WAIT_QUEUE_HEAD ( mptctl_wait );
 
@@ -129,6 +110,7 @@ struct buflist {
  * arg contents specific to function.
  */
 static int mptctl_fw_download(unsigned long arg);
+static int mptctl_fw_downloadboot(unsigned long arg);
 static int mptctl_getiocinfo (unsigned long arg, unsigned int cmd);
 static int mptctl_gettargetinfo (unsigned long arg);
 static int mptctl_readtest (unsigned long arg);
@@ -137,18 +119,49 @@ static int mptctl_eventquery (unsigned long arg);
 static int mptctl_eventenable (unsigned long arg);
 static int mptctl_eventreport (unsigned long arg);
 static int mptctl_replace_fw (unsigned long arg);
+static int mptctl_hba_pciinfo(unsigned long arg);
 
 static int mptctl_do_reset(unsigned long arg);
+static int mptctl_do_diag_reset(unsigned long arg);
 static int mptctl_hp_hostinfo(unsigned long arg, unsigned int cmd);
 static int mptctl_hp_targetinfo(unsigned long arg);
 
+static int mptctl_register_diag_buffer(unsigned long arg);
+static int mptctl_release_diag_buffer(unsigned long arg);
+static int mptctl_unregister_diag_buffer(unsigned long arg);
+static int mptctl_query_diag_buffer(unsigned long arg);
+static int mptctl_read_diag_buffer(unsigned long arg);
+#if defined(CPQ_CIM)
+static int mptctl_csmi_sas_get_driver_info(unsigned long arg);
+static int mptctl_csmi_sas_get_cntlr_status(unsigned long arg);
+static int mptctl_csmi_sas_get_cntlr_config(unsigned long arg);
+static int mptctl_csmi_sas_get_phy_info(unsigned long arg);
+static int mptctl_csmi_sas_get_scsi_address(unsigned long arg);
+static int mptctl_csmi_sas_get_link_errors(unsigned long arg);
+static int mptctl_csmi_sas_smp_passthru(unsigned long arg);
+static int mptctl_csmi_sas_firmware_download(unsigned long arg);
+static int mptctl_csmi_sas_get_raid_info(unsigned long arg);
+static int mptctl_csmi_sas_get_raid_config(unsigned long arg);
+static int mptctl_csmi_sas_set_phy_info(unsigned long arg);
+static int mptctl_csmi_sas_ssp_passthru(unsigned long arg);
+static int mptctl_csmi_sas_stp_passthru(unsigned long arg);
+static int mptctl_csmi_sas_get_sata_signature(unsigned long arg);
+static int mptctl_csmi_sas_get_device_address(unsigned long arg);
+static int mptctl_csmi_sas_task_managment(unsigned long arg);
+static u8  map_sas_status_to_csmi(u8 mpi_sas_status);
+static int mptctl_csmi_sas_phy_control(unsigned long arg);
+static int mptctl_csmi_sas_get_connector_info(unsigned long arg);
+static int mptctl_csmi_sas_get_location(unsigned long arg);
+#endif // CPQ_CIM
 /*
  * Private function calls.
  */
-static int mptctl_do_mpt_command (struct mpt_ioctl_command karg, char *mfPtr, int local);
+static int mptctl_do_mpt_command (struct mpt_ioctl_command karg, char *mfPtr);
 static int mptctl_do_fw_download(int ioc, char *ufwbuf, size_t fwlen);
-static MptSge_t *kbuf_alloc_2_sgl( int bytes, u32 dir, int sge_offset, int *frags,
-		struct buflist **blp, dma_addr_t *sglbuf_dma, MPT_ADAPTER *ioc);
+static int mptctl_do_fw_downloadboot(int ioc, char *ufwbuf, size_t fwlen);
+static MptSge_t *kbuf_alloc_2_sgl( int bytes, u32 dir, int sge_offset, 
+	int *frags, struct buflist **blp, dma_addr_t *sglbuf_dma, 
+	MPT_ADAPTER *ioc);
 static void kfree_sgl( MptSge_t *sgl, dma_addr_t sgl_dma,
 		struct buflist *buflist, MPT_ADAPTER *ioc);
 static void mptctl_timer_expired (unsigned long data);
@@ -160,6 +173,12 @@ static void mptctl_free_tm_flags(MPT_ADAPTER *ioc);
  * Reset Handler cleanup function
  */
 static int  mptctl_ioc_reset(MPT_ADAPTER *ioc, int reset_phase);
+
+/*
+ * Event Handler function
+ */
+static int mptctl_event_process(MPT_ADAPTER *ioc, EventNotificationReply_t *pEvReply);
+struct fasync_struct *async_queue=NULL;
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
 /*
@@ -183,6 +202,7 @@ static int  mptctl_ioc_reset(MPT_ADAPTER *ioc, int reset_phase);
 #define MAX_KMALLOC_SZ		(128*1024)
 
 #define MPT_IOCTL_DEFAULT_TIMEOUT 10	/* Default timeout value (seconds) */
+#define mptctl_is_this_sas_cntr(ioc) (ioc->bus_type == SAS) ? 1 : 0
 
 static u32 fwReplyBuffer[16];
 static pMPIDefaultReply_t ReplyMsg = NULL;
@@ -205,26 +225,17 @@ mptctl_syscall_down(MPT_ADAPTER *ioc, int nonblock)
 	dctlprintk((KERN_INFO MYNAM "::mptctl_syscall_down(%p,%d) called\n", ioc, nonblock));
 
 	if (ioc->ioctl->tmPtr != NULL) {
-		dctlprintk((KERN_INFO MYNAM "::mptctl_syscall_down BUSY\n"));
+		dctlprintk((MYIOC_s_WARN_FMT "::mptctl_syscall_down returns -EBUSY tmPtr=%p\n", ioc->name, ioc->ioctl->tmPtr));
 		return -EBUSY;
 	}
 
-#ifdef MPT_CONFIG_COMPAT
-	if (!nonblock) {
-		if (down_interruptible(&mptctl_syscall_sem_ioc[ioc->id]))
-			rc = -ERESTARTSYS;
-	} else {
-		rc = -EPERM;
-	}
-#else
 	if (nonblock) {
-		if (down_trylock(&mptctl_syscall_sem_ioc[ioc->id]))
+		if (down_trylock(&ioc->mptctl_syscall_sem_ioc))
 			rc = -EAGAIN;
 	} else {
-		if (down_interruptible(&mptctl_syscall_sem_ioc[ioc->id]))
+		if (down_interruptible(&ioc->mptctl_syscall_sem_ioc))
 			rc = -ERESTARTSYS;
 	}
-#endif
 	dctlprintk((KERN_INFO MYNAM "::mptctl_syscall_down return %d\n", rc));
 	return rc;
 }
@@ -244,11 +255,31 @@ mptctl_reply(MPT_ADAPTER *ioc, MPT_FRAME_HDR *req, MPT_FRAME_HDR *reply)
 	u16 iocStatus;
 	u8 cmd;
 
-	dctlprintk((MYIOC_s_INFO_FMT ": mptctl_reply()!\n", ioc->name));
-	if (req)
-		 cmd = req->u.hdr.Function;
-	else
+	if (reply) {
+		cmd = reply->u.hdr.Function;
+		iocStatus = reply->u.reply.IOCStatus & MPI_IOCSTATUS_MASK;
+		dctlprintk(("mptctl_reply() with req=%p reply=%p Function=%x iocStatus=%x!\n", req, reply, cmd, iocStatus));
+	} else {
+		if (ioc->ioctl) {
+			dctlprintk(("mptctl_reply() NULL Reply Function=%x!\n", req->u.hdr.Function));
+			ioc->ioctl->status |= MPT_IOCTL_STATUS_COMMAND_GOOD;
+			ioc->ioctl->reset &= ~MPTCTL_RESET_OK;
+
+			if (ioc->ioctl->status & MPT_IOCTL_STATUS_TIMER_ACTIVE) {
+				/* Delete this timer
+			 	*/
+				del_timer (&ioc->ioctl->timer);
+				ioc->ioctl->status &= ~MPT_IOCTL_STATUS_TIMER_ACTIVE;
+				/* We are done, issue wake up
+		 		*/
+				ioc->ioctl->wait_done = 1;
+				wake_up (&mptctl_wait);
+			}
+		} else {
+			dctlprintk(("mptctl_reply() NULL ioctl\n"));
+		}
 		return 1;
+	}
 
 	if (ioc->ioctl) {
 		/* If timer is not running, then an error occurred.
@@ -256,10 +287,16 @@ mptctl_reply(MPT_ADAPTER *ioc, MPT_FRAME_HDR *req, MPT_FRAME_HDR *reply)
 		 * queues.
 		 * Main callback will free message and reply frames.
 		 */
-		if (reply && (cmd == MPI_FUNCTION_SCSI_TASK_MGMT) &&
+		if ((cmd == MPI_FUNCTION_SCSI_TASK_MGMT) &&
 		    (ioc->ioctl->status & MPT_IOCTL_STATUS_TMTIMER_ACTIVE)) {
 			/* This is internally generated TM
 			 */
+			dctlprintk(("Copying Reply Frame @%p to ioc%d!\n",
+				reply, ioc->id));
+			memcpy(ioc->ioctl->ReplyFrame, reply,
+				min(ioc->reply_sz, 4*reply->u.reply.MsgLength));
+			ioc->ioctl->status |= MPT_IOCTL_STATUS_RF_VALID;
+
 			del_timer (&ioc->ioctl->TMtimer);
 			ioc->ioctl->status &= ~MPT_IOCTL_STATUS_TMTIMER_ACTIVE;
 
@@ -268,7 +305,6 @@ mptctl_reply(MPT_ADAPTER *ioc, MPT_FRAME_HDR *req, MPT_FRAME_HDR *reply)
 			/* If TM failed, reset the timer on the existing command,
 			 * will trigger an adapter reset.
 			 */
-			iocStatus = reply->u.reply.IOCStatus & MPI_IOCSTATUS_MASK;
 			if (iocStatus == MPI_IOCSTATUS_SCSI_TASK_MGMT_FAILED) {
 				if (ioc->ioctl->status & MPT_IOCTL_STATUS_TIMER_ACTIVE) {
 					ioc->ioctl->reset &= ~MPTCTL_RESET_OK;
@@ -277,7 +313,11 @@ mptctl_reply(MPT_ADAPTER *ioc, MPT_FRAME_HDR *req, MPT_FRAME_HDR *reply)
 					add_timer(&ioc->ioctl->timer);
 				}
 			}
-			ioc->ioctl->tmPtr = NULL;
+
+			/* We are done, issue wake up
+			 */
+			ioc->ioctl->wait_done = 1;
+			wake_up (&mptctl_wait);
 
 		} else if (ioc->ioctl->status & MPT_IOCTL_STATUS_TIMER_ACTIVE) {
 			/* Delete this timer
@@ -288,67 +328,82 @@ mptctl_reply(MPT_ADAPTER *ioc, MPT_FRAME_HDR *req, MPT_FRAME_HDR *reply)
 			/* Set the overall status byte.  Good if:
 			 * IOC status is good OR if no reply and a SCSI IO request
 			 */
-			if (reply) {
-				/* Copy the reply frame (which much exist
-				 * for non-SCSI I/O) to the IOC structure.
-				 */
-				dctlprintk((MYIOC_s_INFO_FMT ": Copying Reply Frame @%p to IOC!\n",
-						ioc->name, reply));
-				memcpy(ioc->ioctl->ReplyFrame, reply,
-					MIN(ioc->reply_sz, 4*reply->u.reply.MsgLength));
-				ioc->ioctl->status |= MPT_IOCTL_STATUS_RF_VALID;
+			/* Copy the reply frame (which must exist
+			 * for non-SCSI I/O) to the IOC structure.
+			 */
+			dctlprintk(("Copying Reply Frame @%p to ioc%d!\n",
+					reply, ioc->id));
+			memcpy(ioc->ioctl->ReplyFrame, reply,
+				min(ioc->reply_sz, 4*reply->u.reply.MsgLength));
+			ioc->ioctl->status |= MPT_IOCTL_STATUS_RF_VALID;
 
-				/* Set the command status to GOOD if IOC Status is GOOD
-				 * OR if SCSI I/O cmd and data underrun or recovered error.
-				 */
-				iocStatus = reply->u.reply.IOCStatus & MPI_IOCSTATUS_MASK;
-				if (iocStatus  == MPI_IOCSTATUS_SUCCESS)
+			/* Set the command status to GOOD if IOC Status is GOOD
+			 * OR if SCSI I/O cmd and data underrun or recovered error.
+			 */
+			if (iocStatus  == MPI_IOCSTATUS_SUCCESS)
+				ioc->ioctl->status |= MPT_IOCTL_STATUS_COMMAND_GOOD;
+
+			if ((cmd == MPI_FUNCTION_SCSI_IO_REQUEST) ||
+				(cmd == MPI_FUNCTION_RAID_SCSI_IO_PASSTHROUGH)) {
+				ioc->ioctl->reset &= ~MPTCTL_RESET_OK;
+
+				if ((iocStatus == MPI_IOCSTATUS_SCSI_DATA_UNDERRUN) ||
+					(iocStatus == MPI_IOCSTATUS_SCSI_RECOVERED_ERROR)) {
 					ioc->ioctl->status |= MPT_IOCTL_STATUS_COMMAND_GOOD;
-
-				if ((cmd == MPI_FUNCTION_SCSI_IO_REQUEST) ||
-					(cmd == MPI_FUNCTION_RAID_SCSI_IO_PASSTHROUGH)) {
-					ioc->ioctl->reset &= ~MPTCTL_RESET_OK;
-
-					if ((iocStatus == MPI_IOCSTATUS_SCSI_DATA_UNDERRUN) ||
-						(iocStatus == MPI_IOCSTATUS_SCSI_RECOVERED_ERROR)) {
-						ioc->ioctl->status |= MPT_IOCTL_STATUS_COMMAND_GOOD;
-					}
 				}
+			}
 
-				/* Copy the sense data - if present
-				 */
-				if ((cmd == MPI_FUNCTION_SCSI_IO_REQUEST) &&
+			/* Copy the sense data - if present
+			 */
+			if ((cmd == MPI_FUNCTION_SCSI_IO_REQUEST) &&
 					(reply->u.sreply.SCSIState & MPI_SCSI_STATE_AUTOSENSE_VALID)){
 
-					sz = req->u.scsireq.SenseBufferLength;
-					req_index = le16_to_cpu(req->u.frame.hwhdr.msgctxu.fld.req_idx);
-					sense_data = ((u8 *)ioc->sense_buf_pool + (req_index * MPT_SENSE_BUFFER_ALLOC));
-					memcpy(ioc->ioctl->sense, sense_data, sz);
-					ioc->ioctl->status |= MPT_IOCTL_STATUS_SENSE_VALID;
-				}
-
-				if (cmd == MPI_FUNCTION_SCSI_TASK_MGMT)
-					mptctl_free_tm_flags(ioc);
-
-
-			} else if ((cmd == MPI_FUNCTION_SCSI_IO_REQUEST) ||
-					(cmd == MPI_FUNCTION_RAID_SCSI_IO_PASSTHROUGH)) {
-				ioc->ioctl->status |= MPT_IOCTL_STATUS_COMMAND_GOOD;
-				ioc->ioctl->reset &= ~MPTCTL_RESET_OK;
+				sz = req->u.scsireq.SenseBufferLength;
+				req_index = le16_to_cpu(req->u.frame.hwhdr.msgctxu.fld.req_idx);
+				sense_data = ((u8 *)ioc->sense_buf_pool + (req_index * MPT_SENSE_BUFFER_ALLOC));
+				memcpy(ioc->ioctl->sense, sense_data, sz);
+				ioc->ioctl->status |= MPT_IOCTL_STATUS_SENSE_VALID;
 			}
+
+			if (cmd == MPI_FUNCTION_SCSI_TASK_MGMT)
+				mptctl_free_tm_flags(ioc);
+
 
 			/* We are done, issue wake up
 			 */
 			ioc->ioctl->wait_done = 1;
 			wake_up (&mptctl_wait);
 
-		} else if (reply && cmd == MPI_FUNCTION_FW_DOWNLOAD) {
-			/* Two paths to FW DOWNLOAD! */
-			// NOTE: Expects/requires non-Turbo reply!
-			dctlprintk((MYIOC_s_INFO_FMT ":Caching MPI_FUNCTION_FW_DOWNLOAD reply!\n",
-				ioc->name));
-			memcpy(fwReplyBuffer, reply, MIN(sizeof(fwReplyBuffer), 4*reply->u.reply.MsgLength));
-			ReplyMsg = (pMPIDefaultReply_t) fwReplyBuffer;
+		} else {
+			if (cmd == MPI_FUNCTION_FW_DOWNLOAD) {
+				/* Two paths to FW DOWNLOAD! */
+				// NOTE: Expects/requires non-Turbo reply!
+				dctlprintk(("ioc%d Caching MPI_FUNCTION_FW_DOWNLOAD reply!\n",
+					ioc->id));
+				memcpy(fwReplyBuffer, reply, min_t(int, sizeof(fwReplyBuffer), 4*reply->u.reply.MsgLength));
+				ReplyMsg = (pMPIDefaultReply_t) fwReplyBuffer;
+			} else if (cmd == MPI_FUNCTION_DIAG_BUFFER_POST) {
+				DiagBufferPostReply_t *DiagBufferPostReply =
+	    				(DiagBufferPostReply_t *)reply;
+				u8	buffType = DiagBufferPostReply->BufferType;
+
+				if ( DiagBufferPostReply->IOCStatus == 
+					MPI_IOCSTATUS_DIAGNOSTIC_RELEASED) {
+					ioc->DiagBuffer_Status[buffType] |= 
+						MPT_DIAG_BUFFER_IS_RELEASED;
+				}
+				if ( reply->u.reply.MsgLength > 5) {
+					ioc->DataSize[buffType] = 
+						DiagBufferPostReply->TransferLength;
+				}
+				dctlprintk((MYIOC_s_WARN_FMT "DIAG_BUFFER_POST reply status=%x MsgLength=%d\n",
+					ioc->name, DiagBufferPostReply->IOCStatus, 
+					reply->u.reply.MsgLength));
+			} else {
+				cmd = reply->u.reply.Function;
+				dctlprintk(("mptctl_reply: ioc%d Unknown cmd=%x reply received req=%p reply=%p\n",
+					ioc->id, cmd, req, reply));
+			}
 		}
 	}
 	return 1;
@@ -365,10 +420,13 @@ static void mptctl_timer_expired (unsigned long data)
 	MPT_IOCTL *ioctl = (MPT_IOCTL *) data;
 	int rc = 1;
 
-	dctlprintk((KERN_NOTICE MYNAM ": Timer Expired! Host %d\n",
-				ioctl->ioc->id));
-	if (ioctl == NULL)
+	if (ioctl == NULL) {
+		printk("mptctl_timer_expired: NULL ioctl pointer!!\n");
 		return;
+	}
+
+	dctlprintk(("Timer Expired! ioc%d\n",
+				ioctl->ioc->id));
 
 	if (ioctl->reset & MPTCTL_RESET_OK)
 		rc = mptctl_bus_reset(ioctl);
@@ -391,6 +449,7 @@ static void mptctl_timer_expired (unsigned long data)
 static int mptctl_bus_reset(MPT_IOCTL *ioctl)
 {
 	MPT_FRAME_HDR	*mf;
+	MPT_ADAPTER	*iocp=ioctl->ioc;
 	SCSITaskMgmt_t	*pScsiTm;
 	MPT_SCSI_HOST	*hd;
 	int		 ii;
@@ -399,10 +458,10 @@ static int mptctl_bus_reset(MPT_IOCTL *ioctl)
 
 	ioctl->reset &= ~MPTCTL_RESET_OK;
 
-	if (ioctl->ioc->sh == NULL)
+	if (iocp->sh == NULL)
 		return -EPERM;
-	
-	hd = (MPT_SCSI_HOST *) ioctl->ioc->sh->hostdata;
+
+	hd = (MPT_SCSI_HOST *) iocp->sh->hostdata;
 	if (hd == NULL)
 		return -EPERM;
 
@@ -413,16 +472,16 @@ static int mptctl_bus_reset(MPT_IOCTL *ioctl)
 
 	/* Send request
 	 */
-	if ((mf = mpt_get_msg_frame(mptctl_id, ioctl->ioc->id)) == NULL) {
-		dctlprintk((MYIOC_s_WARN_FMT "IssueTaskMgmt, no msg frames!!\n",
-				ioctl->ioc->name));
+	if ((mf = mpt_get_msg_frame(mptctl_id, iocp)) == NULL) {
+		dfailprintk(("%s: mptctl_bus_reset, no msg frames!!\n",
+			iocp->name));
 
-		mptctl_free_tm_flags(ioctl->ioc);
+		mptctl_free_tm_flags(iocp);
 		return -ENOMEM;
 	}
 
-	dtmprintk((MYIOC_s_INFO_FMT "IssueTaskMgmt request @ %p\n",
-			ioctl->ioc->name, mf));
+	dtmprintk((MYIOC_s_WARN_FMT "IssueTaskMgmt request @ %p\n",
+			iocp->name, mf));
 
 	pScsiTm = (SCSITaskMgmt_t *) mf;
 	pScsiTm->TargetID = ioctl->target;
@@ -441,23 +500,23 @@ static int mptctl_bus_reset(MPT_IOCTL *ioctl)
 		pScsiTm->Reserved2[ii] = 0;
 
 	pScsiTm->TaskMsgContext = 0;
-	dtmprintk((MYIOC_s_INFO_FMT "mptctl_bus_reset: issued.\n", ioctl->ioc->name));
+	dtmprintk((MYIOC_s_WARN_FMT "mptctl_bus_reset: issued mf=%x\n", iocp->name, mf));
 
 	ioctl->tmPtr = mf;
 	ioctl->TMtimer.expires = jiffies + HZ * 20;	/* 20 seconds */
 	ioctl->status |= MPT_IOCTL_STATUS_TMTIMER_ACTIVE;
 	add_timer(&ioctl->TMtimer);
 
-	retval = mpt_send_handshake_request(mptctl_id, ioctl->ioc->id,
+	retval = mpt_send_handshake_request(mptctl_id, iocp,
 			sizeof(SCSITaskMgmt_t), (u32*)pScsiTm, NO_SLEEP);
 
 	if (retval != 0) {
 		dtmprintk((MYIOC_s_WARN_FMT "_send_handshake FAILED!"
-			" (hd %p, ioc %p, mf %p) \n", ioctl->ioc->name, hd, hd->ioc, mf));
+			" (mf=%p) \n", iocp->name, mf));
 
-		mptctl_free_tm_flags(ioctl->ioc);
+		mptctl_free_tm_flags(iocp);
 		del_timer(&ioctl->TMtimer);
-		mpt_free_msg_frame(mptctl_id, ioctl->ioc->id, mf);
+		mpt_free_msg_frame(iocp, mf);
 		ioctl->tmPtr = NULL;
 	}
 
@@ -502,7 +561,7 @@ mptctl_free_tm_flags(MPT_ADAPTER *ioc)
 
 	spin_lock_irqsave(&ioc->FreeQlock, flags);
 #ifdef MPT_SCSI_USE_NEW_EH
-	hd->tmState = TM_STATE_ERROR;
+	hd->tmState = TM_STATE_NONE;
 	hd->tmPending = 0;
 	spin_unlock_irqrestore(&ioc->FreeQlock, flags);
 #else
@@ -525,7 +584,8 @@ static int
 mptctl_ioc_reset(MPT_ADAPTER *ioc, int reset_phase)
 {
 	MPT_IOCTL *ioctl = ioc->ioctl;
-	dctlprintk((KERN_INFO MYNAM ": IOC %s_reset routed to IOCTL driver!\n",
+	dctlprintk(("ioc%d %s_reset routed to IOCTL driver!\n",
+			ioc->id,
 			reset_phase==MPT_IOC_SETUP_RESET ? "setup" : (
 			reset_phase==MPT_IOC_PRE_RESET ? "pre" : "post")));
 
@@ -544,11 +604,12 @@ mptctl_ioc_reset(MPT_ADAPTER *ioc, int reset_phase)
 		if (ioctl && (ioctl->status & MPT_IOCTL_STATUS_TMTIMER_ACTIVE)){
 			ioctl->status &= ~MPT_IOCTL_STATUS_TMTIMER_ACTIVE;
 			del_timer(&ioctl->TMtimer);
-			mpt_free_msg_frame(mptctl_id, ioc->id, ioctl->tmPtr);
+			if (ioctl->tmPtr != NULL) {
+				mpt_free_msg_frame(ioc, ioctl->tmPtr);
+				ioctl->tmPtr = NULL;
+			}
 		}
-
 	} else {
-		ioctl->tmPtr = NULL;
 
 		/* Set the status and continue IOCTL
 		 * processing. All memory will be free'd
@@ -564,40 +625,45 @@ mptctl_ioc_reset(MPT_ADAPTER *ioc, int reset_phase)
 			wake_up(&mptctl_wait);
 		}
 	}
-
 	return 1;
 }
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
-/*
- *  struct file_operations functionality.
- *  Members:
- *	llseek, write, read, ioctl, open, release
- */
-/*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,4,9)
-static loff_t
-mptctl_llseek(struct file *file, loff_t offset, int origin)
+/* ASYNC Event Notification Support */
+static int
+mptctl_event_process(MPT_ADAPTER *ioc, EventNotificationReply_t *pEvReply)
 {
-	return -ESPIPE;
-}
-#define no_llseek mptctl_llseek
-#endif
+	u8 event;
 
-/*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
-static ssize_t
-mptctl_write(struct file *file, const char *buf, size_t count, loff_t *ppos)
-{
-	printk(KERN_ERR MYNAM ": ioctl WRITE not yet supported\n");
-	return 0;
+	event = le32_to_cpu(pEvReply->Event) & 0xFF;
+
+	dctlprintk(("%s() called\n", __FUNCTION__));
+	if(async_queue == NULL)
+		return 1;
+
+	/* Signal only for the events that are
+	 * requested for by the application
+	 */
+	if (ioc->events && (ioc->eventTypes & ( 1 << event))) {
+		dctlprintk(("Raised SIGIO to application\n"));
+		devtprintk(("Raised SIGIO to application\n"));
+		kill_fasync(&async_queue, SIGIO, POLL_IN);
+	}
+	return 1;
 }
 
-/*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
-static ssize_t
-mptctl_read(struct file *file, char *buf, size_t count, loff_t *ptr)
+static int
+mptctl_fasync(int fd, struct file *filep, int mode)
 {
-	printk(KERN_ERR MYNAM ": ioctl READ not yet supported\n");
-	return 0;
+	dctlprintk(("%s() called\n", __FUNCTION__));
+	return fasync_helper(fd, filep, mode, &async_queue);
+}
+
+static int
+mptctl_release(struct inode *inode, struct file *filep)
+{
+	dctlprintk(("%s() called\n", __FUNCTION__));
+	return fasync_helper(-1, filep, 0, &async_queue);
 }
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
@@ -617,14 +683,15 @@ mptctl_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned 
 	int ret;
 	MPT_ADAPTER *iocp = NULL;
 
-	dctlprintk(("mptctl_ioctl() called\n"));
-
 	if (copy_from_user(&khdr, uhdr, sizeof(khdr))) {
 		printk(KERN_ERR "%s::mptctl_ioctl() @%d - "
 				"Unable to copy mpt_ioctl_header data @ %p\n",
 				__FILE__, __LINE__, (void*)uhdr);
 		return -EFAULT;
 	}
+
+	dctlprintk(("mptctl_ioctl() called with cmd=%x\n", cmd));
+
 	ret = -ENXIO;				/* (-6) No such device or address */
 
 	/* Verify intended MPT adapter - set iocnum and the adapter
@@ -633,16 +700,16 @@ mptctl_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned 
 	iocnumX = khdr.iocnum & 0xFF;
 	if (((iocnum = mpt_verify_adapter(iocnumX, &iocp)) < 0) ||
 	    (iocp == NULL)) {
-		dctlprintk((KERN_ERR "%s::mptctl_ioctl() @%d - ioc%d not found!\n",
-				__FILE__, __LINE__, iocnumX));
+		dctlprintk(("mptctl_ioctl: ioc%d not found!\n",
+				iocnumX));
 		return -ENODEV;
 	}
 
-	if (!iocp->active) {
+/*	if (!iocp->active) {
 		printk(KERN_ERR "%s::mptctl_ioctl() @%d - Controller disabled.\n",
 				__FILE__, __LINE__);
 		return -EFAULT;
-	}
+	} */
 
 	/* Handle those commands that are just returning
 	 * information stored in the driver.
@@ -663,7 +730,26 @@ mptctl_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned 
 		return mptctl_eventreport(arg);
 	} else if (cmd == MPTFWREPLACE) {
 		return mptctl_replace_fw(arg);
+	} else if (cmd == MPTDIAGQUERY) {
+		return mptctl_query_diag_buffer(arg);
+	} else if (cmd == MPTDIAGUNREGISTER) {
+		return mptctl_unregister_diag_buffer(arg);
+	} else if (cmd == MPTHBAPCIINFO) {
+		return mptctl_hba_pciinfo(arg);
 	}
+#if defined(CPQ_CIM)
+	else if (cmd == CC_CSMI_SAS_GET_DRIVER_INFO) {
+		return mptctl_csmi_sas_get_driver_info(arg);
+	} else if (cmd == CC_CSMI_SAS_GET_CNTLR_CONFIG) {
+		return mptctl_csmi_sas_get_cntlr_config(arg);
+	} else if (cmd == CC_CSMI_SAS_GET_CNTLR_STATUS) {
+		return mptctl_csmi_sas_get_cntlr_status(arg);
+	} else if (cmd == CC_CSMI_SAS_GET_SCSI_ADDRESS) {
+		return mptctl_csmi_sas_get_scsi_address(arg);
+	} else if (cmd == CC_CSMI_SAS_GET_DEVICE_ADDRESS){
+		return mptctl_csmi_sas_get_device_address(arg);
+	}
+#endif // CPQ_CIM
 
 	/* All of these commands require an interrupt or
 	 * are unknown/illegal.
@@ -671,23 +757,63 @@ mptctl_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned 
 	if ((ret = mptctl_syscall_down(iocp, nonblock)) != 0)
 		return ret;
 
-	dctlprintk((MYIOC_s_INFO_FMT ": mptctl_ioctl()\n", iocp->name));
-
 	if (cmd == MPTFWDOWNLOAD)
 		ret = mptctl_fw_download(arg);
+	else if (cmd == MPTFWDOWNLOADBOOT)
+		ret = mptctl_fw_downloadboot(arg);
 	else if (cmd == MPTCOMMAND)
 		ret = mptctl_mpt_command(arg);
 	else if (cmd == MPTHARDRESET)
 		ret = mptctl_do_reset(arg);
+	else if (cmd == MPTDIAGRESET)
+		ret = mptctl_do_diag_reset(arg);
 	else if ((cmd & ~IOCSIZE_MASK) == (HP_GETHOSTINFO & ~IOCSIZE_MASK))
 		ret = mptctl_hp_hostinfo(arg, _IOC_SIZE(cmd));
 	else if (cmd == HP_GETTARGETINFO)
 		ret = mptctl_hp_targetinfo(arg);
-	else
+	else if (cmd == MPTDIAGREGISTER)
+		ret = mptctl_register_diag_buffer(arg);
+	else if (cmd == MPTDIAGRELEASE)
+		ret = mptctl_release_diag_buffer(arg);
+	else if (cmd == MPTDIAGREADBUFFER)
+		ret = mptctl_read_diag_buffer(arg);
+#if defined(CPQ_CIM)
+	else if (cmd == CC_CSMI_SAS_GET_PHY_INFO)
+		ret = mptctl_csmi_sas_get_phy_info(arg);
+	else if (cmd == CC_CSMI_SAS_GET_SATA_SIGNATURE)
+		ret = mptctl_csmi_sas_get_sata_signature(arg);
+	else if (cmd == CC_CSMI_SAS_GET_LINK_ERRORS)
+		ret = mptctl_csmi_sas_get_link_errors(arg);
+	else if (cmd == CC_CSMI_SAS_SMP_PASSTHRU)
+		ret = mptctl_csmi_sas_smp_passthru(arg);
+	else if (cmd == CC_CSMI_SAS_SSP_PASSTHRU)
+		ret = mptctl_csmi_sas_ssp_passthru(arg);
+	else if (cmd == CC_CSMI_SAS_FIRMWARE_DOWNLOAD)
+		ret = mptctl_csmi_sas_firmware_download(arg);
+	else if (cmd == CC_CSMI_SAS_GET_RAID_INFO)
+		ret = mptctl_csmi_sas_get_raid_info(arg);
+	else if (cmd == CC_CSMI_SAS_GET_RAID_CONFIG)
+		ret = mptctl_csmi_sas_get_raid_config(arg);
+	else if (cmd == CC_CSMI_SAS_SET_PHY_INFO)
+		ret = mptctl_csmi_sas_set_phy_info(arg);
+	else if (cmd == CC_CSMI_SAS_STP_PASSTHRU)
+		ret = mptctl_csmi_sas_stp_passthru(arg);
+	else if (cmd == CC_CSMI_SAS_TASK_MANAGEMENT)
+		ret = mptctl_csmi_sas_task_managment(arg);
+	else if (cmd == CC_CSMI_SAS_PHY_CONTROL)
+		ret = mptctl_csmi_sas_phy_control(arg);
+	else if (cmd == CC_CSMI_SAS_GET_CONNECTOR_INFO)
+		ret = mptctl_csmi_sas_get_connector_info(arg);
+	else if (cmd == CC_CSMI_SAS_GET_LOCATION)
+		ret = mptctl_csmi_sas_get_location(arg);
+#endif // CPQ_CIM
+	else {
+		dctlprintk(("mptctl_ioctl() cmd=%x not found\n", cmd));
 		ret = -EINVAL;
+	}
 
 
-	up(&mptctl_syscall_sem_ioc[iocp->id]);
+	up(&iocp->mptctl_syscall_sem_ioc);
 
 	return ret;
 }
@@ -698,7 +824,7 @@ static int mptctl_do_reset(unsigned long arg)
 	struct mpt_ioctl_diag_reset krinfo;
 	MPT_ADAPTER		*iocp;
 
-	dctlprintk((KERN_INFO "mptctl_do_reset called.\n"));
+	dctlprintk(("mptctl_do_reset called.\n"));
 
 	if (copy_from_user(&krinfo, urinfo, sizeof(struct mpt_ioctl_diag_reset))) {
 		printk(KERN_ERR "%s@%d::mptctl_do_reset - "
@@ -708,32 +834,45 @@ static int mptctl_do_reset(unsigned long arg)
 	}
 
 	if (mpt_verify_adapter(krinfo.hdr.iocnum, &iocp) < 0) {
-		dctlprintk((KERN_ERR "%s@%d::mptctl_do_reset - ioc%d not found!\n",
-				__FILE__, __LINE__, krinfo.hdr.iocnum));
+		dctlprintk(("mptctl_do_reset: ioc%d not found!\n",
+				krinfo.hdr.iocnum));
 		return -ENODEV; /* (-6) No such device or address */
 	}
 
-	if (mpt_HardResetHandler(iocp, CAN_SLEEP) != 0) {
-		printk (KERN_ERR "%s@%d::mptctl_do_reset - reset failed.\n",
-			__FILE__, __LINE__);
+	if (mpt_HardResetHandler(iocp, NO_SLEEP) != 0) {
+		dctlprintk(("mptctl_do_reset: reset failed.\n"));
 		return -1;
 	}
 
 	return 0;
 }
 
-/*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
-static int mptctl_open(struct inode *inode, struct file *file)
+static int mptctl_do_diag_reset(unsigned long arg)
 {
-	/*
-	 * Should support multiple management users
-	 */
-	return 0;
-}
+	struct mpt_ioctl_diag_reset *urinfo = (struct mpt_ioctl_diag_reset *) arg;
+	struct mpt_ioctl_diag_reset krinfo;
+	MPT_ADAPTER		*iocp;
 
-/*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
-static int mptctl_release(struct inode *inode, struct file *file)
-{
+	dctlprintk(("mptctl_do_diag_reset called.\n"));
+
+	if (copy_from_user(&krinfo, urinfo, sizeof(struct mpt_ioctl_diag_reset))) {
+		printk(KERN_ERR "%s@%d::mptctl_do_diag_reset - "
+				"Unable to copy mpt_ioctl_diag_reset struct @ %p\n",
+				__FILE__, __LINE__, (void*)urinfo);
+		return -EFAULT;
+	}
+
+	if (mpt_verify_adapter(krinfo.hdr.iocnum, &iocp) < 0) {
+		dctlprintk(("mptctl_do_diag_reset: ioc%d not found!\n",
+				krinfo.hdr.iocnum));
+		return -ENODEV; /* (-6) No such device or address */
+	}
+
+	if (mpt_do_diag_reset(iocp, NO_SLEEP) != 0) {
+		dctlprintk(("mptctl_do_diag_reset: reset failed.\n"));
+		return -1;
+	}
+
 	return 0;
 }
 
@@ -760,7 +899,7 @@ mptctl_fw_download(unsigned long arg)
 	struct mpt_fw_xfer	*ufwdl = (struct mpt_fw_xfer *) arg;
 	struct mpt_fw_xfer	 kfwdl;
 
-	dctlprintk((KERN_INFO "mptctl_fwdl called. mptctl_id = %xh\n", mptctl_id)); //tc
+	dctlprintk(("mptctl_fwdl called. mptctl_id = %xh\n", mptctl_id)); //tc
 	if (copy_from_user(&kfwdl, ufwdl, sizeof(struct mpt_fw_xfer))) {
 		printk(KERN_ERR "%s@%d::_ioctl_fwdl - "
 				"Unable to copy mpt_fw_xfer struct @ %p\n",
@@ -809,22 +948,26 @@ mptctl_do_fw_download(int ioc, char *ufwbuf, size_t fwlen)
 	int			 sge_offset = 0;
 	u16			 iocstat;
 
-	dctlprintk((KERN_INFO "mptctl_do_fwdl called. mptctl_id = %xh.\n", mptctl_id));
+	dctlprintk(("mptctl_do_fwdl called. mptctl_id = %xh.\n", mptctl_id));
 
-	dctlprintk((KERN_INFO "DbG: kfwdl.bufp  = %p\n", ufwbuf));
-	dctlprintk((KERN_INFO "DbG: kfwdl.fwlen = %d\n", (int)fwlen));
-	dctlprintk((KERN_INFO "DbG: kfwdl.ioc   = %04xh\n", ioc));
+	dctlprintk(("DbG: kfwdl.bufp  = %p\n", ufwbuf));
+	dctlprintk(("DbG: kfwdl.fwlen = %d\n", (int)fwlen));
+	dctlprintk(("DbG: kfwdl.ioc   = %04xh\n", ioc));
 
-	if ((ioc = mpt_verify_adapter(ioc, &iocp)) < 0) {
-		dctlprintk(("%s@%d::_ioctl_fwdl - ioc%d not found!\n",
-				__FILE__, __LINE__, ioc));
+	if (mpt_verify_adapter(ioc, &iocp) < 0) {
+		dctlprintk(("ioctl_fwdl - ioc%d not found!\n",
+				 ioc));
 		return -ENODEV; /* (-6) No such device or address */
-	}
+	} else {
 
-	/*  Valid device. Get a message frame and construct the FW download message.
-	 */
-	if ((mf = mpt_get_msg_frame(mptctl_id, ioc)) == NULL)
-		return -EAGAIN;
+		/*  Valid device. Get a message frame and construct the FW download message.
+	 	*/
+		if ((mf = mpt_get_msg_frame(mptctl_id, iocp)) == NULL) {
+			dfailprintk(("%s: mptctl_do_fwdl, no msg frames!!\n",
+				iocp->name));
+			return -EAGAIN;
+		}
+	}
 	dlmsg = (FWDownload_t*) mf;
 	ptsge = (FWDownloadTCSGE_t *) &dlmsg->SGL;
 	sgOut = (char *) (ptsge + 1);
@@ -837,7 +980,12 @@ mptctl_do_fw_download(int ioc, char *ufwbuf, size_t fwlen)
 	dlmsg->ChainOffset = 0;
 	dlmsg->Function = MPI_FUNCTION_FW_DOWNLOAD;
 	dlmsg->Reserved1[0] = dlmsg->Reserved1[1] = dlmsg->Reserved1[2] = 0;
-	dlmsg->MsgFlags = 0;
+//	if (iocp->facts.MsgVersion >= MPI_VERSION_01_05) {
+		dlmsg->MsgFlags = MPI_FW_DOWNLOAD_MSGFLGS_LAST_SEGMENT;
+//	} else {
+//		dlmsg->MsgFlags = 0;
+//	}
+	dctlprintk(("mptctl_do_fwdl MsgVersion=%x MsgFlags=%x\n", iocp->facts.MsgVersion, dlmsg->MsgFlags));
 
 	/* Set up the Transaction SGE.
 	 */
@@ -889,7 +1037,7 @@ mptctl_do_fw_download(int ioc, char *ufwbuf, size_t fwlen)
 		goto fwdl_out;
 	}
 
-	dctlprintk((KERN_INFO "DbG: sgl buffer  = %p, sgfrags = %d\n", sgl, numfrags));
+	dctlprintk(("DbG: sgl buffer  = %p, sgfrags = %d\n", sgl, numfrags));
 
 	/*
 	 * Parse SG list, copying sgl itself,
@@ -939,7 +1087,7 @@ mptctl_do_fw_download(int ioc, char *ufwbuf, size_t fwlen)
 	 * Finally, perform firmware download.
 	 */
 	ReplyMsg = NULL;
-	mpt_put_msg_frame(mptctl_id, ioc, mf);
+	mpt_put_msg_frame(mptctl_id, iocp, mf);
 
 	/*
 	 *  Wait until the reply has been received
@@ -951,7 +1099,7 @@ mptctl_do_fw_download(int ioc, char *ufwbuf, size_t fwlen)
 		}
 
 		if (!(i%HZ)) {
-			dctlprintk((KERN_INFO "DbG::_do_fwdl: "
+			dctlprintk(("DbG::_do_fwdl: "
 				   "In ReplyMsg loop - iteration %d\n",
 				   i));
 		}
@@ -991,6 +1139,107 @@ fwdl_out:
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
 /*
+ * MPT FW downloadboot function.  Cast the arg into the mpt_fw_xfer structure.
+ * This structure contains: iocnum, firmware length (bytes),
+ *      pointer to user space memory where the fw image is stored.
+ *
+ * Outputs:	None.
+ * Return:	0 if successful
+ *		-EFAULT if data unavailable
+ *		-ENXIO  if no such device
+ *		-EAGAIN if resource problem
+ *		-ENOMEM if no memory for SGE
+ *		-EMLINK if too many chain buffers required
+ *		-EBADRQC if adapter does not support FW downloadboot
+ *		-EBUSY if adapter is busy
+ *		-ENOMSG if FW upload returned bad status
+ */
+static int
+mptctl_fw_downloadboot(unsigned long arg)
+{
+	struct mpt_fw_xfer	*ufwdl = (struct mpt_fw_xfer *) arg;
+	struct mpt_fw_xfer	 kfwdl;
+
+	dctlprintk(("mptctl_fwdlboot called. mptctl_id = %xh\n", mptctl_id)); //tc
+	if (copy_from_user(&kfwdl, ufwdl, sizeof(struct mpt_fw_xfer))) {
+		printk(KERN_ERR "%s@%d::_ioctl_fwdl - "
+				"Unable to copy mpt_fw_xfer struct @ %p\n",
+				__FILE__, __LINE__, (void*)ufwdl);
+		return -EFAULT;
+	}
+
+	dctlprintk(("mptctl_fwdlboot fwlen = 0x%x (%d) bufp=%p\n", kfwdl.fwlen, kfwdl.fwlen, kfwdl.bufp)); //tc
+	return mptctl_do_fw_downloadboot(kfwdl.iocnum, kfwdl.bufp, kfwdl.fwlen);
+}
+
+
+/*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
+/*
+ *	mptctl_do_fw_downloadboot - DownloadBoot code
+ *	@ioc: Pointer to MPT_ADAPTER structure
+ *	@flag: Specify which part of IOC memory is to be uploaded.
+ *	@sleepFlag: Specifies whether the process can sleep
+ *
+ *	FwDownloadBoot requires Programmed IO access.
+ *
+ *	Returns 0 for success
+ *		-1 FW Image size is 0
+ *		-2 No valid cached_fw Pointer
+ *		<0 for fw upload failure.
+ */
+static int
+mptctl_do_fw_downloadboot(int ioc_num, char *ufwbuf, size_t fwlen)
+{
+	MPT_ADAPTER		*ioc;
+	char			*pbuf;
+	int			rc;
+
+	if (mpt_verify_adapter(ioc_num, &ioc) < 0) {
+		dctlprintk(("ioctl_fwdl - ioc%d not found!\n",
+				 ioc_num));
+		return -ENODEV; /* (-6) No such device or address */
+	}
+
+	pbuf = kmalloc(fwlen, GFP_KERNEL);
+	if (copy_from_user(pbuf, ufwbuf, fwlen)) {
+		printk(KERN_ERR "%s@%d::_ioctl_fwdlboot - "
+				"Unable to copy mpt_fw @ %p\n",
+				__FILE__, __LINE__, (void*)ufwbuf);
+		return -EFAULT;
+	}
+
+	ddlprintk((MYIOC_s_WARN_FMT "mptctl_do_fw_downloadboot fwlen=%d pbuf=%p\n",
+				ioc->name, (int)fwlen, pbuf));
+
+	rc = mpt_downloadboot(ioc, (MpiFwHeader_t *)pbuf, CAN_SLEEP);
+	ddlprintk((MYIOC_s_WARN_FMT "mptctl_do_fw_downloadboot rc=%x\n",
+				ioc->name, rc));
+/*	if ( (rc == 0) && (ioc->bus_type == SAS) ) {
+		if ((rc = mptctl_syscall_down(ioc, nonblock)) != 0)
+			return rc;
+
+		rc = mptctl_do_fw_download(ioc_num, ufwbuf, fwlen);
+
+		up(&ioc->mptctl_syscall_sem_ioc);
+
+		ddlprintk((MYIOC_s_WARN_FMT "SAS mptctl_do_fw_download rc=%x\n",
+				ioc->name, rc));
+
+		if ( (rc = mpt_diag_reset(ioc, 1, sleepFlag)) < 0) {
+			ddlprintk((MYIOC_s_WARN_FMT "SAS Diagnostic reset after downloadboot failed!\n",
+				ioc->name));
+		} else {
+		ddlprintk((MYIOC_s_WARN_FMT "SAS Diagnostic reset after downloadboot successful!\n",
+			ioc->name));
+		}
+	} */
+	kfree(pbuf);
+	return rc;
+}
+
+
+/*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
+/*
  * SGE Allocation routine
  *
  * Inputs:	bytes - number of bytes to be transferred
@@ -1014,7 +1263,7 @@ kbuf_alloc_2_sgl(int bytes, u32 sgdir, int sge_offset, int *frags,
 	MptSge_t	*sgl;
 	int		 numfrags = 0;
 	int		 fragcnt = 0;
-	int		 alloc_sz = MIN(bytes,MAX_KMALLOC_SZ);	// avoid kernel warning msg!
+	int		 alloc_sz = min(bytes,MAX_KMALLOC_SZ);	// avoid kernel warning msg!
 	int		 bytes_allocd = 0;
 	int		 this_alloc;
 	dma_addr_t	 pa;					// phys addr
@@ -1059,7 +1308,7 @@ kbuf_alloc_2_sgl(int bytes, u32 sgdir, int sge_offset, int *frags,
 	sgl = sglbuf;
 	sg_spill = ((ioc->req_sz - sge_offset)/(sizeof(dma_addr_t) + sizeof(u32))) - 1;
 	while (bytes_allocd < bytes) {
-		this_alloc = MIN(alloc_sz, bytes-bytes_allocd);
+		this_alloc = min(alloc_sz, bytes-bytes_allocd);
 		buflist[buflist_ent].len = this_alloc;
 		buflist[buflist_ent].kptr = pci_alloc_consistent(ioc->pcidev,
 								 this_alloc,
@@ -1115,11 +1364,11 @@ kbuf_alloc_2_sgl(int bytes, u32 sgdir, int sge_offset, int *frags,
 	*frags = numfrags;
 	*blp = buflist;
 
-	dctlprintk((KERN_INFO MYNAM "-SG: kbuf_alloc_2_sgl() - "
+	dctlprintk(("-SG: kbuf_alloc_2_sgl() - "
 			   "%d SG frags generated!\n",
 			   numfrags));
 
-	dctlprintk((KERN_INFO MYNAM "-SG: kbuf_alloc_2_sgl() - "
+	dctlprintk(("-SG: kbuf_alloc_2_sgl() - "
 			   "last (big) alloc_sz=%d\n",
 			   alloc_sz));
 
@@ -1205,7 +1454,7 @@ kfree_sgl(MptSge_t *sgl, dma_addr_t sgl_dma, struct buflist *buflist, MPT_ADAPTE
 
 	pci_free_consistent(ioc->pcidev, MAX_SGL_BYTES, sgl, sgl_dma);
 	kfree(buflist);
-	dctlprintk((KERN_INFO MYNAM "-SG: Free'd 1 SGL buf + %d kbufs!\n", n));
+	dctlprintk(("-SG: Free'd 1 SGL buf + %d kbufs!\n", n));
 }
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
@@ -1222,7 +1471,7 @@ static int
 mptctl_getiocinfo (unsigned long arg, unsigned int data_size)
 {
 	struct mpt_ioctl_iocinfo *uarg = (struct mpt_ioctl_iocinfo *) arg;
-	struct mpt_ioctl_iocinfo karg;
+	struct mpt_ioctl_iocinfo *karg;
 	MPT_ADAPTER		*ioc;
 	struct pci_dev		*pdev;
 	struct Scsi_Host	*sh;
@@ -1233,73 +1482,98 @@ mptctl_getiocinfo (unsigned long arg, unsigned int data_size)
 	int			ii;
 	int			port;
 	int			cim_rev;
-	u8			revision;
 
-	dctlprintk((": mptctl_getiocinfo called.\n"));
+	dctlprintk(("mptctl_getiocinfo called.\n"));
 	/* Add of PCI INFO results in unaligned access for
 	 * IA64 and Sparc. Reset long to int. Return no PCI
 	 * data for obsolete format.
 	 */
 	if (data_size == sizeof(struct mpt_ioctl_iocinfo_rev0))
 		cim_rev = 0;
-	else if (data_size == sizeof(struct mpt_ioctl_iocinfo))
+	else if (data_size == sizeof(struct mpt_ioctl_iocinfo_rev1))
 		cim_rev = 1;
+	else if (data_size == sizeof(struct mpt_ioctl_iocinfo))
+		cim_rev = 2;
 	else if (data_size == (sizeof(struct mpt_ioctl_iocinfo_rev0)+12))
 		cim_rev = 0;	/* obsolete */
-	else
+	else {
+		dctlprintk(("mptctl_getiocinfo(): incorrect data_size=%d\n",
+				data_size));
 		return -EFAULT;
+	}
 
-	if (copy_from_user(&karg, uarg, data_size)) {
+	karg = kmalloc(data_size, GFP_KERNEL);
+	if (karg == NULL) {
+		printk(KERN_ERR "%s::mpt_ioctl_iocinfo() @%d - no memory available!\n",
+				__FILE__, __LINE__);
+		return -ENOMEM;
+	}
+
+	if (copy_from_user(karg, uarg, data_size)) {
 		printk(KERN_ERR "%s@%d::mptctl_getiocinfo - "
 			"Unable to read in mpt_ioctl_iocinfo struct @ %p\n",
 				__FILE__, __LINE__, (void*)uarg);
+		kfree(karg);
 		return -EFAULT;
 	}
 
-	if (((iocnum = mpt_verify_adapter(karg.hdr.iocnum, &ioc)) < 0) ||
+	if (((iocnum = mpt_verify_adapter(karg->hdr.iocnum, &ioc)) < 0) ||
 	    (ioc == NULL)) {
-		dctlprintk((KERN_ERR "%s::mptctl_getiocinfo() @%d - ioc%d not found!\n",
-				__FILE__, __LINE__, iocnum));
+		dctlprintk(("mptctl_getiocinfo(): ioc%d not found!\n",
+				iocnum));
+		kfree(karg);
 		return -ENODEV;
 	}
+
+	dctlprintk(("mptctl_getiocinfo(): ioc%d found!\n",
+				iocnum));
 
 	/* Verify the data transfer size is correct.
 	 * Ignore the port setting.
 	 */
-	if (karg.hdr.maxDataSize != data_size) {
+	if (karg->hdr.maxDataSize != data_size) {
 		printk(KERN_ERR "%s@%d::mptctl_getiocinfo - "
 			"Structure size mismatch. Command not completed.\n",
 				__FILE__, __LINE__);
+		kfree(karg);
 		return -EFAULT;
 	}
 
 	/* Fill in the data and return the structure to the calling
 	 * program
 	 */
-	if ((int)ioc->chip_type <= (int) FC929)
-		karg.adapterType = MPT_IOCTL_INTERFACE_FC;
+	if (ioc->bus_type == SAS)
+		karg->adapterType = MPT_IOCTL_INTERFACE_SAS;
+	else if (ioc->bus_type == FC)
+		karg->adapterType = MPT_IOCTL_INTERFACE_FC;
 	else
-		karg.adapterType = MPT_IOCTL_INTERFACE_SCSI;
+		karg->adapterType = MPT_IOCTL_INTERFACE_SCSI;
 
-	port = karg.hdr.port;
+	port = karg->hdr.port & 0x0000ffff;
 
-	karg.port = port;
-	pdev = (struct pci_dev *) ioc->pcidev;
+	karg->port = port;
+	pdev = ioc->pcidev;
 
-	karg.pciId = pdev->device;
-	pci_read_config_byte(pdev, PCI_CLASS_REVISION, &revision);
-	karg.hwRev = revision;
+	karg->pciId = pdev->device;
+	karg->hwRev = ioc->revisionID;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,4,0)
-	karg.subSystemDevice = pdev->subsystem_device;
-	karg.subSystemVendor = pdev->subsystem_vendor;
+	karg->subSystemDevice = pdev->subsystem_device;
+	karg->subSystemVendor = pdev->subsystem_vendor;
 #endif
 
 	if (cim_rev == 1) {
 		/* Get the PCI bus, device, and function numbers for the IOC
 		 */
-		karg.pciInfo.u.bits.busNumber = pdev->bus->number;
-		karg.pciInfo.u.bits.deviceNumber = PCI_SLOT( pdev->devfn );
-		karg.pciInfo.u.bits.functionNumber = PCI_FUNC( pdev->devfn );
+		karg->pciInfo.u.bits.busNumber = pdev->bus->number;
+		karg->pciInfo.u.bits.deviceNumber = PCI_SLOT( pdev->devfn );
+		karg->pciInfo.u.bits.functionNumber = PCI_FUNC( pdev->devfn );
+	} else if (cim_rev == 2) {
+		/* Get the PCI bus, device, function and segment ID numbers
+		   for the IOC */
+		karg->pciInfo.u.bits.busNumber = pdev->bus->number;
+		karg->pciInfo.u.bits.deviceNumber = PCI_SLOT( pdev->devfn );
+		karg->pciInfo.u.bits.functionNumber = PCI_FUNC( pdev->devfn );
+		karg->pciInfo.segmentID = PCI_SEGMENT(pdev->bus);
 	}
 
 	/* Get number of devices
@@ -1320,31 +1594,33 @@ mptctl_getiocinfo (unsigned long arg, unsigned int data_size)
 			}
 		}
 	}
-	karg.numDevices = numDevices;
+	karg->numDevices = numDevices;
 
 	/* Set the BIOS and FW Version
 	 */
-	karg.FWVersion = ioc->facts.FWVersion.Word;
-	karg.BIOSVersion = ioc->biosVersion;
+	karg->FWVersion = ioc->facts.FWVersion.Word;
+	karg->BIOSVersion = ioc->biosVersion;
 
 	/* Set the Version Strings.
 	 */
-	strncpy (karg.driverVersion, MPT_LINUX_PACKAGE_NAME, MPT_IOCTL_VERSION_LENGTH);
-	karg.driverVersion[MPT_IOCTL_VERSION_LENGTH-1]='\0';
+	strncpy (karg->driverVersion, MPT_LINUX_PACKAGE_NAME, MPT_IOCTL_VERSION_LENGTH);
+	karg->driverVersion[MPT_IOCTL_VERSION_LENGTH-1]='\0';
 
-	karg.busChangeEvent = 0;
-	karg.hostId = ioc->pfacts[port].PortSCSIID;
-	karg.rsvd[0] = karg.rsvd[1] = 0;
+	karg->busChangeEvent = 0;
+	karg->hostId = ioc->pfacts[port].PortSCSIID;
+	karg->rsvd[0] = karg->rsvd[1] = 0;
 
 	/* Copy the data from kernel memory to user memory
 	 */
-	if (copy_to_user((char *)arg, &karg, data_size)) {
+	if (copy_to_user((char *)arg, karg, data_size)) {
 		printk(KERN_ERR "%s@%d::mptctl_getiocinfo - "
 			"Unable to write out mpt_ioctl_iocinfo struct @ %p\n",
 				__FILE__, __LINE__, (void*)uarg);
+		kfree(karg);
 		return -EFAULT;
 	}
 
+	kfree(karg);
 	return 0;
 }
 
@@ -1390,8 +1666,8 @@ mptctl_gettargetinfo (unsigned long arg)
 
 	if (((iocnum = mpt_verify_adapter(karg.hdr.iocnum, &ioc)) < 0) ||
 	    (ioc == NULL)) {
-		dctlprintk((KERN_ERR "%s::mptctl_gettargetinfo() @%d - ioc%d not found!\n",
-				__FILE__, __LINE__, iocnum));
+		dctlprintk(("mptctl_gettargetinfo: ioc%d not found!\n",
+				iocnum));
 		return -ENODEV;
 	}
 
@@ -1401,7 +1677,7 @@ mptctl_gettargetinfo (unsigned long arg)
 	 */
 	numBytes = karg.hdr.maxDataSize - sizeof(mpt_ioctl_header);
 	maxWordsLeft = numBytes/sizeof(int);
-	port = karg.hdr.port;
+	port = karg.hdr.port & 0x0000ffff;
 
 	if (maxWordsLeft <= 0) {
 		printk(KERN_ERR "%s::mptctl_gettargetinfo() @%d - no memory available!\n",
@@ -1462,7 +1738,7 @@ mptctl_gettargetinfo (unsigned long arg)
 						bus_id = pIoc2->RaidVolume[0].VolumeBus;
 	            				numDevices++;
                     				*pdata = ( (devType << 24) | (bus_id << 8) | id );
-						dctlprintk((KERN_ERR "mptctl_gettargetinfo - "
+						dctlprintk(("mptctl_gettargetinfo - "
 		"volume ioc=%d target=%x numDevices=%d pdata=%p\n", iocnum, *pdata, numDevices, pdata));
                     				pdata++;
 						--maxWordsLeft;
@@ -1489,7 +1765,7 @@ mptctl_gettargetinfo (unsigned long arg)
 							bus_id = vdev->bus_id;
 							numDevices++;
                             				*pdata = ( (jj << 16) | (bus_id << 8) | id );
-							dctlprintk((KERN_ERR "mptctl_gettargetinfo - "
+							dctlprintk(("mptctl_gettargetinfo - "
 		"target ioc=%d target=%x numDevices=%d pdata=%p\n", iocnum, *pdata, numDevices, pdata));
 							pdata++;
 							--maxWordsLeft;
@@ -1530,6 +1806,64 @@ data_space_full:
 	return 0;
 }
 
+
+/*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
+/*
+ *	mptctl_hba_pciinfo - Obtain all mpt HBAs pci (Config Space) information.
+ *	@arg: User space argument
+ *
+ * Outputs:	None.
+ * Return:	0 if successful
+ *		-EFAULT if data unavailable
+ */
+static int
+mptctl_hba_pciinfo (unsigned long arg)
+{
+	struct mpt_ioctl_hbapciinfo *uarg = (struct mpt_ioctl_hbapciinfo *) arg;
+	struct mpt_ioctl_hbapciinfo karg;
+
+	MPT_ADAPTER	*ioc;
+	int		ioc_num=0, data_size;
+
+	data_size = sizeof(mpt_ioctl_header)+4;
+	/* Clear the struct before filling in data. */
+	memset( &karg, 0, (uarg->hdr.maxDataSize + data_size) );
+
+	dctlprintk((KERN_INFO MYNAM ": Checking for MPT adapters...maxDataSize=%d\n data_size=%d", uarg->hdr.maxDataSize, data_size));
+
+	list_for_each_entry(ioc,&ioc_list,list) {
+		data_size += sizeof (struct mpt_ioctl_mptpciinfo);
+		if ( data_size >= uarg->hdr.maxDataSize ) {
+			dctlprintk((KERN_INFO MYNAM ": data_size=%d >= maxDataSize=%d\n", data_size, uarg->hdr.maxDataSize));
+			break;
+		}
+		karg.hbapciinfo[ioc_num].iocNumber = ioc_num;
+		karg.hbapciinfo[ioc_num].deviceID = ioc->deviceID;
+		karg.hbapciinfo[ioc_num].vendorID = ioc->vendorID;
+		karg.hbapciinfo[ioc_num].subSystemVendorID = ioc->subSystemVendorID;
+		karg.hbapciinfo[ioc_num].subSystemID = ioc->subSystemID;
+		karg.hbapciinfo[ioc_num].revisionID = ioc->revisionID;
+		mpt_GetIocState(ioc, 1);
+		karg.hbapciinfo[ioc_num++].iocState = (ioc->last_state >> MPI_IOC_STATE_SHIFT);
+	}
+
+	karg.totalIOC = ioc_num;
+
+	dctlprintk((KERN_INFO MYNAM ": %d MPT adapters found, arg=%p karg=%p size=%d\n",
+		 karg.totalIOC, (char *)arg, &karg, sizeof(struct mpt_ioctl_hbapciinfo)));
+
+	/* Copy the data from kernel memory to user memory
+	 */
+	if (copy_to_user((char *)arg, &karg, sizeof(struct mpt_ioctl_hbapciinfo))) {
+		printk(KERN_ERR "%s@%d::mptctl_eventquery - "
+			"Unable to write out mpt_ioctl_eventquery struct @ %p\n",
+				__FILE__, __LINE__, (void*)uarg);
+		return -EFAULT;
+	}
+	return 0;
+}
+
+
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
 /* MPT IOCTL Test function.
  *
@@ -1556,8 +1890,8 @@ mptctl_readtest (unsigned long arg)
 
 	if (((iocnum = mpt_verify_adapter(karg.hdr.iocnum, &ioc)) < 0) ||
 	    (ioc == NULL)) {
-		dctlprintk((KERN_ERR "%s::mptctl_readtest() @%d - ioc%d not found!\n",
-				__FILE__, __LINE__, iocnum));
+		dctlprintk(("mptctl_readtest: ioc%d not found!\n",
+				iocnum));
 		return -ENODEV;
 	}
 
@@ -1568,7 +1902,7 @@ mptctl_readtest (unsigned long arg)
 #ifdef MFCNT
 	karg.chip_type = ioc->mfcnt;
 #else
-	karg.chip_type = ioc->chip_type;
+	karg.chip_type = ioc->deviceID;
 #endif
 	strncpy (karg.name, ioc->name, MPT_MAX_NAME);
 	karg.name[MPT_MAX_NAME-1]='\0';
@@ -1616,8 +1950,8 @@ mptctl_eventquery (unsigned long arg)
 
 	if (((iocnum = mpt_verify_adapter(karg.hdr.iocnum, &ioc)) < 0) ||
 	    (ioc == NULL)) {
-		dctlprintk((KERN_ERR "%s::mptctl_eventquery() @%d - ioc%d not found!\n",
-				__FILE__, __LINE__, iocnum));
+		dctlprintk(("mptctl_eventquery: ioc%d not found!\n",
+				iocnum));
 		return -ENODEV;
 	}
 
@@ -1654,8 +1988,8 @@ mptctl_eventenable (unsigned long arg)
 
 	if (((iocnum = mpt_verify_adapter(karg.hdr.iocnum, &ioc)) < 0) ||
 	    (ioc == NULL)) {
-		dctlprintk((KERN_ERR "%s::mptctl_eventenable() @%d - ioc%d not found!\n",
-				__FILE__, __LINE__, iocnum));
+		dctlprintk(("mptctl_eventenable: ioc%d not found!\n",
+				iocnum));
 		return -ENODEV;
 	}
 
@@ -1702,8 +2036,8 @@ mptctl_eventreport (unsigned long arg)
 
 	if (((iocnum = mpt_verify_adapter(karg.hdr.iocnum, &ioc)) < 0) ||
 	    (ioc == NULL)) {
-		dctlprintk((KERN_ERR "%s::mptctl_eventreport() @%d - ioc%d not found!\n",
-				__FILE__, __LINE__, iocnum));
+		dctlprintk(("mptctl_eventreport: ioc%d not found!\n",
+				iocnum));
 		return -ENODEV;
 	}
 
@@ -1739,11 +2073,8 @@ mptctl_replace_fw (unsigned long arg)
 	struct mpt_ioctl_replace_fw	*uarg = (struct mpt_ioctl_replace_fw *) arg;
 	struct mpt_ioctl_replace_fw	 karg;
 	MPT_ADAPTER		 *ioc;
-	u8			 *fwmem = NULL;
 	int			 iocnum;
 	int			 newFwSize;
-	int			 alloc_sz;
-	int			 ii;
 
 	dctlprintk(("mptctl_replace_fw called.\n"));
 	if (copy_from_user(&karg, uarg, sizeof(struct mpt_ioctl_replace_fw))) {
@@ -1755,24 +2086,24 @@ mptctl_replace_fw (unsigned long arg)
 
 	if (((iocnum = mpt_verify_adapter(karg.hdr.iocnum, &ioc)) < 0) ||
 	    (ioc == NULL)) {
-		dctlprintk((KERN_ERR "%s::mptctl_replace_fw() @%d - ioc%d not found!\n",
-				__FILE__, __LINE__, iocnum));
+		dctlprintk(("mptctl_replace_fw: ioc%d not found!\n",
+				iocnum));
 		return -ENODEV;
 	}
 
 	/* If caching FW, Free the old FW image
 	 */
-	if (ioc->cached_fw) {
-		mpt_free_fw_memory(ioc);
-	} else
+	if (ioc->cached_fw == NULL)
 		return 0;
+
+	mpt_free_fw_memory(ioc);
 
 	/* Allocate memory for the new FW image
 	 */
 	newFwSize = karg.newImageSize;
-	if ( newFwSize & 0x01 )
+	if (newFwSize & 0x01)
 		newFwSize += 1;
-	if ( newFwSize & 0x02 )
+	if (newFwSize & 0x02)
 		newFwSize += 2;
 
 	mpt_alloc_fw_memory(ioc, newFwSize);
@@ -1829,12 +2160,12 @@ mptctl_mpt_command (unsigned long arg)
 
 	if (((iocnum = mpt_verify_adapter(karg.hdr.iocnum, &ioc)) < 0) ||
 	    (ioc == NULL)) {
-		dctlprintk((KERN_ERR "%s::mptctl_mpt_command() @%d - ioc%d not found!\n",
-				__FILE__, __LINE__, iocnum));
+		dctlprintk(("mptctl_mpt_command: ioc%d not found!\n",
+				iocnum));
 		return -ENODEV;
 	}
 
-	rc = mptctl_do_mpt_command (karg, (char *) &uarg->MF, 0);
+	rc = mptctl_do_mpt_command (karg, (char *) &uarg->MF);
 
 	return rc;
 }
@@ -1852,33 +2183,35 @@ mptctl_mpt_command (unsigned long arg)
  *		-EPERM if SCSI I/O and target is untagged
  */
 static int
-mptctl_do_mpt_command (struct mpt_ioctl_command karg, char *mfPtr, int local)
+mptctl_do_mpt_command (struct mpt_ioctl_command karg, char *mfPtr)
 {
 	MPT_ADAPTER	*ioc;
-	MPT_FRAME_HDR	*mf = NULL;
+	MPT_FRAME_HDR	*mf=NULL;
+	MPT_FRAME_HDR	*SAS_handshake_mf=NULL;
+	char		*SAS_handshake_reply=NULL;
 	MPIHeader_t	*hdr;
 	char		*psge;
 	struct buflist	bufIn;	/* data In buffer */
 	struct buflist	bufOut; /* data Out buffer */
 	dma_addr_t	dma_addr_in;
 	dma_addr_t	dma_addr_out;
-	int		dir;	/* PCI data direction */
 	int		sgSize = 0;	/* Num SG elements */
 	int		iocnum, flagsLength;
 	int		sz, rc = 0;
 	int		msgContext;
 	int		tm_flags_set = 0;
-	u16		req_idx;
+	u16		req_idx=0, msgSize=0;
+  	FWDownloadReply_t FWDownloadReply;
 
-	dctlprintk(("mptctl_do_mpt_command called.\n"));
 	bufIn.kptr = bufOut.kptr = NULL;
 
 	if (((iocnum = mpt_verify_adapter(karg.hdr.iocnum, &ioc)) < 0) ||
 	    (ioc == NULL)) {
-		dctlprintk((KERN_ERR "%s::mptctl_do_mpt_command() @%d - ioc%d not found!\n",
-				__FILE__, __LINE__, iocnum));
+		dctlprintk(("mptctl_do_mpt_command: ioc%d not found!\n",
+				iocnum));
 		return -ENODEV;
 	}
+	dctlprintk((KERN_WARNING "mptctl_do_mpt_command called iocnum=%d ioc=%p.\n", karg.hdr.iocnum, ioc));
 	if (!ioc->ioctl) {
 		printk(KERN_ERR "%s@%d::mptctl_do_mpt_command - "
 			"No memory available during driver init.\n",
@@ -1907,34 +2240,40 @@ mptctl_do_mpt_command (struct mpt_ioctl_command karg, char *mfPtr, int local)
 
 	/* Get a free request frame and save the message context.
 	 */
-        if ((mf = mpt_get_msg_frame(mptctl_id, ioc->id)) == NULL)
-                return -EAGAIN;
-
-	hdr = (MPIHeader_t *) mf;
-	msgContext = le32_to_cpu(hdr->MsgContext);
-	req_idx = le16_to_cpu(mf->u.frame.hwhdr.msgctxu.fld.req_idx);
+        if ((mf = mpt_get_msg_frame(mptctl_id, ioc)) == NULL) {
+		if (((MPIHeader_t *)(mfPtr))->MsgContext == 0x02012020) {
+			msgSize = karg.hdr.port >> 16;
+			SAS_handshake_mf = mf = 
+				(MPT_FRAME_HDR *)kmalloc(msgSize, GFP_KERNEL);
+			if (karg.maxReplyBytes)
+				SAS_handshake_reply = (char *)kmalloc(karg.maxReplyBytes, GFP_KERNEL);
+			hdr = (MPIHeader_t *) mf;
+			msgContext = le32_to_cpu(0x02012020);
+			karg.hdr.port &= 0x0000ffff;
+		} else {
+			dfailprintk(("%s: mptctl_do_mpt_command, no msg frames!!\n",
+				ioc->name));
+                	return -EAGAIN;
+		}
+	} else {
+		hdr = (MPIHeader_t *) mf;
+		msgContext = le32_to_cpu(hdr->MsgContext);
+		req_idx = le16_to_cpu(mf->u.frame.hwhdr.msgctxu.fld.req_idx);
+	}
 
 	/* Copy the request frame
 	 * Reset the saved message context.
 	 */
-        if (local) {
-		/* Request frame in kernel space
-		 */
-		memcpy((char *)mf, (char *) mfPtr, karg.dataSgeOffset * 4);
-        } else {
-		/* Request frame in user space
-		 */
-		if (copy_from_user((char *)mf, (char *) mfPtr,
-					karg.dataSgeOffset * 4)){
-			printk(KERN_ERR "%s@%d::mptctl_do_mpt_command - "
-				"Unable to read MF from mpt_ioctl_command struct @ %p\n",
-				__FILE__, __LINE__, (void*)mfPtr);
-			rc = -EFAULT;
-			goto done_free_mem;
-		}
-        }
+	if (copy_from_user(mf, mfPtr, karg.dataSgeOffset * 4)) {
+		printk(KERN_ERR "%s@%d::mptctl_do_mpt_command - "
+			"Unable to read MF from mpt_ioctl_command struct @ %p\n",
+			__FILE__, __LINE__, mfPtr);
+		rc = -EFAULT;
+		goto done_free_mem;
+	}
 	hdr->MsgContext = cpu_to_le32(msgContext);
 
+	dctlprintk(("mptctl_do_mpt_command Function=%x\n", hdr->Function));
 
 	/* Verify that this request is allowed.
 	 */
@@ -1951,6 +2290,8 @@ mptctl_do_mpt_command (struct mpt_ioctl_command karg, char *mfPtr, int local)
 	case MPI_FUNCTION_SCSI_ENCLOSURE_PROCESSOR:
 	case MPI_FUNCTION_FW_DOWNLOAD:
 	case MPI_FUNCTION_FC_PRIMITIVE_SEND:
+	case MPI_FUNCTION_TOOLBOX:
+	case MPI_FUNCTION_SAS_IO_UNIT_CONTROL:
 		break;
 
 	case MPI_FUNCTION_SCSI_IO_REQUEST:
@@ -1971,11 +2312,12 @@ mptctl_do_mpt_command (struct mpt_ioctl_command karg, char *mfPtr, int local)
 				goto done_free_mem;
 			}
 
-			pScsiReq->MsgFlags = mpt_msg_flags();
+			pScsiReq->MsgFlags &= ~MPI_SCSIIO_MSGFLGS_SENSE_WIDTH;
+			pScsiReq->MsgFlags |= mpt_msg_flags();
 
 			/* verify that app has not requested
-			 *	more sense data than driver
-			 *	can provide, if so, reset this parameter
+			 * more sense data than driver
+			 * can provide, if so, reset this parameter
 			 * set the sense buffer pointer low address
 			 * update the control field to specify Q type
 			 */
@@ -2022,6 +2364,25 @@ mptctl_do_mpt_command (struct mpt_ioctl_command karg, char *mfPtr, int local)
 		}
 		break;
 
+	case MPI_FUNCTION_SMP_PASSTHROUGH:
+		/* Check mf->PassthruFlags to determine if
+		 * transfer is ImmediateMode or not.
+		 * Immediate mode returns data in the ReplyFrame.
+		 * Else, we are sending request and response data
+		 * in two SGLs at the end of the mf.
+		 */
+		break;
+
+	case MPI_FUNCTION_SATA_PASSTHROUGH:
+		if (!ioc->sh) {
+			printk(KERN_ERR "%s@%d::mptctl_do_mpt_command - "
+				"SCSI driver is not loaded. \n",
+					__FILE__, __LINE__);
+			rc = -EFAULT;
+			goto done_free_mem;
+		}
+		break;
+
 	case MPI_FUNCTION_RAID_ACTION:
 		/* Just add a SGE
 		 */
@@ -2033,8 +2394,9 @@ mptctl_do_mpt_command (struct mpt_ioctl_command karg, char *mfPtr, int local)
 			int qtag = MPI_SCSIIO_CONTROL_SIMPLEQ;
 			int scsidir = MPI_SCSIIO_CONTROL_READ;
 			int dataSize;
-
-			pScsiReq->MsgFlags = mpt_msg_flags();
+			
+			pScsiReq->MsgFlags &= ~MPI_SCSIIO_MSGFLGS_SENSE_WIDTH;
+			pScsiReq->MsgFlags |= mpt_msg_flags();
 
 			/* verify that app has not requested
 			 *	more sense data than driver
@@ -2112,7 +2474,7 @@ mptctl_do_mpt_command (struct mpt_ioctl_command karg, char *mfPtr, int local)
 				sense_high= 0;
 			}
 
-			if ((pInit->Flags != 0) || (pInit->MaxDevices != ioc->facts.MaxDevices) ||
+/*			if ((pInit->Flags != 0) || (pInit->MaxDevices != ioc->facts.MaxDevices) ||
 				(pInit->MaxBuses != ioc->facts.MaxBuses) ||
 				(pInit->ReplyFrameSize != cpu_to_le16(ioc->reply_sz)) ||
 				(pInit->HostMfaHighAddr != high_addr) ||
@@ -2120,9 +2482,16 @@ mptctl_do_mpt_command (struct mpt_ioctl_command karg, char *mfPtr, int local)
 				printk(KERN_ERR "%s@%d::mptctl_do_mpt_command - "
 					"IOC_INIT issued with 1 or more incorrect parameters. Rejected.\n",
 					__FILE__, __LINE__);
+				printk(KERN_ERR "%s@%d::mptctl_do_mpt_command - "
+					"pInit Flags=%x MaxDevices=%d MaxBuses=%d ReplyFrameSize=%x HostMfaHighAddr=%x SenseBufferHighAddr=%x\n",
+					__FILE__, __LINE__, pInit->Flags, pInit->MaxDevices, pInit->MaxBuses, pInit->ReplyFrameSize, pInit->HostMfaHighAddr, pInit->SenseBufferHighAddr);
+				printk(KERN_ERR "%s@%d::mptctl_do_mpt_command - "
+					"ioc MaxDevices=%d MaxBuses=%d reply_sz=%x high_addr=%x sense_high=%x\n",
+					__FILE__, __LINE__, 
+ioc->facts.MaxDevices, ioc->facts.MaxBuses, ioc->reply_sz, high_addr, sense_high);
 				rc = -EFAULT;
 				goto done_free_mem;
-			}
+			} */
 		}
 		break;
 	default:
@@ -2163,6 +2532,7 @@ mptctl_do_mpt_command (struct mpt_ioctl_command karg, char *mfPtr, int local)
 	 * allocated memory.
 	 */
 	psge = (char *) (((int *) mf) + karg.dataSgeOffset);
+	dctlprintk(("mptctl_do_mpt_command mf=%p psge=%p\n", mf, psge));
 	flagsLength = 0;
 
 	/* bufIn and bufOut are used for user to kernel space transfers
@@ -2180,9 +2550,9 @@ mptctl_do_mpt_command (struct mpt_ioctl_command karg, char *mfPtr, int local)
 
 		/* Set up the dataOut memory allocation */
 		if (karg.dataOutSize > 0) {
-			dir = PCI_DMA_TODEVICE;
 			if (karg.dataInSize > 0) {
 				flagsLength = ( MPI_SGE_FLAGS_SIMPLE_ELEMENT |
+						MPI_SGE_FLAGS_END_OF_BUFFER |
 						MPI_SGE_FLAGS_DIRECTION |
 						mpt_addr_size() )
 						<< MPI_SGE_FLAGS_SHIFT;
@@ -2221,8 +2591,16 @@ mptctl_do_mpt_command (struct mpt_ioctl_command karg, char *mfPtr, int local)
 		}
 
 		if (karg.dataInSize > 0) {
-			dir = PCI_DMA_FROMDEVICE;
-			flagsLength = MPT_SGE_FLAGS_SSIMPLE_READ;
+			if ((karg.dataOutSize > 0) &&
+			    (hdr->Function == MPI_FUNCTION_SMP_PASSTHROUGH)){
+				flagsLength = ( MPI_SGE_FLAGS_SIMPLE_ELEMENT |
+						MPI_SGE_FLAGS_END_OF_BUFFER |
+						MPI_SGE_FLAGS_DIRECTION |
+						mpt_addr_size() )
+						<< MPI_SGE_FLAGS_SHIFT;
+			} else {
+				flagsLength = MPT_SGE_FLAGS_SSIMPLE_READ;
+			}
 			flagsLength |= karg.dataInSize;
 
 			bufIn.len = karg.dataInSize;
@@ -2259,7 +2637,8 @@ mptctl_do_mpt_command (struct mpt_ioctl_command karg, char *mfPtr, int local)
 	add_timer(&ioc->ioctl->timer);
 
 	if (hdr->Function == MPI_FUNCTION_SCSI_TASK_MGMT) {
-		rc = mpt_send_handshake_request(mptctl_id, ioc->id,
+		DBG_DUMP_TM_REQUEST_FRAME((u32*)mf);
+		rc = mpt_send_handshake_request(mptctl_id, ioc,
 				sizeof(SCSITaskMgmt_t), (u32*)mf, CAN_SLEEP);
 		if (rc == 0) {
 			wait_event(mptctl_wait, ioc->ioctl->wait_done);
@@ -2269,11 +2648,46 @@ mptctl_do_mpt_command (struct mpt_ioctl_command karg, char *mfPtr, int local)
 			del_timer(&ioc->ioctl->timer);
 			ioc->ioctl->status &= ~MPT_IOCTL_STATUS_TIMER_ACTIVE;
 			ioc->ioctl->status |= MPT_IOCTL_STATUS_TM_FAILED;
-			mpt_free_msg_frame(mptctl_id, ioc->id, mf);
+			mpt_free_msg_frame(ioc, mf);
 		}
 	} else {
-		mpt_put_msg_frame(mptctl_id, ioc->id, mf);
-		wait_event(mptctl_wait, ioc->ioctl->wait_done);
+		if ( SAS_handshake_mf ) {
+			dctlprintk(("SAS_handshake_message Function=%x\n",
+				hdr->Function));
+			rc = mpt_handshake_req_reply_wait(ioc,
+				msgSize, 
+				(u32*)SAS_handshake_mf,
+				karg.maxReplyBytes, 
+				(u16*)SAS_handshake_reply, 30 /*seconds*/, 
+				CAN_SLEEP);
+			kfree(SAS_handshake_mf);
+			SAS_handshake_mf = NULL;
+			if (rc == 0) {
+				dctlprintk(("SAS_handshake_message completed\n"));
+				sz = karg.maxReplyBytes;
+
+				if (sz > 0) {
+					if (copy_to_user((char *)karg.replyFrameBufPtr,
+						 SAS_handshake_reply, sz)){
+
+					 	printk(KERN_ERR "%s@%d::mptctl_do_mpt_command - "
+					 	"Unable to write out reply frame %p\n",
+					 	__FILE__, __LINE__, (void*)karg.replyFrameBufPtr);
+						rc =  -ENODATA;
+					}
+					kfree(SAS_handshake_reply);
+					SAS_handshake_reply = NULL;
+				} else {
+					dctlprintk(("SAS_handshake_message failed\n"));
+				}
+				del_timer(&ioc->ioctl->timer);
+				ioc->ioctl->status &= ~MPT_IOCTL_STATUS_TIMER_ACTIVE;
+				return rc;
+			}
+		} else {
+			mpt_put_msg_frame(mptctl_id, ioc, mf);
+			wait_event(mptctl_wait, ioc->ioctl->wait_done);
+		}
 	}
 
 	mf = NULL;
@@ -2308,9 +2722,9 @@ mptctl_do_mpt_command (struct mpt_ioctl_command karg, char *mfPtr, int local)
 		 */
 		if (ioc->ioctl->status & MPT_IOCTL_STATUS_RF_VALID) {
 			if (karg.maxReplyBytes < ioc->reply_sz) {
-				 sz = MIN(karg.maxReplyBytes, 4*ioc->ioctl->ReplyFrame[2]);
+				 sz = min(karg.maxReplyBytes, 4*ioc->ioctl->ReplyFrame[2]);
 			} else {
-				 sz = MIN(ioc->reply_sz, 4*ioc->ioctl->ReplyFrame[2]);
+				 sz = min(ioc->reply_sz, 4*ioc->ioctl->ReplyFrame[2]);
 			}
 
 			if (sz > 0) {
@@ -2329,7 +2743,7 @@ mptctl_do_mpt_command (struct mpt_ioctl_command karg, char *mfPtr, int local)
 		/* If valid sense data, copy to user.
 		 */
 		if (ioc->ioctl->status & MPT_IOCTL_STATUS_SENSE_VALID) {
-			sz = MIN(karg.maxSenseBytes, MPT_SENSE_BUFFER_SIZE);
+			sz = min(karg.maxSenseBytes, MPT_SENSE_BUFFER_SIZE);
 			if (sz > 0) {
 				if (copy_to_user((char *)karg.senseDataPtr, ioc->ioctl->sense, sz)) {
 					printk(KERN_ERR "%s@%d::mptctl_do_mpt_command - "
@@ -2383,11 +2797,18 @@ done_free_mem:
 			bufIn.len, (void *) bufIn.kptr, dma_addr_in);
 	}
 
+	if (SAS_handshake_mf) {
+		kfree(SAS_handshake_mf);
+		mf=NULL;
+	}
+	if (SAS_handshake_reply)
+		kfree(SAS_handshake_reply);
+
 	/* mf is null if command issued successfully
 	 * otherwise, failure occured after mf acquired.
 	 */
 	if (mf)
-		mpt_free_msg_frame(mptctl_id, ioc->id, mf);
+		mpt_free_msg_frame(ioc, mf);
 
 	return rc;
 }
@@ -2417,7 +2838,7 @@ mptctl_hp_hostinfo(unsigned long arg, unsigned int data_size)
 	int			iocnum;
 	int			rc, cim_rev;
 
-	dctlprintk((": mptctl_hp_hostinfo called.\n"));
+	dctlprintk(("mptctl_hp_hostinfo called.\n"));
 	/* Reset long to int. Should affect IA64 and SPARC only
 	 */
 	if (data_size == sizeof(hp_host_info_t))
@@ -2436,15 +2857,15 @@ mptctl_hp_hostinfo(unsigned long arg, unsigned int data_size)
 
 	if (((iocnum = mpt_verify_adapter(karg.hdr.iocnum, &ioc)) < 0) ||
 	    (ioc == NULL)) {
-		dctlprintk((KERN_ERR "%s::mptctl_hp_hostinfo() @%d - ioc%d not found!\n",
-				__FILE__, __LINE__, iocnum));
+		dctlprintk(("mptctl_hp_hostinfo: ioc%d not found!\n",
+				iocnum));
 		return -ENODEV;
 	}
 
 	/* Fill in the data and return the structure to the calling
 	 * program
 	 */
-	pdev = (struct pci_dev *) ioc->pcidev;
+	pdev = ioc->pcidev;
 
 	karg.vendor = pdev->vendor;
 	karg.device = pdev->device;
@@ -2488,7 +2909,7 @@ mptctl_hp_hostinfo(unsigned long arg, unsigned int data_size)
 	hdr.PageLength = 0;
 	hdr.PageNumber = 0;
 	hdr.PageType = MPI_CONFIG_PAGETYPE_MANUFACTURING;
-	cfg.hdr = &hdr;
+	cfg.cfghdr.hdr = &hdr;
 	cfg.physAddr = -1;
 	cfg.pageAddr = 0;
 	cfg.action = MPI_CONFIG_ACTION_PAGE_HEADER;
@@ -2497,7 +2918,7 @@ mptctl_hp_hostinfo(unsigned long arg, unsigned int data_size)
 
 	strncpy(karg.serial_number, " ", 24);
 	if (mpt_config(ioc, &cfg) == 0) {
-		if (cfg.hdr->PageLength > 0) {
+		if (cfg.cfghdr.hdr->PageLength > 0) {
 			/* Issue the second config page request */
 			cfg.action = MPI_CONFIG_ACTION_PAGE_READ_CURRENT;
 
@@ -2535,10 +2956,10 @@ mptctl_hp_hostinfo(unsigned long arg, unsigned int data_size)
 
 	karg.base_io_addr = pdev->PCI_BASEADDR_START(0);
 
-	if ((int)ioc->chip_type <= (int) FC929)
-		karg.bus_phys_width = HP_BUS_WIDTH_UNK;
-	else
+	if (ioc->bus_type == SCSI)
 		karg.bus_phys_width = HP_BUS_WIDTH_16;
+	else
+		karg.bus_phys_width = HP_BUS_WIDTH_UNK;
 
 	karg.hard_resets = 0;
 	karg.soft_resets = 0;
@@ -2608,24 +3029,24 @@ mptctl_hp_targetinfo(unsigned long arg)
 	ConfigPageHeader_t	hdr;
 	int			tmp, np, rc = 0;
 
-	dctlprintk((": mptctl_hp_targetinfo called.\n"));
+	dctlprintk(("mptctl_hp_targetinfo called.\n"));
 	if (copy_from_user(&karg, uarg, sizeof(hp_target_info_t))) {
 		printk(KERN_ERR "%s@%d::mptctl_hp_targetinfo - "
 			"Unable to read in hp_host_targetinfo struct @ %p\n",
 				__FILE__, __LINE__, (void*)uarg);
 		return -EFAULT;
 	}
-	
+
 	if (((iocnum = mpt_verify_adapter(karg.hdr.iocnum, &ioc)) < 0) ||
 		(ioc == NULL)) {
-		dctlprintk((KERN_ERR "%s::mptctl_hp_targetinfo() @%d - ioc%d not found!\n",
-				__FILE__, __LINE__, iocnum));
+		dctlprintk(("mptctl_hp_targetinfo - ioc%d not found!\n",
+				iocnum));
 		return -ENODEV;
 	}
 
-	/*  There is nothing to do for FCP parts.
+	/*  There is nothing to do for FC or SAS parts.
 	 */
-	if ((int) ioc->chip_type <= (int) FC929)
+	if (ioc->bus_type != SCSI)
 		return 0;
 
 	if ((ioc->spi_data.sdp0length == 0) || (ioc->sh == NULL))
@@ -2633,7 +3054,7 @@ mptctl_hp_targetinfo(unsigned long arg)
 
 	if (ioc->sh->host_no != karg.hdr.host)
 		return -ENODEV;
-		
+
        /* Get the data transfer speeds
         */
 	data_sz = ioc->spi_data.sdp0length * 4;
@@ -2644,7 +3065,7 @@ mptctl_hp_targetinfo(unsigned long arg)
 		hdr.PageNumber = 0;
 		hdr.PageType = MPI_CONFIG_PAGETYPE_SCSI_DEVICE;
 
-		cfg.hdr = &hdr;
+		cfg.cfghdr.hdr = &hdr;
 		cfg.action = MPI_CONFIG_ACTION_PAGE_READ_CURRENT;
 		cfg.dir = 0;
 		cfg.timeout = 0;
@@ -2692,15 +3113,15 @@ mptctl_hp_targetinfo(unsigned long arg)
 	hdr.PageNumber = 3;
 	hdr.PageType = MPI_CONFIG_PAGETYPE_SCSI_DEVICE;
 
-	cfg.hdr = &hdr;
+	cfg.cfghdr.hdr = &hdr;
 	cfg.action = MPI_CONFIG_ACTION_PAGE_HEADER;
 	cfg.dir = 0;
 	cfg.timeout = 0;
 	cfg.physAddr = -1;
-	if ((mpt_config(ioc, &cfg) == 0) && (cfg.hdr->PageLength > 0)) {
+	if ((mpt_config(ioc, &cfg) == 0) && (cfg.cfghdr.hdr->PageLength > 0)) {
 		/* Issue the second config page request */
 		cfg.action = MPI_CONFIG_ACTION_PAGE_READ_CURRENT;
-		data_sz = (int) cfg.hdr->PageLength * 4;
+		data_sz = (int) cfg.cfghdr.hdr->PageLength * 4;
 		pg3_alloc = (SCSIDevicePage3_t *) pci_alloc_consistent(
 							ioc->pcidev, data_sz, &page_dma);
 		if (pg3_alloc) {
@@ -2731,21 +3152,653 @@ mptctl_hp_targetinfo(unsigned long arg)
 }
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
+/* REGISTER DIAG BUFFER Routine.
+ *
+ * Outputs:	None.
+ * Return:	0 if successful
+ *		-EFAULT if data unavailable
+ *		-EBUSY  if previous command timout and IOC reset is not complete.
+ *		-ENODEV if no such device/adapter
+ *		-ETIME	if timer expires
+ *		-ENOMEM if memory allocation error
+ */
+static int
+mptctl_register_diag_buffer (unsigned long arg)
+{
+	mpt_diag_register_t	*uarg = (mpt_diag_register_t *) arg;
+	mpt_diag_register_t	karg;
+	MPT_ADAPTER		*ioc;
+	int			iocnum, rc=0, ii;
+	void *			request_data;
+	dma_addr_t		request_data_dma;
+	u32			request_data_sz;
+	MPT_FRAME_HDR		*mf;
+  	DiagBufferPostRequest_t *DiagBufferPostRequest;
+  	DiagBufferPostReply_t	*DiagBufferPostReply;
+	u32 			tmp;
+	u8			buffType;
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,3,51)
-#define	owner_THIS_MODULE  .owner = THIS_MODULE,
-#else
-#define	owner_THIS_MODULE
-#endif
+	dctlprintk(("mptctl_register_diag_buffer called.\n"));
+	if (copy_from_user(&karg, uarg, sizeof(mpt_diag_register_t))) {
+		printk(KERN_ERR "mptctl_register_diag_buffer: "
+			"Unable to read mpt_diag_register_t data @ %p\n",
+				(void*)uarg);
+		return -EFAULT;
+	}
+
+	if (((iocnum = mpt_verify_adapter(karg.hdr.iocnum, &ioc)) < 0) ||
+		(ioc == NULL)) {
+		dctlprintk(("mptctl_register_diag_buffer: ioc%d not found!\n",
+				iocnum));
+		return -ENODEV;
+	}
+
+	buffType = karg.data.BufferType;
+	if ( !(ioc->facts.IOCCapabilities & 
+		MPT_DIAG_CAPABILITY(buffType)) ) {
+		printk("mptctl_register_diag_buffer: ioc%d does not have Capability for BufferType=%x\n",
+				iocnum, buffType);
+		return -ENODEV;
+	}
+
+	if ( ioc->DiagBuffer_Status[buffType] & MPT_DIAG_BUFFER_IS_REGISTERED ) {
+		printk("mptctl_register_diag_buffer: ioc%d already has a Registered buffer for BufferType=%x\n",
+			iocnum, buffType);
+		return -EFAULT;
+	}
+
+	/* Get a free request frame and save the message context.
+	 */
+        if ((mf = mpt_get_msg_frame(mptctl_id, ioc)) == NULL) {
+		dfailprintk(("%s: mptctl_register_diag_buffer: no msg frames!!\n",
+			ioc->name));
+                return -EAGAIN;
+	}
+
+	request_data = ioc->DiagBuffer[buffType];
+	request_data_sz = karg.data.RequestedBufferSize;
+
+	if ( request_data == NULL ) {
+allocDiagBuffer:
+		request_data = pci_alloc_consistent(
+	    		ioc->pcidev, request_data_sz, &request_data_dma);
+
+		if (request_data == NULL) {
+			printk("mptctl_register_diag_buffer: pci_alloc_consistent FAILED\n");
+			mpt_free_msg_frame(ioc, mf);
+                	return -EAGAIN;
+		}
+		ioc->DiagBuffer[buffType] = request_data;
+		ioc->DiagBuffer_sz[buffType] = request_data_sz;
+		ioc->DiagBuffer_dma[buffType] = request_data_dma;
+		ioc->DataSize[buffType] = 0;
+	} else {
+		request_data_dma = ioc->DiagBuffer_dma[buffType];
+		if ( request_data_sz != ioc->DiagBuffer_sz[buffType] ) {
+			pci_free_consistent(ioc->pcidev, ioc->DiagBuffer_sz[buffType],
+				request_data,
+				request_data_dma);
+			goto allocDiagBuffer;
+		}
+	}
+	ioc->DiagBuffer_Status[buffType] = 0;
+
+  	DiagBufferPostRequest = (DiagBufferPostRequest_t *)mf;
+	DiagBufferPostRequest->Function = MPI_FUNCTION_DIAG_BUFFER_POST;
+	DiagBufferPostRequest->ChainOffset = 0;
+	DiagBufferPostRequest->BufferType = karg.data.BufferType;
+	DiagBufferPostRequest->TraceLevel = 
+		ioc->TraceLevel[buffType] =
+		karg.data.TraceLevel;
+	DiagBufferPostRequest->MsgFlags = 0;
+	DiagBufferPostRequest->Reserved1 = 0;
+	DiagBufferPostRequest->Reserved2 = 0;
+	DiagBufferPostRequest->Reserved3 = 0;
+	if ( buffType == MPI_DIAG_BUF_TYPE_EXTENDED ) {
+		DiagBufferPostRequest->ExtendedType = 
+			ioc->ExtendedType[buffType] =
+			karg.data.ExtendedType;
+	} else {
+		DiagBufferPostRequest->ExtendedType =
+			ioc->ExtendedType[buffType] =
+			(u32)0;
+	}
+	ioc->UniqueId[buffType] = karg.data.UniqueId;
+	DiagBufferPostRequest->BufferLength = request_data_sz;
+	for ( ii = 0; ii < 4; ii++ ) {
+		DiagBufferPostRequest->ProductSpecific[ii] =
+			ioc->ProductSpecific[buffType][ii] = 
+			karg.data.ProductSpecific[ii];
+	}
+	if (sizeof(dma_addr_t) == sizeof(u64)) {
+		tmp = (u32) ((u64)request_data_dma >> 32);
+		DiagBufferPostRequest->BufferAddress.High = cpu_to_le32(tmp);
+	} else {
+		DiagBufferPostRequest->BufferAddress.High = (u32)0;
+	}
+	tmp = request_data_dma & 0xFFFFFFFF;
+	DiagBufferPostRequest->BufferAddress.Low = cpu_to_le32(tmp);
+
+	ioc->ioctl->timer.expires =
+	    jiffies + HZ*MPT_IOCTL_DEFAULT_TIMEOUT /* 10 sec */;
+	ioc->ioctl->wait_done = 0;
+	ioc->ioctl->status |= MPT_IOCTL_STATUS_TIMER_ACTIVE;
+	add_timer(&ioc->ioctl->timer);
+	mpt_put_msg_frame(mptctl_id, ioc, mf);
+	wait_event(mptctl_wait, ioc->ioctl->wait_done);
+
+	/* process the completed Reply Message Frame */
+	if (ioc->ioctl->status & MPT_IOCTL_STATUS_RF_VALID) {
+
+		DiagBufferPostReply =
+		    (DiagBufferPostReply_t *)ioc->ioctl->ReplyFrame;
+
+		if ( DiagBufferPostReply->IOCStatus == MPI_IOCSTATUS_SUCCESS) {
+			if ( DiagBufferPostReply->MsgLength > 5 ) {
+				ioc->DataSize[buffType] = 
+					DiagBufferPostReply->TransferLength;
+			}
+			ioc->DiagBuffer_Status[buffType] |= 
+				MPT_DIAG_BUFFER_IS_REGISTERED;
+		} else {
+			dctlprintk(("DiagBufferPostReply: IOCStatus=%x IOCLogInfo=%x\n",
+			    DiagBufferPostReply->IOCStatus,
+			    DiagBufferPostReply->IOCLogInfo));
+			rc = -EFAULT;
+		}
+	} else {
+		dctlprintk(("DiagBufferPostReply: status=%x\n", 
+			ioc->ioctl->status));
+		rc = -EFAULT;
+	}
+
+	ioc->ioctl->status &= ~(MPT_IOCTL_STATUS_TIMER_ACTIVE |
+	    MPT_IOCTL_STATUS_TM_FAILED | MPT_IOCTL_STATUS_COMMAND_GOOD |
+	    MPT_IOCTL_STATUS_SENSE_VALID | MPT_IOCTL_STATUS_RF_VALID |
+	    MPT_IOCTL_STATUS_DID_IOCRESET);
+	mpt_free_msg_frame(ioc, mf);
+
+	if ( rc ) {
+		pci_free_consistent(ioc->pcidev, request_data_sz,
+			request_data,
+			request_data_dma);
+	}
+	return rc;
+}
+
+/*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
+/* RELEASE DIAG BUFFER Routine.
+ *
+ * Outputs:	None.
+ * Return:	0 if successful
+ *		-EFAULT if data unavailable
+ *		-EBUSY  if previous command timout and IOC reset is not complete.
+ *		-ENODEV if no such device/adapter
+ *		-ETIME	if timer expires
+ *		-ENOMEM if memory allocation error
+ */
+static int
+mptctl_release_diag_buffer (unsigned long arg)
+{
+	mpt_diag_release_t	*uarg = (mpt_diag_release_t *) arg;
+	mpt_diag_release_t	karg;
+	MPT_ADAPTER		*ioc;
+	void *			request_data;
+	int			iocnum, rc=0;
+	MPT_FRAME_HDR		*mf;
+  	DiagReleaseRequest_t 	*DiagRelease;
+  	DiagReleaseReply_t	*DiagReleaseReply;
+	u8			buffType;
+
+	dctlprintk(("mptctl_release_diag_buffer called.\n"));
+	if (copy_from_user(&karg, uarg, sizeof(mpt_diag_release_t))) {
+		printk(KERN_ERR "mptctl_release_diag_buffer: "
+			"Unable to read mpt_diag_release_t data @ %p\n",
+				(void*)uarg);
+		return -EFAULT;
+	}
+
+	if (((iocnum = mpt_verify_adapter(karg.hdr.iocnum, &ioc)) < 0) ||
+		(ioc == NULL)) {
+		dctlprintk(("mptctl_release_diag_buffer: ioc%d not found!\n",
+				iocnum));
+		return -ENODEV;
+	}
+
+	buffType = karg.data.UniqueId & 0x000000ff;
+	if ( !(ioc->facts.IOCCapabilities & 
+		MPT_DIAG_CAPABILITY(buffType)) ) {
+		printk("mptctl_release_diag_buffer: ioc%d does not have Capability for BufferType=%x\n",
+				iocnum, buffType);
+		return -ENODEV;
+	}
+
+	if ( (ioc->DiagBuffer_Status[buffType] & MPT_DIAG_BUFFER_IS_REGISTERED) == 0 ) {
+		printk("mptctl_release_diag_buffer: ioc%d BufferType=%x is not registered\n",
+				iocnum, buffType);
+		return -EFAULT;
+	}
+
+	if (karg.data.UniqueId != ioc->UniqueId[buffType]) {
+		printk("mptctl_release_diag_buffer: UniqueId=%x is not registered\n",
+			karg.data.UniqueId);
+		return -EFAULT;
+	}
+
+	if ( ioc->DiagBuffer_Status[buffType] & MPT_DIAG_BUFFER_IS_RELEASED) {
+		dctlprintk(("mptctl_release_diag_buffer: ioc%d BufferType=%x is already released\n",
+			iocnum, buffType));
+		return rc;
+	}
+
+	request_data = ioc->DiagBuffer[buffType];
+
+	if ( request_data == NULL ) {
+		printk("mptctl_release_diag_buffer: ioc%d does not have buffer for BufferType=%x\n",
+				iocnum, buffType);
+		return -ENODEV;
+	}
+
+	/* Get a free request frame and save the message context.
+	 */
+        if ((mf = mpt_get_msg_frame(mptctl_id, ioc)) == NULL) {
+		dfailprintk(("%s: mptctl_release_diag_buffer, no msg frames!!\n",
+			ioc->name));
+                return -EAGAIN;
+	}
+
+  	DiagRelease = (DiagReleaseRequest_t *)mf;
+	DiagRelease->Function = MPI_FUNCTION_DIAG_RELEASE;
+	DiagRelease->BufferType = buffType;
+	DiagRelease->ChainOffset = 0;
+	DiagRelease->Reserved1 = 0;
+	DiagRelease->Reserved2 = 0;
+	DiagRelease->Reserved3 = 0;
+	DiagRelease->MsgFlags = 0;
+
+	ioc->ioctl->timer.expires =
+	    jiffies + HZ*MPT_IOCTL_DEFAULT_TIMEOUT /* 10 sec */;
+	ioc->ioctl->wait_done = 0;
+	ioc->ioctl->status |= MPT_IOCTL_STATUS_TIMER_ACTIVE;
+	add_timer(&ioc->ioctl->timer);
+	mpt_put_msg_frame(mptctl_id, ioc, mf);
+	wait_event(mptctl_wait, ioc->ioctl->wait_done);
+
+	/* process the completed Reply Message Frame */
+	if (ioc->ioctl->status & MPT_IOCTL_STATUS_RF_VALID) {
+		DiagReleaseReply =
+		    (DiagReleaseReply_t *)ioc->ioctl->ReplyFrame;
+
+		if ( DiagReleaseReply->IOCStatus != MPI_IOCSTATUS_DIAGNOSTIC_RELEASED) {
+			dctlprintk(("DiagReleaseReply: IOCStatus=%x IOCLogInfo=%x\n",
+			    DiagReleaseReply->IOCStatus,
+			    DiagReleaseReply->IOCLogInfo));
+			rc = -EFAULT;
+		} else {
+			ioc->DiagBuffer_Status[buffType] |= 
+				MPT_DIAG_BUFFER_IS_RELEASED;
+		}
+	} else {
+		dctlprintk(("DiagReleaseReply: status=%x\n", 
+			ioc->ioctl->status));
+		rc = -EFAULT;
+	}
+
+	ioc->ioctl->status &= ~(MPT_IOCTL_STATUS_TIMER_ACTIVE |
+	    MPT_IOCTL_STATUS_TM_FAILED | MPT_IOCTL_STATUS_COMMAND_GOOD |
+	    MPT_IOCTL_STATUS_SENSE_VALID | MPT_IOCTL_STATUS_RF_VALID |
+	    MPT_IOCTL_STATUS_DID_IOCRESET);
+	mpt_free_msg_frame(ioc, mf);
+
+	return rc;
+}
+
+/*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
+/* UNREGISTER DIAG BUFFER Routine.
+ *
+ * Outputs:	None.
+ * Return:	0 if successful
+ *		-EFAULT if data unavailable
+ *		-EBUSY  if previous command timout and IOC reset is not complete.
+ *		-ENODEV if no such device/adapter
+ *		-ETIME	if timer expires
+ *		-ENOMEM if memory allocation error
+ */
+static int
+mptctl_unregister_diag_buffer (unsigned long arg)
+{
+	mpt_diag_unregister_t	*uarg = (mpt_diag_unregister_t *) arg;
+	mpt_diag_unregister_t	karg;
+	MPT_ADAPTER		*ioc;
+	int			iocnum;
+	void *			request_data;
+	dma_addr_t		request_data_dma;
+	u32			request_data_sz;
+	u8			buffType;
+
+	dctlprintk(("mptctl_unregister_diag_buffer called.\n"));
+	if (copy_from_user(&karg, uarg, sizeof(mpt_diag_unregister_t))) {
+		printk(KERN_ERR "mptctl_unregister_diag_buffer: "
+			"Unable to read pt_diag_unregister_t data @ %p\n",
+				(void*)uarg);
+		return -EFAULT;
+	}
+
+	if (((iocnum = mpt_verify_adapter(karg.hdr.iocnum, &ioc)) < 0) ||
+		(ioc == NULL)) {
+		dctlprintk(("mptctl_unregister_diag_buffer: ioc%d not found!\n",
+				iocnum));
+		return -ENODEV;
+	}
+
+	buffType = karg.data.UniqueId & 0x000000ff;
+	if ( !(ioc->facts.IOCCapabilities & 
+		MPT_DIAG_CAPABILITY(buffType)) ) {
+		printk("mptctl_unregister_diag_buffer: ioc%d does not have Capability for BufferType=%x\n",
+				iocnum, buffType);
+		return -ENODEV;
+	}
+
+	if ( (ioc->DiagBuffer_Status[buffType] & MPT_DIAG_BUFFER_IS_REGISTERED) == 0 ) {
+		printk("mptctl_unregister_diag_buffer: ioc%d BufferType=%x is not registered\n",
+				iocnum, buffType);
+		return -EFAULT;
+	}
+	if ( (ioc->DiagBuffer_Status[buffType] & MPT_DIAG_BUFFER_IS_RELEASED) == 0 ) {
+		printk("mptctl_unregister_diag_buffer: ioc%d BufferType=%x has not been released\n",
+			iocnum, buffType);
+		return -EFAULT;
+	}
+
+	if (karg.data.UniqueId != ioc->UniqueId[buffType]) {
+		printk("mptctl_unregister_diag_buffer: UniqueId=%x is not registered\n",
+			karg.data.UniqueId);
+		return -EFAULT;
+	}
+		
+	request_data = ioc->DiagBuffer[buffType];
+
+	if ( request_data ) {
+		request_data_sz = ioc->DiagBuffer_sz[buffType];
+		request_data_dma = ioc->DiagBuffer_dma[buffType];
+		pci_free_consistent(ioc->pcidev, request_data_sz,
+			request_data,
+			request_data_dma);
+
+		ioc->DiagBuffer[buffType] = NULL;
+		ioc->DiagBuffer_Status[buffType] = 0;
+		return 0;
+	} else {
+		printk("mptctl_unregister_diag_buffer: ioc%d does not have buffer for BufferType=%x\n",
+				iocnum, buffType);
+		return -ENODEV;
+	}
+}
+
+/*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
+/* QUERY DIAG BUFFER Routine.
+ *
+ * Outputs:	None.
+ * Return:	0 if successful
+ *		-EFAULT if data unavailable
+ *		-EBUSY  if previous command timout and IOC reset is not complete.
+ *		-ENODEV if no such device/adapter
+ *		-ETIME	if timer expires
+ *		-ENOMEM if memory allocation error
+ */
+static int
+mptctl_query_diag_buffer (unsigned long arg)
+{
+	mpt_diag_query_t	*uarg = (mpt_diag_query_t *) arg;
+	mpt_diag_query_t	karg;
+	MPT_ADAPTER		*ioc;
+	void *			request_data;
+	int			iocnum, ii, rc=-EFAULT;
+	u8			buffType;
+
+	dctlprintk(("mptctl_query_diag_buffer called.\n"));
+	if (copy_from_user(&karg, uarg, sizeof(mpt_diag_query_t))) {
+		printk(KERN_ERR "mptctl_query_diag_buffer: "
+			"Unable to read mpt_diag_query_t data @ %p\n",
+				(void*)uarg);
+		return -EFAULT;
+	}
+
+	karg.data.Flags = 0;
+	if (((iocnum = mpt_verify_adapter(karg.hdr.iocnum, &ioc)) < 0) ||
+		(ioc == NULL)) {
+		dctlprintk(("mptctl_query_diag_buffer: ioc%d not found!\n",
+			iocnum));
+		goto copy_back;
+	}
+
+	buffType = karg.data.BufferType;
+	if ( !(ioc->facts.IOCCapabilities & 
+		MPT_DIAG_CAPABILITY(buffType)) ) {
+		printk("mptctl_query_diag_buffer: ioc%d does not have Capability for BufferType=%x\n",
+			iocnum, buffType);
+		goto copy_back;
+	}
+
+	if ( (ioc->DiagBuffer_Status[buffType] & MPT_DIAG_BUFFER_IS_REGISTERED) == 0 ) {
+		printk("mptctl_query_diag_buffer: ioc%d BufferType=%x is not registered\n",
+			iocnum, buffType);
+		goto copy_back;
+	}
+
+	if (karg.data.UniqueId & 0xffffff00) {
+		if (karg.data.UniqueId != ioc->UniqueId[buffType]) {
+			printk("mptctl_query_diag_buffer: UniqueId=%x is not registered\n",
+				karg.data.UniqueId);
+			goto copy_back;
+		}
+	}
+
+	request_data = ioc->DiagBuffer[buffType];
+
+	if ( request_data ) {
+		if ( buffType == MPI_DIAG_BUF_TYPE_EXTENDED ) {
+			if (karg.data.ExtendedType != ioc->ExtendedType[buffType])
+				goto copy_back;
+		} else 
+			karg.data.ExtendedType = 0;
+
+		if ( ioc->DiagBuffer_Status[buffType] & MPT_DIAG_BUFFER_IS_RELEASED )
+			karg.data.Flags = 3;
+		else
+			karg.data.Flags = 7;
+		karg.data.TraceLevel = ioc->TraceLevel[buffType];
+		for ( ii = 0; ii < 4; ii++ ) {
+			karg.data.ProductSpecific[ii] =
+				ioc->ProductSpecific[buffType][ii];
+		}
+		karg.data.DataSize = ioc->DataSize[buffType];
+		karg.data.DriverAddedBufferSize = 0;
+		karg.data.UniqueId = ioc->UniqueId[buffType];
+		rc = 0;
+	} else {
+		printk( "mptctl_query_diag_buffer: ioc%d does not have buffer for BufferType=%x\n",
+			iocnum, buffType);
+	}
+copy_back:
+	if (copy_to_user((char *)arg, &karg, sizeof(mpt_diag_query_t))) {
+		printk(KERN_ERR "mptctl_query_diag_buffer: "
+			"Unable to write mpt_diag_query_t data @ %p\n",
+			(void*)uarg);
+		return -EFAULT;
+	}
+	return rc;
+}
+
+/*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
+/* READ DIAG BUFFER Routine.
+ *
+ * Outputs:	None.
+ * Return:	0 if successful
+ *		-EFAULT if data unavailable
+ *		-EBUSY  if previous command timout and IOC reset is not complete.
+ *		-ENODEV if no such device/adapter
+ *		-ETIME	if timer expires
+ *		-ENOMEM if memory allocation error
+ */
+static int
+mptctl_read_diag_buffer (unsigned long arg)
+{
+	mpt_diag_read_buffer_t	*uarg = (mpt_diag_read_buffer_t *) arg;
+	mpt_diag_read_buffer_t	karg;
+	MPT_ADAPTER		*ioc;
+	void			*request_data, *diagData;
+	dma_addr_t		request_data_dma;
+  	DiagBufferPostRequest_t *DiagBufferPostRequest;
+  	DiagBufferPostReply_t	*DiagBufferPostReply;
+	MPT_FRAME_HDR		*mf;
+	int			iocnum, rc=0, ii;
+	u8			buffType;
+	u32 			tmp;
+
+	dctlprintk(("mptctl_read_diag_buffer called.\n"));
+	if (copy_from_user(&karg, uarg, sizeof(mpt_diag_read_buffer_t))) {
+		printk(KERN_ERR "mptctl_read_diag_buffer: "
+			"Unable to read mpt_diag_read_buffer_t data @ %p\n",
+				(void*)uarg);
+		return -EFAULT;
+	}
+
+	if (((iocnum = mpt_verify_adapter(karg.hdr.iocnum, &ioc)) < 0) ||
+		(ioc == NULL)) {
+		dctlprintk((KERN_INFO "mptctl_read_diag_buffer: ioc%d not found!\n",
+				iocnum));
+		return -ENODEV;
+	}
+
+	buffType = karg.data.UniqueId & 0x000000ff;
+	if ( !(ioc->facts.IOCCapabilities & 
+		MPT_DIAG_CAPABILITY(buffType)) ) {
+		printk("mptctl_read_diag_buffer: ioc%d does not have Capability for BufferType=%x\n",
+				iocnum, buffType);
+		return -EFAULT;
+	}
+
+	if (karg.data.UniqueId != ioc->UniqueId[buffType]) {
+		printk("mptctl_read_diag_buffer: UniqueId=%x is not registered\n",
+			karg.data.UniqueId);
+		return -EFAULT;
+	}
+
+	request_data = ioc->DiagBuffer[buffType];
+
+	if ( request_data ) {
+		diagData = (void *)(request_data + karg.data.StartingOffset);
+		dctlprintk(("mptctl_read_diag_buffer: ioc%d diagData=%p request_data=%p StartingOffset=%x\n",
+				iocnum, diagData, request_data, karg.data.StartingOffset));
+		if (copy_to_user((char *)&uarg->data.DiagnosticData[0],
+				diagData, karg.data.BytesToRead)) {
+			printk(KERN_ERR "mptctl_read_diag_buffer: "
+			"Unable to write mpt_diag_read_buffer_t data @ %p\n",
+				(void*)diagData);
+			return -EFAULT;
+		}
+	} else {
+		printk("mptctl_read_diag_buffer: ioc%d does not have buffer for BufferType=%x\n",
+			iocnum, buffType);
+		return -EFAULT;
+	}
+
+	if ( karg.data.Flags & MPI_FW_DIAG_FLAG_REREGISTER ) {
+		dctlprintk(("mptctl_read_diag_buffer: ioc%d Reregister BufferType=%x\n",
+			iocnum, buffType));
+		if ( (ioc->DiagBuffer_Status[buffType] & MPT_DIAG_BUFFER_IS_RELEASED) == 0 ) {
+			dctlprintk(("mptctl_read_diag_buffer: ioc%d BufferType=%x is still registered\n",
+				iocnum, buffType));
+			return rc;
+		}
+		/* Get a free request frame and save the message context.
+	 	*/
+        	if ((mf = mpt_get_msg_frame(mptctl_id, ioc)) == NULL) {
+			dfailprintk(("%s: mptctl_read_diag_buffer, no msg frames!!\n",
+				ioc->name));
+                	return -EAGAIN;
+		}
+
+  		DiagBufferPostRequest = (DiagBufferPostRequest_t *)mf;
+		DiagBufferPostRequest->Function = MPI_FUNCTION_DIAG_BUFFER_POST;
+		DiagBufferPostRequest->ChainOffset = 0;
+		DiagBufferPostRequest->BufferType = buffType;
+		DiagBufferPostRequest->TraceLevel = 
+			ioc->TraceLevel[buffType];
+		DiagBufferPostRequest->MsgFlags = 0;
+		DiagBufferPostRequest->Reserved1 = 0;
+		DiagBufferPostRequest->Reserved2 = 0;
+		DiagBufferPostRequest->Reserved3 = 0;
+		if ( buffType == MPI_DIAG_BUF_TYPE_EXTENDED ) {
+			DiagBufferPostRequest->ExtendedType = 
+				ioc->ExtendedType[buffType];
+		}
+		DiagBufferPostRequest->BufferLength = ioc->DiagBuffer_sz[buffType];
+		for ( ii = 0; ii < 4; ii++ ) {
+			DiagBufferPostRequest->ProductSpecific[ii] =
+				ioc->ProductSpecific[buffType][ii];
+		}
+		request_data_dma = ioc->DiagBuffer_dma[buffType];
+		if (sizeof(dma_addr_t) == sizeof(u64)) {
+			tmp = (u32) ((u64)request_data_dma >> 32);
+			DiagBufferPostRequest->BufferAddress.High = cpu_to_le32(tmp);
+		} else {
+			DiagBufferPostRequest->BufferAddress.High = (u32)0;
+		}
+		tmp = request_data_dma & 0xFFFFFFFF;
+		DiagBufferPostRequest->BufferAddress.Low = cpu_to_le32(tmp);
+
+		ioc->ioctl->timer.expires =
+		    jiffies + HZ*MPT_IOCTL_DEFAULT_TIMEOUT /* 10 sec */;
+		ioc->ioctl->wait_done = 0;
+		ioc->ioctl->status |= MPT_IOCTL_STATUS_TIMER_ACTIVE;
+		add_timer(&ioc->ioctl->timer);
+		mpt_put_msg_frame(mptctl_id, ioc, mf);
+		wait_event(mptctl_wait, ioc->ioctl->wait_done);
+
+		/* process the completed Reply Message Frame */
+		if (ioc->ioctl->status & MPT_IOCTL_STATUS_RF_VALID) {
+			DiagBufferPostReply =
+			    (DiagBufferPostReply_t *)ioc->ioctl->ReplyFrame;
+
+			if ( DiagBufferPostReply->IOCStatus == MPI_IOCSTATUS_SUCCESS) {
+				if ( DiagBufferPostReply->MsgLength > 5 ) {
+					ioc->DataSize[buffType] = 
+						DiagBufferPostReply->TransferLength;
+				}
+				ioc->DiagBuffer_Status[buffType] |= 
+					MPT_DIAG_BUFFER_IS_REGISTERED;
+			} else {
+				dctlprintk(("DiagBufferPostReply: IOCStatus=%x IOCLogInfo=%x\n",
+			    		DiagBufferPostReply->IOCStatus,
+			    		DiagBufferPostReply->IOCLogInfo));
+				rc = -EFAULT;
+			}
+		} else {
+			dctlprintk(("DiagBufferPostReply: status=%x\n", 
+				ioc->ioctl->status));
+			rc = -EFAULT;
+		}
+
+		ioc->ioctl->status &= ~(MPT_IOCTL_STATUS_TIMER_ACTIVE |
+		    MPT_IOCTL_STATUS_TM_FAILED | MPT_IOCTL_STATUS_COMMAND_GOOD |
+		    MPT_IOCTL_STATUS_SENSE_VALID | MPT_IOCTL_STATUS_RF_VALID |
+		    MPT_IOCTL_STATUS_DID_IOCRESET);
+		mpt_free_msg_frame(ioc, mf);
+
+	}
+	return rc;
+}
+
+/*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
 
 static struct file_operations mptctl_fops = {
-	owner_THIS_MODULE
+	.owner =	THIS_MODULE,
 	.llseek =	no_llseek,
-	.read =		mptctl_read,
-	.write =	mptctl_write,
-	.ioctl =	mptctl_ioctl,
-	.open =		mptctl_open,
 	.release =	mptctl_release,
+	.fasync = 	mptctl_fasync,
+	.ioctl =	mptctl_ioctl,
 };
 
 static struct miscdevice mptctl_miscdev = {
@@ -2804,7 +3857,7 @@ compat_mptfwxfer_ioctl(unsigned int fd, unsigned int cmd,
 	iocnumX = kfw32.iocnum & 0xFF;
 	if (((iocnum = mpt_verify_adapter(iocnumX, &iocp)) < 0) ||
 	    (iocp == NULL)) {
-		dctlprintk((KERN_ERR MYNAM "::compat_mptfwxfer_ioctl @%d - ioc%d not found!\n",
+		dctlprintk((KERN_INFO MYNAM "::compat_mptfwxfer_ioctl @%d - ioc%d not found!\n",
 				__LINE__, iocnumX));
 		return -ENODEV;
 	}
@@ -2818,7 +3871,7 @@ compat_mptfwxfer_ioctl(unsigned int fd, unsigned int cmd,
 
 	ret = mptctl_do_fw_download(kfw.iocnum, kfw.bufp, kfw.fwlen);
 
-	up(&mptctl_syscall_sem_ioc[iocp->id]);
+	up(&iocp->mptctl_syscall_sem_ioc);
 
 	return ret;
 }
@@ -2844,7 +3897,7 @@ compat_mpt_command(unsigned int fd, unsigned int cmd,
 	iocnumX = karg32.hdr.iocnum & 0xFF;
 	if (((iocnum = mpt_verify_adapter(iocnumX, &iocp)) < 0) ||
 	    (iocp == NULL)) {
-		dctlprintk((KERN_ERR MYNAM "::compat_mpt_command @%d - ioc%d not found!\n",
+		dctlprintk((KERN_INFO MYNAM "::compat_mpt_command @%d - ioc%d not found!\n",
 				__LINE__, iocnumX));
 		return -ENODEV;
 	}
@@ -2870,9 +3923,9 @@ compat_mpt_command(unsigned int fd, unsigned int cmd,
 
 	/* Pass new structure to do_mpt_command
 	 */
-	ret = mptctl_do_mpt_command (karg, (char *) &uarg->MF, 0);
+	ret = mptctl_do_mpt_command (karg, (char *) &uarg->MF);
 
-	up(&mptctl_syscall_sem_ioc[iocp->id]);
+	up(&iocp->mptctl_syscall_sem_ioc);
 
 	return ret;
 }
@@ -2880,53 +3933,45 @@ compat_mpt_command(unsigned int fd, unsigned int cmd,
 #endif
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
-int __init mptctl_init(void)
+static int __init mptctl_init(void)
 {
 	int err;
 	int i;
 	int where = 1;
 	int sz;
 	u8 *mem;
-	MPT_ADAPTER *ioc = NULL;
+	MPT_ADAPTER *ioc;
 	int iocnum;
 
 	show_mptmod_ver(my_NAME, my_VERSION);
 
-	for (i=0; i<MPT_MAX_ADAPTERS; i++) {
-		sema_init(&mptctl_syscall_sem_ioc[i], 1);
+	list_for_each_entry(ioc,&ioc_list,list) {
+		sema_init(&ioc->mptctl_syscall_sem_ioc, 1);
 
-		ioc = NULL;
-		if (((iocnum = mpt_verify_adapter(i, &ioc)) < 0) ||
-		    (ioc == NULL)) {
-			continue;
+		sz = sizeof (MPT_IOCTL);
+		mem = kmalloc(sz, GFP_KERNEL);
+		if (mem == NULL) {
+			err = -ENOMEM;
+			goto out_fail;
 		}
-		else {
-			/* This adapter instance is found.
-			 * Allocate and inite a MPT_IOCTL structure
-			 */
-			sz = sizeof (MPT_IOCTL);
-			mem = kmalloc(sz, GFP_KERNEL);
-			if (mem == NULL) {
-				err = -ENOMEM;
-				goto out_fail;
-			}
 
-			memset(mem, 0, sz);
-			ioc->ioctl = (MPT_IOCTL *) mem;
-			ioc->ioctl->ioc = ioc;
-			init_timer (&ioc->ioctl->timer);
-			ioc->ioctl->timer.data = (unsigned long) ioc->ioctl;
-			ioc->ioctl->timer.function = mptctl_timer_expired;
-			init_timer (&ioc->ioctl->TMtimer);
-			ioc->ioctl->TMtimer.data = (unsigned long) ioc->ioctl;
-			ioc->ioctl->TMtimer.function = mptctl_timer_expired;
-		}
+		memset(mem, 0, sz);
+		ioc->ioctl = (MPT_IOCTL *) mem;
+		ioc->ioctl->ioc = ioc;
+		init_timer (&ioc->ioctl->timer);
+		ioc->ioctl->timer.data = (unsigned long) ioc->ioctl;
+		ioc->ioctl->timer.function = mptctl_timer_expired;
+		init_timer (&ioc->ioctl->TMtimer);
+		ioc->ioctl->TMtimer.data = (unsigned long) ioc->ioctl;
+		ioc->ioctl->TMtimer.function = mptctl_timer_expired;
 	}
 
 #ifdef MPT_CONFIG_COMPAT
 	err = register_ioctl32_conversion(MPTIOCINFO, compat_mptctl_ioctl);
 	if (++where && err) goto out_fail;
 	err = register_ioctl32_conversion(MPTIOCINFO1, compat_mptctl_ioctl);
+	if (++where && err) goto out_fail;
+	err = register_ioctl32_conversion(MPTIOCINFO2, compat_mptctl_ioctl);
 	if (++where && err) goto out_fail;
 	err = register_ioctl32_conversion(MPTTARGETINFO, compat_mptctl_ioctl);
 	if (++where && err) goto out_fail;
@@ -2940,15 +3985,74 @@ int __init mptctl_init(void)
 	if (++where && err) goto out_fail;
 	err = register_ioctl32_conversion(MPTHARDRESET, compat_mptctl_ioctl);
 	if (++where && err) goto out_fail;
+	err = register_ioctl32_conversion(MPTDIAGRESET, compat_mptctl_ioctl);
+	if (++where && err) goto out_fail;
 	err = register_ioctl32_conversion(MPTCOMMAND32, compat_mpt_command);
 	if (++where && err) goto out_fail;
 	err = register_ioctl32_conversion(MPTFWDOWNLOAD32,
 					  compat_mptfwxfer_ioctl);
 	if (++where && err) goto out_fail;
+	err = register_ioctl32_conversion(MPTFWDOWNLOADBOOT, 
+			compat_mptctl_ioctl);
+	if (++where && err) goto out_fail;
 	err = register_ioctl32_conversion(HP_GETHOSTINFO, compat_mptctl_ioctl);
 	if (++where && err) goto out_fail;
 	err = register_ioctl32_conversion(HP_GETTARGETINFO, compat_mptctl_ioctl);
 	if (++where && err) goto out_fail;
+
+	err = register_ioctl32_conversion(MPTDIAGREGISTER, compat_mptctl_ioctl);
+	if (++where && err) goto out_fail;
+	err = register_ioctl32_conversion(MPTDIAGRELEASE, compat_mptctl_ioctl);
+	if (++where && err) goto out_fail;
+	err = register_ioctl32_conversion(MPTDIAGUNREGISTER, compat_mptctl_ioctl);
+	if (++where && err) goto out_fail;
+	err = register_ioctl32_conversion(MPTDIAGQUERY, compat_mptctl_ioctl);
+	if (++where && err) goto out_fail;
+	err = register_ioctl32_conversion(MPTDIAGREADBUFFER, compat_mptctl_ioctl);
+	if (++where && err) goto out_fail;
+	err = register_ioctl32_conversion(MPTHBAPCIINFO, compat_mptctl_ioctl);
+	if (++where && err) goto out_fail;
+#if defined(CPQ_CIM)
+	err = register_ioctl32_conversion(CC_CSMI_SAS_GET_DRIVER_INFO, compat_mptctl_ioctl);
+	if (++where && err) goto out_fail;
+	err = register_ioctl32_conversion(CC_CSMI_SAS_GET_CNTLR_CONFIG, compat_mptctl_ioctl);
+	if (++where && err) goto out_fail;
+	err = register_ioctl32_conversion(CC_CSMI_SAS_GET_CNTLR_STATUS, compat_mptctl_ioctl);
+	if (++where && err) goto out_fail;
+	err = register_ioctl32_conversion(CC_CSMI_SAS_GET_SCSI_ADDRESS, compat_mptctl_ioctl);
+	if (++where && err) goto out_fail;
+	err = register_ioctl32_conversion(CC_CSMI_SAS_GET_DEVICE_ADDRESS, compat_mptctl_ioctl);
+	if (++where && err) goto out_fail;
+	err = register_ioctl32_conversion(CC_CSMI_SAS_GET_PHY_INFO, compat_mptctl_ioctl);
+	if (++where && err) goto out_fail;
+	err = register_ioctl32_conversion(CC_CSMI_SAS_GET_SATA_SIGNATURE, compat_mptctl_ioctl);
+	if (++where && err) goto out_fail;
+	err = register_ioctl32_conversion(CC_CSMI_SAS_GET_LINK_ERRORS, compat_mptctl_ioctl);
+	if (++where && err) goto out_fail;
+	err = register_ioctl32_conversion(CC_CSMI_SAS_SMP_PASSTHRU, compat_mptctl_ioctl);
+	if (++where && err) goto out_fail;
+	err = register_ioctl32_conversion(CC_CSMI_SAS_SSP_PASSTHRU, compat_mptctl_ioctl);
+	if (++where && err) goto out_fail;
+	err = register_ioctl32_conversion(CC_CSMI_SAS_FIRMWARE_DOWNLOAD, compat_mptctl_ioctl);
+	if (++where && err) goto out_fail;
+	err = register_ioctl32_conversion(CC_CSMI_SAS_GET_RAID_INFO, compat_mptctl_ioctl);
+	if (++where && err) goto out_fail;
+	err = register_ioctl32_conversion(CC_CSMI_SAS_GET_RAID_CONFIG, compat_mptctl_ioctl);
+	if (++where && err) goto out_fail;
+	err = register_ioctl32_conversion(CC_CSMI_SAS_SET_PHY_INFO, compat_mptctl_ioctl);
+	if (++where && err) goto out_fail;
+	err = register_ioctl32_conversion(CC_CSMI_SAS_STP_PASSTHRU, compat_mptctl_ioctl);
+	if (++where && err) goto out_fail;
+	err = register_ioctl32_conversion(CC_CSMI_SAS_TASK_MANAGEMENT, compat_mptctl_ioctl);
+	if (++where && err) goto out_fail;
+	err = register_ioctl32_conversion(CC_CSMI_SAS_PHY_CONTROL, compat_mptctl_ioctl);
+	if (++where && err) goto out_fail;
+	err = register_ioctl32_conversion(CC_CSMI_SAS_GET_CONNECTOR_INFO, compat_mptctl_ioctl);
+	if (++where && err) goto out_fail;
+	err = register_ioctl32_conversion(CC_CSMI_SAS_GET_LOCATION, compat_mptctl_ioctl);
+	if (++where && err) goto out_fail;
+#endif // CPQ_CIM
+
 #endif
 
 	/* Register this device */
@@ -2973,9 +4077,14 @@ int __init mptctl_init(void)
 	}
 
 	if (mpt_reset_register(mptctl_id, mptctl_ioc_reset) == 0) {
-		dprintk((KERN_INFO MYNAM ": Registered for IOC reset notifications\n"));
+		dinitprintk((KERN_INFO MYNAM ": Registered mptctl_ioc_reset notification mptctl_id=%d\n", mptctl_id));
 	} else {
-		/* FIXME! */
+		dinitprintk((KERN_INFO MYNAM ": Register of mptctl_ioc_reset notification mptctl_id=%d FAILED\n", mptctl_id));
+	}
+
+	if (mpt_event_register(mptctl_id, mptctl_event_process) == 0) {
+		devtprintk((KERN_INFO MYNAM
+		  ": Registered for IOC event notifications\n"));
 	}
 
 	return 0;
@@ -2987,36 +4096,60 @@ out_fail:
 			" (%d:err=%d)\n", where, err);
 	unregister_ioctl32_conversion(MPTIOCINFO);
 	unregister_ioctl32_conversion(MPTIOCINFO1);
+	unregister_ioctl32_conversion(MPTIOCINFO2);
 	unregister_ioctl32_conversion(MPTTARGETINFO);
 	unregister_ioctl32_conversion(MPTTEST);
 	unregister_ioctl32_conversion(MPTEVENTQUERY);
 	unregister_ioctl32_conversion(MPTEVENTENABLE);
 	unregister_ioctl32_conversion(MPTEVENTREPORT);
 	unregister_ioctl32_conversion(MPTHARDRESET);
+	unregister_ioctl32_conversion(MPTDIAGRESET);
 	unregister_ioctl32_conversion(MPTCOMMAND32);
 	unregister_ioctl32_conversion(MPTFWDOWNLOAD32);
+	unregister_ioctl32_conversion(MPTFWDOWNLOADBOOT);
 	unregister_ioctl32_conversion(HP_GETHOSTINFO);
 	unregister_ioctl32_conversion(HP_GETTARGETINFO);
+
+	unregister_ioctl32_conversion(MPTDIAGREGISTER);
+	unregister_ioctl32_conversion(MPTDIAGRELEASE);
+	unregister_ioctl32_conversion(MPTDIAGUNREGISTER);
+	unregister_ioctl32_conversion(MPTDIAGQUERY);
+	unregister_ioctl32_conversion(MPTDIAGREADBUFFER);
+	unregister_ioctl32_conversion(MPTHBAPCIINFO);
+#if defined(CPQ_CIM)
+	unregister_ioctl32_conversion(CC_CSMI_SAS_GET_DRIVER_INFO);
+	unregister_ioctl32_conversion(CC_CSMI_SAS_GET_CNTLR_CONFIG);
+	unregister_ioctl32_conversion(CC_CSMI_SAS_GET_CNTLR_STATUS);
+	unregister_ioctl32_conversion(CC_CSMI_SAS_GET_SCSI_ADDRESS);
+	unregister_ioctl32_conversion(CC_CSMI_SAS_GET_DEVICE_ADDRESS);
+	unregister_ioctl32_conversion(CC_CSMI_SAS_GET_PHY_INFO);
+	unregister_ioctl32_conversion(CC_CSMI_SAS_GET_SATA_SIGNATURE);
+	unregister_ioctl32_conversion(CC_CSMI_SAS_GET_LINK_ERRORS);
+	unregister_ioctl32_conversion(CC_CSMI_SAS_SMP_PASSTHRU);
+	unregister_ioctl32_conversion(CC_CSMI_SAS_SSP_PASSTHRU);
+	unregister_ioctl32_conversion(CC_CSMI_SAS_FIRMWARE_DOWNLOAD);
+	unregister_ioctl32_conversion(CC_CSMI_SAS_GET_RAID_INFO);
+	unregister_ioctl32_conversion(CC_CSMI_SAS_GET_RAID_CONFIG);
+	unregister_ioctl32_conversion(CC_CSMI_SAS_SET_PHY_INFO);
+	unregister_ioctl32_conversion(CC_CSMI_SAS_STP_PASSTHRU);
+	unregister_ioctl32_conversion(CC_CSMI_SAS_TASK_MANAGEMENT);
+	unregister_ioctl32_conversion(CC_CSMI_SAS_PHY_CONTROL);
+	unregister_ioctl32_conversion(CC_CSMI_SAS_GET_CONNECTOR_INFO);
+	unregister_ioctl32_conversion(CC_CSMI_SAS_GET_LOCATION);
+#endif // CPQ_CIM
 #endif
 
-	for (i=0; i<MPT_MAX_ADAPTERS; i++) {
-		ioc = NULL;
-		if (((iocnum = mpt_verify_adapter(i, &ioc)) < 0) ||
-		    (ioc == NULL)) {
-			continue;
-		}
-		else {
-			if (ioc->ioctl) {
-				kfree ( ioc->ioctl );
-				ioc->ioctl = NULL;
-			}
+	list_for_each_entry(ioc,&ioc_list,list) {
+		if (ioc->ioctl) {
+			kfree ( ioc->ioctl );
+			ioc->ioctl = NULL;
 		}
 	}
 	return err;
 }
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
-void mptctl_exit(void)
+static void mptctl_exit(void)
 {
 	int i;
 	MPT_ADAPTER *ioc;
@@ -3030,6 +4163,9 @@ void mptctl_exit(void)
 	mpt_reset_deregister(mptctl_id);
 	dprintk((KERN_INFO MYNAM ": Deregistered for IOC reset notifications\n"));
 
+	mpt_event_deregister(mptctl_id);
+	dprintk((KERN_INFO MYNAM ": Deregistered for IOC event notifications\n"));
+
 	/* De-register callback handler from base module */
 	mpt_deregister(mptctl_id);
 	printk(KERN_INFO MYNAM ": Deregistered from Fusion MPT base driver\n");
@@ -3037,33 +4173,61 @@ void mptctl_exit(void)
 #ifdef MPT_CONFIG_COMPAT
 	unregister_ioctl32_conversion(MPTIOCINFO);
 	unregister_ioctl32_conversion(MPTIOCINFO1);
+	unregister_ioctl32_conversion(MPTIOCINFO2);
 	unregister_ioctl32_conversion(MPTTARGETINFO);
 	unregister_ioctl32_conversion(MPTTEST);
 	unregister_ioctl32_conversion(MPTEVENTQUERY);
 	unregister_ioctl32_conversion(MPTEVENTENABLE);
 	unregister_ioctl32_conversion(MPTEVENTREPORT);
 	unregister_ioctl32_conversion(MPTHARDRESET);
+	unregister_ioctl32_conversion(MPTDIAGRESET);
 	unregister_ioctl32_conversion(MPTCOMMAND32);
 	unregister_ioctl32_conversion(MPTFWDOWNLOAD32);
+	unregister_ioctl32_conversion(MPTFWDOWNLOADBOOT);
 	unregister_ioctl32_conversion(HP_GETHOSTINFO);
 	unregister_ioctl32_conversion(HP_GETTARGETINFO);
+
+	unregister_ioctl32_conversion(MPTDIAGREGISTER);
+	unregister_ioctl32_conversion(MPTDIAGRELEASE);
+	unregister_ioctl32_conversion(MPTDIAGUNREGISTER);
+	unregister_ioctl32_conversion(MPTDIAGQUERY);
+	unregister_ioctl32_conversion(MPTDIAGREADBUFFER);
+	unregister_ioctl32_conversion(MPTHBAPCIINFO);
+#if defined(CPQ_CIM)
+	unregister_ioctl32_conversion(CC_CSMI_SAS_GET_DRIVER_INFO);
+	unregister_ioctl32_conversion(CC_CSMI_SAS_GET_CNTLR_CONFIG);
+	unregister_ioctl32_conversion(CC_CSMI_SAS_GET_CNTLR_STATUS);
+	unregister_ioctl32_conversion(CC_CSMI_SAS_GET_SCSI_ADDRESS);
+	unregister_ioctl32_conversion(CC_CSMI_SAS_GET_DEVICE_ADDRESS);
+	unregister_ioctl32_conversion(CC_CSMI_SAS_GET_PHY_INFO);
+	unregister_ioctl32_conversion(CC_CSMI_SAS_GET_SATA_SIGNATURE);
+	unregister_ioctl32_conversion(CC_CSMI_SAS_GET_LINK_ERRORS);
+	unregister_ioctl32_conversion(CC_CSMI_SAS_SMP_PASSTHRU);
+	unregister_ioctl32_conversion(CC_CSMI_SAS_SSP_PASSTHRU);
+	unregister_ioctl32_conversion(CC_CSMI_SAS_FIRMWARE_DOWNLOAD);
+	unregister_ioctl32_conversion(CC_CSMI_SAS_GET_RAID_INFO);
+	unregister_ioctl32_conversion(CC_CSMI_SAS_GET_RAID_CONFIG);
+	unregister_ioctl32_conversion(CC_CSMI_SAS_SET_PHY_INFO);
+	unregister_ioctl32_conversion(CC_CSMI_SAS_STP_PASSTHRU);
+	unregister_ioctl32_conversion(CC_CSMI_SAS_TASK_MANAGEMENT);
+	unregister_ioctl32_conversion(CC_CSMI_SAS_PHY_CONTROL);
+	unregister_ioctl32_conversion(CC_CSMI_SAS_GET_CONNECTOR_INFO);
+	unregister_ioctl32_conversion(CC_CSMI_SAS_GET_LOCATION);
+#endif // CPQ_CIM
 #endif
 
 	/* Free allocated memory */
-	for (i=0; i<MPT_MAX_ADAPTERS; i++) {
-		ioc = NULL;
-		if (((iocnum = mpt_verify_adapter(i, &ioc)) < 0) ||
-		    (ioc == NULL)) {
-			continue;
-		}
-		else {
-			if (ioc->ioctl) {
-				kfree ( ioc->ioctl );
-				ioc->ioctl = NULL;
-			}
+	list_for_each_entry(ioc,&ioc_list,list) {
+		if (ioc->ioctl) {
+			kfree ( ioc->ioctl );
+			ioc->ioctl = NULL;
 		}
 	}
 }
+
+#if defined(CPQ_CIM)
+#include "csmisas.c"
+#endif // CPQ_CIM
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
 

@@ -3,7 +3,7 @@
 
    Written By: Adam Radford <linuxraid@amcc.com>
 
-   Copyright (C) 2004 Applied Micro Circuits Corporation.
+   Copyright (C) 2004-2005 Applied Micro Circuits Corporation.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -95,7 +95,7 @@ static twa_message_type twa_aen_table[] = {
 	{0x0022, "Upgrade UDMA mode to higher speed"},
 	{0x0023, "Sector repair completed"},
 	{0x0024, "Sbuf memory test failed"},
-	{0x0025, "Error flushing cached write data to array"},
+	{0x0025, "Error flushing cached write data to disk"},
 	{0x0026, "Drive reported data ECC error"},
 	{0x0027, "DCB has checksum error"},
 	{0x0028, "DCB version is unsupported"},
@@ -126,6 +126,38 @@ static twa_message_type twa_aen_table[] = {
 	{0x0041, "Unit number assignments were lost"},
 	{0x0042, "Error during read of primary DCB"},
 	{0x0043, "Latent error found in backup DCB"},
+	{0x0044, "Battery voltage is normal"},
+	{0x0045, "Battery voltage is low"},
+	{0x0046, "Battery voltage is high"},
+	{0x0047, "Battery voltage is too low"},
+	{0x0048, "Battery voltage is too high"},
+	{0x0049, "Battery temperature is normal"},
+	{0x004A, "Battery temperature is low"},
+	{0x004B, "Battery temperature is high"},
+	{0x004C, "Battery temperature is too low"},
+	{0x004D, "Battery temperature is too high"},
+	{0x004E, "Battery capacity test started"},
+	{0x004F, "Cache synchronization skipped"},
+	{0x0050, "Battery capacity test completed"},
+	{0x0051, "Battery health check started"},
+	{0x0052, "Battery health check completed"},
+	{0x0053, "Need to do a capacity test"},
+	{0x0054, "Charge termination voltage is at high level"},
+	{0x0055, "Battery charging started"},
+	{0x0056, "Battery charging completed"},
+	{0x0057, "Battery charging fault"},
+	{0x0058, "Battery capacity is below warning level"},
+	{0x0059, "Battery capacity is below error level"},
+	{0x005A, "Battery is present"},
+	{0x005B, "Battery is not present"},
+	{0x005C, "Battery is weak"},
+	{0x005D, "Battery health check failed"},
+	{0x005E, "Cache synchronized after power fail"},
+	{0x005F, "Cache synchronization failed; some data lost"},
+	{0x0060, "Bad cache meta data checksum"},
+	{0x0061, "Bad cache meta data signature"},
+	{0x0062, "Cache meta data restore failed"},
+	{0x0063, "BBU not found after power fail"},
 	{0x00FC, "Recovered/finished array membership update"},
 	{0x00FD, "Handler lockup"},
 	{0x00FE, "Retrying PCI transfer"},
@@ -167,12 +199,15 @@ static twa_message_type twa_error_table[] = {
 	{0x0121, "Drive not degraded"},
 	{0x0122, "Reconstruct error"},
 	{0x0123, "Replace not accepted"},
-	{0x0124, "Replace drive capacity too small"},
+	{0x0124, "Drive capacity too small"},
 	{0x0125, "Sector count not allowed"},
 	{0x0126, "No spares left"},
 	{0x0127, "Reconstruct error"},
 	{0x0128, "Unit is offline"},
 	{0x0129, "Cannot update status to DCB"},
+	{0x012A, "Dchnl cannot be split"},
+	{0x012B, "Dchnl cannot be joined"},
+	{0x012C, "No migration recovery"},
 	{0x0130, "Invalid stripe handle"},
 	{0x0131, "Handle that was not locked"},
 	{0x0132, "Handle that was not empty"},
@@ -204,8 +239,10 @@ static twa_message_type twa_error_table[] = {
 	{0x01C7, "Flash file size error"},
 	{0x01C8, "Bad flash file checksum"},
 	{0x01CA, "Corrupt flash file system detected"},
-	{0x01CD, "Flash Write cycle Failed"},
-	{0x01CE, "Flash Erase cycle Failed"},
+	{0x01CB, "Flash file has no component directory"},
+	{0x01CC, "Flash file component not found"},
+	{0x01CD, "Flash write cycle Failed"},
+	{0x01CE, "Flash erase cycle Failed"},
 	{0x01D0, "Invalid field in parameter list"},
 	{0x01D1, "Parameter list length error"},
 	{0x01D2, "Parameter item is not changeable"},
@@ -234,28 +271,63 @@ static twa_message_type twa_error_table[] = {
 	{0x0232, "Binary image architecture incompatible"},
 	{0x0233, "Binary image has no signature"},
 	{0x0234, "Binary image has bad checksum"},
-	{0x0235, "Image downloaded overflowed buffer"},
+	{0x0235, "Binary image overflowed buffer"},
 	{0x0240, "I2C device not found"},
 	{0x0241, "I2C transaction aborted"},
 	{0x0242, "SO-DIMM parameter(s) incompatible using defaults"},
 	{0x0243, "SO-DIMM unsupported"},
+	{0x0244, "I2C clock is held low - Transfer aborted"},
+	{0x0245, "I2C data  is held low - Transfer aborted"},
+	{0x0246, "I2C slave device NACKed the transfer"},
+	{0x0247, "I2C buffer in-sufficient"},
 	{0x0248, "SPI transfer status error"},
 	{0x0249, "SPI transfer timeout error"},
-	{0x0250, "Invalid unit descriptor size in CreateUnit"},
-	{0x0251, "Unit descriptor size exceeds data buffer in CreateUnit"},
-	{0x0252, "Invalid value in CreateUnit descriptor"},
-	{0x0253, "Inadequate disk space to support descriptor in CreateUnit"},
+	{0x0250, "Invalid unit descriptor size"},
+	{0x0251, "Unit descriptor size exceeds data buffer"},
+	{0x0252, "Invalid value in unit descriptor"},
+	{0x0253, "Inadequate disk space to support descriptor"},
 	{0x0254, "Unable to create data channel for this unit descriptor"},
 	{0x0255, "CreateUnit descriptor specifies a drive already in use"},
 	{0x0256, "Unable to write configuration to all disks during CreateUnit"},
-	{0x0257, "CreateUnit does not support this descriptor version"},
-	{0x0258, "Invalid subunit for RAID 0 or 5 in CreateUnit"},
-	{0x0259, "Too many descriptors in CreateUnit"},
-	{0x025A, "Invalid configuration specified in CreateUnit descriptor"},
-	{0x025B, "Invalid LBA offset specified in CreateUnit descriptor"},
-	{0x025C, "Invalid stripelet size specified in CreateUnit descriptor"},
+	{0x0257, "CreateUnit/MigrateUnit does not support this descriptor version"},
+	{0x0258, "Invalid subunit for RAID 0 or 5 in CreateUnit/MigrateUnit"},
+	{0x0259, "Too many descriptors in CreateUnit/MigrateUnit"},
+	{0x025A, "Invalid configuration specified in unit descriptor"},
+	{0x025B, "Invalid LBA offset specified in unit descriptor"},
+	{0x025C, "Invalid stripelet size specified in unit descriptor"},
 	{0x025D, "JBOD unit is not allowed"},
 	{0x0260, "SMART attribute exceeded threshold"},
+	{0x0270, "Unit is not in NORMAL state"},
+	{0x0271, "Invalid drive members"},
+	{0x0272, "Converted unit is not supported"},
+	{0x0300, "Internal errorcode (BBU base) - should not occur"},
+	{0x0301, "Invalid BBU state change request"},
+	{0x0302, "The BBU resource needed is in use; retry command after a delay"},
+	{0x0303, "Command requires a battery pack to be present and enabled"},
+	{0x0310, "BBU command packet error"},
+	{0x0311, "BBU command not implemented"},
+	{0x0312, "BBU command buffer underflow"},
+	{0x0313, "BBU command buffer overflow"},
+	{0x0314, "BBU command incomplete"},
+	{0x0315, "BBU command checksum error"},
+	{0x0316, "BBU command timeout"},
+	{0x0320, "BBU parameter not defined"},
+	{0x0321, "BBU parameter size mismatch"},
+	{0x0322, "Cannot write a read-only BBU parameter"},
+	{0x0323, "BBU firmware version string not found"},
+	{0x0324, "BBU operating state not available"},
+	{0x0325, "BBU not present"},
+	{0x0326, "BBU not ready"},
+	{0x0327, "BBU S1 not compatible with HBA"},
+	{0x0328, "BBU S0 not compatible with HBA"},
+	{0x0329, "BBU not compatible with HBA"},
+	{0x032A, "BBU not in S0"},
+	{0x032B, "BBU not in S1"},
+	{0x032C, "Timeout on BBU power fail interrupt"},
+	{0x032D, "BBU invalid response length"},
+	{0x0330, "Log updates not allowed"},
+	{0x0331, "Logs are invalid"},
+	{0x0332, "Logs not found"},
 	{0xFFFFFFFF, (char*) 0}
 };
 
@@ -334,9 +406,9 @@ static twa_message_type twa_error_table[] = {
 
 /* Compatibility defines */
 #define TW_9000_ARCH_ID 0x5
-#define TW_CURRENT_FW_SRL 24
-#define TW_CURRENT_FW_BUILD 13
-#define TW_CURRENT_FW_BRANCH 1
+#define TW_CURRENT_DRIVER_SRL 29
+#define TW_CURRENT_DRIVER_BUILD 3
+#define TW_CURRENT_DRIVER_BRANCH 6
 
 /* Misc defines */
 #define TW_SECTOR_SIZE                        512
@@ -350,18 +422,10 @@ static twa_message_type twa_error_table[] = {
 #define TW_BUNDLED_FW_SAFE_TO_FLASH	      0x4
 #define TW_CTLR_FW_RECOMMENDS_FLASH	      0x8
 #define TW_CTLR_FW_COMPATIBLE		      0x2
-#define TW_BASE_FW_SRL			      0x17
+#define TW_BASE_FW_SRL			      24
 #define TW_BASE_FW_BRANCH		      0
 #define TW_BASE_FW_BUILD		      1
-#if BITS_PER_LONG > 32
-#define TW_APACHE_MAX_SGL_LENGTH 72
-#define TW_ESCALADE_MAX_SGL_LENGTH 41
-#define TW_APACHE_CMD_PKT_SIZE 5
-#else
-#define TW_APACHE_MAX_SGL_LENGTH 109
-#define TW_ESCALADE_MAX_SGL_LENGTH 62
-#define TW_APACHE_CMD_PKT_SIZE 4
-#endif
+#define TW_FW_SRL_LUNS_SUPPORTED	      28
 #define TW_ATA_PASS_SGL_MAX                   60
 #define TW_Q_LENGTH			      256
 #define TW_Q_START			      0
@@ -370,8 +434,7 @@ static twa_message_type twa_error_table[] = {
 #define TW_MAX_CMDS_PER_LUN		      254
 #define TW_MAX_RESPONSE_DRAIN		      256
 #define TW_MAX_AEN_DRAIN		      40
-#define TW_IN_INTR                            1
-#define TW_IN_IOCTL                           2
+#define TW_IN_RESET                           2
 #define TW_IN_CHRDEV_IOCTL                    3
 #define TW_IN_ATTENTION_LOOP		      4
 #define TW_MAX_SECTORS                        256
@@ -429,22 +492,23 @@ static twa_message_type twa_error_table[] = {
 #define TW_DRIVER TW_MESSAGE_SOURCE_LINUX_DRIVER
 #define TW_MESSAGE_SOURCE_LINUX_OS            9
 #define TW_OS TW_MESSAGE_SOURCE_LINUX_OS
-#if BITS_PER_LONG > 32
-#define TW_COMMAND_SIZE			      5
-#define TW_DMA_MASK			      0xffffffffffffffff
-#else
-#define TW_COMMAND_SIZE			      4
-#define TW_DMA_MASK			      0xffffffff
+#ifndef DMA_64BIT_MASK
+#define DMA_64BIT_MASK 0xffffffffffffffffULL
 #endif
+#ifndef DMA_32BIT_MASK
+#define DMA_32BIT_MASK 0x00000000ffffffffULL
+#endif
+
+/* Bitmask access macros */
+
+/* request_id: 12, lun: 4 */
+#define TW_REQ_LUN_IN(lun, request_id) (((lun << 12) & 0xf000) | (request_id & 0xfff))
+#define TW_LUN_OUT(lun) ((lun >> 12) & 0xf)
 
 /* Macros */
 #define TW_CONTROL_REG_ADDR(x) (x->base_addr)
 #define TW_STATUS_REG_ADDR(x) ((unsigned char *)x->base_addr + 0x4)
-#if BITS_PER_LONG > 32
-#define TW_COMMAND_QUEUE_REG_ADDR(x) ((unsigned char *)x->base_addr + 0x20)
-#else
-#define TW_COMMAND_QUEUE_REG_ADDR(x) ((unsigned char *)x->base_addr + 0x8)
-#endif
+#define TW_COMMAND_QUEUE_REG_ADDR(x) (sizeof(dma_addr_t) > 4 ? ((unsigned char *)x->base_addr + 0x20) : ((unsigned char *)x->base_addr + 0x8))
 #define TW_RESPONSE_QUEUE_REG_ADDR(x) ((unsigned char *)x->base_addr + 0xC)
 #define TW_CLEAR_ALL_INTERRUPTS(x) (writel(TW_STATUS_VALID_INTERRUPT, TW_CONTROL_REG_ADDR(x)))
 #define TW_CLEAR_ATTENTION_INTERRUPT(x) (writel(TW_CONTROL_CLEAR_ATTENTION_INTERRUPT, TW_CONTROL_REG_ADDR(x)))
@@ -466,26 +530,26 @@ printk(KERN_WARNING "3w-9xxx: scsi%d: ERROR: (0x%02X:0x%04X): %s.\n",h->host_no,
 else \
 printk(KERN_WARNING "3w-9xxx: ERROR: (0x%02X:0x%04X): %s.\n",a,b,c); \
 }
+#define TW_MAX_LUNS(srl) (srl < TW_FW_SRL_LUNS_SUPPORTED ? 1 : 16)
+#define TW_COMMAND_SIZE (sizeof(dma_addr_t) > 4 ? 5 : 4)
+#define TW_APACHE_MAX_SGL_LENGTH (sizeof(dma_addr_t) > 4 ? 72 : 109)
+#define TW_ESCALADE_MAX_SGL_LENGTH (sizeof(dma_addr_t) > 4 ? 41 : 62)
+#define TW_PADDING_LENGTH (sizeof(dma_addr_t) > 4 ? 8 : 0)
 
-/* This was taken from 2.5 kernel */
-#define twa_wait_event_interruptible_timeout(wq, condition, ret)         \
+/* This macro was taken from 2.6 kernel */
+#define twa_wait_event_timeout(wq, condition, ret)         		\
 do {                                                                    \
         wait_queue_t __wait;                                            \
         init_waitqueue_entry(&__wait, current);                         \
                                                                         \
         add_wait_queue(&wq, &__wait);                                   \
         for (;;) {                                                      \
-                set_current_state(TASK_INTERRUPTIBLE);                  \
+                set_current_state(TASK_UNINTERRUPTIBLE);                \
                 if (condition)                                          \
                         break;                                          \
-                if (!signal_pending(current)) {                         \
-                        ret = schedule_timeout(ret);                    \
-                        if (!ret)                                       \
-                                break;                                  \
-                        continue;                                       \
-                }                                                       \
-                ret = -ERESTARTSYS;                                     \
-                break;                                                  \
+                ret = schedule_timeout(ret);     	                \
+                if (!ret)       	                                \
+                        break;    	                                \
         }                                                               \
         current->state = TASK_RUNNING;                                  \
         remove_wait_queue(&wq, &__wait);                                \
@@ -495,7 +559,7 @@ do {                                                                    \
 
 /* Scatter Gather List Entry */
 typedef struct TAG_TW_SG_Entry {
-	unsigned long address;
+	dma_addr_t address;
 	u32 length;
 } TW_SG_Entry;
 
@@ -523,28 +587,15 @@ typedef struct TW_Command {
 		struct {
 			u32 lba;
 			TW_SG_Entry sgl[TW_ESCALADE_MAX_SGL_LENGTH];
-#if BITS_PER_LONG > 32
-			u32 padding[2];	/* pad to 512 bytes */
-#else
-			u32 padding;
-#endif
+			dma_addr_t padding;
 		} io;
 		struct {
 			TW_SG_Entry sgl[TW_ESCALADE_MAX_SGL_LENGTH];
-#if BITS_PER_LONG > 32
-			u32 padding[3];
-#else
-			u32 padding[2];
-#endif
+			u32 padding;
+			dma_addr_t padding2;
 		} param;
 	} byte8_offset;
 } TW_Command;
-
-/* Scatter gather element for 9000+ controllers */
-typedef struct TAG_TW_SG_Apache {
-	unsigned long address;
-	u32 length;
-} TW_SG_Apache;
 
 /* Command Packet for 9000+ controllers */
 typedef struct TAG_TW_Command_Apache {
@@ -553,15 +604,13 @@ typedef struct TAG_TW_Command_Apache {
 		unsigned char reserved:3;
 	} command;
 	unsigned char unit;
-	unsigned short request_id;
+	unsigned short request_id__lunl;
 	unsigned char status;
 	unsigned char sgl_offset;
-	unsigned short sgl_entries;
+	unsigned short sgl_entries__lunh;
 	unsigned char cdb[16];
-	TW_SG_Apache sg_list[TW_APACHE_MAX_SGL_LENGTH];
-#if BITS_PER_LONG > 32
-	unsigned char padding[8];
-#endif
+	TW_SG_Entry sg_list[TW_APACHE_MAX_SGL_LENGTH];
+	unsigned char padding[TW_PADDING_LENGTH];
 } TW_Command_Apache;
 
 /* New command packet header */
@@ -680,6 +729,12 @@ typedef struct TAG_TW_Compatibility_Info
 	unsigned short working_srl;
 	unsigned short working_branch;
 	unsigned short working_build;
+	unsigned short driver_srl_high;
+	unsigned short driver_branch_high;
+	unsigned short driver_build_high;
+	unsigned short driver_srl_low;
+	unsigned short driver_branch_low;
+	unsigned short driver_build_low;
 } TW_Compatibility_Info;
 
 /* Command header for ATA pass-thru */
@@ -712,9 +767,9 @@ typedef struct TAG_TW_Passthru
 typedef struct TAG_TW_Device_Extension {
 	u32                     *base_addr;
 	unsigned long	       	*generic_buffer_virt[TW_Q_LENGTH];
-	unsigned long	       	generic_buffer_phys[TW_Q_LENGTH];
+	dma_addr_t	       	generic_buffer_phys[TW_Q_LENGTH];
 	unsigned long	       	*command_packet_virt[TW_Q_LENGTH];
-	unsigned long		command_packet_phys[TW_Q_LENGTH];
+	dma_addr_t		command_packet_phys[TW_Q_LENGTH];
 	struct pci_dev		*tw_pci_dev;
 	Scsi_Cmnd		*srb[TW_Q_LENGTH];
 	unsigned char		free_queue[TW_Q_LENGTH];
@@ -730,13 +785,11 @@ typedef struct TAG_TW_Device_Extension {
 	unsigned int		max_pending_request_count;
 	unsigned int		max_sgl_entries;
 	unsigned int		sgl_entries;
-	unsigned int		num_aborts;
 	unsigned int		num_resets;
 	unsigned int		sector_count;
 	unsigned int		max_sector_count;
 	unsigned int		aen_count;
 	struct Scsi_Host	*host;
-	spinlock_t		tw_lock;
 	long			flags;
 	int			reset_print;
 	char                    online;
@@ -775,13 +828,11 @@ static void twa_copy_mem_info(TW_Info *info, char *data, int len);
 static int twa_decode_bits(TW_Device_Extension *tw_dev, u32 status_reg_value);
 static int twa_empty_response_queue(TW_Device_Extension *tw_dev);
 static int twa_fill_sense(TW_Device_Extension *tw_dev, int request_id, int copy_sense, int print_host);
-static int twa_flash_fw(TW_Device_Extension *tw_dev);
 static void twa_free_device_extension(TW_Device_Extension *tw_dev);
 static void twa_free_request_id(TW_Device_Extension *tw_dev,int request_id);
 static void *twa_get_param(TW_Device_Extension *tw_dev, int request_id, int table_id, int parameter_id, int parameter_size_bytes);
 static void twa_get_request_id(TW_Device_Extension *tw_dev, int *request_id);
 static int twa_halt(struct notifier_block *nb, ulong event, void *buf);
-static int twa_hard_reset(TW_Device_Extension *tw_dev);
 static int twa_initconnection(TW_Device_Extension *tw_dev, int message_credits,
  			      u32 set_features, unsigned short current_fw_srl, 
 			      unsigned short current_fw_arch_id, 
@@ -801,16 +852,15 @@ static int twa_poll_response(TW_Device_Extension *tw_dev, int request_id, int se
 static int twa_poll_status(TW_Device_Extension *tw_dev, u32 flag, int seconds);
 static int twa_poll_status_gone(TW_Device_Extension *tw_dev, u32 flag, int seconds);
 static int twa_post_command_packet(TW_Device_Extension *tw_dev, int request_id);
-static int twa_reset_device_extension(TW_Device_Extension *tw_dev);
+static int twa_reset_device_extension(TW_Device_Extension *tw_dev, int ioctl_reset);
 static int twa_reset_sequence(TW_Device_Extension *tw_dev, int soft_reset);
 static int twa_scsi_biosparam(Disk *disk, kdev_t dev, int geom[]);
 static int twa_scsi_detect(Scsi_Host_Template *tw_host);
-static int twa_scsi_eh_abort(Scsi_Cmnd *SCpnt);
 static int twa_scsi_eh_reset(Scsi_Cmnd *SCpnt);
 static int twa_scsi_proc_info(char *buffer, char **start, off_t offset, int length, int inode, int inout);
 static int twa_scsi_queue(Scsi_Cmnd *cmd, void (*done) (Scsi_Cmnd *));
 static int twa_scsi_release(struct Scsi_Host *tw_host);
-static int twa_scsiop_execute_scsi(TW_Device_Extension *tw_dev, int request_id, char *cdb, int use_sg, TW_SG_Apache *sglistarg);
+static int twa_scsiop_execute_scsi(TW_Device_Extension *tw_dev, int request_id, char *cdb, int use_sg, TW_SG_Entry *sglistarg);
 static void twa_scsiop_execute_scsi_complete(TW_Device_Extension *tw_dev, int request_id);
 static void twa_select_queue_depths(struct Scsi_Host *host, Scsi_Device *dev);
 static int twa_setup_irq(TW_Device_Extension *tw_dev);
@@ -832,7 +882,7 @@ static void twa_unmap_scsi_data(TW_Device_Extension *tw_dev, int request_id);
 	command : NULL,					\
 	queuecommand : twa_scsi_queue,			\
 	eh_strategy_handler : NULL,			\
-	eh_abort_handler : twa_scsi_eh_abort,		\
+	eh_abort_handler : NULL,			\
 	eh_device_reset_handler : NULL,			\
 	eh_bus_reset_handler : NULL,			\
 	eh_host_reset_handler : twa_scsi_eh_reset,	\
@@ -849,6 +899,7 @@ static void twa_unmap_scsi_data(TW_Device_Extension *tw_dev, int request_id);
 	use_clustering : ENABLE_CLUSTERING,		\
  	use_new_eh_code : 1,				\
 	emulated : 1,					\
-	highmem_io : 1					\
+	highmem_io : 1,					\
+	vary_io : 1					\
 }
 #endif /* _3W_9XXX_H */

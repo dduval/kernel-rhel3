@@ -39,6 +39,55 @@ unsigned long __wall_jiffies __section_wall_jiffies;
 struct timeval __xtime __section_xtime;
 struct timezone __sys_tz __section_sys_tz;
 
+#ifdef CONFIG_ACPI_PMTMR
+
+unsigned int	acpi_pmtmr_port = 0;
+unsigned char	acpi_pmtmr_len = 0;
+int		use_pmtmr = 0;
+
+#define ACPI_PM_MASK 0xffffff	/* 24 bits */
+
+/* Number of PMTMR ticks expected during calibration run */
+#define PMTMR_TICKS_PER_SEC 3579545
+#define PMTMR_TICK (PMTMR_TICKS_PER_SEC/HZ)
+#define PMTMR_EXPECTED_RATE \
+  (((5*LATCH) * (PMTMR_TICKS_PER_SEC >> 10)) / (CLOCK_TICK_RATE>>10))
+
+
+static inline u32 read_pmtmr(void)
+{
+	u32 v1=0,v2=0,v3=0;
+        /* It has been reported that because of various broken
+	 * chipsets (ICH4, PIIX4 and PIIX4E) where the ACPI PM time
+	 * source is not latched, so you must read it multiple
+	 * times to insure a safe value is read.
+	 */
+	do {
+		v1 = inl(acpi_pmtmr_port);
+		v2 = inl(acpi_pmtmr_port);
+		v3 = inl(acpi_pmtmr_port);
+	} while ((v1 > v2 && v1 < v3) || (v2 > v3 && v2 < v1)
+			|| (v3 > v1 && v3 < v2));
+
+	/* mask the output to 24 bits */
+	return v2 & ACPI_PM_MASK;
+}
+
+/* The Power Management Timer ticks at 3.579545 ticks per microsecond.
+ * 1 / PM_TIMER_FREQUENCY == 0.27936511 =~ 286/1024 [error: 0.024%]
+ *
+ * Even with HZ = 100, delta is at maximum 35796 ticks, so it can
+ * easily be multiplied with 286 (=0x11E) without having to fear
+ * u32 overflows.
+ */
+static inline u32 pm_cyc2us(u32 cycles)
+{
+	cycles *= 286;
+	return (cycles >> 10);
+}
+
+#endif
+
 static inline void rdtscll_sync(unsigned long *tsc)
 {
 	sync_core();
@@ -62,6 +111,12 @@ static unsigned int do_gettimeoffset_hpet(void)
 	return ((hpet_readl(HPET_COUNTER) - vxtime.last) * vxtime.quot) >> 32;
 }
 
+#ifdef CONFIG_ACPI_PMTMR
+static unsigned int do_gettimeoffset_pmtmr(void)
+{
+	return pm_cyc2us((read_pmtmr() - vxtime.last_pmtmr) & ACPI_PM_MASK);
+}
+#endif
 static unsigned int do_gettimeoffset_nop(void)
 {
 	return 0;
@@ -241,6 +296,28 @@ static void timer_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 
 			vxtime.last = offset;
 
+#ifdef CONFIG_ACPI_PMTMR
+		} else if (vxtime.mode == VXTIME_PMTMR) {
+
+			u32 pmtmr;
+
+			pmtmr = read_pmtmr();
+			offset = ((pmtmr - vxtime.last_pmtmr) & ACPI_PM_MASK) - PMTMR_TICK;
+			if (offset > PMTMR_TICK) {
+				if (report_lost_ticks)
+					printk(KERN_WARNING "time.c: lost %ld tick(s) (rip %016lx)\n",
+						 offset / PMTMR_TICK, regs->rip);
+				jiffies += offset / PMTMR_TICK;
+				offset %= PMTMR_TICK;
+			}
+
+			if (offset < PMTMR_TICK)
+				vxtime.last_pmtmr = (pmtmr - offset) & ACPI_PM_MASK;
+			else
+				vxtime.last_pmtmr = pmtmr;
+
+			vxtime.last_tsc = tsc - vxtime.quot * delay / vxtime.tsc_quot; 
+#endif
 		} else {
 
 			offset = (((tsc - vxtime.last_tsc) * vxtime.tsc_quot) >> 32) - tick;
@@ -405,6 +482,74 @@ static unsigned int __init pit_calibrate_tsc(void)
 	return (end - start) / 50;
 }
 
+#ifdef CONFIG_ACPI_PMTMR
+/*
+ * Some boards have the PMTMR running way too fast.  We check
+ * the PMTMR rate against PIT channel 2 to catch these cases.
+ */
+static int verify_pmtmr_rate(void)
+{
+	u32 value1, value2;
+	unsigned long count = 0, delta;
+
+	/* prepare the counter */
+	outb((inb(0x61) & ~0x02) | 0x01, 0x61);
+
+	/* take care of CTC channel 2 */
+	outb(0xb0, 0x43);	/* binary, mode 0, LSB/MSB, ch 2 */
+	outb_p((5*LATCH) & 0xff, 0x42);	/* LSB of count */
+	outb_p((5*LATCH) >> 8, 0x42);	/* MSB of count */
+
+	value1 = read_pmtmr();
+
+	do {
+		count++;
+	} while ((inb_p(0x61) & 0x20) == 0);
+
+	value2 = read_pmtmr();
+	delta = (value2 - value1) & ACPI_PM_MASK;
+
+	/* Check that the PMTMR delta is within 5% of what we expect */
+	if (delta < (PMTMR_EXPECTED_RATE * 19) / 20 ||
+	    delta > (PMTMR_EXPECTED_RATE * 21) / 20) {
+		printk(KERN_INFO "PM-Timer running at invalid rate: %lu%% of normal - aborting.\n", 100UL * delta / PMTMR_EXPECTED_RATE);
+		return -1;
+	}
+	return 0;
+}
+
+static int pmtmr_init(void)
+{
+	u32 value1, value2;
+	int i;
+
+	/* make sure it's here and it's working */
+	if (!acpi_pmtmr_port)
+		return -ENODEV;
+
+	value1 = read_pmtmr();
+	for (i = 0; i < 10000; i++) {
+		value2 = read_pmtmr();
+		if (value2 == value1)
+			continue;
+		if (value2 > value1)
+			goto pm_good;
+		if ((value2 < value1) && (value2 < 0xfff))
+			goto pm_good;
+		printk(KERN_INFO "PM-Timer had inconsistent results: 0x%#x, 0x%#x- aborting.\n", value1, value2);
+		return -EINVAL;
+	}
+	printk(KERN_INFO "PM-Timer had no reasonable result: 0x%#x - aborting\n", value1);
+	return -ENODEV;
+
+pm_good:
+	if (verify_pmtmr_rate() != 0)
+		return -ENODEV;
+
+	return 0;
+}
+#endif
+
 static int hpet_init(void)
 {
 	unsigned int cfg, id;
@@ -493,6 +638,7 @@ static struct irqaction irq0 = { timer_interrupt, SA_INTERRUPT, 0, "timer", NULL
 void __init time_init(void)
 {
 	char *timename;
+	unsigned long timer_hz;
 
 #ifdef HPET_HACK_ENABLE_DANGEROUS
         if (!hpet_address) {
@@ -515,10 +661,19 @@ void __init time_init(void)
 	br_write_unlock(BR_XTIME_LOCK);
 
 	if (!hpet_init()) {
-                vxtime_hz = (1000000000000000L + hpet_period / 2) / hpet_period;
+                timer_hz = vxtime_hz = (1000000000000000L + hpet_period / 2) / hpet_period;
                 cpu_khz = hpet_calibrate_tsc();
 		timename = "HPET";
+#ifdef CONFIG_ACPI_PMTMR
+	} else if (acpi_pmtmr_port && !pmtmr_init()) {
+		timer_hz = PMTMR_TICKS_PER_SEC;
+		vxtime.last_pmtmr = read_pmtmr();
+		pit_init();
+		cpu_khz = pit_calibrate_tsc();
+		timename = "PMTMR";
+#endif
 	} else {
+		timer_hz = vxtime_hz;
 		pit_init();
 		cpu_khz = pit_calibrate_tsc();
 		timename = "PIT";
@@ -532,7 +687,7 @@ void __init time_init(void)
 	setup_irq(0, &irq0);
 
         printk(KERN_INFO "time.c: Detected %ld.%06ld MHz %s timer.\n",
-		vxtime_hz / 1000000, vxtime_hz % 1000000, timename);
+		timer_hz / 1000000, timer_hz % 1000000, timename);
 	printk(KERN_INFO "time.c: Detected %d.%03d MHz TSC timer.\n",
 			cpu_khz / 1000, cpu_khz % 1000);
 }
@@ -552,6 +707,13 @@ void __init time_init_smp(void)
 			vxtime.mode = VXTIME_TSC;
 			do_gettimeoffset = do_gettimeoffset_tsc;
 		}		
+#ifdef CONFIG_ACPI_PMTMR
+	} else if (acpi_pmtmr_port) {
+		timetype = "PMTMR";
+		vxtime.last_pmtmr = read_pmtmr();
+		vxtime.mode = VXTIME_PMTMR;
+		do_gettimeoffset = do_gettimeoffset_pmtmr;
+#endif
 	} else {
 		if (notsc) {
 			timetype = "PIT";

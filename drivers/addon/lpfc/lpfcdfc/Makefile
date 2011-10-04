@@ -13,4 +13,7 @@ obj-y:= lpfc_cdev.o		\
 	lpfc_debug_ioctl.o	\
 	lpfc_logmsg.o
 
+lpfc_logmsg.c:
+	ln -sf ../lpfc_logmsg.c lpfc_logmsg.c
+
 include $(TOPDIR)/Rules.make

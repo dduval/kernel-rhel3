@@ -769,6 +769,7 @@ int neigh_update(struct neighbour *neigh, const u8 *lladdr, u8 new, int override
 	int err;
 	int notify = 0;
 	struct net_device *dev = neigh->dev;
+	int update_isrouter = 0;
 
 	write_lock_bh(&neigh->lock);
 	old = neigh->nud_state;
@@ -797,12 +798,9 @@ int neigh_update(struct neighbour *neigh, const u8 *lladdr, u8 new, int override
 		   - compare new & old
 		   - if they are different, check override flag
 		 */
-		if (old&NUD_VALID) {
-			if (memcmp(lladdr, neigh->ha, dev->addr_len) == 0)
-				lladdr = neigh->ha;
-			else if (!override)
-				goto out;
-		}
+	        if ((old & NUD_VALID) &&
+		  !memcmp(lladdr, neigh->ha, dev->addr_len))
+		      lladdr = neigh->ha;
 	} else {
 		/* No address is supplied; if we know something,
 		   use it, otherwise discard the request.
@@ -823,10 +821,21 @@ int neigh_update(struct neighbour *neigh, const u8 *lladdr, u8 new, int override
 	   do not change entry state, if new one is STALE.
 	 */
 	err = 0;
-	if (old&NUD_VALID) {
-		if (lladdr == neigh->ha)
-			if (new == old || (new == NUD_STALE && (old&NUD_CONNECTED)))
-				goto out;
+	update_isrouter = override & NEIGH_UPDATE_F_OVERRIDE_ISROUTER;
+	if (old & NUD_VALID) {
+	        if (lladdr != neigh->ha && !(override & NEIGH_UPDATE_F_OVERRIDE)) {
+		      update_isrouter = 0;
+		      if ((override & NEIGH_UPDATE_F_WEAK_OVERRIDE) &&
+			(old & NUD_CONNECTED)) {
+			    lladdr = neigh->ha;
+			    new = NUD_STALE;
+		      } else
+			    goto out;
+	        } else {
+		      if (lladdr == neigh->ha &&
+			new == NUD_STALE && (old & NUD_CONNECTED))
+			    new = old;
+	        }
 	}
 	neigh_del_timer(neigh);
 	neigh->nud_state = new;
@@ -863,6 +872,11 @@ int neigh_update(struct neighbour *neigh, const u8 *lladdr, u8 new, int override
 		skb_queue_purge(&neigh->arp_queue);
 	}
 out:
+	if (update_isrouter) {
+	        neigh->flags = (override & NEIGH_UPDATE_F_ISROUTER) ?
+		      (neigh->flags | NTF_ROUTER) :
+		      (neigh->flags & ~NTF_ROUTER);
+	}
 	write_unlock_bh(&neigh->lock);
 #ifdef CONFIG_ARPD
 	if (notify && neigh->parms->app_probes)

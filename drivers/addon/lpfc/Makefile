@@ -4,7 +4,7 @@
 #
 
 O_TARGET := lpfc.o
-EXTRA_CFLAGS += -I$(TOPDIR)/drivers/scsi
+EXTRA_CFLAGS += -I$(TOPDIR)/drivers/scsi -DVARYIO=3 -DUSE_HIGHMEM_IO=3
 obj-m:= $(O_TARGET)
 
 obj-y:= lpfc_clock.o 		\

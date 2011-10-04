@@ -319,6 +319,8 @@ static struct pci_device_id i810_pci_tbl [] = {
 	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, INTELICH4},
 	{PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_ICH7_20,
 	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, INTELICH4},
+	{PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_ESB2_14,
+	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, INTELICH4},
 
 	{0,}
 };
@@ -2896,6 +2898,7 @@ static int is_new_ich(u16 pci_id)
 	case PCI_DEVICE_ID_INTEL_ESB_5:
 	case PCI_DEVICE_ID_INTEL_ICH6_18:
 	case PCI_DEVICE_ID_INTEL_ICH7_20:
+	case PCI_DEVICE_ID_INTEL_ESB2_14:
 		return 1;
 	default:
 		break;

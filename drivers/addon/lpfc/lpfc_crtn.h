@@ -1,9 +1,9 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
- * Enterprise Fibre Channel Host Bus Adapters.                     *
+ * Fibre Channel Host Bus Adapters.                                *
  * Refer to the README file included with this package for         *
  * driver version and adapter support.                             *
- * Copyright (C) 2004 Emulex Corporation.                          *
+ * Copyright (C) 2003-2005 Emulex.  All rights reserved.           *
  * www.emulex.com                                                  *
  *                                                                 *
  * This program is free software; you can redistribute it and/or   *
@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_crtn.h 1.2 2004/11/02 13:25:13EST sf_support Exp  $
+ * $Id: lpfc_crtn.h 1.4 2005/05/03 11:21:23EDT sf_support Exp  $
  */
 
 #ifndef _H_LPFC_CRTN
@@ -38,7 +38,7 @@
 
 int lpfc_proc_info(char *, char **, off_t , int , int , int);
 
-void lpfc_dump_mem(lpfcHBA_t *, LPFC_MBOXQ_t *);
+void lpfc_dump_mem(lpfcHBA_t *, LPFC_MBOXQ_t *, uint16_t);
 void lpfc_read_nv(lpfcHBA_t *, LPFC_MBOXQ_t *);
 int lpfc_read_la(lpfcHBA_t *, LPFC_MBOXQ_t *);
 void lpfc_clear_la(lpfcHBA_t *, LPFC_MBOXQ_t *);

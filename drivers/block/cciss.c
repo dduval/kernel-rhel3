@@ -1,6 +1,6 @@
 /*
  *    Disk Array driver for HP SA 5xxx and 6xxx Controllers
- *    Copyright 2000, 2002 Hewlett-Packard Development Company, L.P. 
+ *    Copyright 2000, 2005 Hewlett-Packard Development Company, L.P. 
  *
  *    This program is free software; you can redistribute it and/or modify
  *    it under the terms of the GNU General Public License as published by
@@ -41,20 +41,23 @@
 #include <asm/uaccess.h>
 #include <asm/io.h>
 #include <linux/smp_lock.h>
-
 #include <linux/blk.h>
 #include <linux/blkdev.h>
 #include <linux/genhd.h>
+#if (CONFIG_BLOCKDUMP || CONFIG_BLOCKDUMP_MODULE)
+#include "block_dump.h" 
+#endif
+
 
 #define CCISS_DRIVER_VERSION(maj,min,submin) ((maj<<16)|(min<<8)|(submin))
-#define DRIVER_NAME "HP CISS Driver (v 2.4.54.RH1)"
-#define DRIVER_VERSION CCISS_DRIVER_VERSION(2,4,54)
+#define DRIVER_NAME "HP CISS Driver (v 2.4.58.RH1)"
+#define DRIVER_VERSION CCISS_DRIVER_VERSION(2,4,58)
 
 /* Embedded module documentation macros - see modules.h */
 MODULE_AUTHOR("Hewlett-Packard Company");
-MODULE_DESCRIPTION("Driver for HP SA5xxx SA6xxx Controllers version 2.4.54.RH1");
+MODULE_DESCRIPTION("Driver for HP SA5xxx SA6xxx Controllers version 2.4.58.RH1");
 MODULE_SUPPORTED_DEVICE("HP SA5i SA5i+ SA532 SA5300 SA5312 SA641 SA642 SA6400"
-		" SA6i P600"); 
+		" SA6i P600 P800 P400 E200 E200i"); 
 MODULE_LICENSE("GPL");
 
 #include "cciss_cmd.h"
@@ -83,6 +86,22 @@ const struct pci_device_id cciss_pci_device_id[] = {
                         0x0E11, 0x4091, 0, 0, 0},
 	{ PCI_VENDOR_ID_HP, PCI_DEVICE_ID_HP_CISSA,
                         0x103C, 0x3225, 0, 0, 0},
+	{ PCI_VENDOR_ID_HP, PCI_DEVICE_ID_HP_CISSC,
+                        0x103C, 0x3223, 0, 0, 0},
+	{ PCI_VENDOR_ID_HP, PCI_DEVICE_ID_HP_CISSC,
+                        0x103C, 0x3234, 0, 0, 0},
+	{ PCI_VENDOR_ID_HP, PCI_DEVICE_ID_HP_CISSC,
+                        0x103C, 0x3235, 0, 0, 0},
+	{ PCI_VENDOR_ID_HP, PCI_DEVICE_ID_HP_CISSD,
+			0x103C, 0x3211, 0, 0, 0},
+	{ PCI_VENDOR_ID_HP, PCI_DEVICE_ID_HP_CISSD,
+			0x103C, 0x3212, 0, 0, 0},
+	{ PCI_VENDOR_ID_HP, PCI_DEVICE_ID_HP_CISSD,
+			0x103C, 0x3213, 0, 0, 0},
+	{ PCI_VENDOR_ID_HP, PCI_DEVICE_ID_HP_CISSD,
+			0x103C, 0x3214, 0, 0, 0},
+	{ PCI_VENDOR_ID_HP, PCI_DEVICE_ID_HP_CISSD,
+			0x103C, 0x3215, 0, 0, 0},
 	{0,}
 };
 MODULE_DEVICE_TABLE(pci, cciss_pci_device_id);
@@ -104,6 +123,14 @@ static struct board_type products[] = {
 	{ 0x409D0E11, "Smart Array 6400 EM", &SA5_access},
 	{ 0x40910E11, "Smart Array 6i", &SA5_access},
 	{ 0x3225103C, "Smart Array P600", &SA5_access},
+	{ 0x3223103C, "Smart Array P800", &SA5_access},
+	{ 0x3234103C, "Smart Array E400", &SA5_access},
+	{ 0x3235103C, "Smart Array E400i", &SA5_access},
+	{ 0x3211103C, "Smart Array E200i", &SA5_access},
+	{ 0x3212103C, "Smart Array E200", &SA5_access},
+	{ 0x3213103C, "Smart Array E200i", &SA5_access},
+	{ 0x3214103C, "Smart Array E200i", &SA5_access},
+	{ 0x3215103C, "Smart Array E200i", &SA5_access},
 };
 
 /* How long to wait (in millesconds) for board to go into simple mode */
@@ -162,15 +189,38 @@ static int cciss_proc_get_info(char *buffer, char **start, off_t offset,
 static void cciss_procinit(int i) {}
 #endif /* CONFIG_PROC_FS */
 
-static struct block_device_operations cciss_fops  = {
-	owner:			THIS_MODULE,
-	open:			cciss_open, 
-	release:        	cciss_release,
-        ioctl:			cciss_ioctl,
-	revalidate:		frevalidate_logvol,
-};
+#include "cciss_diskdump.c"
 
 #include "cciss_scsi.c"		/* For SCSI tape support */
+
+
+#if (CONFIG_BLOCKDUMP || CONFIG_BLOCKDUMP_MODULE)
+block_device_operations_dump cciss_blk_fops_dump = {
+	.blk_fops 	  = {
+		.owner      = THIS_MODULE,
+		.open       = cciss_open,
+		.release    = cciss_release,
+		.ioctl      = cciss_ioctl,
+		.revalidate = frevalidate_logvol,
+	},	
+	.block_dump_ops   = &cciss_dump_device_ops,
+	.block_probe 	  = cciss_probe,
+	.block_add_device = cciss_add_device,
+	.poll		  = diskdump_pollcomplete,	
+
+};
+
+#define cciss_fops cciss_blk_fops_dump.blk_fops
+#else
+struct block_device_operations cciss_fops = {	
+	.owner      = THIS_MODULE,
+	.open       = cciss_open,
+	.release    = cciss_release,
+	.ioctl      = cciss_ioctl,
+	.revalidate = frevalidate_logvol,
+};
+
+#endif
 
 #define ENG_GIG	1048576000
 #define ENG_GIG_FACTOR (ENG_GIG/512)
@@ -281,6 +331,7 @@ cciss_proc_write(struct file *file, const char *buffer,
 		/* might be nice to have "disengage" too, but it's not
 		   safely possible. (only 1 module use count, lock issues.) */
 #	endif
+
 	if (START_MONITOR_THREAD(h, cmd, count, cciss_monitor, &rc) == 0)
 		return rc;
 	return -EINVAL;
@@ -702,6 +753,11 @@ static int cciss_ioctl(struct inode *inode, struct file *filep,
 	case BLKPG:
 	case BLKELVGET:
 	case BLKELVSET:
+#if defined(CONFIG_IA64)
+	/* we need this for IPF installs */
+	case BLKGETLASTSECT:
+	case BLKSETLASTSECT:
+#endif
 		return blk_ioctl(inode->i_rdev, cmd, arg);
 	case CCISS_GETPCIINFO:
 	{
@@ -1918,20 +1974,53 @@ static int sendcmd(
 				      2: periph device address is scsi3addr */
 	unsigned int log_unit,
 	__u8	page_code,
-	unsigned char *scsi3addr)
+	unsigned char *scsi3addr,
+	int block_nr,
+	int diskdump)		/* 0: this is not a diskdump command
+				   1: this is a diskdump command */
+				   
 {
 	CommandList_struct *c;
+	ErrorInfo_struct *err_ptr;
+	dma_addr_t tmp_cmd_dma_handle;
+	u64bit tmp_err_dma_handle;
 	int i;
 	unsigned long complete;
 	ctlr_info_t *info_p= hba[ctlr];
 	u64bit buff_dma_handle;
 	int status = IO_OK;
+	u64bit temp64;
+	int temp;
+	int nr_blocks;
 
+	/* For diskdump we will do a read and write in this routine.  
+	   Because the kernel is not in a stable state we will use the
+	   pre-allocated command reserved for diskdump */
+	if ( diskdump == 1 ) {
+		c = cciss_dump_cmnd;
+		err_ptr = c->err_info;
+		tmp_cmd_dma_handle = (__u32) c->busaddr;
+		tmp_err_dma_handle.val32.lower = c->ErrDesc.Addr.lower;
+		tmp_err_dma_handle.val32.upper = c->ErrDesc.Addr.upper;
+		
+		memset(c, 0, sizeof(CommandList_struct));
+		c->err_info = err_ptr;
+		memset(c->err_info, 0, sizeof(ErrorInfo_struct));
+
+		c->busaddr = (__u32) tmp_cmd_dma_handle;
+		c->ErrDesc.Addr.lower = tmp_err_dma_handle.val32.lower;
+		c->ErrDesc.Addr.upper = tmp_err_dma_handle.val32.upper;
+		c->ErrDesc.Len = sizeof(ErrorInfo_struct);
+		c->ctlr = ctlr;
+	}
+	else
 	c = cmd_alloc(info_p, 1);
+
 	if (c == NULL) {
 		printk(KERN_WARNING "cciss: unable to get memory");
 		return IO_ERROR;
 	}
+
 	/* Fill in Command Header */
 	c->Header.ReplyQueue = 0;  /* unused in simple mode */
 	if (buff != NULL) { 	/* buffer to fill */
@@ -2017,6 +2106,54 @@ static int sendcmd(
 			c->Request.CDB[0] = BMIC_WRITE;  /* BMIC Passthru */
 			c->Request.CDB[6] = BMIC_CACHE_FLUSH;
 		break;
+		case CCISS_READ:
+			if (use_unit_num == 1) {
+				c->Header.LUN.LogDev.VolId =
+					hba[ctlr]->drv[log_unit].LunID;
+				c->Header.LUN.LogDev.Mode = 1;
+			}
+			c->ctlr = ctlr;
+			c->cmd_type = CMD_RWREQ;
+			c->Request.CDBLen = 10;
+			c->Request.Type.Type = TYPE_CMD;
+			c->Request.Type.Attribute = ATTR_SIMPLE;
+			c->Request.Type.Direction = XFER_READ;
+			c->Request.Timeout = 0;
+			c->Request.CDB[0] = CCISS_READ;
+			c->Request.CDB[2] = (block_nr >> 24) & 0xff;
+			c->Request.CDB[3] = (block_nr >> 16) & 0xff;
+			c->Request.CDB[4] = (block_nr >> 8) & 0xff;
+			c->Request.CDB[5] = block_nr & 0xff;
+			c->Request.CDB[6] = 0;
+			nr_blocks = size/hba[ctlr]->drv[log_unit].block_size;
+			c->Request.CDB[7] = (nr_blocks >> 8) & 0xff;
+			c->Request.CDB[8] = nr_blocks & 0xff;
+			c->Request.CDB[9] = 0;
+		break;
+		case CCISS_WRITE:
+			if (use_unit_num == 1) {
+				c->Header.LUN.LogDev.VolId =
+					hba[ctlr]->drv[log_unit].LunID;
+				c->Header.LUN.LogDev.Mode = 1;
+			}
+			c->ctlr = ctlr;
+			c->cmd_type = CMD_RWREQ;
+			c->Request.CDBLen = 10;
+			c->Request.Type.Type = TYPE_CMD;
+			c->Request.Type.Attribute = ATTR_SIMPLE;
+			c->Request.Type.Direction = XFER_WRITE;
+			c->Request.Timeout = 0;
+			c->Request.CDB[0] = CCISS_WRITE;
+			c->Request.CDB[2] = (block_nr >> 24) & 0xff;
+			c->Request.CDB[3] = (block_nr >> 16) & 0xff;
+			c->Request.CDB[4] = (block_nr >> 8) & 0xff;
+			c->Request.CDB[5] = block_nr & 0xff;
+			c->Request.CDB[6] = 0;
+			nr_blocks = size/hba[ctlr]->drv[log_unit].block_size;
+			c->Request.CDB[7] = (nr_blocks >> 8) & 0xff;
+			c->Request.CDB[8] = nr_blocks & 0xff;
+			c->Request.CDB[9] = 0;
+		break;
 		default:
 			printk(KERN_WARNING
 				"cciss:  Unknown Command 0x%x sent attempted\n",
@@ -2058,6 +2195,11 @@ resend_cmd1:
          * Send the cmd
          */
         info_p->access.submit_command(info_p, c);
+
+	if ( diskdump == 1 ){
+	        complete = diskdump_pollcomplete(ctlr);
+	}
+	else
         complete = pollcomplete(ctlr);
 
 #ifdef CCISS_DEBUG
@@ -2133,7 +2275,10 @@ cleanup1:
 	/* unlock the data buffer from DMA */
 	pci_unmap_single(info_p->pdev, (dma_addr_t) buff_dma_handle.val,
                                 size, PCI_DMA_BIDIRECTIONAL);
+
+	if ( diskdump != 1 )
 	cmd_free(info_p, c, 1);
+
         return status;
 } 
 /*
@@ -2913,7 +3058,7 @@ static void cciss_getgeometry(int cntl_num)
         }
 	/* Get the firmware version */ 
 	return_code = sendcmd(CISS_INQUIRY, cntl_num, inq_buff, 
-		sizeof(InquiryData_struct), 0, 0 ,0, NULL);
+		sizeof(InquiryData_struct), 0, 0 ,0, NULL, 0, 0);
 	if (return_code == IO_OK) {
 		hba[cntl_num]->firm_ver[0] = inq_buff->data_byte[32];
 		hba[cntl_num]->firm_ver[1] = inq_buff->data_byte[33];
@@ -2925,7 +3070,7 @@ static void cciss_getgeometry(int cntl_num)
 	}
 	/* Get the number of logical volumes */ 
 	return_code = sendcmd(CISS_REPORT_LOG, cntl_num, ld_buff, 
-			sizeof(ReportLunData_struct), 0, 0, 0, NULL);
+			sizeof(ReportLunData_struct), 0, 0, 0, NULL, 0, 0);
 
 	if (return_code == IO_OK) {
 #ifdef CCISS_DEBUG
@@ -2966,7 +3111,7 @@ static void cciss_getgeometry(int cntl_num)
 
 	  	memset(size_buff, 0, sizeof(ReadCapdata_struct));
 	  	return_code = sendcmd(CCISS_READ_CAPACITY, cntl_num, size_buff, 
-				sizeof( ReadCapdata_struct), 1, i, 0, NULL);
+				sizeof( ReadCapdata_struct), 1, i, 0, NULL, 0, 0);
 	  	if (return_code == IO_OK) {
 			total_size = (0xff & 
 				(unsigned int)(size_buff->total_size[0])) << 24;
@@ -2997,7 +3142,7 @@ static void cciss_getgeometry(int cntl_num)
 		/* Execute the command to read the disk geometry */
 		memset(inq_buff, 0, sizeof(InquiryData_struct));
 		return_code = sendcmd(CISS_INQUIRY, cntl_num, inq_buff,
-			sizeof(InquiryData_struct), 1, i, 0xC1, NULL );
+			sizeof(InquiryData_struct), 1, i, 0xC1, NULL, 0, 0);
 	  	if (return_code == IO_OK) {
 			if (inq_buff->data_byte[8] == 0xFF) {
 			   printk(KERN_WARNING "cciss: reading geometry failed, volume does not support reading geometry\n");
@@ -3433,7 +3578,7 @@ static void __devexit cciss_remove_one (struct pci_dev *pdev)
 		/* write all data in the battery backed cache to disks */
  	memset(flush_buf, 0, 4);
 		return_code = sendcmd(CCISS_CACHE_FLUSH, i, flush_buf,
-					4, 0, 0, 0, NULL);
+					4, 0, 0, 0, NULL, 0, 0);
 		if (return_code != IO_OK)
  		printk(KERN_WARNING 
 				"cciss%d: Error flushing cache\n", i);
@@ -3487,6 +3632,7 @@ int __init cciss_init(void)
 EXPORT_NO_SYMBOLS;
 static int __init init_cciss_module(void)
 {
+
 	register_cciss_ioctl32();
 	return cciss_init();
 }

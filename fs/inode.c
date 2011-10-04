@@ -296,7 +296,7 @@ static inline void __refile_inode(struct inode *inode)
 {
 	struct list_head *to;
 	
-	if (inode->i_state & I_FREEING)
+	if (inode->i_state & (I_FREEING|I_CLEAR))
 		return;
 	if (list_empty(&inode->i_hash))
 		return;
@@ -564,6 +564,7 @@ void write_inode_now(struct inode *inode, int sync)
 int generic_osync_inode(struct inode *inode, int what)
 {
 	int err = 0, err2 = 0, need_write_inode_now = 0;
+	struct address_space *mapping;
 	
 	/* 
 	 * WARNING
@@ -604,6 +605,13 @@ int generic_osync_inode(struct inode *inode, int what)
 	else
 		wait_on_inode(inode);
 
+	mapping = inode->i_mapping;
+	if (mapping) {
+		err2 = mapping_get_error(mapping);
+		if (!err)
+			err = err2;
+	}
+	
 	return err;
 }
 
@@ -636,7 +644,9 @@ void clear_inode(struct inode *inode)
 		cdput(inode->i_cdev);
 		inode->i_cdev = NULL;
 	}
+	spin_lock(&inode_lock);
 	inode->i_state = I_CLEAR;
+	spin_unlock(&inode_lock);
 }
 
 /*

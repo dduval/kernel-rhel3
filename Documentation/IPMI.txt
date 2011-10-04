@@ -22,6 +22,58 @@ are not familiar with IPMI itself, see the web site at
 http://www.intel.com/design/servers/ipmi/index.htm.  IPMI is a big
 subject and I can't cover it all here!
 
+Configuration
+-------------
+
+The LinuxIPMI driver is modular, which means you have to pick several
+things to have it work right depending on your hardware.  Most of
+these are available in the 'Character Devices' menu.
+
+No matter what, you must pick 'IPMI top-level message handler' to use
+IPMI.  What you do beyond that depends on your needs and hardware.
+
+The message handler does not provide any user-level interfaces.
+Kernel code (like the watchdog) can still use it.  If you need access
+from userland, you need to select 'Device interface for IPMI' if you
+want access through a device driver.  Another interface is also
+available, you may select 'IPMI sockets' in the 'Networking Support'
+main menu.  This provides a socket interface to IPMI.  You may select
+both of these at the same time, they will both work together.
+
+The driver interface depends on your hardware.  If you have a board
+with a standard interface (These will generally be either "KCS",
+"SMIC", or "BT", consult your hardware manual), choose the 'IPMI SI
+handler' option.  A driver also exists for direct I2C access to the
+IPMI management controller.  Some boards support this, but it is
+unknown if it will work on every board.  For this, choose 'IPMI SMBus
+handler', but be ready to try to do some figuring to see if it will
+work.
+
+There is also a KCS-only driver interface supplied, but it is
+depracated in favor of the SI interface.
+
+You should generally enable ACPI on your system, as systems with IPMI
+should have ACPI tables describing them.
+
+If you have a standard interface and the board manufacturer has done
+their job correctly, the IPMI controller should be automatically
+detect (via ACPI or SMBIOS tables) and should just work.  Sadly, many
+boards do not have this information.  The driver attempts standard
+defaults, but they may not work.  If you fall into this situation, you
+need to read the section below named 'The SI Driver' on how to
+hand-configure your system.
+
+IPMI defines a standard watchdog timer.  You can enable this with the
+'IPMI Watchdog Timer' config option.  If you compile the driver into
+the kernel, then via a kernel command-line option you can have the
+watchdog timer start as soon as it intitializes.  It also have a lot
+of other options, see the 'Watchdog' section below for more details.
+Note that you can also have the watchdog continue to run if it is
+closed (by default it is disabled on close).  Go into the 'Watchdog
+Cards' menu, enable 'Watchdog Timer Support', and enable the option
+'Disable watchdog shutdown on close'.
+
+
 Basic Design
 ------------
 
@@ -41,18 +93,25 @@ ipmi_devintf - This provides a userland IOCTL interface for the IPMI
 driver, each open file for this device ties in to the message handler
 as an IPMI user.
 
-ipmi_kcs_drv - A driver for the KCS SMI.  Most system have a KCS
-interface for IPMI.
+ipmi_si_drv - A driver for various system interfaces.  This supports
+KCS, SMIC, and may support BT in the future.  Unless you have your own
+custom interface, you probably need to use this.
+
+ipmi_kcs_drv - A driver for the KCS SI.  Most systems have a KCS
+interface for IPMI.  This is deprecated, ipmi_si_drv supports KCS and
+SMIC interfaces.
+
 
 
 Much documentation for the interface is in the include files.  The
 IPMI include files are:
 
-ipmi.h - Contains the user interface and IOCTL interface for IPMI.
+linux/ipmi.h - Contains the user interface and IOCTL interface for IPMI.
 
-ipmi_smi.h - Contains the interface for SMI drivers to use.
+linux/ipmi_smi.h - Contains the interface for system management interfaces
+(things that interface to IPMI controllers) to use.
 
-ipmi_msgdefs.h - General definitions for base IPMI messaging.
+linux/ipmi_msgdefs.h - General definitions for base IPMI messaging.
 
 
 Addressing
@@ -260,8 +319,98 @@ they register with the message handler.  They are generally assigned
 in the order they register, although if an SMI unregisters and then
 another one registers, all bets are off.
 
-The ipmi_smi.h defines the interface for SMIs, see that for more
-details.
+The ipmi_smi.h defines the interface for management interfaces, see
+that for more details.
+
+
+The SI Driver
+-------------
+
+The SI driver allows up to 4 KCS or SMIC interfaces to be configured
+in the system.  By default, scan the ACPI tables for interfaces, and
+if it doesn't find any the driver will attempt to register one KCS
+interface at the spec-specified I/O port 0xca2 without interrupts.
+You can change this at module load time (for a module) with:
+
+  insmod ipmi_si_drv.o si_type=<type1>,<type2>....
+       si_ports=<port1>,<port2>... si_addrs=<addr1>,<addr2>
+       si_irqs=<irq1>,<irq2>... si_trydefaults=[0|1]
+       si_regspacings=<sp1>,<sp2>,... si_regsizes=<size1>,<size2>,...
+       si_regshifts=<shift1>,<shift2>,...
+
+Each of these except si_trydefaults is a list, the first item for the
+first interface, second item for the second interface, etc.
+
+The si_type may be either "kcs", "smic", or "bt".  If you leave it blank, it
+defaults to "kcs".
+
+If you specify si_addrs as non-zero for an interface, the driver will
+use the memory address given as the address of the device.  This
+overrides si_ports.
+
+If you specify si_ports as non-zero for an interface, the driver will
+use the I/O port given as the device address.
+
+If you specify si_irqs as non-zero for an interface, the driver will
+attempt to use the given interrupt for the device.
+
+si_trydefaults sets whether the standard IPMI interface at 0xca2 and
+any interfaces specified by ACPE are tried.  By default, the driver
+tries it, set this value to zero to turn this off.
+
+The next three parameters have to do with register layout.  The
+registers used by the interfaces may not appear at successive
+locations and they may not be in 8-bit registers.  These parameters
+allow the layout of the data in the registers to be more precisely
+specified.
+
+The regspacings parameter give the number of bytes between successive
+register start addresses.  For instance, if the regspacing is set to 4
+and the start address is 0xca2, then the address for the second
+register would be 0xca6.  This defaults to 1.
+
+The regsizes parameter gives the size of a register, in bytes.  The
+data used by IPMI is 8-bits wide, but it may be inside a larger
+register.  This parameter allows the read and write type to specified.
+It may be 1, 2, 4, or 8.  The default is 1.
+
+Since the register size may be larger than 32 bits, the IPMI data may not
+be in the lower 8 bits.  The regshifts parameter give the amount to shift
+the data to get to the actual IPMI data.
+
+When compiled into the kernel, the addresses can be specified on the
+kernel command line as:
+
+  ipmi_si=[<type>,]<bmc1>:<irq1>,[<type>,]<bmc2>:<irq2>....,[nodefault]
+
+The type is optional and may be either "kcs" for KCS, "smic" for SMIC,
+or "bt" for BT.  If not specified, it defaults to KCS.  The <bmcx>
+values is either "p<port>[#<reginfo>]" or "m<addr>[#<reginfo>]" for
+port or memory addresses.  So for instance, a KCS interface at port
+0xca2 using interrupt 9 and a SMIC memory interface at address
+0xf9827341 with no interrupt would be specified
+"ipmi_si=k,p0xca2:9,s,m0xf9827341".  If you specify zero for in irq or
+don't specify it, the driver will run polled unless the software can
+detect the interrupt to use in the ACPI tables.
+
+The #reginfo in the address specifies the register layout as described
+in the previous discussion of register layout.  See that for the
+details of the meainings of this.  The format of reginfo is:
+"#<regspacing>[.<regsizes>[.<regshift>]].  So, for instance, if you
+have a KCS system with a BMC at memory address 0xfea00000 with 32-bit
+registers that are 16 bytes apart and the IPMI info is in the top 8
+bits of the register, you would have the following:
+  ipmi_si=kcs,m0xfea00000#16.4.24
+
+By default, the driver will attempt to detect a KCS device at the
+spec-specified 0xca2 address and any address specified by ACPI.  If
+you want to turn this off, use the "nodefault" option.
+
+If you have high-res timers compiled into the kernel, the driver will
+use them to provide much better performance.  Note that if you do not
+have high-res timers enabled in the kernel and you don't have
+interrupts enabled, the driver will run VERY slowly.  Don't blame me,
+these interfaces suck.
 
 
 The KCS Driver
@@ -323,7 +472,10 @@ used to control it:
 
 The timeout is the number of seconds to the action, and the pretimeout
 is the amount of seconds before the reset that the pre-timeout panic will
-occur (if pretimeout is zero, then pretimeout will not be enabled).
+occur (if pretimeout is zero, then pretimeout will not be enabled).  Note
+that the pretimeout is the time before the final timeout.  So if the
+timeout is 50 seconds and the pretimeout is 10 seconds, then the pretimeout
+will occur in 40 second (10 seconds before the timeout).
 
 The action may be "reset", "power_cycle", or "power_off", and
 specifies what to do when the timer times out, and defaults to

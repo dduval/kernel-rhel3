@@ -852,14 +852,14 @@ iscsi_drop_session(iscsi_session_t * session)
 							 * timeouts 
 							 */
     smp_wmb();
-    clear_bit(SESSION_ESTABLISHED, &session->control_bits);
-    smp_mb();
-
-    if ((pid = session->tx_pid))
-	kill_proc(pid, SIGHUP, 1);
-    if ((pid = session->rx_pid))
-	kill_proc(pid, SIGHUP, 1);
-    session->session_alive = 0;
+    if (test_and_clear_bit(SESSION_ESTABLISHED, &session->control_bits)) {
+    	smp_mb();
+	if ((pid = session->tx_pid))
+		kill_proc(pid, SIGHUP, 1);
+    	if ((pid = session->rx_pid))
+		kill_proc(pid, SIGHUP, 1);
+    	session->session_alive = 0;
+    }
 }
 
 /* caller must hold session->task_lock */
@@ -936,13 +936,17 @@ static int
 iscsi_handle_signals(iscsi_session_t * session)
 {
     pid_t pid;
-    int ret = 0;
+    int ret = 0, sigkill, sighup;
 
     /* if we got SIGHUP, try to establish a replacement session.
      * if we got SIGKILL, terminate this session.
      */
     if (signal_pending(current)) {
 	LOCK_SIGNALS();
+	sigkill = SIGNAL_IS_PENDING(SIGKILL);
+	sighup = SIGNAL_IS_PENDING(SIGHUP);
+	flush_signals(current);
+	UNLOCK_SIGNALS();
 
 	/* iscsi_drop_session and iscsi_terminate_session signal both
 	 * threads, but someone logged in as root may not.  So, we
@@ -952,8 +956,7 @@ iscsi_handle_signals(iscsi_session_t * session)
 	 */
 
 	/* on SIGKILL, terminate the session */
-	if (SIGNAL_IS_PENDING(SIGKILL)) {
-
+	if (sigkill) {
 	    /*
 	     * FIXME: We don't terminate the sessions if "/" is iSCSI disk
 	     * Need to fix this for other iSCSI targets.
@@ -979,7 +982,7 @@ iscsi_handle_signals(iscsi_session_t * session)
 	/* on SIGHUP, drop the session, and try to establish
 	 * a replacement session 
 	 */
-	if (SIGNAL_IS_PENDING(SIGHUP)) {
+	if (sighup) {
 	    if (test_and_clear_bit(SESSION_ESTABLISHED, &session->control_bits)) {
 		if ((pid = session->tx_pid) && (pid != current->pid)) {
 		    printk("iSCSI: rx thread %d received SIGHUP, "
@@ -994,11 +997,8 @@ iscsi_handle_signals(iscsi_session_t * session)
 	    }
 	    ret = 1;
 	}
-	/* we don't care about any other signals */
-	flush_signals(current);
-	UNLOCK_SIGNALS();
     }
-    if (ret) {
+    if (ret && !session->session_drop_time) {
 	session->session_drop_time = jiffies ? jiffies : 1;
 	session->session_alive = 0;
     }
@@ -4277,6 +4277,7 @@ process_timedout_commands(iscsi_session_t * session)
     }
 
     SPIN_UNLOCK_NOQUEUE(&session->scsi_cmnd_lock);
+    spin_unlock(&session->task_lock);
 
     /* if we have commands to fail back to the high-level
      * driver with a fatal error, do so now 
@@ -4319,8 +4320,6 @@ process_timedout_commands(iscsi_session_t * session)
 	}
 	UNLOCK_MIDLAYER_LOCK(session->hba->host);
     }
-
-    spin_unlock(&session->task_lock);
 
     return 0;
 }
@@ -6891,6 +6890,9 @@ iscsi_tx_thread(void *vtaskp)
 		while ((sc = session->scsi_cmnd_head)) {
 		    session->scsi_cmnd_head = (Scsi_Cmnd *) sc->host_scribble;
 
+                    if (session->scsi_cmnd_head == NULL)
+                        session->scsi_cmnd_tail = NULL;
+
 		    atomic_dec(&session->num_cmnds);
 		    sc->result = HOST_BYTE(DID_NO_CONNECT);
 		    sc->resid = iscsi_expected_data_length(sc);
@@ -6903,6 +6905,9 @@ iscsi_tx_thread(void *vtaskp)
 		     */
 
 		    if (sc->scsi_done) {
+			del_command_timer(sc); /* DiskCommandTimeout's timer
+						* might be running.
+						*/
 			add_completion_timer(sc);
 			DEBUG_EH("iSCSI: session %p replacement timeout "
 				 "completing %p at %lu\n",
@@ -10095,14 +10100,13 @@ iscsi_establish_session(iscsi_session_t * session)
 	iscsi_disconnect(session);
 	/* Try a different portal for the retry.  We have no idea
 	 * what the problem is, but maybe a different portal will
-	 * work better.
+	 * work better. (for single portal setups we try again in
+	 * a couple of seconds on the same portal)
 	 */
 	spin_lock(&session->portal_lock);
-	if (session->portal_failover) {
+	ret = -1;
+	if (session->portal_failover)
 	    next_portal(session);
-	    ret = -1;
-	} else
-	    ret = 0;
 	spin_unlock(&session->portal_lock);
 	goto done;
     default:
@@ -11982,6 +11986,7 @@ check_session_timeouts(iscsi_session_t * session)
 {
     unsigned long timeout;
     unsigned long session_timeout = 0;
+    pid_t pid;
 
     if (!test_bit(SESSION_ESTABLISHED, &session->control_bits)) {
 	/* check login phase timeouts */
@@ -11995,7 +12000,8 @@ check_session_timeouts(iscsi_session_t * session)
 		session->login_phase_timer = 0;
 		smp_mb();
 		session_timeout = 0;
-		iscsi_drop_session(session);
+		if ((pid = session->rx_pid))
+			kill_proc(pid, SIGHUP, 1);
 	    }
 	}
     } else {

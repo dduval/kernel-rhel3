@@ -186,11 +186,11 @@ static void zap_completion_queue(void)
 		}
 	}
 	/* maintain jiffies in a polling fashion, based on rdtsc. */
-	{
+	if (netdump_mode) {
 		static unsigned long long prev_tick;
 
 		if (t1 - prev_tick >= jiffy_cycles) {
-			prev_tick += jiffy_cycles;
+			prev_tick = t1;
 			jiffies++;
 		}
 	}
@@ -220,7 +220,8 @@ repeat:
 				once = 0;
 			}
 			Dprintk("alloc skb: polling controller ...\n");
-			dev->poll_controller(dev);
+			if (dev->poll_controller)
+				dev->poll_controller(dev);
 			goto repeat;
 		}
 	}
@@ -250,13 +251,18 @@ repeat_poll:
 		spin_unlock(&dev->xmit_lock);
 
 		Dprintk("xmit skb: polling controller ...\n");
-		dev->poll_controller(dev);
+		if (dev->poll_controller)
+			dev->poll_controller(dev);
 		zap_completion_queue();
 		goto repeat_poll;
 	}
 
+	/* tell the hard_start_xmit routine that we got here via netconsole */
+	dev->priv_flags |= IFF_NETCONSOLE;
+
 	dev->hard_start_xmit(skb, dev);
 
+	dev->priv_flags &= ~IFF_NETCONSOLE;
 	dev->xmit_lock_owner = -1;
 	spin_unlock(&dev->xmit_lock);
 }
@@ -844,6 +850,12 @@ repeat:
 		// wait 1 sec.
 		udelay(100);
 		Dprintk("handshake: polling controller ...\n");
+		if (!dev->poll_controller) {
+			printk("device %s does not support netconsole!\n",
+			       dev->name);
+			mdelay(3000);
+			machine_restart(NULL);
+		}
 		dev->poll_controller(dev);
 		zap_completion_queue();
 		req = get_new_req();
@@ -975,7 +987,8 @@ static asmlinkage void do_netdump(struct pt_regs *regs, void *platform_arg)
 	while (netdump_mode) {
 		__cli();
 		Dprintk("main netdump loop: polling controller ...\n");
-		dev->poll_controller(dev);
+		if (dev->poll_controller)
+			dev->poll_controller(dev);
 		zap_completion_queue();
 #if !CLI
 		__sti();

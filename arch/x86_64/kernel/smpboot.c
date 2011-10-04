@@ -60,10 +60,14 @@ static int cpu_mask = -1;
 /* Total count of live CPUs */
 int smp_num_cpus = 1;
 
-/* Number of siblings per CPU package */
+/* Number of siblings per CPU core */
 int smp_num_siblings = 1;
+/* Number of cores per CPU package */
+int smp_num_cores = 1;
 /* Package ID of each logical CPU */
-u8 __initdata phys_proc_id[NR_CPUS] = { [0 ... NR_CPUS-1] = BAD_APICID };
+u8 phys_proc_id[NR_CPUS] = { [0 ... NR_CPUS-1] = BAD_APICID };
+/* Core ID of each logical CPU */
+u8 cpu_core_id[NR_CPUS] = { [0 ... NR_CPUS-1] = BAD_APICID };
 int cpu_sibling_map[NR_CPUS] __cacheline_aligned;
 
 static int test_ht;
@@ -1016,7 +1020,7 @@ void __init smp_boot_cpus(void)
 			for (i = 0; i < smp_num_cpus; i++) {
 				if (i == cpu)
 					continue;
-				if (phys_proc_id[cpu] == phys_proc_id[i]) {
+				if (cpu_core_id[cpu] == cpu_core_id[i]) {
 					cpu_sibling_map[cpu] = i;
 					printk("cpu_sibling_map[%d] = %d\n", cpu, cpu_sibling_map[cpu]);
 					break;

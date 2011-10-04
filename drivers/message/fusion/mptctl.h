@@ -5,22 +5,10 @@
  *          LSIFC9xx/LSI409xx Fibre Channel
  *      running LSI Logic Fusion MPT (Message Passing Technology) firmware.
  *
- *  Credits:
- *      This driver would not exist if not for Alan Cox's development
- *      of the linux i2o driver.
- *
- *      A huge debt of gratitude is owed to David S. Miller (DaveM)
- *      for fixing much of the stupid and broken stuff in the early
- *      driver while porting to sparc64 platform.  THANK YOU!
- *
- *      (see also mptbase.c)
- *
- *  Copyright (c) 1999-2004 LSI Logic Corporation
- *  Originally By: Steven J. Ralston
- *  (mailto:sjralston1@netscape.net)
+ *  Copyright (c) 1999-2005 LSI Logic Corporation
  *  (mailto:mpt_linux_developer@lsil.com)
  *
- *  $Id: mptctl.h,v 1.14 2003/03/18 22:49:51 pdelaney Exp $
+ *  $Id: mptctl.h,v 1.14 2003/03/18 22:49:51 Exp $
  */
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
 /*
@@ -63,6 +51,7 @@
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
 
 #include "linux/version.h"
+#include "lsi/mpi_ioc.h"
 
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
@@ -71,6 +60,7 @@
  */
 #define MPT_MISCDEV_BASENAME            "mptctl"
 #define MPT_MISCDEV_PATHNAME            "/dev/" MPT_MISCDEV_BASENAME
+#define MPT_CSMI_DESCRIPTION	        "LSI Logic Corporation: Fusion MPT Driver " MPT_LINUX_VERSION_COMMON
 
 #define MPT_PRODUCT_LENGTH              12
 
@@ -82,6 +72,7 @@
 #define MPTRWPERF		_IOWR(MPT_MAGIC_NUMBER,0,struct mpt_raw_r_w)
 
 #define MPTFWDOWNLOAD		_IOWR(MPT_MAGIC_NUMBER,15,struct mpt_fw_xfer)
+#define MPTFWDOWNLOADBOOT	_IOWR(MPT_MAGIC_NUMBER,16,struct mpt_fw_xfer)
 #define MPTCOMMAND		_IOWR(MPT_MAGIC_NUMBER,20,struct mpt_ioctl_command)
 
 #if defined(__KERNEL__) && defined(MPT_CONFIG_COMPAT)
@@ -91,6 +82,7 @@
 
 #define MPTIOCINFO		_IOWR(MPT_MAGIC_NUMBER,17,struct mpt_ioctl_iocinfo)
 #define MPTIOCINFO1		_IOWR(MPT_MAGIC_NUMBER,17,struct mpt_ioctl_iocinfo_rev0)
+#define MPTIOCINFO2		_IOWR(MPT_MAGIC_NUMBER,17,struct mpt_ioctl_iocinfo_rev1)
 #define MPTTARGETINFO		_IOWR(MPT_MAGIC_NUMBER,18,struct mpt_ioctl_targetinfo)
 #define MPTTEST			_IOWR(MPT_MAGIC_NUMBER,19,struct mpt_ioctl_test)
 #define MPTEVENTQUERY		_IOWR(MPT_MAGIC_NUMBER,21,struct mpt_ioctl_eventquery)
@@ -98,6 +90,13 @@
 #define MPTEVENTREPORT		_IOWR(MPT_MAGIC_NUMBER,23,struct mpt_ioctl_eventreport)
 #define MPTHARDRESET		_IOWR(MPT_MAGIC_NUMBER,24,struct mpt_ioctl_diag_reset)
 #define MPTFWREPLACE		_IOWR(MPT_MAGIC_NUMBER,25,struct mpt_ioctl_replace_fw)
+#define MPTDIAGREGISTER		_IOWR(MPT_MAGIC_NUMBER,26,mpt_diag_register_t)
+#define MPTDIAGRELEASE		_IOWR(MPT_MAGIC_NUMBER,27,mpt_diag_release_t)
+#define MPTDIAGUNREGISTER	_IOWR(MPT_MAGIC_NUMBER,28,mpt_diag_unregister_t)
+#define MPTDIAGQUERY		_IOWR(MPT_MAGIC_NUMBER,29,mpt_diag_query_t)
+#define MPTDIAGREADBUFFER	_IOWR(MPT_MAGIC_NUMBER,30,mpt_diag_read_buffer_t)
+#define MPTHBAPCIINFO		_IOWR(MPT_MAGIC_NUMBER,31,struct mpt_ioctl_hbapciinfo)
+#define MPTDIAGRESET		_IOWR(MPT_MAGIC_NUMBER,32,struct mpt_ioctl_diag_reset)
 
 /*
  * SPARC PLATFORM REMARKS:
@@ -121,9 +120,9 @@ struct mpt_fw_xfer {
 struct mpt_fw_xfer32 {
 	unsigned int iocnum;
 	unsigned int fwlen;
-	u32 bufp;
+	U32 bufp;
 };
-#endif
+#endif	/*}*/
 
 /*
  *  IOCTL header structure.
@@ -165,16 +164,47 @@ struct mpt_ioctl_pci_info {
 	} u;
 };
 
+struct mpt_ioctl_pci_info2 {
+	union {
+		struct {
+			unsigned int  deviceNumber   :  5;
+			unsigned int  functionNumber :  3;
+			unsigned int  busNumber      : 24;
+		} bits;
+		unsigned int  asUlong;
+	} u;
+  int segmentID;
+};
+
 /*
  *  Adapter Information Page
  *  Read only.
  *  Data starts at offset 0xC
  */
-#define MPT_IOCTL_INTERFACE_FC		(0x01)
 #define MPT_IOCTL_INTERFACE_SCSI	(0x00)
+#define MPT_IOCTL_INTERFACE_FC		(0x01)
+#define MPT_IOCTL_INTERFACE_SAS		(0x02)
 #define MPT_IOCTL_VERSION_LENGTH	(32)
 
 struct mpt_ioctl_iocinfo {
+	mpt_ioctl_header hdr;
+	int		 adapterType;	/* SCSI or FCP */
+	int		 port;		/* port number */
+	int		 pciId;		/* PCI Id. */
+	int		 hwRev;		/* hardware revision */
+	int		 subSystemDevice;	/* PCI subsystem Device ID */
+	int		 subSystemVendor;	/* PCI subsystem Vendor ID */
+	int		 numDevices;		/* number of devices */
+	int		 FWVersion;		/* FW Version (integer) */
+	int		 BIOSVersion;		/* BIOS Version (integer) */
+	char		 driverVersion[MPT_IOCTL_VERSION_LENGTH];	/* Driver Version (string) */
+	char		 busChangeEvent;
+	char		 hostId;
+	char		 rsvd[2];
+	struct mpt_ioctl_pci_info2  pciInfo; /* Added Rev 2 */
+};
+
+struct mpt_ioctl_iocinfo_rev1 {
 	mpt_ioctl_header hdr;
 	int		 adapterType;	/* SCSI or FCP */
 	int		 port;		/* port number */
@@ -262,9 +292,9 @@ struct mpt_ioctl_eventreport {
 #define MPT_MAX_NAME	32
 struct mpt_ioctl_test {
 	mpt_ioctl_header hdr;
-	u8		 name[MPT_MAX_NAME];
+	U8		 name[MPT_MAX_NAME];
 	int		 chip_type;
-	u8		 product [MPT_PRODUCT_LENGTH];
+	U8		 product [MPT_PRODUCT_LENGTH];
 };
 
 /* Replace the FW image cached in host driver memory
@@ -274,10 +304,31 @@ struct mpt_ioctl_test {
 typedef struct mpt_ioctl_replace_fw {
 	mpt_ioctl_header hdr;
 	int		 newImageSize;
-	u8		 newImage[1];
+	U8		 newImage[1];
 } mpt_ioctl_replace_fw_t;
 
-/* General MPT Pass through data strucutre
+
+struct mpt_ioctl_mptpciinfo {
+    U8  iocNumber;
+    U8  iocState;
+    U8  revisionID;
+    U8  reserved1;
+    U16 vendorID; 
+    U16 deviceID;
+    U16 subSystemVendorID;
+    U16 subSystemID;
+};
+
+
+struct mpt_ioctl_hbapciinfo {
+	mpt_ioctl_header     hdr;
+    U8                   totalIOC;
+    U8                   reserved[3];
+    struct mpt_ioctl_mptpciinfo hbapciinfo[18];
+};
+
+
+/* General MPT Pass through data structure
  *
  * iocnum
  * timeout - in seconds, command timeout. If 0, set by driver to
@@ -320,10 +371,10 @@ struct mpt_ioctl_command {
 struct mpt_ioctl_command32 {
 	mpt_ioctl_header hdr;
 	int	timeout;
-	u32	replyFrameBufPtr;
-	u32	dataInBufPtr;
-	u32	dataOutBufPtr;
-	u32	senseDataPtr;
+	U32	replyFrameBufPtr;
+	U32	dataInBufPtr;
+	U32	dataOutBufPtr;
+	U32	senseDataPtr;
 	int	maxReplyBytes;
 	int	dataInSize;
 	int	dataOutSize;
@@ -331,7 +382,7 @@ struct mpt_ioctl_command32 {
 	int	dataSgeOffset;
 	char	MF[1];
 };
-#endif
+#endif	/*}*/
 
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
@@ -358,26 +409,26 @@ typedef struct _hp_header {
 /*
  *  Header:
  *  iocnum 	required (input)
- *  host 	ignored	
+ *  host 	ignored
  *  channe	ignored
  *  id		ignored
  *  lun		ignored
  */
 typedef struct _hp_host_info {
 	hp_header_t	 hdr;
-	u16		 vendor;
-	u16		 device;
-	u16		 subsystem_vendor;
-	u16		 subsystem_id;
-	u8		 devfn;
-	u8		 bus;
+	U16		 vendor;
+	U16		 device;
+	U16		 subsystem_vendor;
+	U16		 subsystem_id;
+	U8		 devfn;
+	U8		 bus;
 	ushort		 host_no;		/* SCSI Host number, if scsi driver not loaded*/
-	u8		 fw_version[16];	/* string */	
-	u8		 serial_number[24];	/* string */
-	u32		 ioc_status;	
-	u32		 bus_phys_width;
-	u32		 base_io_addr;
-	u32		 rsvd;
+	U8		 fw_version[16];	/* string */
+	U8		 serial_number[24];	/* string */
+	U32		 ioc_status;
+	U32		 bus_phys_width;
+	U32		 base_io_addr;
+	U32		 rsvd;
 	unsigned int	 hard_resets;		/* driver initiated resets */
 	unsigned int	 soft_resets;		/* ioc, external resets */
 	unsigned int	 timeouts;		/* num timeouts */
@@ -388,19 +439,19 @@ typedef struct _hp_host_info {
  */
 typedef struct _hp_host_info_rev0 {
 	hp_header_t	 hdr;
-	u16		 vendor;
-	u16		 device;
-	u16		 subsystem_vendor;
-	u16		 subsystem_id;
-	u8		 devfn;
-	u8		 bus;
+	U16		 vendor;
+	U16		 device;
+	U16		 subsystem_vendor;
+	U16		 subsystem_id;
+	U8		 devfn;
+	U8		 bus;
 	ushort		 host_no;		/* SCSI Host number, if scsi driver not loaded*/
-	u8		 fw_version[16];	/* string */	
-	u8		 serial_number[24];	/* string */
-	u32		 ioc_status;	
-	u32		 bus_phys_width;
-	u32		 base_io_addr;
-	u32		 rsvd;
+	U8		 fw_version[16];	/* string */
+	U8		 serial_number[24];	/* string */
+	U32		 ioc_status;
+	U32		 bus_phys_width;
+	U32		 base_io_addr;
+	U32		 rsvd;
 	unsigned long	 hard_resets;		/* driver initiated resets */
 	unsigned long	 soft_resets;		/* ioc, external resets */
 	unsigned long	 timeouts;		/* num timeouts */
@@ -409,7 +460,7 @@ typedef struct _hp_host_info_rev0 {
 /*
  *  Header:
  *  iocnum 	required (input)
- *  host 	required	
+ *  host 	required
  *  channel	required	(bus number)
  *  id		required
  *  lun		ignored
@@ -418,13 +469,13 @@ typedef struct _hp_host_info_rev0 {
  */
 typedef struct _hp_target_info {
 	hp_header_t	 hdr;
-	u32 parity_errors;
-	u32 phase_errors;
-	u32 select_timeouts;
-	u32 message_rejects;
-	u32 negotiated_speed;
-	u8  negotiated_width;
-	u8  rsvd[7];				/* 8 byte alignment */
+	U32 parity_errors;
+	U32 phase_errors;
+	U32 select_timeouts;
+	U32 message_rejects;
+	U32 negotiated_speed;
+	U8  negotiated_width;
+	U8  rsvd[7];				/* 8 byte alignment */
 } hp_target_info_t;
 
 #define HP_STATUS_OTHER		1
@@ -446,8 +497,106 @@ typedef struct _hp_target_info {
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
 
+#define MPI_FW_DIAG_IOCTL               (0x80646961)    // dia
+#define MPI_FW_DIAG_TYPE_REGISTER       (0x00000001)
+#define MPI_FW_DIAG_TYPE_UNREGISTER     (0x00000002)
+#define MPI_FW_DIAG_TYPE_QUERY          (0x00000003)
+#define MPI_FW_DIAG_TYPE_READ_BUFFER    (0x00000004)
+#define MPI_FW_DIAG_TYPE_RELEASE        (0x00000005)
 
-/*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
+#define MPI_FW_DIAG_INVALID_UID         (0x00000000)
+#define FW_DIAGNOSTIC_BUFFER_COUNT      (3)
+#define FW_DIAGNOSTIC_UID_NOT_FOUND     (0xFF)
+
+#define MPI_FW_DIAG_ERROR_SUCCESS           (0x00000000)
+#define MPI_FW_DIAG_ERROR_FAILURE           (0x00000001)
+#define MPI_FW_DIAG_ERROR_INVALID_PARAMETER (0x00000002)
+#define MPI_FW_DIAG_ERROR_POST_FAILED       (0x00000010)
+#define MPI_FW_DIAG_ERROR_INVALID_UID       (0x00000011)
+#define MPI_FW_DIAG_ERROR_RELEASE_FAILED    (0x00000012)
+#define MPI_FW_DIAG_ERROR_NO_BUFFER         (0x00000013)
+#define MPI_FW_DIAG_ERROR_ALREADY_RELEASED  (0x00000014)
+
+#define MPT_DIAG_CAPABILITY(bufftype) (MPI_IOCFACTS_CAPABILITY_DIAG_TRACE_BUFFER << bufftype)
+
+typedef struct _MPI_FW_DIAG_REGISTER
+{
+    U8                  TraceLevel;
+    U8                  BufferType;
+    U16                 Flags;
+    U32                 ExtendedType;
+    U32                 ProductSpecific[4];
+    U32                 RequestedBufferSize;
+    U32                 UniqueId;
+} MPI_FW_DIAG_REGISTER, *PTR_MPI_FW_DIAG_REGISTER;
+
+typedef struct _mpt_diag_register {
+	mpt_ioctl_header hdr;
+	MPI_FW_DIAG_REGISTER data;
+} mpt_diag_register_t;
+
+typedef struct _MPI_FW_DIAG_UNREGISTER
+{
+    U32                 UniqueId;
+} MPI_FW_DIAG_UNREGISTER, *PTR_MPI_FW_DIAG_UNREGISTER;
+
+typedef struct _mpt_diag_unregister {
+	mpt_ioctl_header hdr;
+	MPI_FW_DIAG_UNREGISTER data;
+} mpt_diag_unregister_t;
+
+#define MPI_FW_DIAG_FLAG_APP_OWNED          (0x0001)
+#define MPI_FW_DIAG_FLAG_BUFFER_VALID       (0x0002)
+#define MPI_FW_DIAG_FLAG_FW_BUFFER_ACCESS   (0x0004)
+
+typedef struct _MPI_FW_DIAG_QUERY
+{
+    U8                  TraceLevel;
+    U8                  BufferType;
+    U16                 Flags;
+    U32                 ExtendedType;
+    U32                 ProductSpecific[4];
+    U32                 DataSize;
+    U32                 DriverAddedBufferSize;
+    U32                 UniqueId;
+} MPI_FW_DIAG_QUERY, *PTR_MPI_FW_DIAG_QUERY;
+
+typedef struct _mpt_diag_query {
+	mpt_ioctl_header hdr;
+	MPI_FW_DIAG_QUERY data;
+} mpt_diag_query_t;
+
+typedef struct _MPI_FW_DIAG_RELEASE
+{
+    U32                 UniqueId;
+} MPI_FW_DIAG_RELEASE, *PTR_MPI_FW_DIAG_RELEASE;
+
+typedef struct _mpt_diag_release {
+	mpt_ioctl_header hdr;
+	MPI_FW_DIAG_RELEASE data;
+} mpt_diag_release_t;
+
+#define MPI_FW_DIAG_FLAG_REREGISTER         (0x0001)
+
+typedef struct _MPI_FW_DIAG_READ_BUFFER
+{
+    U8                  Status;
+    U8                  Reserved;
+    U16                 Flags;
+    U32                 StartingOffset;
+    U32                 BytesToRead;
+    U32                 UniqueId;
+    U32                 DiagnosticData[1];
+} MPI_FW_DIAG_READ_BUFFER, *PTR_MPI_FW_DIAG_READ_BUFFER;
+
+typedef struct _mpt_diag_read_buffer {
+	mpt_ioctl_header hdr;
+	MPI_FW_DIAG_READ_BUFFER data;
+} mpt_diag_read_buffer_t;
+
+typedef struct _mpt_FWDownload_MF {
+	FWDownload_t	FWMessage;
+	U32		SGL_Word;
+} mpt_FWDownload_MF_t;
 
 #endif
-

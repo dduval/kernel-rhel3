@@ -1,10 +1,9 @@
-
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
- * Enterprise Fibre Channel Host Bus Adapters.                     *
+ * Fibre Channel Host Bus Adapters.                                *
  * Refer to the README file included with this package for         *
  * driver version and adapter support.                             *
- * Copyright (C) 2004 Emulex Corporation.                          *
+ * Copyright (C) 2003-2005 Emulex.  All rights reserved.           *
  * www.emulex.com                                                  *
  *                                                                 *
  * This program is free software; you can redistribute it and/or   *
@@ -20,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: ioctls/lpfc_util_ioctl.h 1.1 2004/10/26 17:00:31EDT sf_support Exp  $
+ * $Id: ioctls/lpfc_util_ioctl.h 1.3 2005/05/03 11:21:02EDT sf_support Exp  $
  */
 
 #ifndef  _H_LPFC_UTIL_IOCTL
@@ -48,6 +47,7 @@ int lpfc_ioctl_hba_set_event(lpfcHBA_t *, LPFCCMDINPUT_t *);
 int lpfc_ioctl_add_bind(lpfcHBA_t *, LPFCCMDINPUT_t *);
 int lpfc_ioctl_del_bind(lpfcHBA_t *, LPFCCMDINPUT_t *);
 int lpfc_ioctl_list_bind(lpfcHBA_t *, LPFCCMDINPUT_t *, void *, int *);
+int lpfc_ioctl_get_vpd(lpfcHBA_t *, LPFCCMDINPUT_t *, void *, int *);
 int dfc_rsp_data_copy(lpfcHBA_t *, uint8_t *, DMABUFEXT_t *, uint32_t);
 DMABUFEXT_t *dfc_cmd_data_alloc(lpfcHBA_t *, char *, ULP_BDE64 *, uint32_t);
 int dfc_cmd_data_free(lpfcHBA_t *, DMABUFEXT_t *);

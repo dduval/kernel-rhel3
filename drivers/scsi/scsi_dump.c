@@ -614,10 +614,16 @@ static void scsi_dump_remove_device(struct disk_dump_device *dump_device)
 
 }
 
+static void scsi_dump_compute_cksum(void)
+{
+	set_crc_modules();
+}
+
 static struct disk_dump_type scsi_dump_type = {
 	.probe		= scsi_dump_probe,
 	.add_device	= scsi_dump_add_device,
 	.remove_device	= scsi_dump_remove_device,
+	.compute_cksum	= scsi_dump_compute_cksum,
 	.owner		= THIS_MODULE,
 };
 
@@ -629,7 +635,6 @@ static int init_scsi_dump(void)
 		Err("register failed");
 		return ret;
 	}
-	set_crc_modules();
 	return ret;
 }
 

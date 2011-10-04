@@ -169,6 +169,13 @@ struct neigh_table
 	struct pneigh_entry	*phash_buckets[PNEIGH_HASHMASK+1];
 };
 
+/* flags for neigh_update() */
+#define NEIGH_UPDATE_F_OVERRIDE                 0x00000001
+#define NEIGH_UPDATE_F_WEAK_OVERRIDE            0x00000002
+#define NEIGH_UPDATE_F_OVERRIDE_ISROUTER        0x00000004
+#define NEIGH_UPDATE_F_ISROUTER                 0x40000000
+#define NEIGH_UPDATE_F_ADMIN                    0x80000000
+
 extern void			neigh_table_init(struct neigh_table *tbl);
 extern int			neigh_table_clear(struct neigh_table *tbl);
 extern struct neighbour *	neigh_lookup(struct neigh_table *tbl,

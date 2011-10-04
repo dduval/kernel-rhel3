@@ -509,7 +509,7 @@ static int sd_open(struct inode *inode, struct file *filp)
 
 	while (rscsi_disks[target].device->busy) {
 		barrier();
-		cpu_relax();
+		yield();
 	}
 	/*
 	 * The following code can sleep.
@@ -894,7 +894,8 @@ static int sd_init_onedisk(int i)
 		 */
 		if( the_result != 0
 		    && ((driver_byte(the_result) & DRIVER_SENSE) != 0)
-		    && SRpnt->sr_sense_buffer[2] == UNIT_ATTENTION
+		    && (SRpnt->sr_sense_buffer[2] == UNIT_ATTENTION ||
+		        SRpnt->sr_sense_buffer[2] == NOT_READY)
 		    && SRpnt->sr_sense_buffer[12] == 0x3A ) {
 			rscsi_disks[i].capacity = 0x1fffff;
 			sector_size = 512;

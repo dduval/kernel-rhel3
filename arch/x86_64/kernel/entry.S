@@ -436,6 +436,49 @@ ENTRY(\x)
 	jmp error_entry
 	.endm
 
+	.macro errorentry_stack sym
+	pushq %rax		/* save rax in RDI slot */
+	leaq  \sym(%rip),%rax
+	testl $3,CS-RDI(%rsp)	/* test for user mode in saved CS */
+	je error_entry		/* branch if we were in kernel mode */
+
+	/* here if user mode - we need to switch to per-thread kernel stack */
+	pushq %rsi			/* save rsi on old stack first */
+	swapgs
+	GET_CURRENT(%rax)
+	movq  tsk_thread+thread_rsp0(%rax),%rax
+	movq  %rsp,%rsi			/* save old stack ptr (at RSI level) */
+#define FRAME_SIZE 168
+	leaq  RSI-FRAME_SIZE(%rax),%rsp	/* switch to new stk (at RSI level) */
+	pushq %rdx
+	movq  8(%rsi),%rdx		/* load rax */
+	pushq %rcx
+	pushq %rdx			/* store rax */
+	pushq %r8
+	pushq %r9
+	pushq %r10
+	pushq %r11
+	cld
+	SAVE_REST			/* new stack is now at frame bottom */
+	xorl  %r15d,%r15d
+	movq  RSI-RSI(%rsi),%rdx	/* copy regs from old to new stack */
+	movq  %rdx,RSI(%rsp)
+	movq  ORIG_RAX-RSI(%rsi),%rdx
+	movq  %rdx,ORIG_RAX(%rsp)
+	movq  RIP-RSI(%rsi),%rdx
+	movq  %rdx,RIP(%rsp)
+	movq  CS-RSI(%rsi),%rdx
+	movq  %rdx,CS(%rsp)
+	movq  EFLAGS-RSI(%rsi),%rdx
+	movq  %rdx,EFLAGS(%rsp)
+	movq  RSP-RSI(%rsi),%rdx
+	movq  %rdx,RSP(%rsp)
+	movq  SS-RSI(%rsi),%rdx
+	movq  %rdx,SS(%rsp)
+	leaq  \sym(%rip),%rax		/* reload target function address */
+	jmp error_action		/* jump into common code */
+	.endm
+
 /*
  * Exception entry point. This expects an error code/orig_rax on the stack
  * and the exception handler in %rax.	
@@ -688,7 +731,7 @@ ENTRY(reserved)
 	zeroentry do_reserved
 
 ENTRY(double_fault)
-	errorentry do_double_fault	
+	errorentry_stack do_double_fault
 
 ENTRY(invalid_TSS)
 	errorentry do_invalid_TSS
@@ -697,7 +740,7 @@ ENTRY(segment_not_present)
 	errorentry do_segment_not_present
 
 ENTRY(stack_segment)
-	errorentry do_stack_segment
+	errorentry_stack do_stack_segment
 
 ENTRY(general_protection)
 	errorentry do_general_protection

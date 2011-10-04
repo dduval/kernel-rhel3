@@ -54,6 +54,7 @@ struct disk_dump_type {
 	void *(*probe)(kdev_t);
 	int (*add_device)(struct disk_dump_device *);
 	void (*remove_device)(struct disk_dump_device *);
+	void (*compute_cksum)(void);
 	struct module *owner;
 	list_t list;
 };

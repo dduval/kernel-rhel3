@@ -68,6 +68,7 @@ static force_inline void do_vgettimeofday(struct timeval * tv)
 		switch (__vxtime.mode) {
 
 			case VXTIME_TSC:
+			case VXTIME_PMTMR:
 				sync_core();
 				rdtscll(t);
 				usec += (((t  - __vxtime.last_tsc) * __vxtime.tsc_quot) >> 32);

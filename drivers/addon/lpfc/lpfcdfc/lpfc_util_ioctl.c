@@ -1,9 +1,9 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
- * Enterprise Fibre Channel Host Bus Adapters.                     *
+ * Fibre Channel Host Bus Adapters.                                *
  * Refer to the README file included with this package for         *
  * driver version and adapter support.                             *
- * Copyright (C) 2004 Emulex Corporation.                          *
+ * Copyright (C) 2003-2005 Emulex.  All rights reserved.           *
  * www.emulex.com                                                  *
  *                                                                 *
  * This program is free software; you can redistribute it and/or   *
@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: ioctls/lpfc_util_ioctl.c 1.3 2004/10/29 18:22:32EDT sf_support Exp  $
+ * $Id: ioctls/lpfc_util_ioctl.c 1.9 2005/05/03 11:21:00EDT sf_support Exp  $
  */
 #include <linux/version.h>
 #include <linux/kernel.h>
@@ -49,12 +49,6 @@
 #include <asm/io.h>
 #include <asm/dma.h>
 #include <asm/irq.h>
-
-#ifdef IPFC
-#include <linux/netdevice.h>
-#include <linux/etherdevice.h>
-#endif /* IPFC */
-
 #include <sd.h>			/* From drivers/scsi */
 #include <hosts.h>
 
@@ -300,6 +294,10 @@ lpfc_process_ioctl_util(lpfcHBA_t *phba, LPFCCMDINPUT_t *cip)
 
 	case LPFC_LIST_BIND:
 		rc = lpfc_ioctl_list_bind(phba, cip, dataout, &do_cp);
+		break;
+
+	case LPFC_GET_VPD:
+		rc = lpfc_ioctl_get_vpd(phba, cip, dataout, &do_cp);
 		break;
 	}
 	di->fc_refcnt--;
@@ -1296,13 +1294,13 @@ lpfc_ioctl_mbox(lpfcHBA_t * phba, LPFCCMDINPUT_t * cip, void *dataout)
 
 	/* Allocate mbox structure */
 	if ((pmbox = (MAILBOX_t *) lpfc_mbox_alloc(phba, MEM_PRI)) == 0) {
-		return (1);
+		return ENOMEM;
 	}
 
 	/* Allocate mboxq structure */
 	if ((pmboxq = lpfc_mbox_alloc(phba, MEM_PRI)) == 0) {
 		lpfc_mbox_free(phba, (LPFC_MBOXQ_t *) pmbox);
-		return (1);
+		return ENOMEM;
 	}
 
 	/* Allocate mbuf structure */
@@ -1313,7 +1311,7 @@ lpfc_ioctl_mbox(lpfcHBA_t * phba, LPFCCMDINPUT_t * cip, void *dataout)
 			kfree(pbfrnfo);
 		lpfc_mbox_free(phba, (LPFC_MBOXQ_t *) pmbox);
 		lpfc_mbox_free(phba, pmboxq);
-		return (1);
+		return ENOMEM;
 	}
 	INIT_LIST_HEAD(&pbfrnfo->list);
 	di = &dfc.dfc_info[cip->lpfc_brd];
@@ -1326,9 +1324,7 @@ lpfc_ioctl_mbox(lpfcHBA_t * phba, LPFCCMDINPUT_t * cip, void *dataout)
 		lpfc_mbox_free(phba, pmboxq);
 		lpfc_mbuf_free(phba, pbfrnfo->virt, pbfrnfo->phys);
 		kfree(pbfrnfo);
-		rc = EIO;
-
-		return (rc);
+		return EIO;
 	}
 	LPFC_DRVR_LOCK(phba, iflag);
 
@@ -1342,7 +1338,7 @@ lpfc_ioctl_mbox(lpfcHBA_t * phba, LPFCCMDINPUT_t * cip, void *dataout)
 
 	if (count >= 200) {
 		pmbox->mbxStatus = MBXERR_ERROR;
-		rc = EBUSY;
+		rc = EAGAIN;
 		goto mbout_err;
 	} else {
 #ifdef _LP64
@@ -1469,12 +1465,15 @@ lpfc_ioctl_mbox(lpfcHBA_t * phba, LPFCCMDINPUT_t * cip, void *dataout)
 				    lpfc_sli_issue_mbox_wait(phba, pmboxq,
 							    LPFC_MBOX_TMO);
 			di->fc_flag &= ~DFC_MBOX_ACTIVE;
-			if (mbxstatus != MBX_SUCCESS) {
+
+			if (mbxstatus == MBX_TIMEOUT) {
+				rc = EBUSY;
+				goto mbout;
+			} else if (mbxstatus != MBX_SUCCESS) {
 				rc = ENODEV;
 				/* Not successful */
 				goto mbout;
 			}
-
 		}
 
 		if (lptr) {
@@ -2454,6 +2453,45 @@ lpfc_ioctl_list_bind(lpfcHBA_t * phba,
 	}
 	bind_list->NumberOfEntries = next_index;
 	return 0;
+}
+
+int
+lpfc_ioctl_get_vpd(lpfcHBA_t * phba,
+		   LPFCCMDINPUT_t * cip, void *dataout, int *do_cp)
+{
+	struct vpd *dp;
+	int rc = 0;
+
+	dp = (struct vpd *) dataout;
+
+	if (cip->lpfc_arg4 != VPD_VERSION1) {
+		rc = EINVAL;
+		*do_cp = 1;
+	}
+
+	dp->version = VPD_VERSION1;
+
+	memset(dp->ModelDescription, 0, 256);
+	memset(dp->Model, 0, 80);
+	memset(dp->ProgramType, 0, 256);
+	memset(dp->PortNum, 0, 20);
+
+	if (phba->vpd_flag & VPD_MASK) {
+		if (phba->vpd_flag & VPD_MODEL_DESC) {
+			memcpy(dp->ModelDescription, phba->ModelDesc, 256);
+		}
+		if (phba->vpd_flag & VPD_MODEL_NAME) {
+			memcpy(dp->Model, phba->ModelName, 80);
+		}
+		if (phba->vpd_flag & VPD_PROGRAM_TYPE) {
+			memcpy(dp->ProgramType, phba->ProgramType, 256);
+		}
+		if (phba->vpd_flag & VPD_PORT) {
+			memcpy(dp->PortNum, phba->Port, 20);
+		}
+	}
+
+	return rc;
 }
 
 int

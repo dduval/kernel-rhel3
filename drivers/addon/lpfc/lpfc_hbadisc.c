@@ -1,9 +1,9 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
- * Enterprise Fibre Channel Host Bus Adapters.                     *
+ * Fibre Channel Host Bus Adapters.                                *
  * Refer to the README file included with this package for         *
  * driver version and adapter support.                             *
- * Copyright (C) 2004 Emulex Corporation.                          *
+ * Copyright (C) 2003-2005 Emulex.  All rights reserved.           *
  * www.emulex.com                                                  *
  *                                                                 *
  * This program is free software; you can redistribute it and/or   *
@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_hbadisc.c 1.4 2004/11/02 13:25:15EST sf_support Exp  $
+ * $Id: lpfc_hbadisc.c 1.9 2005/07/08 19:29:41EDT sf_support Exp  $
  */
 
 #include <linux/version.h>
@@ -304,13 +304,6 @@ lpfc_mbx_cmpl_read_la(lpfcHBA_t * phba, LPFC_MBOXQ_t * pmb)
 
 	mp = (DMABUF_t *) (pmb->context1);
 
-	/* The mailbox was populated by the HBA.  Flush it to main store for the
-	 * driver.  Note that all context buffers are from the driver's
-	 * dma pool and have length LPFC_BPL_SIZE.
-	 */
-	pci_dma_sync_single(phba->pcidev, mp->phys, LPFC_BPL_SIZE,
-			    PCI_DMA_FROMDEVICE);
-
 	/* Get Loop Map information */
 	if (mp) {
 		memcpy(&phba->alpa_map[0], mp->virt, 128);
@@ -346,10 +339,20 @@ lpfc_mbx_cmpl_read_la(lpfcHBA_t * phba, LPFC_MBOXQ_t * pmb)
 				la->granted_AL_PA, la->UlnkSpeed,
 				phba->alpa_map[0]);
 
-		if (la->UlnkSpeed == LA_2GHZ_LINK)
-			phba->fc_linkspeed = LA_2GHZ_LINK;
-		else
-			phba->fc_linkspeed = 0;
+		switch(la->UlnkSpeed) {
+			case LA_1GHZ_LINK:
+				phba->fc_linkspeed = LA_1GHZ_LINK;
+			break;
+			case LA_2GHZ_LINK:
+				phba->fc_linkspeed = LA_2GHZ_LINK;
+			break;
+			case LA_4GHZ_LINK:
+				phba->fc_linkspeed = LA_4GHZ_LINK;
+			break;
+			default:
+				phba->fc_linkspeed = LA_UNKNW_LINK;
+			break;
+		}
 
 		if ((phba->fc_topology = la->topology) == TOPOLOGY_LOOP) {
 
@@ -467,22 +470,9 @@ lpfc_mbx_cmpl_config_link(lpfcHBA_t * phba, LPFC_MBOXQ_t * pmb)
 	}
 
 	if (phba->hba_state == LPFC_LOCAL_CFG_LINK) {
-		if (phba->fc_topology == TOPOLOGY_LOOP) {
-			/* If we are public loop and L bit was set */
-			if ((phba->fc_flag & FC_PUBLIC_LOOP) &&
-			    !(phba->fc_flag & FC_LBIT)) {
-				/* Need to wait for FAN - use discovery timer
-				 * for timeout.  hba_state is identically
-				 * LPFC_LOCAL_CFG_LINK while waiting for FAN
-				 */
-				lpfc_set_disctmo(phba);
-				lpfc_mbox_free(phba, pmb);
-				return;
-			}
-		}
 
 		/* Start discovery by sending a FLOGI hba_state is identically
-		 * LPFC_FLOGI while waiting for FLOGI cmpl
+		 * LPFC_FLOGI while waiting for FLOGI cmpl (same on FAN)
 		 */
 		phba->hba_state = LPFC_FLOGI;
 		lpfc_set_disctmo(phba);
@@ -563,13 +553,6 @@ lpfc_mbx_cmpl_read_sparam(lpfcHBA_t * phba, LPFC_MBOXQ_t * pmb)
 	}
 
 	mp = (DMABUF_t *) pmb->context1;
-
-	/* The mailbox was populated by the HBA.  Flush it to main store for the
-	 * driver.  Note that all context buffers are from the driver's
-	 * dma pool and have length LPFC_BPL_SIZE.
-	 */
-	pci_dma_sync_single(phba->pcidev, mp->phys, LPFC_BPL_SIZE,
-			    PCI_DMA_FROMDEVICE);
 
 	memcpy((uint8_t *) & phba->fc_sparam, (uint8_t *) mp->virt,
 	       sizeof (SERV_PARM));
@@ -696,13 +679,6 @@ lpfc_mbx_cmpl_reg_login(lpfcHBA_t * phba, LPFC_MBOXQ_t * pmb)
 	ndlp = (LPFC_NODELIST_t *) pmb->context2;
 	mp = (DMABUF_t *) (pmb->context1);
 
-	/* The mailbox was populated by the HBA.  Flush it to main store for the
-	 * driver.  Note that all context buffers are from the driver's
-	 * dma pool and have length LPFC_BPL_SIZE.
-	 */
-	pci_dma_sync_single(phba->pcidev, mp->phys, LPFC_BPL_SIZE,
-			    PCI_DMA_FROMDEVICE);
-
 	pmb->context1 = 0;
 
 	/* Good status, call state machine */
@@ -737,13 +713,6 @@ lpfc_mbx_cmpl_fabric_reg_login(lpfcHBA_t * phba, LPFC_MBOXQ_t * pmb)
 
 	ndlp = (LPFC_NODELIST_t *) pmb->context2;
 	mp = (DMABUF_t *) (pmb->context1);
-
-	/* The mailbox was populated by the HBA.  Flush it to main store for the
-	 * driver.  Note that all context buffers are from the driver's
-	 * dma pool and have length LPFC_BPL_SIZE.
-	 */
-	pci_dma_sync_single(phba->pcidev, mp->phys, LPFC_BPL_SIZE,
-			    PCI_DMA_FROMDEVICE);
 
 	pmb->context1 = 0;
 
@@ -815,13 +784,6 @@ lpfc_mbx_cmpl_ns_reg_login(lpfcHBA_t * phba, LPFC_MBOXQ_t * pmb)
 
 	ndlp = (LPFC_NODELIST_t *) pmb->context2;
 	mp = (DMABUF_t *) (pmb->context1);
-
-	/* The mailbox was populated by the HBA.  Flush it to main store for the
-	 * driver.  Note that all context buffers are from the driver's
-	 * dma pool and have length LPFC_BPL_SIZE.
-	 */
-	pci_dma_sync_single(phba->pcidev, mp->phys, LPFC_BPL_SIZE,
-			    PCI_DMA_FROMDEVICE);
 
 	pmb->context1 = 0;
 	ndlp->nlp_rpi = mb->un.varWords[0];
@@ -2363,7 +2325,14 @@ lpfc_disc_timeout(unsigned long ptr)
 		kfree(clkData);
 		return;
 	}
+
 	LPFC_DRVR_LOCK(phba, iflag);
+       	if (clkData->flags & TM_CANCELED) {
+		list_del((struct list_head *)clkData);
+		kfree(clkData);	
+		goto out;
+ 	}
+
 	clkData->timeObj->function = 0;
 	list_del((struct list_head *)clkData);
 	kfree(clkData);
@@ -2567,6 +2536,12 @@ lpfc_linkdown_timeout(unsigned long ptr)
 	}
 
 	LPFC_DRVR_LOCK(phba, iflag);
+       	if (clkData->flags & TM_CANCELED) {
+		list_del((struct list_head *)clkData);
+		kfree(clkData);	
+		goto out;
+ 	}
+	
 	clkData->timeObj->function = 0;
 	list_del((struct list_head *)clkData);
 	kfree(clkData);
@@ -2580,7 +2555,7 @@ lpfc_linkdown_timeout(unsigned long ptr)
 	phba->fc_linkdown.function = 0;	/* timer expired */
 	phba->fc_flag |= (FC_LD_TIMER | FC_LD_TIMEOUT);	/* indicate timeout */
 	phba->hba_flag &= ~FC_LFR_ACTIVE;
-
+out:
 	LPFC_DRVR_UNLOCK(phba, iflag);
 	return;
 }
@@ -2904,6 +2879,12 @@ lpfc_disc_retry_rptlun(unsigned long ptr)
 	clkData = (struct clk_data *)ptr;
 	phba = clkData->phba;
 	LPFC_DRVR_LOCK(phba, iflag);
+       	if (clkData->flags & TM_CANCELED) {
+		list_del((struct list_head *)clkData);
+		kfree(clkData);	
+		goto out;
+	}
+
 	targetp = (LPFCSCSITARGET_t *) clkData->clData1;
 	clkData->timeObj->function = 0;
 	list_del((struct list_head *)clkData);
@@ -2913,6 +2894,7 @@ lpfc_disc_retry_rptlun(unsigned long ptr)
 	if (ndlp) {
 		lpfc_disc_issue_rptlun(phba, ndlp);
 	}
+out:
 	LPFC_DRVR_UNLOCK(phba, iflag);
 }
 
@@ -3149,6 +3131,12 @@ lpfc_put_buf(unsigned long ptr)
 	clkData = (struct clk_data *)ptr;
 	phba = clkData->phba;
 	LPFC_DRVR_LOCK(phba, iflag);
+       	if (clkData->flags & TM_CANCELED) {
+		list_del((struct list_head *)clkData);
+		kfree(clkData);	
+		goto out;
+        }
+
 	clkData->timeObj->function = 0;
 	list_del((struct list_head *)clkData);
 
@@ -3158,6 +3146,7 @@ lpfc_put_buf(unsigned long ptr)
 		       some_buf->phys);
 	kfree((void *)some_buf);
 	kfree(clkData);
+out:
 	LPFC_DRVR_UNLOCK(phba, iflag);
 	return;
 }
@@ -3183,13 +3172,6 @@ lpfc_mbx_cmpl_fdmi_reg_login(lpfcHBA_t * phba, LPFC_MBOXQ_t * pmb)
 
 	ndlp = (LPFC_NODELIST_t *) pmb->context2;
 	mp = (DMABUF_t *) (pmb->context1);
-
-	/* The mailbox was populated by the HBA.  Flush it to main store for the
-	 * driver.  Note that all context buffers are from the driver's
-	 * dma pool and have length LPFC_BPL_SIZE.
-	 */
-	pci_dma_sync_single(phba->pcidev, mp->phys, LPFC_BPL_SIZE,
-			    PCI_DMA_FROMDEVICE);
 
 	pmb->context1 = 0;
 	ndlp->nlp_rpi = mb->un.varWords[0];

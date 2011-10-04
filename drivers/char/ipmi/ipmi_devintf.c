@@ -44,6 +44,8 @@
 #include <asm/semaphore.h>
 #include <linux/init.h>
 
+#define IPMI_DEVINTF_VERSION "35.4"
+
 struct ipmi_file_private
 {
 	ipmi_user_t          user;
@@ -53,6 +55,8 @@ struct ipmi_file_private
 	struct fasync_struct *fasync_queue;
 	wait_queue_head_t    wait;
 	struct semaphore     recv_sem;
+	int                  default_retries;
+	unsigned int         default_retry_time_ms;
 };
 
 static void file_receive_handler(struct ipmi_recv_msg *msg,
@@ -105,7 +109,7 @@ static int ipmi_fasync(int fd, struct file *file, int on)
 
 static struct ipmi_user_hndl ipmi_hndlrs =
 {
-	ipmi_recv_hndl : file_receive_handler
+	.ipmi_recv_hndl	= file_receive_handler,
 };
 
 static int ipmi_open(struct inode *inode, struct file *file)
@@ -138,6 +142,10 @@ static int ipmi_open(struct inode *inode, struct file *file)
 	priv->fasync_queue = NULL;
 	sema_init(&(priv->recv_sem), 1);
 
+	/* Use the low-level defaults. */
+	priv->default_retries = -1;
+	priv->default_retry_time_ms = 0;
+
 	return 0;
 }
 
@@ -158,6 +166,63 @@ static int ipmi_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
+static int handle_send_req(ipmi_user_t     user,
+			   struct ipmi_req *req,
+			   int             retries,
+			   unsigned int    retry_time_ms)
+{
+	int              rv;
+	struct ipmi_addr addr;
+	unsigned char    *msgdata;
+	
+	if (req->addr_len > sizeof(struct ipmi_addr))
+		return -EINVAL;
+
+	if (copy_from_user(&addr, req->addr, req->addr_len))
+		return -EFAULT;
+
+	msgdata = kmalloc(IPMI_MAX_MSG_LENGTH, GFP_KERNEL);
+	if (!msgdata)
+		return -ENOMEM;
+
+	/* From here out we cannot return, we must jump to "out" for
+	   error exits to free msgdata. */
+
+	rv = ipmi_validate_addr(&addr, req->addr_len);
+	if (rv)
+		goto out;
+
+	if (req->msg.data != NULL) {
+		if (req->msg.data_len > IPMI_MAX_MSG_LENGTH) {
+			rv = -EMSGSIZE;
+			goto out;
+		}
+
+		if (copy_from_user(msgdata,
+				   req->msg.data,
+				   req->msg.data_len))
+		{
+			rv = -EFAULT;
+			goto out;
+		}
+	} else {
+		req->msg.data_len = 0;
+	}
+	req->msg.data = msgdata;
+
+	rv = ipmi_request_settime(user,
+				  &addr,
+				  req->msgid,
+				  &(req->msg),
+				  NULL,
+				  0,
+				  retries,
+				  retry_time_ms);
+ out:
+	kfree(msgdata);
+	return rv;
+}
+
 static int ipmi_ioctl(struct inode  *inode,
 		      struct file   *file,
 		      unsigned int  cmd,
@@ -170,54 +235,33 @@ static int ipmi_ioctl(struct inode  *inode,
 	{
 	case IPMICTL_SEND_COMMAND:
 	{
-		struct ipmi_req    req;
-		struct ipmi_addr   addr;
-		unsigned char msgdata[IPMI_MAX_MSG_LENGTH];
+		struct ipmi_req req;
 
 		if (copy_from_user(&req, (void *) data, sizeof(req))) {
 			rv = -EFAULT;
 			break;
 		}
 
-		if (req.addr_len > sizeof(struct ipmi_addr))
-		{
-			rv = -EINVAL;
-			break;
-		}
+		rv = handle_send_req(priv->user,
+				     &req,
+				     priv->default_retries,
+				     priv->default_retry_time_ms);
+		break;
+	}
 
-		if (copy_from_user(&addr, req.addr, req.addr_len)) {
+	case IPMICTL_SEND_COMMAND_SETTIME:
+	{
+		struct ipmi_req_settime req;
+
+		if (copy_from_user(&req, (void *) data, sizeof(req))) {
 			rv = -EFAULT;
 			break;
 		}
 
-		rv = ipmi_validate_addr(&addr, req.addr_len);
-		if (rv)
-			break;
-
-		if (req.msg.data != NULL) {
-			if (req.msg.data_len > IPMI_MAX_MSG_LENGTH) {
-				rv = -EMSGSIZE;
-				break;
-			}
-
-			if (copy_from_user(&msgdata,
-					   req.msg.data,
-					   req.msg.data_len))
-			{
-				rv = -EFAULT;
-				break;
-			}
-		} else {
-			req.msg.data_len = 0;
-		}
-
-		req.msg.data = msgdata;
-
-		rv = ipmi_request(priv->user,
-				  &addr,
-				  req.msgid,
-				  &(req.msg),
-				  0);
+		rv = handle_send_req(priv->user,
+				     &req.req,
+				     req.retries,
+				     req.retry_time_ms);
 		break;
 	}
 
@@ -416,7 +460,36 @@ static int ipmi_ioctl(struct inode  *inode,
 		rv = 0;
 		break;
 	}
+	case IPMICTL_SET_TIMING_PARMS_CMD:
+	{
+		struct ipmi_timing_parms parms;
 
+		if (copy_from_user(&parms, (void *) data, sizeof(parms))) {
+			rv = -EFAULT;
+			break;
+		}
+
+		priv->default_retries = parms.retries;
+		priv->default_retry_time_ms = parms.retry_time_ms;
+		rv = 0;
+		break;
+	}
+
+	case IPMICTL_GET_TIMING_PARMS_CMD:
+	{
+		struct ipmi_timing_parms parms;
+
+		parms.retries = priv->default_retries;
+		parms.retry_time_ms = priv->default_retry_time_ms;
+
+		if (copy_to_user((void *) data, &parms, sizeof(parms))) {
+			rv = -EFAULT;
+			break;
+		}
+
+		rv = 0;
+		break;
+	}
 	}
   
 	return rv;
@@ -424,12 +497,12 @@ static int ipmi_ioctl(struct inode  *inode,
 
 
 static struct file_operations ipmi_fops = {
-	owner:   THIS_MODULE,
-	ioctl:   ipmi_ioctl,
-	open:    ipmi_open,
-	release: ipmi_release,
-	fasync:  ipmi_fasync,
-	poll:    ipmi_poll
+	.owner		= THIS_MODULE,
+	.ioctl		= ipmi_ioctl,
+	.open		= ipmi_open,
+	.release	= ipmi_release,
+	.fasync		= ipmi_fasync,
+	.poll		= ipmi_poll,
 };
 
 #define DEVICE_NAME     "ipmidev"
@@ -468,8 +541,9 @@ static void ipmi_smi_gone(int if_num)
 
 static struct ipmi_smi_watcher smi_watcher =
 {
-	new_smi  : ipmi_new_smi,
-	smi_gone : ipmi_smi_gone
+	.owner    = THIS_MODULE,
+	.new_smi  = ipmi_new_smi,
+	.smi_gone = ipmi_smi_gone,
 };
 
 static __init int init_ipmi_devintf(void)
@@ -478,6 +552,9 @@ static __init int init_ipmi_devintf(void)
 
 	if (ipmi_major < 0)
 		return -EINVAL;
+
+	printk(KERN_INFO "ipmi device interface version "
+	       IPMI_DEVINTF_VERSION "\n");
 
 	rv = register_chrdev(ipmi_major, DEVICE_NAME, &ipmi_fops);
 	if (rv < 0) {
@@ -497,9 +574,6 @@ static __init int init_ipmi_devintf(void)
 		printk(KERN_WARNING "ipmi: can't register smi watcher");
 		return rv;
 	}
-
-	printk(KERN_INFO "ipmi: device interface at char major %d\n",
-	       ipmi_major);
 
 	return 0;
 }
@@ -530,3 +604,5 @@ static __init int ipmi_setup (char *str)
 
 __setup("ipmi=", ipmi_setup);
 MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Corey Minyard <minyard@mvista.com>");
+MODULE_DESCRIPTION("/dev interface for the IPMI message handler.");

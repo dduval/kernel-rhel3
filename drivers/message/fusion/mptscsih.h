@@ -5,22 +5,10 @@
  *          LSIFC9xx/LSI409xx Fibre Channel
  *      running LSI Logic Fusion MPT (Message Passing Technology) firmware.
  *
- *  Credits:
- *      This driver would not exist if not for Alan Cox's development
- *      of the linux i2o driver.
- *
- *      A huge debt of gratitude is owed to David S. Miller (DaveM)
- *      for fixing much of the stupid and broken stuff in the early
- *      driver while porting to sparc64 platform.  THANK YOU!
- *
- *      (see also mptbase.c)
- *
- *  Copyright (c) 1999-2004 LSI Logic Corporation
- *  Originally By: Steven J. Ralston
- *  (mailto:sjralston1@netscape.net)
+ *  Copyright (c) 1999-2005 LSI Logic Corporation
  *  (mailto:mpt_linux_developer@lsil.com)
  *
- *  $Id: mptscsih.h,v 1.1.2.2 2003/05/07 14:08:35 pdelaney Exp $
+ *  $Id: mptscsih.h,v 1.1.2.2 2003/05/07 14:08:35 Exp $
  */
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
 /*
@@ -79,62 +67,21 @@
 	#define MPT_SCSI_CAN_QUEUE	63
 #endif
 
-#define MPT_SCSI_CMD_PER_DEV_HIGH	31
-#define MPT_SCSI_CMD_PER_DEV_LOW	7
+#define MPT_SCSI_CMD_PER_DEV_HIGH	64
+#define MPT_SCSI_CMD_PER_DEV_LOW	32
 
 #define MPT_SCSI_CMD_PER_LUN		7
 
 #define MPT_SCSI_MAX_SECTORS    8192
 
-/*
- * Set the MAX_SGE value based on user input.
- */
-#ifdef  CONFIG_FUSION_MAX_SGE
-#if     CONFIG_FUSION_MAX_SGE  < 16
-#define MPT_SCSI_SG_DEPTH	16
-#elif   CONFIG_FUSION_MAX_SGE  > 128
-#define MPT_SCSI_SG_DEPTH	128
-#else
-#define MPT_SCSI_SG_DEPTH	CONFIG_FUSION_MAX_SGE
-#endif
-#else
-#define MPT_SCSI_SG_DEPTH	40
-#endif
-
-/* To disable domain validation, uncomment the
+/* To disable domain validation, comment the
  * following line. No effect for FC devices.
  * For SCSI devices, driver will negotiate to
  * NVRAM settings (if available) or to maximum adapter
  * capabilities.
  */
-/* #define MPTSCSIH_DISABLE_DOMAIN_VALIDATION */
 
-
-/* SCSI driver setup structure. Settings can be overridden
- * by command line options.
- */
-#define MPTSCSIH_DOMAIN_VALIDATION      1
-#define MPTSCSIH_MAX_WIDTH              1
-#define MPTSCSIH_MIN_SYNC               0x08
-#define MPTSCSIH_SAF_TE                 0
-
-struct mptscsih_driver_setup
-{
-        u8      dv;
-        u8      max_width;
-        u8      min_sync_fac;
-        u8      saf_te;
-};
-
-
-#define MPTSCSIH_DRIVER_SETUP                   \
-{                                               \
-        MPTSCSIH_DOMAIN_VALIDATION,             \
-        MPTSCSIH_MAX_WIDTH,                     \
-        MPTSCSIH_MIN_SYNC,                      \
-        MPTSCSIH_SAF_TE,                        \
-}
-
+#define MPTSCSIH_ENABLE_DOMAIN_VALIDATION
 
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
@@ -153,10 +100,6 @@ struct mptscsih_driver_setup
 #define MPT_SCSIHOST_NEED_ENTRY_EXIT_HOOKUPS			1
 #if LINUX_VERSION_CODE <= KERNEL_VERSION(2,4,0)
 #	if LINUX_VERSION_CODE == KERNEL_VERSION(2,4,0)
-		/*
-		 *	Super HACK!  -by sralston:-(
-		 *	(good grief; heaven help me!)
-		 */
 #		include <linux/capability.h>
 #		if !defined(CAP_LEASE) && !defined(MODULE)
 #			undef MPT_SCSIHOST_NEED_ENTRY_EXIT_HOOKUPS
@@ -167,44 +110,6 @@ struct mptscsih_driver_setup
 #		endif
 #	endif
 #endif
-
-/*
- *	tq_scheduler disappeared @ lk-2.4.0-test12
- *	(right when <linux/sched.h> newly defined TQ_ACTIVE)
- *	tq_struct reworked in 2.5.41. Include workqueue.h.
- */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,41)
-#	include <linux/sched.h>
-#	include <linux/workqueue.h>
-#define SCHEDULE_TASK(x)		\
-	if (schedule_work(x) == 0) {	\
-		/*MOD_DEC_USE_COUNT*/;	\
-	}
-#else
-#define HAVE_TQ_SCHED	1
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,4,0)
-#	include <linux/sched.h>
-#	ifdef TQ_ACTIVE
-#		undef HAVE_TQ_SCHED
-#	endif
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,40)
-#		undef HAVE_TQ_SCHED
-#endif
-#endif
-#ifdef HAVE_TQ_SCHED
-#define SCHEDULE_TASK(x)		\
-	/*MOD_INC_USE_COUNT*/;		\
-	(x)->next = NULL;		\
-	queue_task(x, &tq_scheduler)
-#else
-#define SCHEDULE_TASK(x)		\
-	/*MOD_INC_USE_COUNT*/;		\
-	if (schedule_task(x) == 0) {	\
-		/*MOD_DEC_USE_COUNT*/;	\
-	}
-#endif
-#endif
-
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
 
 #define x_scsi_detect		mptscsih_detect

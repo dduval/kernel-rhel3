@@ -571,6 +571,12 @@ void __init parse_mem_cmdline (char ** cmdline_p)
 			setup_io_tlb_npages(from);
 		}
 #endif
+#ifdef CONFIG_ACPI_PMTMR
+		else if (!memcmp(from, "pmtmr", 5)) {
+			extern int use_pmtmr;
+			use_pmtmr = 1;
+		}
+#endif
 	next:
 		c = *(from++);
 		if (!c)

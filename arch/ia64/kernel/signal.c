@@ -106,7 +106,7 @@ sys_sigaltstack (const stack_t *uss, stack_t *uoss, long arg2, long arg3, long a
 static long
 restore_sigcontext (struct sigcontext *sc, struct sigscratch *scr)
 {
-	unsigned long ip, flags, nat, um, cfm;
+	unsigned long ip, flags, nat, um, cfm, rsc;
 	long err;
 
 	/* restore scratch that always needs gets updated during signal delivery: */
@@ -116,7 +116,7 @@ restore_sigcontext (struct sigcontext *sc, struct sigscratch *scr)
 	err |= __get_user(ip, &sc->sc_ip);			/* instruction pointer */
 	err |= __get_user(cfm, &sc->sc_cfm);
 	err |= __get_user(um, &sc->sc_um);			/* user mask */
-	err |= __get_user(scr->pt.ar_rsc, &sc->sc_ar_rsc);
+	err |= __get_user(rsc, &sc->sc_ar_rsc);
 	err |= __get_user(scr->pt.ar_ccv, &sc->sc_ar_ccv);
 	err |= __get_user(scr->pt.ar_unat, &sc->sc_ar_unat);
 	err |= __get_user(scr->pt.ar_fpsr, &sc->sc_ar_fpsr);
@@ -131,6 +131,7 @@ restore_sigcontext (struct sigcontext *sc, struct sigscratch *scr)
 	err |= __copy_from_user(&scr->pt.r16, &sc->sc_gr[16], 16*8);	/* r16-r31 */
 
 	scr->pt.cr_ifs = cfm | (1UL << 63);
+	scr->pt.ar_rsc = rsc | (3 << 2); /* force PL3 */
 
 	/* establish new instruction pointer: */
 	scr->pt.cr_iip = ip & ~0x3UL;

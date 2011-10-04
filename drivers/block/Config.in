@@ -53,5 +53,6 @@ dep_bool '  Initial RAM disk (initrd) support' CONFIG_BLK_DEV_INITRD $CONFIG_BLK
 bool 'Per partition statistics in /proc/partitions' CONFIG_BLK_STATS
 
 tristate 'Disk dump support' CONFIG_DISKDUMP
+tristate 'Disk dump support in the Block subsystem' CONFIG_BLOCKDUMP
 
 endmenu

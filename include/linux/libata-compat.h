@@ -1,10 +1,10 @@
 #ifndef __LIBATA_COMPAT_H__
 #define __LIBATA_COMPAT_H__
 
-#include <linux/time.h>
-#include <linux/sched.h>
+#include <linux/types.h>
 #include <linux/delay.h>
 #include <linux/pci.h>
+#include <linux/slab.h>
 
 /* For 2.6.x compatibility */
 typedef void irqreturn_t;
@@ -23,6 +23,12 @@ typedef void irqreturn_t;
 		dump_stack(); \
 	} \
 } while (0)
+
+typedef u32 __le32;
+typedef u64 __le64;
+
+#define DMA_64BIT_MASK 0xffffffffffffffffULL
+#define DMA_32BIT_MASK 0x00000000ffffffffULL
 
 #define MODULE_VERSION(ver_str)
 
@@ -76,11 +82,13 @@ static inline void libata_msleep(unsigned long msecs)
 {
 	msleep(msecs);
 }
-
 static inline struct pci_dev *to_pci_dev(struct device *dev)
 {
 	return (struct pci_dev *) dev;
 }
+
+static inline int pci_enable_msi(struct pci_dev *dev) { return -1; }
+static inline void pci_disable_msi(struct pci_dev *dev) {}
 
 #define pci_set_consistent_dma_mask(pdev,mask) (0)
 
@@ -109,9 +117,17 @@ static inline struct pci_dev *to_pci_dev(struct device *dev)
 #define dev_set_drvdata(dev,ptr) \
 	pci_set_drvdata(to_pci_dev(dev),(ptr))
 
+static inline void *kcalloc(size_t nmemb, size_t size, int flags)
+{
+	size_t total = nmemb * size;
+	void *mem = kmalloc(total, flags);
+	if (mem)
+		memset(mem, 0, total);
+	return mem;
+}
+
 static inline struct page *nth_page(struct page *page, int n)
 {
         return page + n;
 }
-
 #endif /* __LIBATA_COMPAT_H__ */

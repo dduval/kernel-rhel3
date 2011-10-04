@@ -1674,38 +1674,54 @@ done_fo_ioctl:
 static BOOL
 qla2x00_fo_count_retries(scsi_qla_host_t *ha, srb_t *sp)
 {
-	BOOL		retry = TRUE;
+	BOOL		retry = FALSE;
 	os_lun_t	*lq;
 	os_tgt_t	*tq;
 	scsi_qla_host_t	*vis_ha;
+	uint16_t        path_id;
+	struct fo_information	*mp_info = NULL;
+
 
 	DEBUG9(printk("%s: entered.\n", __func__);)
 
-	if (++sp->fo_retry_cnt >  qla_fo_params.MaxRetriesPerIo) {
-		/* no more failovers for this request */
-		retry = FALSE;
-		sp->fo_retry_cnt = 0;
-		printk(KERN_INFO
-		    "qla2x00: no more failovers for request - "
+	lq = sp->lun_queue;
+	mp_info = (struct fo_information *) lq->fo_info;
+
+       if (test_and_clear_bit(LUN_MPIO_RESET_CNTS, &lq->q_flag)) {
+               for (path_id = 0; path_id < MAX_PATHS_PER_DEVICE; path_id++)
+                       mp_info->fo_retry_cnt[path_id] = 0;
+	}
+
+	/* check to see if we have exhausted retries on all the paths */
+        for( path_id = 0; path_id < mp_info->path_cnt; path_id++)  {
+                if(mp_info->fo_retry_cnt[path_id] >=
+                        qla_fo_params.MaxRetriesPerPath)
+                                continue;
+                retry = TRUE;
+                break;
+        }
+
+	if(retry == FALSE) {
+                printk(KERN_INFO
+                    "qla2x00: no more failovers for request - "
 		    "pid= %ld\n", sp->cmd->serial_number);
 	} else {
 		/*
 		 * We haven't exceeded the max retries for this request, check
 		 * max retries this path
 		 */
-		if ((sp->fo_retry_cnt % qla_fo_params.MaxRetriesPerPath) == 0) {
-			DEBUG(printk(" qla2x00_fo_count_retries: FAILOVER - "
-			    "queuing ha=%ld, sp=%p, pid =%ld, "
-			    "fo retry= %d \n",
-			    ha->host_no,
-			    sp, sp->cmd->serial_number,
-			    sp->fo_retry_cnt);)
-
+		if((++sp->fo_retry_cnt % qla_fo_params.MaxRetriesPerPath) == 0){
+			path_id = sp->fclun->fcport->cur_path;
+			mp_info->fo_retry_cnt[path_id]++;
+			DEBUG(printk(" %s: FAILOVER - queuing ha=%ld, sp=%p,"
+				"pid =%ld, path_id=%d fo retry= %d \n",
+				 __func__, ha->host_no, sp, 
+				sp->cmd->serial_number, path_id, 
+				mp_info->fo_retry_cnt[path_id]);)
 			/*
 			 * Note: we don't want it to timeout, so it is
 			 * recycling on the retry queue and the fialover queue.
 			 */
-			lq = sp->lun_queue;
 			tq = sp->tgt_queue;
 			set_bit(LUN_MPIO_BUSY, &lq->q_flag);
 
@@ -1746,12 +1762,26 @@ qla2x00_fo_check_device(scsi_qla_host_t *ha, srb_t *sp)
 	switch (cp->sense_buffer[2] & 0xf) {
 
 		case NOT_READY:
-			if ( (fcport->flags & (FC_MSA_DEVICE|FC_EVA_DEVICE)) ) {
+			if (fcport->flags & (FC_MSA_DEVICE | FC_EVA_DEVICE 
+				| FC_AA_EVA_DEVICE)) {
 				/*
 				 * if we can't access port 
 				 */
-				if ((cp->sense_buffer[12] == 0x4 &&
-					cp->sense_buffer[13] == 0x0)) {
+				if (cp->sense_buffer[12] == 0x4 &&
+					(cp->sense_buffer[13] == 0x0 ||
+					cp->sense_buffer[13] == 0x2)) {
+				 	sp->err_id = SRB_ERR_DEVICE;
+					return (TRUE);
+				}
+			} 
+ 	     		if (fcport->flags & FC_DSXXX_DEVICE) {
+				/*
+				 * if we can't access port: lun in transition 
+				 */
+				if (cp->sense_buffer[12] == 0x4 &&
+					(cp->sense_buffer[13] == 0x0 ||
+					cp->sense_buffer[13] == 0xa ||
+					cp->sense_buffer[13] == 0xb)) {
 				 	sp->err_id = SRB_ERR_DEVICE;
 					return (TRUE);
 				}
@@ -1759,7 +1789,8 @@ qla2x00_fo_check_device(scsi_qla_host_t *ha, srb_t *sp)
 			break;
 
 		case UNIT_ATTENTION:
-			if ( (fcport->flags & FC_EVA_DEVICE) ) {
+			if (fcport->flags & (FC_EVA_DEVICE | 
+				FC_AA_EVA_DEVICE)) {
 				if ((cp->sense_buffer[12] == 0xa &&
 					cp->sense_buffer[13] == 0x8)) {
 				 	sp->err_id = SRB_ERR_DEVICE;
@@ -1770,6 +1801,14 @@ qla2x00_fo_check_device(scsi_qla_host_t *ha, srb_t *sp)
 					/* failback lun */
 				}
 			} 
+ 	     		if (fcport->flags & FC_DSXXX_DEVICE) {
+				/* lun config changed */
+				if (cp->sense_buffer[12] == 0x2a &&
+					cp->sense_buffer[13] == 0x6) {
+				 	sp->err_id = SRB_ERR_DEVICE;
+					return (TRUE);
+				}
+			}
 			break;
 
 	} /* end of switch */
@@ -1846,6 +1885,11 @@ qla2x00_fo_check(scsi_qla_host_t *ha, srb_t *sp)
 				sp, sp->fo_retry_cnt,
 				retry, host_status);)
 	}
+
+	/* Clear out any FO retry counts on good completions. */
+	if (host_status == DID_OK)
+		set_bit(LUN_MPIO_RESET_CNTS, &sp->lun_queue->q_flag);
+
 
 	DEBUG9(printk("%s: exiting. retry = %d.\n", __func__, retry);)
 
@@ -1960,6 +2004,204 @@ qla2x00_fo_set_params(PFO_PARAMS pp)
 	DEBUG9(printk("%s: exiting.\n", __func__);)
 
 	return EXT_STATUS_OK;
+}
+
+static int 
+qla2x00_issue_set_tpg_cdb (fc_lun_t *new_lp)
+{
+	int		rval = QLA2X00_SUCCESS;
+	int		retry;
+	uint16_t	comp_status;
+	uint16_t	scsi_status;
+	uint16_t	tpg_count;
+	//uint16_t	tpg_id;
+	uint16_t	lun = 0;
+	uint8_t		passive_state = 0;
+	dma_addr_t	stpg_dma;
+	scsi_qla_host_t *ha;
+	fc_port_t	*fcport;
+	mp_lun_t *mplun;
+	set_tport_grp_rsp_t *stpg;
+	struct list_head *list, *temp;
+	mp_tport_grp_t *tport_grp;
+	uint8_t	index = 0;
+
+	ENTER(__func__);
+
+	DEBUG2(printk("%s  entered lp=%p\n",__func__,new_lp);)
+	fcport = new_lp->fcport;
+	ha = fcport->ha;
+	if (atomic_read(&fcport->state) == FC_DEVICE_DEAD) {
+		DEBUG2(printk("scsi(%ld) %s leaving: Port 0x%02x is marked "
+			"DEAD\n", ha->host_no,__func__,fcport->loop_id);)
+		return (QLA2X00_FUNCTION_FAILED);
+	}
+
+	lun = new_lp->lun;
+	mplun = new_lp->mplun;	
+	if (mplun ==  NULL) {
+		DEBUG(printk("%s mplun does not exist for fclun=%p\n",
+				__func__,new_lp);)
+		return (QLA2X00_FUNCTION_FAILED);
+	}
+
+	/* check for ALUA support */
+	if (new_lp->asymm_support == TGT_PORT_GRP_UNSUPPORTED || 
+		new_lp->asymm_support == SET_TGT_PORT_GRP_UNSUPPORTED) {
+		printk("%s(%ld): lun=%d does not support ALUA\n",__func__,ha->instance,lun);
+		return rval;
+	}
+
+	stpg = pci_alloc_consistent(ha->pdev,
+				sizeof(set_tport_grp_rsp_t), &stpg_dma);
+	if (stpg == NULL) {
+		printk(KERN_WARNING
+				"scsi(%ld): Memory Allocation failed - TPG\n",
+				ha->host_no);
+		ha->mem_err++;
+		return (QLA2X00_FUNCTION_FAILED);
+	}
+
+	retry = 5;
+	do {
+		memset(stpg, 0, sizeof(set_tport_grp_rsp_t));
+		stpg->p.cmd.entry_type = COMMAND_A64_TYPE;
+		stpg->p.cmd.entry_count = 1;
+		stpg->p.cmd.lun = cpu_to_le16(lun);
+#if defined(EXTENDED_IDS)
+		stpg->p.cmd.target = cpu_to_le16(fcport->loop_id);
+#else
+		stpg->p.cmd.target = (uint8_t)fcport->loop_id;
+#endif
+		stpg->p.cmd.control_flags =
+			__constant_cpu_to_le16(CF_WRITE | CF_SIMPLE_TAG);
+		stpg->p.cmd.scsi_cdb[0] = SCSIOP_MAINTENANCE_OUT;
+		stpg->p.cmd.scsi_cdb[1] = SCSISA_TARGET_PORT_GROUPS;
+		stpg->p.cmd.scsi_cdb[8] = ((sizeof(set_tport_grp_data_t) >> 8) & 0xff); 
+		stpg->p.cmd.scsi_cdb[9] = (sizeof(set_tport_grp_data_t) & 0xff);
+
+		/* Right now we support only two tgt port groups. For
+		 * failover to occur the state of the two controller must be
+		 * opposite to each other and different from current state */
+		tpg_count = 0; 
+		list_for_each_safe(list, temp, &mplun->tport_grps_list) {
+			tport_grp = list_entry(list, mp_tport_grp_t, list);
+			if (tport_grp->asym_acc_state != TPG_ACT_OPT) {
+				passive_state = tport_grp->asym_acc_state;
+				stpg->list.descriptor[tpg_count].
+					    asym_acc_state = TPG_ACT_OPT;	
+			} else  {
+				index = tpg_count;
+			}
+			memcpy(&stpg->list.descriptor[tpg_count].
+				tgt_port_grp[0], &tport_grp->tpg_id[0],
+				 sizeof(tport_grp->tpg_id));
+			DEBUG4(printk("%s lun=%d tpg_id=%d old_tpg_state=%d \n",__func__, lun, 
+				tport_grp->tpg_id[1], tport_grp->asym_acc_state);) 
+			tpg_count++; 
+		}
+
+		/* setting the active controller to passive state */	
+		stpg->list.descriptor[index].asym_acc_state = passive_state;	
+
+		stpg->p.cmd.dseg_count = __constant_cpu_to_le16(1);
+		stpg->p.cmd.timeout = __constant_cpu_to_le16(10);
+		stpg->p.cmd.byte_count =
+			__constant_cpu_to_le32(sizeof(set_tport_grp_data_t));
+		stpg->p.cmd.dseg_0_address[0] = cpu_to_le32(
+				LSD(stpg_dma + sizeof(sts_entry_t)));
+		stpg->p.cmd.dseg_0_address[1] = cpu_to_le32(
+				MSD(stpg_dma + sizeof(sts_entry_t)));
+		stpg->p.cmd.dseg_0_length =
+			__constant_cpu_to_le32(sizeof(set_tport_grp_data_t));
+
+		#if  0
+			for (tpg_count = 0; tpg_count < TGT_PORT_GRP_COUNT; 
+				tpg_count++) {
+				printk("%s lun=%d tpg cnt=%d tpg_id[0]=%d tpg_id[1]=%d new_tpg_state=%d\n",__func__, 
+					lun, tpg_count,stpg->list.descriptor[tpg_count].tgt_port_grp[0],
+					stpg->list.descriptor[tpg_count].tgt_port_grp[1],
+					stpg->list.descriptor[tpg_count].asym_acc_state);
+			}
+		#endif	
+
+		rval = qla2x00_issue_iocb(ha, stpg, stpg_dma,
+				sizeof(set_tport_grp_rsp_t));
+
+		comp_status = le16_to_cpu(stpg->p.rsp.comp_status);
+		scsi_status = le16_to_cpu(stpg->p.rsp.scsi_status);
+
+		/* Port Logged Out, so don't retry */
+		if (comp_status == CS_PORT_LOGGED_OUT ||
+		    comp_status == CS_PORT_CONFIG_CHG ||
+		    comp_status == CS_PORT_BUSY ||
+		    comp_status == CS_INCOMPLETE ||
+		    comp_status == CS_PORT_UNAVAILABLE)
+				break;
+
+
+		if (scsi_status & SS_CHECK_CONDITION) {
+			DEBUG2(printk("%s: check status bytes = 0x%02x 0x%02x 0x%02x\n", __func__,
+				stpg->p.rsp.req_sense_data[2], stpg->p.rsp.req_sense_data[12],
+				stpg->p.rsp.req_sense_data[13]);)
+
+			/* switched status */
+ 	     		if( (fcport->flags & FC_DSXXX_DEVICE) &&
+			    stpg->p.rsp.req_sense_data[2] == 0x6 &&
+			    stpg->p.rsp.req_sense_data[12] == 0x29 &&
+			    stpg->p.rsp.req_sense_data[13] == 0x1) {
+				scsi_status = 0; /* make OK */
+				break;
+			}
+			/* Already switched status */
+ 	     		if( (fcport->flags & FC_DSXXX_DEVICE) &&
+			    stpg->p.rsp.req_sense_data[2] == 0x5 &&
+			    stpg->p.rsp.req_sense_data[12] == 0x26 &&
+			    stpg->p.rsp.req_sense_data[13] == 0x0) {
+				scsi_status = 0; /* make OK */
+				break;
+			}
+
+			if (stpg->p.rsp.req_sense_data[2] == NOT_READY &&
+			    stpg->p.rsp.req_sense_data[12] == 0x4 &&
+			    stpg->p.rsp.req_sense_data[13] == 0xa) {
+				set_current_state(TASK_UNINTERRUPTIBLE);
+				schedule_timeout(3 * HZ);
+			}
+		}
+
+		/* printk(KERN_INFO 
+			"qla_fo(%ld): Sending Set target port group - retry=%d"
+				" comp status 0x%x, "
+				"scsi status 0x%x, rval=%d\n",
+				ha->host_no,
+				retry,
+				comp_status,
+				scsi_status, 
+				rval); */
+
+	} while ((rval != QLA2X00_SUCCESS || comp_status != CS_COMPLETE ||
+				(scsi_status & SS_CHECK_CONDITION)) && --retry);
+
+	if (rval == QLA2X00_SUCCESS && retry &&
+		(!((scsi_status & SS_CHECK_CONDITION) &&
+		   (stpg->p.rsp.req_sense_data[2] == NOT_READY )) &&
+		 comp_status == CS_COMPLETE)) {
+		DEBUG2(printk("%s Set tgt port group - SUCCEDED, lun (%d) cs=0x%x ss=0x%x, rval=%d\n",
+					__func__, lun, comp_status, scsi_status, rval);)
+	} else {
+		rval = QLA2X00_FUNCTION_FAILED;
+		DEBUG2(printk("%s Set tgt port group - FAILED, lun (%d) cs=0x%x ss=0x%x, rval=%d\n",
+					__func__, lun, comp_status, scsi_status, rval);)
+	}
+
+	pci_free_consistent(ha->pdev, sizeof(set_tport_grp_rsp_t),
+			stpg, stpg_dma); 
+
+	DEBUG(printk(KERN_INFO "%s  leaving\n",__func__);)
+	LEAVE(__func__);
+
+	return rval;
 }
 
 
@@ -2092,7 +2334,7 @@ qla2x00_spinup(scsi_qla_host_t *ha, fc_port_t *fcport, uint16_t lun)
 				   (pkt->p.rsp.req_sense_data[12] == 4 ) &&
 				   (pkt->p.rsp.req_sense_data[13] == 3 ) ) {
 
-					current->state = TASK_UNINTERRUPTIBLE;
+ 					set_current_state(TASK_UNINTERRUPTIBLE);
 					schedule_timeout(HZ);
 					printk(".");
 					count--;
@@ -2144,6 +2386,64 @@ qla2x00_spinup(scsi_qla_host_t *ha, fc_port_t *fcport, uint16_t lun)
 	return( rval );
 
 }
+
+uint32_t
+qla2x00_wait_for_tpg_avail(fc_lun_t *new_lp)
+{
+	int seconds = 60;	/* seconds * 2 */
+	mp_tport_grp_t *tport_grp;
+	mp_lun_t *mplun;
+	int tpg_count;
+	struct list_head *list, *temp;
+	int	rval = QLA2X00_FAILED;
+
+	DEBUG2(printk("%s: entered.\n", __func__);)
+	printk(KERN_INFO "%s: entered.\n", __func__);
+	mplun = new_lp->mplun;	
+	do  {
+		qla2x00_get_target_ports(new_lp->fcport, new_lp, 0);
+		tpg_count = 0; 
+		list_for_each_safe(list, temp, &mplun->tport_grps_list) {
+			tport_grp = list_entry(list, mp_tport_grp_t, list);
+			if (tport_grp->asym_acc_state == TPG_UNAVAIL)
+				tpg_count++; 
+		}
+		if (tpg_count == 0 ) {
+			rval = QLA2X00_SUCCESS;
+			break;
+		}
+ 		set_current_state(TASK_UNINTERRUPTIBLE);
+		schedule_timeout(HZ*2);
+	} while (--seconds); 
+
+
+	printk(KERN_INFO "%s: leaving tpg_count=%d seconds=%d.\n", __func__, tpg_count, seconds);
+
+	return rval;
+}
+
+uint32_t
+qla2x00_wait_for_tpg_ready(fc_lun_t *new_lp)
+{
+	int seconds = 60;
+	int rval = QLA2X00_FAILED;
+	uint8_t	 wait_for_transition;	
+
+	DEBUG2(printk("%s: entered.\n", __func__);)
+	wait_for_transition = 1;	
+	do  {
+		rval = qla2x00_test_active_lun(new_lp->fcport, new_lp, &wait_for_transition);
+		if(rval == 1 || wait_for_transition == 0)
+			break; 
+ 		set_current_state(TASK_UNINTERRUPTIBLE);
+		schedule_timeout(HZ * 2);
+	} while (--seconds); 
+
+	printk("%s: leaving rval=%d seconds=%d.\n", __func__, rval, seconds);
+
+	return rval;
+}
+	
 
 /*
  * qla2x00_send_fo_notification
@@ -2212,6 +2512,24 @@ qla2x00_send_fo_notification(fc_lun_t *old_lp, fc_lun_t *new_lp)
 		new_lp->fcport->notify_type == FO_NOTIFY_TYPE_SPINUP ) {
 		rval = qla2x00_spinup(new_lp->fcport->ha, new_lp->fcport, 
 			new_lp->lun); 
+	}
+
+	if (qla_fo_params.FailoverNotifyType == FO_NOTIFY_TYPE_TPGROUP_CDB ||
+		   old_lp->fcport->notify_type == FO_NOTIFY_TYPE_TPGROUP_CDB) {
+		/* send set target port group cdb */	
+		rval = qla2x00_wait_for_tpg_avail(new_lp);
+		if (rval == QLA2X00_SUCCESS) {
+			rval = qla2x00_issue_set_tpg_cdb(new_lp);
+			if (rval == QLA2X00_SUCCESS) {
+				qla2x00_wait_for_tpg_ready(new_lp);
+				DEBUG2(printk("qla2x00_send_fo_failover_notify: "
+			    	"set tgt port group succeded\n");)
+			
+			} else {
+				DEBUG2(printk("qla2x00_send_fo_failover_notify: "
+			    	"set tgt port group failed\n");)
+			}
+		}
 	}
 
 	if (qla_fo_params.FailoverNotifyType == FO_NOTIFY_TYPE_CDB) {

@@ -54,7 +54,7 @@
 #include <linux/interrupt.h>
 #include <linux/ipmi_smi.h>
 #include <asm/io.h>
-#include "ipmi_kcs_sm.h"
+#include "ipmi_si_sm.h"
 #include <linux/init.h>
 
 /* Measure times between events in the driver. */
@@ -87,7 +87,7 @@ enum kcs_intf_state {
 struct kcs_info
 {
 	ipmi_smi_t          intf;
-	struct kcs_data     *kcs_sm;
+	struct si_sm_data   *kcs_sm;
 	spinlock_t          kcs_lock;
 	spinlock_t          msg_lock;
 	struct list_head    xmit_msgs;
@@ -112,8 +112,10 @@ struct kcs_info
 	   out. */
 	int                 run_to_completion;
 
+	struct si_sm_io     io;
+
 	/* The I/O port of a KCS interface. */
-	int                 port;
+	unsigned int        port;
 
 	/* zero if no irq; */
 	int                 irq;
@@ -164,7 +166,7 @@ static void return_hosed_msg(struct kcs_info *kcs_info)
 	deliver_recv_msg(kcs_info, msg);
 }
 
-static enum kcs_result start_next_msg(struct kcs_info *kcs_info)
+static enum si_sm_result start_next_msg(struct kcs_info *kcs_info)
 {
 	int              rv;
 	struct list_head *entry = NULL;
@@ -185,7 +187,7 @@ static enum kcs_result start_next_msg(struct kcs_info *kcs_info)
 
 	if (!entry) {
 		kcs_info->curr_msg = NULL;
-		rv = KCS_SM_IDLE;
+		rv = SI_SM_IDLE;
 	} else {
 		int err;
 
@@ -197,14 +199,15 @@ static enum kcs_result start_next_msg(struct kcs_info *kcs_info)
 		do_gettimeofday(&t);
 		printk("**Start2: %d.%9.9d\n", t.tv_sec, t.tv_usec);
 #endif
-		err = start_kcs_transaction(kcs_info->kcs_sm,
-					   kcs_info->curr_msg->data,
-					   kcs_info->curr_msg->data_size);
+		err = kcs_smi_handlers.start_transaction(
+		    kcs_info->kcs_sm,
+		    kcs_info->curr_msg->data,
+		    kcs_info->curr_msg->data_size);
 		if (err) {
 			return_hosed_msg(kcs_info);
 		}
 
-		rv = KCS_CALL_WITHOUT_DELAY;
+		rv = SI_SM_CALL_WITHOUT_DELAY;
 	}
 	spin_unlock(&(kcs_info->msg_lock));
 
@@ -220,7 +223,7 @@ static void start_enable_irq(struct kcs_info *kcs_info)
 	msg[0] = (IPMI_NETFN_APP_REQUEST << 2);
 	msg[1] = IPMI_GET_BMC_GLOBAL_ENABLES_CMD;
 
-	start_kcs_transaction(kcs_info->kcs_sm, msg, 2);
+	kcs_smi_handlers.start_transaction(kcs_info->kcs_sm, msg, 2);
 	kcs_info->kcs_state = KCS_ENABLE_INTERRUPTS1;
 }
 
@@ -233,7 +236,7 @@ static void start_clear_flags(struct kcs_info *kcs_info)
 	msg[1] = IPMI_CLEAR_MSG_FLAGS_CMD;
 	msg[2] = WDT_PRE_TIMEOUT_INT;
 
-	start_kcs_transaction(kcs_info->kcs_sm, msg, 3);
+	kcs_smi_handlers.start_transaction(kcs_info->kcs_sm, msg, 3);
 	kcs_info->kcs_state = KCS_CLEARING_FLAGS;
 }
 
@@ -280,9 +283,10 @@ static void handle_flags(struct kcs_info *kcs_info)
 		kcs_info->curr_msg->data[1] = IPMI_GET_MSG_CMD;
 		kcs_info->curr_msg->data_size = 2;
 
-		start_kcs_transaction(kcs_info->kcs_sm,
-				      kcs_info->curr_msg->data,
-				      kcs_info->curr_msg->data_size);
+		kcs_smi_handlers.start_transaction(
+		    kcs_info->kcs_sm,
+		    kcs_info->curr_msg->data,
+		    kcs_info->curr_msg->data_size);
 		kcs_info->kcs_state = KCS_GETTING_MESSAGES;
 	} else if (kcs_info->msg_flags & EVENT_MSG_BUFFER_FULL) {
 		/* Events available. */
@@ -298,9 +302,10 @@ static void handle_flags(struct kcs_info *kcs_info)
 		kcs_info->curr_msg->data[1] = IPMI_READ_EVENT_MSG_BUFFER_CMD;
 		kcs_info->curr_msg->data_size = 2;
 
-		start_kcs_transaction(kcs_info->kcs_sm,
-				      kcs_info->curr_msg->data,
-				      kcs_info->curr_msg->data_size);
+		kcs_smi_handlers.start_transaction(
+		    kcs_info->kcs_sm,
+		    kcs_info->curr_msg->data,
+		    kcs_info->curr_msg->data_size);
 		kcs_info->kcs_state = KCS_GETTING_EVENTS;
 	} else {
 		kcs_info->kcs_state = KCS_NORMAL;
@@ -322,9 +327,10 @@ static void handle_transaction_done(struct kcs_info *kcs_info)
 			break;
 			
 		kcs_info->curr_msg->rsp_size
-			= kcs_get_result(kcs_info->kcs_sm,
-					 kcs_info->curr_msg->rsp,
-					 IPMI_MAX_MSG_LENGTH);
+			= kcs_smi_handlers.get_result(
+			    kcs_info->kcs_sm,
+			    kcs_info->curr_msg->rsp,
+			    IPMI_MAX_MSG_LENGTH);
 		
 		/* Do this here becase deliver_recv_msg() releases the
 		   lock, and a new message can be put in during the
@@ -340,7 +346,7 @@ static void handle_transaction_done(struct kcs_info *kcs_info)
 		unsigned int  len;
 
 		/* We got the flags from the KCS, now handle them. */
-		len = kcs_get_result(kcs_info->kcs_sm, msg, 4);
+		len = kcs_smi_handlers.get_result(kcs_info->kcs_sm, msg, 4);
 		if (msg[2] != 0) {
 			/* Error fetching flags, just give up for
 			   now. */
@@ -362,7 +368,7 @@ static void handle_transaction_done(struct kcs_info *kcs_info)
 		unsigned char msg[3];
 
 		/* We cleared the flags. */
-		kcs_get_result(kcs_info->kcs_sm, msg, 3);
+		kcs_smi_handlers.get_result(kcs_info->kcs_sm, msg, 3);
 		if (msg[2] != 0) {
 			/* Error clearing flags */
 			printk(KERN_WARNING
@@ -379,9 +385,9 @@ static void handle_transaction_done(struct kcs_info *kcs_info)
 	case KCS_GETTING_EVENTS:
 	{
 		kcs_info->curr_msg->rsp_size
-			= kcs_get_result(kcs_info->kcs_sm,
-					 kcs_info->curr_msg->rsp,
-					 IPMI_MAX_MSG_LENGTH);
+			= kcs_smi_handlers.get_result(kcs_info->kcs_sm,
+						      kcs_info->curr_msg->rsp,
+						      IPMI_MAX_MSG_LENGTH);
 
 		/* Do this here becase deliver_recv_msg() releases the
 		   lock, and a new message can be put in during the
@@ -394,19 +400,25 @@ static void handle_transaction_done(struct kcs_info *kcs_info)
 
 			/* Take off the event flag. */
 			kcs_info->msg_flags &= ~EVENT_MSG_BUFFER_FULL;
+			handle_flags(kcs_info);
 		} else {
+			/* Do this before we deliver the message
+			   because delivering the message releases the
+			   lock and something else can mess with the
+			   state. */
+			handle_flags(kcs_info);
+
 			deliver_recv_msg(kcs_info, msg);
 		}
-		handle_flags(kcs_info);
 		break;
 	}
 
 	case KCS_GETTING_MESSAGES:
 	{
 		kcs_info->curr_msg->rsp_size
-			= kcs_get_result(kcs_info->kcs_sm,
-					 kcs_info->curr_msg->rsp,
-					 IPMI_MAX_MSG_LENGTH);
+			= kcs_smi_handlers.get_result(kcs_info->kcs_sm,
+						      kcs_info->curr_msg->rsp,
+						      IPMI_MAX_MSG_LENGTH);
 
 		/* Do this here becase deliver_recv_msg() releases the
 		   lock, and a new message can be put in during the
@@ -419,10 +431,16 @@ static void handle_transaction_done(struct kcs_info *kcs_info)
 
 			/* Take off the msg flag. */
 			kcs_info->msg_flags &= ~RECEIVE_MSG_AVAIL;
+			handle_flags(kcs_info);
 		} else {
+			/* Do this before we deliver the message
+			   because delivering the message releases the
+			   lock and something else can mess with the
+			   state. */
+			handle_flags(kcs_info);
+
 			deliver_recv_msg(kcs_info, msg);
 		}
-		handle_flags(kcs_info);
 		break;
 	}
 
@@ -431,7 +449,7 @@ static void handle_transaction_done(struct kcs_info *kcs_info)
 		unsigned char msg[4];
 
 		/* We got the flags from the KCS, now handle them. */
-		kcs_get_result(kcs_info->kcs_sm, msg, 4);
+		kcs_smi_handlers.get_result(kcs_info->kcs_sm, msg, 4);
 		if (msg[2] != 0) {
 			printk(KERN_WARNING
 			       "ipmi_kcs: Could not enable interrupts"
@@ -441,7 +459,8 @@ static void handle_transaction_done(struct kcs_info *kcs_info)
 			msg[0] = (IPMI_NETFN_APP_REQUEST << 2);
 			msg[1] = IPMI_SET_BMC_GLOBAL_ENABLES_CMD;
 			msg[2] = msg[3] | 1; /* enable msg queue int */
-			start_kcs_transaction(kcs_info->kcs_sm, msg,3);
+			kcs_smi_handlers.start_transaction(
+			    kcs_info->kcs_sm, msg,3);
 			kcs_info->kcs_state = KCS_ENABLE_INTERRUPTS2;
 		}
 		break;
@@ -452,7 +471,7 @@ static void handle_transaction_done(struct kcs_info *kcs_info)
 		unsigned char msg[4];
 
 		/* We got the flags from the KCS, now handle them. */
-		kcs_get_result(kcs_info->kcs_sm, msg, 4);
+		kcs_smi_handlers.get_result(kcs_info->kcs_sm, msg, 4);
 		if (msg[2] != 0) {
 			printk(KERN_WARNING
 			       "ipmi_kcs: Could not enable interrupts"
@@ -466,9 +485,10 @@ static void handle_transaction_done(struct kcs_info *kcs_info)
 
 /* Called on timeouts and events.  Timeouts should pass the elapsed
    time, interrupts should pass in zero. */
-static enum kcs_result kcs_event_handler(struct kcs_info *kcs_info, int time)
+static enum si_sm_result kcs_event_handler(struct kcs_info *kcs_info,
+					   int time)
 {
-	enum kcs_result kcs_result;
+	enum si_sm_result kcs_result;
 
  restart:
 	/* There used to be a loop here that waited a little while
@@ -477,32 +497,34 @@ static enum kcs_result kcs_event_handler(struct kcs_info *kcs_info, int time)
 	   range, which is far too long to wait in an interrupt.  So
 	   we just run until the state machine tells us something
 	   happened or it needs a delay. */
-	kcs_result = kcs_event(kcs_info->kcs_sm, time);
+	kcs_result = kcs_smi_handlers.event(kcs_info->kcs_sm, time);
 	time = 0;
-	while (kcs_result == KCS_CALL_WITHOUT_DELAY)
+	while (kcs_result == SI_SM_CALL_WITHOUT_DELAY)
 	{
-		kcs_result = kcs_event(kcs_info->kcs_sm, 0);
+		kcs_result = kcs_smi_handlers.event(kcs_info->kcs_sm, 0);
 	}
 
-	if (kcs_result == KCS_TRANSACTION_COMPLETE)
+	if (kcs_result == SI_SM_TRANSACTION_COMPLETE)
 	{
 		handle_transaction_done(kcs_info);
-		kcs_result = kcs_event(kcs_info->kcs_sm, 0);
+		kcs_result = kcs_smi_handlers.event(kcs_info->kcs_sm, 0);
 	}
-	else if (kcs_result == KCS_SM_HOSED)
+	else if (kcs_result == SI_SM_HOSED)
 	{
+		/* Do the before return_hosed_msg, because that
+		   releases the lock. */
+		kcs_info->kcs_state = KCS_NORMAL;
 		if (kcs_info->curr_msg != NULL) {
 			/* If we were handling a user message, format
                            a response to send to the upper layer to
                            tell it about the error. */
 			return_hosed_msg(kcs_info);
 		}
-		kcs_result = kcs_event(kcs_info->kcs_sm, 0);
-		kcs_info->kcs_state = KCS_NORMAL;
+		kcs_result = kcs_smi_handlers.event(kcs_info->kcs_sm, 0);
 	}
 
 	/* We prefer handling attn over new messages. */
-	if (kcs_result == KCS_ATTN)
+	if (kcs_result == SI_SM_ATTN)
 	{
 		unsigned char msg[2];
 
@@ -514,19 +536,19 @@ static enum kcs_result kcs_event_handler(struct kcs_info *kcs_info, int time)
 		msg[0] = (IPMI_NETFN_APP_REQUEST << 2);
 		msg[1] = IPMI_GET_MSG_FLAGS_CMD;
 
-		start_kcs_transaction(kcs_info->kcs_sm, msg, 2);
+		kcs_smi_handlers.start_transaction(kcs_info->kcs_sm, msg, 2);
 		kcs_info->kcs_state = KCS_GETTING_FLAGS;
 		goto restart;
 	}
 
 	/* If we are currently idle, try to start the next message. */
-	if (kcs_result == KCS_SM_IDLE) {
+	if (kcs_result == SI_SM_IDLE) {
 		kcs_result = start_next_msg(kcs_info);
-		if (kcs_result != KCS_SM_IDLE)
+		if (kcs_result != SI_SM_IDLE)
 			goto restart;
         }
 
-	if ((kcs_result == KCS_SM_IDLE)
+	if ((kcs_result == SI_SM_IDLE)
 	    && (atomic_read(&kcs_info->req_events)))
 	{
 		/* We are idle and the upper layer requested that I fetch
@@ -537,7 +559,7 @@ static enum kcs_result kcs_event_handler(struct kcs_info *kcs_info, int time)
 		msg[0] = (IPMI_NETFN_APP_REQUEST << 2);
 		msg[1] = IPMI_GET_MSG_FLAGS_CMD;
 
-		start_kcs_transaction(kcs_info->kcs_sm, msg, 2);
+		kcs_smi_handlers.start_transaction(kcs_info->kcs_sm, msg, 2);
 		kcs_info->kcs_state = KCS_GETTING_FLAGS;
 		goto restart;
 	}
@@ -549,11 +571,11 @@ static void sender(void                *send_info,
 		   struct ipmi_smi_msg *msg,
 		   int                 priority)
 {
-	struct kcs_info *kcs_info = (struct kcs_info *) send_info;
-	enum kcs_result result;
-	unsigned long   flags;
+	struct kcs_info    *kcs_info = (struct kcs_info *) send_info;
+	enum si_sm_result  result;
+	unsigned long      flags;
 #ifdef DEBUG_TIMING
-	struct timeval t;
+	struct timeval     t;
 #endif
 
 	spin_lock_irqsave(&(kcs_info->msg_lock), flags);
@@ -574,7 +596,7 @@ static void sender(void                *send_info,
 
 		spin_lock_irqsave(&(kcs_info->kcs_lock), flags);
 		result = kcs_event_handler(kcs_info, 0);
-		while (result != KCS_SM_IDLE) {
+		while (result != SI_SM_IDLE) {
 			udelay(KCS_SHORT_TIMEOUT_USEC);
 			result = kcs_event_handler(kcs_info,
 						   KCS_SHORT_TIMEOUT_USEC);
@@ -602,16 +624,16 @@ static void sender(void                *send_info,
 
 static void set_run_to_completion(void *send_info, int i_run_to_completion)
 {
-	struct kcs_info *kcs_info = (struct kcs_info *) send_info;
-	enum kcs_result result;
-	unsigned long   flags;
+	struct kcs_info    *kcs_info = (struct kcs_info *) send_info;
+	enum si_sm_result  result;
+	unsigned long      flags;
 
 	spin_lock_irqsave(&(kcs_info->kcs_lock), flags);
 
 	kcs_info->run_to_completion = i_run_to_completion;
 	if (i_run_to_completion) {
 		result = kcs_event_handler(kcs_info, 0);
-		while (result != KCS_SM_IDLE) {
+		while (result != SI_SM_IDLE) {
 			udelay(KCS_SHORT_TIMEOUT_USEC);
 			result = kcs_event_handler(kcs_info,
 						   KCS_SHORT_TIMEOUT_USEC);
@@ -619,6 +641,13 @@ static void set_run_to_completion(void *send_info, int i_run_to_completion)
 	}
 
 	spin_unlock_irqrestore(&(kcs_info->kcs_lock), flags);
+}
+
+static void poll(void *send_info)
+{
+	struct kcs_info *kcs_info = (struct kcs_info *) send_info;
+
+	kcs_event_handler(kcs_info, 0);
 }
 
 static void request_events(void *send_info)
@@ -676,13 +705,13 @@ static void kcs_restart_short_timer(struct kcs_info *kcs_info)
 
 static void kcs_timeout(unsigned long data)
 {
-	struct kcs_info *kcs_info = (struct kcs_info *) data;
-	enum kcs_result kcs_result;
-	unsigned long   flags;
-	unsigned long   jiffies_now;
-	unsigned long   time_diff;
+	struct kcs_info    *kcs_info = (struct kcs_info *) data;
+	enum si_sm_result  kcs_result;
+	unsigned long      flags;
+	unsigned long      jiffies_now;
+	unsigned long      time_diff;
 #ifdef DEBUG_TIMING
-	struct timeval t;
+	struct timeval     t;
 #endif
 
 	if (kcs_info->stop_operation) {
@@ -712,7 +741,7 @@ static void kcs_timeout(unsigned long data)
 	/* If the state machine asks for a short delay, then shorten
            the timer timeout. */
 #ifdef CONFIG_HIGH_RES_TIMERS
-	if (kcs_result == KCS_CALL_WITH_DELAY) {
+	if (kcs_result == SI_SM_CALL_WITH_DELAY) {
 		kcs_info->kcs_timer.sub_expires
 			+= usec_to_arch_cycles(KCS_SHORT_TIMEOUT_USEC);
 		while (kcs_info->kcs_timer.sub_expires >= cycles_per_jiffies) {
@@ -725,7 +754,7 @@ static void kcs_timeout(unsigned long data)
 	}
 #else
 	/* If requested, take the shortest delay possible */
-	if (kcs_result == KCS_CALL_WITH_DELAY) {
+	if (kcs_result == SI_SM_CALL_WITH_DELAY) {
 		kcs_info->kcs_timer.expires = jiffies + 1;
 	} else {
 		kcs_info->kcs_timer.expires = jiffies + KCS_TIMEOUT_JIFFIES;
@@ -764,7 +793,8 @@ static struct ipmi_smi_handlers handlers =
 	request_events:        request_events,
 	new_user:	       new_user,
 	user_left:	       user_left,
-	set_run_to_completion: set_run_to_completion
+	set_run_to_completion: set_run_to_completion,
+	poll:                  poll,
 };
 
 static unsigned char ipmi_kcs_dev_rev;
@@ -776,12 +806,13 @@ static unsigned char ipmi_version_minor;
 extern int kcs_dbg;
 static int ipmi_kcs_detect_hardware(unsigned int port,
 				    unsigned char *addr,
-				    struct kcs_data *data)
+				    struct si_sm_data *data)
 {
-	unsigned char   msg[2];
-	unsigned char   resp[IPMI_MAX_MSG_LENGTH];
-	unsigned long   resp_len;
-	enum kcs_result kcs_result;
+	unsigned char      msg[2];
+	unsigned char      *resp;
+	unsigned long      resp_len;
+	enum si_sm_result  kcs_result;
+	int                rv = 0;
 
 	/* It's impossible for the KCS status register to be all 1's,
 	   (assuming a properly functioning, self-initialized BMC)
@@ -794,40 +825,51 @@ static int ipmi_kcs_detect_hardware(unsigned int port,
 		if (readb(addr+1) == 0xff) return -ENODEV; 
 	}
 
+	resp = kmalloc(IPMI_MAX_MSG_LENGTH, GFP_KERNEL);
+	if (!resp)
+		return -ENOMEM;
+
 	/* Do a Get Device ID command, since it comes back with some
 	   useful info. */
 	msg[0] = IPMI_NETFN_APP_REQUEST << 2;
 	msg[1] = IPMI_GET_DEVICE_ID_CMD;
-	start_kcs_transaction(data, msg, 2);
+	kcs_smi_handlers.start_transaction(data, msg, 2);
 	
-	kcs_result = kcs_event(data, 0);
+	kcs_result = kcs_smi_handlers.event(data, 0);
 	for (;;)
 	{
-		if (kcs_result == KCS_CALL_WITH_DELAY) {
-			udelay(100);
-			kcs_result = kcs_event(data, 100);
+		if (kcs_result == SI_SM_CALL_WITH_DELAY) {
+			set_current_state(TASK_UNINTERRUPTIBLE);
+			schedule_timeout(1);
+			kcs_result = kcs_smi_handlers.event(data, 100);
 		}
-		else if (kcs_result == KCS_CALL_WITHOUT_DELAY)
+		else if (kcs_result == SI_SM_CALL_WITHOUT_DELAY)
 		{
-			kcs_result = kcs_event(data, 0);
+			kcs_result = kcs_smi_handlers.event(data, 0);
 		}
 		else
 			break;
 	}
-	if (kcs_result == KCS_SM_HOSED) {
+	if (kcs_result == SI_SM_HOSED) {
 		/* We couldn't get the state machine to run, so whatever's at
 		   the port is probably not an IPMI KCS interface. */
-		return -ENODEV;
+		rv = -ENODEV;
+		goto out;
 	}
 	/* Otherwise, we got some data. */
-	resp_len = kcs_get_result(data, resp, IPMI_MAX_MSG_LENGTH);
-	if (resp_len < 6)
+	resp_len = kcs_smi_handlers.get_result(data, resp,
+					       IPMI_MAX_MSG_LENGTH);
+	if (resp_len < 6) {
 		/* That's odd, it should be longer. */
-		return -EINVAL;
+		rv = -EINVAL;
+		goto out;
+	}
 	
-	if ((resp[1] != IPMI_GET_DEVICE_ID_CMD) || (resp[2] != 0))
+	if ((resp[1] != IPMI_GET_DEVICE_ID_CMD) || (resp[2] != 0)) {
 		/* That's odd, it shouldn't be able to fail. */
-		return -EINVAL;
+		rv = -EINVAL;
+		goto out;
+	}
 	
 	ipmi_kcs_dev_rev = resp[4] & 0xf;
 	ipmi_kcs_fw_rev_major = resp[5] & 0x7f;
@@ -835,7 +877,9 @@ static int ipmi_kcs_detect_hardware(unsigned int port,
 	ipmi_version_major = resp[7] & 0xf;
 	ipmi_version_minor = resp[7] >> 4;
 
-	return 0;
+ out:
+	kfree(resp);
+	return rv;
 }
 
 /* There can be 4 IO ports passed in (with or without IRQs), 4 addresses,
@@ -859,6 +903,36 @@ MODULE_PARM(kcs_trydefaults, "i");
 MODULE_PARM(kcs_addrs, "1-4l");
 MODULE_PARM(kcs_irqs, "1-4i");
 MODULE_PARM(kcs_ports, "1-4i");
+
+static unsigned char port_inb(struct si_sm_io *io, unsigned int offset)
+{
+	struct kcs_info *info = io->info;
+
+	return inb(info->port+offset);
+}
+
+static void port_outb(struct si_sm_io *io, unsigned int offset,
+		      unsigned char b)
+{
+	struct kcs_info *info = io->info;
+
+	outb(b, info->port+offset);
+}
+
+static unsigned char mem_inb(struct si_sm_io *io, unsigned int offset)
+{
+	struct kcs_info *info = io->info;
+
+	return readb(info->addr+offset);
+}
+
+static void mem_outb(struct si_sm_io *io, unsigned int offset,
+		     unsigned char b)
+{
+	struct kcs_info *info = io->info;
+
+	writeb(b, info->addr+offset);
+}
 
 /* Returns 0 if initialized, or negative on an error. */
 static int init_one_kcs(int kcs_port, 
@@ -902,6 +976,9 @@ static int init_one_kcs(int kcs_port,
 		       	       kcs_port);
 			return -EIO;
 		}
+		new_kcs->io.outputb = port_outb;
+		new_kcs->io.inputb = port_inb;
+		new_kcs->io.info = new_kcs;
 	} else {
 		if (request_mem_region(kcs_physaddr, 2, DEVICE_NAME) == NULL) {
 			kfree(new_kcs);
@@ -917,15 +994,18 @@ static int init_one_kcs(int kcs_port,
 		       	       kcs_physaddr);
 			return -EIO;
 		}
+		new_kcs->io.outputb = mem_outb;
+		new_kcs->io.inputb = mem_inb;
+		new_kcs->io.info = new_kcs;
 	}
 
-	new_kcs->kcs_sm = kmalloc(kcs_size(), GFP_KERNEL);
+	new_kcs->kcs_sm = kmalloc(kcs_smi_handlers.size(), GFP_KERNEL);
 	if (!new_kcs->kcs_sm) {
 		printk(KERN_ERR "ipmi_kcs: out of memory\n");
 		rv = -ENOMEM;
 		goto out_err;
 	}
-	init_kcs_data(new_kcs->kcs_sm, kcs_port, new_kcs->addr);
+	kcs_smi_handlers.init_data(new_kcs->kcs_sm, &(new_kcs->io));
 	spin_lock_init(&(new_kcs->kcs_lock));
 	spin_lock_init(&(new_kcs->msg_lock));
 
@@ -984,19 +1064,6 @@ static int init_one_kcs(int kcs_port,
 		       	       kcs_physaddr);
 	}
 
-	rv = ipmi_register_smi(&handlers,
-			       new_kcs,
-			       ipmi_version_major,
-			       ipmi_version_minor,
-			       &(new_kcs->intf));
-	if (rv) {
-		free_irq(irq, new_kcs);
-		printk(KERN_ERR 
-		       "ipmi_kcs: Unable to register device: error %d\n",
-		       rv);
-		goto out_err;
-	}
-
 	new_kcs->interrupt_disabled = 0;
 	new_kcs->timer_stopped = 0;
 	new_kcs->stop_operation = 0;
@@ -1009,6 +1076,19 @@ static int init_one_kcs(int kcs_port,
 	add_timer(&(new_kcs->kcs_timer));
 
 	*kcs = new_kcs;
+
+	rv = ipmi_register_smi(&handlers,
+			       new_kcs,
+			       ipmi_version_major,
+			       ipmi_version_minor,
+			       &(new_kcs->intf));
+	if (rv) {
+		free_irq(irq, new_kcs);
+		printk(KERN_ERR 
+		       "ipmi_kcs: Unable to register device: error %d\n",
+		       rv);
+		goto out_err;
+	}
 
 	return 0;
 
@@ -1027,12 +1107,11 @@ static int init_one_kcs(int kcs_port,
 
 #ifdef CONFIG_ACPI
 
-/* Retrieve the base physical address from ACPI tables.  Originally
-   from Hewlett-Packard simple bmc.c, a GPL KCS driver. */
-
 #include <linux/acpi.h>
-#include <acpi/acpi.h>
-#include <acpi/actypes.h>
+/* A real hack, but everything's not there yet in 2.4. */
+#define COMPILER_DEPENDENT_UINT64 unsigned long
+#include <../drivers/acpi/include/acpi.h>
+#include <../drivers/acpi/include/actypes.h>
 
 struct SPMITable {
 	s8	Signature[4];
@@ -1044,37 +1123,69 @@ struct SPMITable {
 	s8	OEMRevision[4];
 	s8	CreatorID[4];
 	s8	CreatorRevision[4];
-	s16	InterfaceType;
+	u8	InterfaceType[2];
 	s16	SpecificationRevision;
-	u8	InterruptType;
-	u8	GPE;
-	s16	Reserved;
-	u64	GlobalSystemInterrupt;
-	u8	BaseAddress[12];
-	u8	UID[4];
-} __attribute__ ((packed));
 
-static unsigned long acpi_find_bmc(void)
+	/*
+	 * Bit 0 - SCI interrupt supported
+	 * Bit 1 - I/O APIC/SAPIC
+	 */
+	u8	InterruptType;
+
+	/* If bit 0 of InterruptType is set, then this is the SCI
+           interrupt in the GPEx_STS register. */
+	u8	GPE;
+
+	s16	Reserved;
+
+	/* If bit 1 of InterruptType is set, then this is the I/O
+           APIC/SAPIC interrupt. */
+	u32	GlobalSystemInterrupt;
+
+	/* The actual register address. */
+	acpi_generic_address addr;
+
+	u8	UID[4];
+
+	s8      spmi_id[1]; /* A '\0' terminated array starts here. */
+};
+
+static int acpi_find_bmc(unsigned long *physaddr, int *port)
 {
 	acpi_status       status;
-	struct acpi_table_header *spmi;
-	static unsigned long io_base = 0;
-
-	if (io_base != 0)
-		return io_base;
+	struct SPMITable  *spmi;
 
 	status = acpi_get_firmware_table("SPMI", 1,
-			ACPI_LOGICAL_ADDRESSING, &spmi);
+					 ACPI_LOGICAL_ADDRESSING,
+					 (acpi_table_header **) &spmi);
+	if (status != AE_OK)
+		goto not_found;
 
-	if (status != AE_OK) {
-		printk(KERN_ERR "ipmi_kcs: SPMI table not found.\n");
-		return 0;
-	}
+	if (spmi->InterfaceType[0] != 1)
+		/* Not IPMI. */
+		goto not_found;
 
-	memcpy(&io_base, ((struct SPMITable *)spmi)->BaseAddress,
-			sizeof(io_base));
-	
-	return io_base;
+	if (spmi->InterfaceType[1] != 1)
+		/* Not KCS. */
+		goto not_found;
+
+	if (spmi->addr.address_space_id == ACPI_ADR_SPACE_SYSTEM_MEMORY) {
+		*physaddr = spmi->addr.address;
+		printk("ipmi_kcs_intf: Found ACPI-specified state machine"
+		       " at memory address 0x%lx\n",
+		       (unsigned long) spmi->addr.address);
+	} else if (spmi->addr.address_space_id == ACPI_ADR_SPACE_SYSTEM_IO) {
+		*port = spmi->addr.address;
+		printk("ipmi_kcs_intf: Found ACPI-specified state machine"
+		       " at I/O address 0x%x\n",
+		       (int) spmi->addr.address);
+	} else
+		goto not_found; /* Not an address type we recognise. */
+
+	return 0;
+
+ not_found:
+	return -ENODEV;
 }
 #endif
 
@@ -1085,6 +1196,7 @@ static __init int init_ipmi_kcs(void)
 	int		i = 0;
 #ifdef CONFIG_ACPI
 	unsigned long	physaddr = 0;
+	int             port = 0;
 #endif
 
 	if (initialized)
@@ -1112,26 +1224,25 @@ static __init int init_ipmi_kcs(void)
 	/* Only try the defaults if enabled and resources are available
 	   (because they weren't already specified above). */
 
-	if (kcs_trydefaults) {
+	if (kcs_trydefaults && (pos == 0)) {
+		rv = -EINVAL;
 #ifdef CONFIG_ACPI
-		if ((physaddr = acpi_find_bmc())) {
-			if (!check_mem_region(physaddr, 2)) {
-				rv = init_one_kcs(0, 
-						  0, 
-						  physaddr, 
-						  &(kcs_infos[pos]));
-				if (rv == 0)
-					pos++;
-			}
+		if (rv && (acpi_find_bmc(&physaddr, &port) == 0)) {
+			rv = init_one_kcs(port, 
+					  0, 
+					  physaddr, 
+					  &(kcs_infos[pos]));
+			if (rv == 0)
+				pos++;
 		}
 #endif
-		if (!check_region(DEFAULT_IO_PORT, 2)) {
+		if (rv) {
 			rv = init_one_kcs(DEFAULT_IO_PORT, 
 					  0, 
 					  0, 
 					  &(kcs_infos[pos]));
 			if (rv == 0)
-				pos++;
+			    pos++;
 		}
 	}
 
@@ -1183,8 +1294,10 @@ void __exit cleanup_one_kcs(struct kcs_info *to_clean)
 	   conditions removing the timer here.  Hopefully this will be
 	   long enough to avoid problems with interrupts still
 	   running. */
+	set_current_state(TASK_UNINTERRUPTIBLE);
 	schedule_timeout(2);
 	while (!to_clean->timer_stopped) {
+		set_current_state(TASK_UNINTERRUPTIBLE);
 		schedule_timeout(1);
 	}
 
@@ -1282,3 +1395,5 @@ __setup("ipmi_kcs=", ipmi_kcs_setup);
 #endif
 
 MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Corey Minyard <minyard@mvista.com>");
+MODULE_DESCRIPTION("Deprecated, use ipmi_si_drv instead.");

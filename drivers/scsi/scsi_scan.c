@@ -158,12 +158,15 @@ static struct dev_info device_list[] =
  	{"TOSHIBA","CDROM","*", BLIST_ISROM},
  	{"TOSHIBA","CD-ROM","*", BLIST_ISROM},
 	{"MegaRAID", "LD", "*", BLIST_FORCELUN},
+	{"3PARdata", "VV", "*", BLIST_SPARSELUN | BLIST_LARGELUN},    // 3PARdata InServ Virtual Volume
 	{"DGC",  "RAID",      "*", BLIST_SPARSELUN | BLIST_LARGELUN}, // Dell PV 650F (tgt @ LUN 0)
 	{"DGC",  "DISK",      "*", BLIST_SPARSELUN | BLIST_LARGELUN}, // Dell PV 650F (no tgt @ LUN 0) 
 	{"DELL", "PV660F",   "*", BLIST_SPARSELUN | BLIST_LARGELUN},
 	{"DELL", "PV660F   PSEUDO",   "*", BLIST_SPARSELUN | BLIST_LARGELUN},
 	{"DELL", "PSEUDO DEVICE .",   "*", BLIST_SPARSELUN | BLIST_LARGELUN}, // Dell PV 530F
 	{"DELL", "PV530F",    "*", BLIST_SPARSELUN | BLIST_LARGELUN}, // Dell PV 530F
+	{"DELL", "PV-136T-SNC2", "*", BLIST_SPARSELUN},
+	{"EMC",  "Invista",   "*", BLIST_SPARSELUN | BLIST_LARGELUN}, // EMC Invista Product Range 
 	{"EMC", "SYMMETRIX", "*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_FORCELUN},
 	{"HP", "A6189A", "*", BLIST_SPARSELUN |  BLIST_LARGELUN}, // HP VA7400, by Alar Aun
 	{"HP", "OPEN-", "*", BLIST_SPARSELUN | BLIST_LARGELUN},	/* HP XP Arrays */
@@ -218,6 +221,9 @@ static struct dev_info device_list[] =
 	{"SGI", "TP9300", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
 	{"SGI", "TP9400", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
 	{"SGI", "TP9500", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
+	{"SGI", "TP9700", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
+	{"SGI", "RM610", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
+	{"SGI", "RM660", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
 	{"MYLEX", "DACARMRB", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
 	{"PLATYPUS", "CX5", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
 	{"Raidtec", "FCR", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
@@ -230,6 +236,7 @@ static struct dev_info device_list[] =
 	{"IBM", "1722", "*", BLIST_SPARSELUN | BLIST_LARGELUN}, 
 	{"IBM", "1724", "*", BLIST_SPARSELUN | BLIST_LARGELUN}, 
 	{"IBM", "1742", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
+	{"IBM", "ULT3580-TD2", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
 	{"CNSi", "JSS122", "*", BLIST_SPARSELUN}, 		// Chaparral SR0812 SR1422
 	{"CNSi", "JSS224", "*", BLIST_SPARSELUN}, 		// Chaparral FR1422 (wrong model no.?)
 	{"CNSi", "JFS224", "*", BLIST_SPARSELUN}, 		// Chaparral FR1422
@@ -712,6 +719,7 @@ static int scan_scsis_single(unsigned int channel, unsigned int dev,
 	 */
 	if (lun != 0 && (scsi_result[0] >> 5) == 1) {
 		scsi_release_request(SRpnt);
+		scsi_release_commandblocks(SDpnt);
 		return 0;
 	}
 

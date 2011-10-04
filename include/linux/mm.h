@@ -846,6 +846,9 @@ extern struct page *filemap_nopage(struct vm_area_struct *, unsigned long, int);
 #define __GFP_FS	0x100	/* Can call down to low-level FS? */
 #define __GFP_WIRED	0x200   /* Highmem bias and wired */
 
+#define __GFP_BITS_SHIFT 16	/* Room for 16 __GFP_FOO bits */
+#define __GFP_BITS_MASK ((1 << __GFP_BITS_SHIFT) - 1)
+
 #define GFP_NOHIGHIO	(__GFP_HIGH | __GFP_WAIT | __GFP_IO)
 #define GFP_NOIO	(__GFP_HIGH | __GFP_WAIT)
 #define GFP_NOFS	(__GFP_HIGH | __GFP_WAIT | __GFP_IO | __GFP_HIGHIO)

@@ -1,9 +1,9 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
- * Enterprise Fibre Channel Host Bus Adapters.                     *
+ * Fibre Channel Host Bus Adapters.                                *
  * Refer to the README file included with this package for         *
  * driver version and adapter support.                             *
- * Copyright (C) 2004 Emulex Corporation.                          *
+ * Copyright (C) 2003-2005 Emulex.  All rights reserved.           *
  * www.emulex.com                                                  *
  *                                                                 *
  * This program is free software; you can redistribute it and/or   *
@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_sli.c 1.4 2004/11/02 11:28:55EST sf_support Exp  $
+ * $Id: lpfc_sli.c 1.14 2005/05/03 11:22:13EDT sf_support Exp  $
  */
 
 #include <linux/version.h>
@@ -654,9 +654,6 @@ lpfc_sli_handle_mb_event(lpfcHBA_t * phba)
 		return (1);
 	}
 
-	pci_dma_sync_single(phba->pcidev, phba->slim2p.phys, 
-				sizeof (MAILBOX_t), PCI_DMA_FROMDEVICE);
-
 	psli->slistat.mboxEvent++;
 
 	/* Get a Mailbox buffer to setup mailbox commands for callback */
@@ -672,11 +669,6 @@ lpfc_sli_handle_mb_event(lpfcHBA_t * phba)
 		if (pmbox->mbxOwner != OWN_HOST) {
 			/* Lets try for a while */
 			for (i = 0; i < 10240; i++) {
-				pci_dma_sync_single(phba->pcidev, 
-							phba->slim2p.phys, 
-							sizeof (MAILBOX_t), 
-							PCI_DMA_FROMDEVICE);
-
 				/* First copy command data */
 				lpfc_sli_pcimem_bcopy((uint32_t *) mbox,
 						     (uint32_t *) pmbox,
@@ -743,16 +735,23 @@ lpfc_sli_handle_mb_event(lpfcHBA_t * phba)
 			}
 		}
 
-		/* Mailbox Cmpl, wd0 <pmbox> wd1 <varWord> wd2 <varWord> cmpl
-		   <mbox_cmpl) */
+		/* Mailbox cmd <cmd> Cmpl <cmpl> */
 		lpfc_printf_log(phba->brd_no,
 			&lpfc_msgBlk0307,	
 			lpfc_mes0307,
 			lpfc_msgBlk0307.msgPreambleStr,
+			pmbox->mbxCommand,
+			pmb->mbox_cmpl,
 			*((uint32_t *) pmbox),
 			pmbox->un.varWords[0],
 			pmbox->un.varWords[1],
-			pmb->mbox_cmpl);
+			pmbox->un.varWords[2],
+			pmbox->un.varWords[3],
+			pmbox->un.varWords[4],
+			pmbox->un.varWords[5],
+			pmbox->un.varWords[6],
+			pmbox->un.varWords[7]);
+
 
 		if (pmb->mbox_cmpl) {
 			/* Copy entire mbox completion over buffer */
@@ -823,6 +822,7 @@ lpfc_sli_handle_ring_event(lpfcHBA_t * phba,
 	uint32_t           portCmdGet, portGetIndex;
 	int                ringno, loopcnt, rc;
 	uint8_t            type;
+	void *to_slim;
 
 	psli = &phba->sli;
 	ringno = pring->ringno;
@@ -838,9 +838,6 @@ lpfc_sli_handle_ring_event(lpfcHBA_t * phba,
 	/* portRspMax is the number of rsp ring entries for this specific
 	   ring. */
 	portRspMax = psli->sliinit.ringinit[ringno].numRiocb;
-
-	pci_dma_sync_single(phba->pcidev, phba->slim2p.phys,
-			    LPFC_SLIM2_PAGE_AREA, PCI_DMA_FROMDEVICE);
 
 	rspiocbp = 0;
 	loopcnt = 0;
@@ -896,28 +893,14 @@ lpfc_sli_handle_ring_event(lpfcHBA_t * phba,
 		/* Let the HBA know what IOCB slot will be the next one the
 		 * driver will read a response from.
 		 */
-		if (psli->sliinit.sli_flag & LPFC_HGP_HOSTSLIM) {
-			status = (uint32_t) pring->rspidx;
-			hgp->rspGetInx = le32_to_cpu(status);
+               
 
-			/* Since this may be expensive, sync it every 4 IOCBs */
-			loopcnt++;
-			if ((loopcnt & 0x3) == 0) {
-				/* sync hgp->rspGetInx in the MAILBOX_t */
-				pci_dma_sync_single(phba->pcidev,
-						    phba->slim2p.phys,
-						    sizeof (MAILBOX_t),
-						    PCI_DMA_TODEVICE);
-			}
-		} else {
-			void *to_slim;
-
-			status = (uint32_t) pring->rspidx;
-			to_slim = (uint8_t *) phba->MBslimaddr +
-			    (SLIMOFF + (ringno * 2) + 1) * 4;
-			writel(status, to_slim);
-			readl(to_slim); /* flush */
-		}
+		status = (uint32_t) pring->rspidx;
+		to_slim = (uint8_t *) phba->MBslimaddr +
+		    (SLIMOFF + (ringno * 2) + 1) * 4;
+		writel(status, to_slim);
+		readl(to_slim); /* flush */
+	
 
 		/* chain all iocb entries until LE is set */
 		if (list_empty(&(pring->iocb_continueq))) {
@@ -940,6 +923,22 @@ lpfc_sli_handle_ring_event(lpfcHBA_t * phba,
 			pring->iocb_continueq_cnt = 0;
 
 			psli->slistat.iocbRsp[ringno]++;
+
+			if (irsp->ulpStatus) {
+				/* Rsp ring <ringno> error: IOCB Data: */
+				lpfc_printf_log(phba->brd_no, &lpfc_msgBlk0325,
+						lpfc_mes0325,
+						lpfc_msgBlk0325.msgPreambleStr,
+						ringno,
+						irsp->un.ulpWord[0],
+						irsp->un.ulpWord[1],
+						irsp->un.ulpWord[2],
+						irsp->un.ulpWord[3],
+						irsp->un.ulpWord[4],
+						irsp->un.ulpWord[5],
+						*(((uint32_t *) irsp) + 6),
+						*(((uint32_t *) irsp) + 7));
+			}
 
 			/* Determine if IOCB command is a solicited or
 			   unsolicited event */
@@ -1028,10 +1027,6 @@ lpfc_sli_handle_ring_event(lpfcHBA_t * phba,
 		 * response put pointer.
 		 */
 		if (pring->rspidx == portRspPut) {
-			pci_dma_sync_single(phba->pcidev,
-					    phba->slim2p.phys,
-					    sizeof (MAILBOX_t),
-					    PCI_DMA_FROMDEVICE);
 			status = pgp->rspPutInx;
 			portRspPut = le32_to_cpu(status);
 		}
@@ -1236,6 +1231,12 @@ lpfc_mbox_timeout(unsigned long ptr)
 	clkData = (struct clk_data *)ptr;
 	phba = clkData->phba;
 	LPFC_DRVR_LOCK(phba, iflag);
+       	if (clkData->flags & TM_CANCELED) {
+		list_del((struct list_head *)clkData);
+		kfree(clkData);	
+		goto out;
+	}
+
 	pmbox = (LPFC_MBOXQ_t *) clkData->clData1;
 	clkData->timeObj->function = 0;
 	list_del((struct list_head *)clkData);
@@ -1271,6 +1272,7 @@ lpfc_mbox_timeout(unsigned long ptr)
 	}
 
 	lpfc_mbox_abort(phba);
+out:
 	LPFC_DRVR_UNLOCK(phba, iflag);
 	return;
 }
@@ -1468,8 +1470,6 @@ lpfc_sli_issue_mbox(lpfcHBA_t * phba, LPFC_MBOXQ_t * pmbox, uint32_t flag)
 				      (sizeof (uint32_t) *
 				       (MAILBOX_CMD_WSIZE)));
 
-		pci_dma_sync_single(phba->pcidev, phba->slim2p.phys,
-				    sizeof (MAILBOX_t), PCI_DMA_TODEVICE);
 	} else {
 		if (mb->mbxCommand == MBX_CONFIG_PORT) {
 			/* copy command data into host mbox for cmpl */
@@ -1513,10 +1513,6 @@ lpfc_sli_issue_mbox(lpfcHBA_t * phba, LPFC_MBOXQ_t * pmbox, uint32_t flag)
 		i = 0;
 		psli->mbox_active = 0;
 		if (psli->sliinit.sli_flag & LPFC_SLI2_ACTIVE) {
-			pci_dma_sync_single(phba->pcidev, phba->slim2p.phys,
-					    sizeof (MAILBOX_t),
-					    PCI_DMA_FROMDEVICE);
-
 			/* First read mbox status word */
 			mbox = (MAILBOX_t *) psli->MBhostaddr;
 			word0 = *((volatile uint32_t *)mbox);
@@ -1552,11 +1548,6 @@ lpfc_sli_issue_mbox(lpfcHBA_t * phba, LPFC_MBOXQ_t * pmbox, uint32_t flag)
 			LPFC_DRVR_LOCK(phba, drvr_flag);
 
 			if (psli->sliinit.sli_flag & LPFC_SLI2_ACTIVE) {
-				pci_dma_sync_single(phba->pcidev,
-						    phba->slim2p.phys,
-						    sizeof (MAILBOX_t),
-						    PCI_DMA_FROMDEVICE);
-
 				/* First copy command data */
 				mbox = (MAILBOX_t *) psli->MBhostaddr;
 				word0 = *((volatile uint32_t *)mbox);
@@ -1583,10 +1574,6 @@ lpfc_sli_issue_mbox(lpfcHBA_t * phba, LPFC_MBOXQ_t * pmbox, uint32_t flag)
 		}
 
 		if (psli->sliinit.sli_flag & LPFC_SLI2_ACTIVE) {
-			pci_dma_sync_single(phba->pcidev, phba->slim2p.phys,
-					    sizeof (MAILBOX_t),
-					    PCI_DMA_FROMDEVICE);
-
 			/* First copy command data */
 			mbox = (MAILBOX_t *) psli->MBhostaddr;
 			/* copy results back to user */
@@ -1599,6 +1586,12 @@ lpfc_sli_issue_mbox(lpfcHBA_t * phba, LPFC_MBOXQ_t * pmbox, uint32_t flag)
 			lpfc_memcpy_from_slim((void *)mb,
 				      phba->MBslimaddr,
 				      sizeof (uint32_t) * (MAILBOX_CMD_WSIZE));
+			if ((mb->mbxCommand == MBX_DUMP_MEMORY) &&
+			       pmbox->context2) {
+				lpfc_memcpy_from_slim((void *)pmbox->context2,
+				      phba->MBslimaddr + DMP_RSP_OFFSET,
+				      mb->un.varDmp.word_cnt);
+			}
 		}
 
 		wmb();
@@ -1645,9 +1638,6 @@ lpfc_sli_issue_iocb(lpfcHBA_t * phba,
 	/* portCmdMax is the number of cmd ring entries for this specific
 	   ring. */
 	portCmdMax = psli->sliinit.ringinit[ringno].numCiocb;
-
-	pci_dma_sync_single(phba->pcidev, phba->slim2p.phys,
-			    LPFC_SLIM2_PAGE_AREA, PCI_DMA_FROMDEVICE);
 
 	/* portCmdGet is the IOCB index of the next IOCB that the HBA
 	 * is going to process.
@@ -1774,25 +1764,14 @@ lpfc_sli_issue_iocb(lpfcHBA_t * phba,
 		if (((nextiocb = lpfc_sli_ringtx_get(phba, pring)) == 0)
 		    && (piocb == 0)) {
 		      issueout:
-			pci_dma_sync_single(phba->pcidev, phba->slim2p.phys,
-					    LPFC_SLIM2_PAGE_AREA,
-					    PCI_DMA_FROMDEVICE);
-
-			pci_dma_sync_single(phba->pcidev, phba->slim2p.phys,
-					    LPFC_SLIM2_PAGE_AREA,
-					    PCI_DMA_TODEVICE);
-
 			/* Make sure cmdidx is in sync with the HBA's current
 			   value. */
-			if (psli->sliinit.sli_flag & LPFC_HGP_HOSTSLIM) {
-				status = hgp->cmdPutInx;
-				pring->cmdidx = (uint8_t) le32_to_cpu(status);
-			} else {
-				from_slim = (uint8_t *) phba->MBslimaddr +
-				    (SLIMOFF + (ringno * 2)) * 4;
-				status = readl(from_slim);
-				pring->cmdidx = (uint8_t) status;
-			}
+			
+			from_slim = (uint8_t *) phba->MBslimaddr +
+			    (SLIMOFF + (ringno * 2)) * 4;
+			status = readl(from_slim);
+			pring->cmdidx = (uint8_t) status;
+		
 
 			/* Interrupt the HBA to let it know there is work to do
 			 * in ring ringno.
@@ -1896,26 +1875,14 @@ afterloop:
 		/* Let the HBA know what IOCB slot will be the next one the
 		 * driver will put a command into.
 		 */
-		if (psli->sliinit.sli_flag & LPFC_HGP_HOSTSLIM) {
-			status = (uint32_t) pring->cmdidx;
-			hgp->cmdPutInx = le32_to_cpu(status);
-
-			/* Since this may be expensive, sync it every 4 IOCBs */
-			loopcnt++;
-			if ((loopcnt & 0x3) == 0) {
-				/* sync hgp->cmdPutInx in the MAILBOX_t */
-				pci_dma_sync_single(phba->pcidev,
-						    phba->slim2p.phys,
-						    sizeof (MAILBOX_t),
-						    PCI_DMA_TODEVICE);
-			}
-		} else {
-			status = (uint32_t) pring->cmdidx;
-			to_slim = (uint8_t *) phba->MBslimaddr
-			    + (SLIMOFF + (ringno * 2)) * 4;
-			writel(status, to_slim);
-			readl(to_slim);
-		}
+		
+		
+		status = (uint32_t) pring->cmdidx;
+		to_slim = (uint8_t *) phba->MBslimaddr
+		    + (SLIMOFF + (ringno * 2)) * 4;
+		writel(status, to_slim);
+		readl(to_slim);
+	
 
 		/* Get the next available command iocb.
 		 * cmdidx is the IOCB index of the next IOCB that the driver
@@ -1934,9 +1901,6 @@ afterloop:
 		 * not, sync the slim memory area and refetch the command index.
 		 */
 		if (pring->cmdidx == portCmdGet) {
-			pci_dma_sync_single(phba->pcidev, phba->slim2p.phys,
-					    sizeof (MAILBOX_t),
-					    PCI_DMA_FROMDEVICE);
 			status = pgp->cmdGetInx;
 			portCmdGet = le32_to_cpu(status);
 		}
@@ -1946,23 +1910,14 @@ afterloop:
 	if (piocb == 0 && !(flag & SLI_IOCB_HIGH_PRIORITY)) {
 		goto issueout;
 	} else if (piocb == 0) {
-		pci_dma_sync_single(phba->pcidev, phba->slim2p.phys,
-				    LPFC_SLIM2_PAGE_AREA, PCI_DMA_FROMDEVICE);
-
-		pci_dma_sync_single(phba->pcidev, phba->slim2p.phys,
-				    LPFC_SLIM2_PAGE_AREA, PCI_DMA_TODEVICE);
-
 		/* Make sure cmdidx is in sync with the HBA's current value. */
-		if (psli->sliinit.sli_flag & LPFC_HGP_HOSTSLIM) {
-			status = hgp->cmdPutInx;
-			pring->cmdidx = (uint8_t) le32_to_cpu(status);
-		} else {
-			from_slim =
-			    (uint8_t *) phba->MBslimaddr + (SLIMOFF +
-							    (ringno * 2)) * 4;
-			status = readl(from_slim);
-			pring->cmdidx = (uint8_t) status;
-		}
+		
+		from_slim =
+		    (uint8_t *) phba->MBslimaddr + (SLIMOFF +
+						    (ringno * 2)) * 4;
+		status = readl(from_slim);
+		pring->cmdidx = (uint8_t) status;
+	
 
 		/* Interrupt the HBA to let it know there is work to do
 		 * in ring ringno.
@@ -1979,22 +1934,12 @@ afterloop:
 	 * HBA to process some entries before handing it more work.
 	 */
 
-	pci_dma_sync_single(phba->pcidev, phba->slim2p.phys,
-			    LPFC_SLIM2_PAGE_AREA, PCI_DMA_FROMDEVICE);
-
-	pci_dma_sync_single(phba->pcidev, phba->slim2p.phys,
-			    LPFC_SLIM2_PAGE_AREA, PCI_DMA_TODEVICE);
-
 	/* Make sure cmdidx is in sync with the HBA's current value. */
-	if (psli->sliinit.sli_flag & LPFC_HGP_HOSTSLIM) {
-		status = hgp->cmdPutInx;
-		pring->cmdidx = (uint8_t) le32_to_cpu(status);
-	} else {
-		from_slim =
+      	from_slim =
 		    (uint8_t *) phba->MBslimaddr + (SLIMOFF + (ringno * 2)) * 4;
-		status = readl(from_slim);
-		pring->cmdidx = (uint8_t) status;
-	}
+	status = readl(from_slim);
+	pring->cmdidx = (uint8_t) status;
+
 
 	pring->flag |= LPFC_CALL_RING_AVAILABLE; /* indicates cmd ring was
 						    full */
@@ -2044,9 +1989,6 @@ lpfc_sli_resume_iocb(lpfcHBA_t * phba, LPFC_SLI_RING_t * pring)
 	/* portCmdMax is the number of cmd ring entries for this specific
 	   ring. */
 	portCmdMax = psli->sliinit.ringinit[ringno].numCiocb;
-
-	pci_dma_sync_single(phba->pcidev, phba->slim2p.phys,
-			    LPFC_SLIM2_PAGE_AREA, PCI_DMA_FROMDEVICE);
 
 	/* portCmdGet is the IOCB index of the next IOCB that the HBA
 	 * is going to process.
@@ -2108,27 +2050,16 @@ lpfc_sli_resume_iocb(lpfcHBA_t * phba, LPFC_SLI_RING_t * pring)
 	while (pring->cmdidx != portCmdGet) {
 		/* If there is anything on the tx queue, process it */
 		if ((nextiocb = lpfc_sli_ringtx_get(phba, pring)) == 0) {
-			pci_dma_sync_single(phba->pcidev, phba->slim2p.phys,
-					    LPFC_SLIM2_PAGE_AREA,
-					    PCI_DMA_FROMDEVICE);
-
-			pci_dma_sync_single(phba->pcidev, phba->slim2p.phys,
-					    LPFC_SLIM2_PAGE_AREA,
-					    PCI_DMA_TODEVICE);
-
 			/* Make sure cmdidx is in sync with the HBA's current
 			   value. */
-			if (psli->sliinit.sli_flag & LPFC_HGP_HOSTSLIM) {
-				status = hgp->cmdPutInx;
-				pring->cmdidx = (uint8_t) le32_to_cpu(status);
-			} else {
-				from_slim =
-				    (uint8_t *) phba->MBslimaddr + (SLIMOFF +
-								    (ringno *
-								     2)) * 4;
-				status = readl(from_slim);
-				pring->cmdidx = (uint8_t) status;
-			}
+			
+			from_slim =
+			    (uint8_t *) phba->MBslimaddr + (SLIMOFF +
+							    (ringno *
+							     2)) * 4;
+			status = readl(from_slim);
+			pring->cmdidx = (uint8_t) status;
+		
 
 			/* Interrupt the HBA to let it know there is work to do
 			 * in ring ringno.
@@ -2160,27 +2091,15 @@ lpfc_sli_resume_iocb(lpfcHBA_t * phba, LPFC_SLI_RING_t * pring)
 		/* Let the HBA know what IOCB slot will be the next one the
 		 * driver will put a command into.
 		 */
-		if (psli->sliinit.sli_flag & LPFC_HGP_HOSTSLIM) {
-			status = (uint32_t) pring->cmdidx;
-			hgp->cmdPutInx = le32_to_cpu(status);
+		
 
-			/* Since this may be expensive, sync it every 4 IOCBs */
-			loopcnt++;
-			if ((loopcnt & 0x3) == 0) {
-				/* sync hgp->cmdPutInx in the MAILBOX_t */
-				pci_dma_sync_single(phba->pcidev,
-						    phba->slim2p.phys,
-						    sizeof (MAILBOX_t),
-						    PCI_DMA_TODEVICE);
-			}
-		} else {
-			status = (uint32_t) pring->cmdidx;
-			to_slim =
-			    (uint8_t *) phba->MBslimaddr + (SLIMOFF +
-							    (ringno * 2)) * 4;
-			writel(status, to_slim);
-			readl(to_slim);
-		}
+		status = (uint32_t) pring->cmdidx;
+		to_slim =
+		    (uint8_t *) phba->MBslimaddr + (SLIMOFF +
+						    (ringno * 2)) * 4;
+		writel(status, to_slim);
+		readl(to_slim);
+	
 
 		/* Get the next available command iocb.
 		 * cmdidx is the IOCB index of the next IOCB that the driver
@@ -2198,10 +2117,6 @@ lpfc_sli_resume_iocb(lpfcHBA_t * phba, LPFC_SLI_RING_t * pring)
 		 */
 		if (pring->cmdidx == portCmdGet) {
 			/* sync pgp->cmdGetInx in the MAILBOX_t */
-			pci_dma_sync_single(phba->pcidev,
-					    phba->slim2p.phys,
-					    sizeof (MAILBOX_t),
-					    PCI_DMA_FROMDEVICE);
 			status = pgp->cmdGetInx;
 			portCmdGet = le32_to_cpu(status);
 		}
@@ -2210,22 +2125,13 @@ lpfc_sli_resume_iocb(lpfcHBA_t * phba, LPFC_SLI_RING_t * pring)
 	/* This code is executed only if the command ring is full.  Wait for the
 	 * HBA to process some entries before handing it more work.
 	 */
-	pci_dma_sync_single(phba->pcidev, phba->slim2p.phys,
-			    LPFC_SLIM2_PAGE_AREA, PCI_DMA_FROMDEVICE);
-
-	pci_dma_sync_single(phba->pcidev, phba->slim2p.phys,
-			    LPFC_SLIM2_PAGE_AREA, PCI_DMA_TODEVICE);
-
 	/* Make sure cmdidx is in sync with the HBA's current value. */
-	if (psli->sliinit.sli_flag & LPFC_HGP_HOSTSLIM) {
-		status = hgp->cmdPutInx;
-		pring->cmdidx = (uint8_t) le32_to_cpu(status);
-	} else {
-		from_slim = (uint8_t *) phba->MBslimaddr +
-		    (SLIMOFF + (ringno * 2)) * 4;
-		status = readl(from_slim);
-		pring->cmdidx = (uint8_t) status;
-	}
+   
+	from_slim = (uint8_t *) phba->MBslimaddr +
+	    (SLIMOFF + (ringno * 2)) * 4;
+	status = readl(from_slim);
+	pring->cmdidx = (uint8_t) status;
+
 
 	pring->flag |= LPFC_CALL_RING_AVAILABLE; /* indicates cmd ring was
 						    full */
@@ -2280,6 +2186,14 @@ lpfc_sli_brdreset(lpfcHBA_t * phba)
 	to_slim = (uint8_t *) phba->MBslimaddr + sizeof (uint32_t);
 	writel(*(uint32_t *) swpmb, to_slim);
 	readl(to_slim); /* flush */
+
+	/* Reset HBA */
+	lpfc_printf_log(phba->brd_no,
+			&lpfc_msgBlk0326,
+			lpfc_mes0326,
+			lpfc_msgBlk0326.msgPreambleStr,
+			phba->hba_state,
+			psli->sliinit.sli_flag);
 
 	/* Turn off SERR, PERR in PCI cmd register */
 	phba->hba_state = LPFC_INIT_START;
@@ -2364,7 +2278,8 @@ lpfc_sli_queue_setup(lpfcHBA_t * phba)
 			if (pring->fast_lookup == 0) {
 				return (0);
 			}
-			memset((char *)pring->fast_lookup, 0, cnt);
+			memset((char *)pring->fast_lookup, 0, 
+			       cnt*sizeof (LPFC_IOCBQ_t *));
 		}
 	}
 	return (1);
@@ -2377,7 +2292,7 @@ lpfc_sli_hba_down(lpfcHBA_t * phba)
 	LPFC_SLI_RING_t *pring;
 	LPFC_MBOXQ_t *pmb;
 	DMABUF_t * mp;
-	LPFC_IOCBQ_t *iocb, *next_iocb;
+	LPFC_IOCBQ_t *iocb;
 	IOCB_t *icmd = 0;
 	int i, cnt;
 	unsigned long iflag;
@@ -2438,7 +2353,8 @@ lpfc_sli_hba_down(lpfcHBA_t * phba)
 	/* Return any pending mbox cmds */
 	while ((pmb = lpfc_mbox_get(phba))) {
 		mp = (DMABUF_t *) (pmb->context1);
-		if(mp) {
+		if ((mp) &&
+		    (pmb->mbox_cmpl != lpfc_sli_wake_mbox_wait)) {
 			lpfc_mbuf_free(phba, mp->virt, mp->phys);
 			kfree(mp);
 		}
@@ -2515,10 +2431,6 @@ lpfc_sli_ringpostbuf_search(lpfcHBA_t * phba,
 				list_del(&mp->list);
 
 				pring->postbufq_cnt--;
-
-				pci_dma_sync_single(phba->pcidev, mp->phys,
-						    LPFC_BPL_SIZE,
-						    PCI_DMA_FROMDEVICE);
 			}
 			return (mp);
 		}

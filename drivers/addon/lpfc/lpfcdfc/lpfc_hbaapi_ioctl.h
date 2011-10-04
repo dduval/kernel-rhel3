@@ -1,9 +1,9 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
- * Enterprise Fibre Channel Host Bus Adapters.                     *
+ * Fibre Channel Host Bus Adapters.                                *
  * Refer to the README file included with this package for         *
  * driver version and adapter support.                             *
- * Copyright (C) 2004 Emulex Corporation.                          *
+ * Copyright (C) 2003-2005 Emulex.  All rights reserved.           *
  * www.emulex.com                                                  *
  *                                                                 *
  * This program is free software; you can redistribute it and/or   *
@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: ioctls/lpfc_hbaapi_ioctl.h 1.4 2004/10/29 17:42:30EDT sf_support Exp  $
+ * $Id: ioctls/lpfc_hbaapi_ioctl.h 1.6 2005/05/03 11:20:55EDT sf_support Exp  $
  */
 
 #include "hbaapi.h"
@@ -42,6 +42,5 @@ int lpfc_ioctl_hba_fcpbinding(lpfcHBA_t *, LPFCCMDINPUT_t *, void *, int, int *)
 int lpfc_ioctl_port_attrib(lpfcHBA_t *, void *);
 int lpfc_ioctl_found_port(lpfcHBA_t *, LPFC_NODELIST_t *, void *, MAILBOX_t *, HBA_PORTATTRIBUTES *);
 void lpfc_decode_firmware_rev(lpfcHBA_t *, char *, int);
-void lpfc_get_hba_model_desc(lpfcHBA_t *, uint8_t *, uint8_t *);
 void lpfc_get_hba_sym_node_name(lpfcHBA_t *, uint8_t *);
 #endif

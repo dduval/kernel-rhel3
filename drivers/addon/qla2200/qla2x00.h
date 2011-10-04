@@ -162,8 +162,8 @@ typedef char BOOL;
 /* The ISP2312 v2 chip cannot access the FLASH/GPIO registers via MMIO
  * in 133 MHZ slot.
  */
-#define RD_REG_WORD_IOMEM(addr)         (inw((unsigned long)addr))
-#define WRT_REG_WORD_IOMEM(addr, data)  (outw(data,(unsigned long)addr))
+#define RD_REG_WORD_PIO(addr)         (inw((unsigned long)addr))
+#define WRT_REG_WORD_PIO(addr, data)  (outw(data,(unsigned long)addr))
 
 /*
  * Fibre Channel device definitions.
@@ -413,6 +413,9 @@ typedef volatile struct
         #define NV_SELECT       BIT_1
         #define NV_DATA_OUT     BIT_2
         #define NV_DATA_IN      BIT_3
+	/* Only applicable to ISP2322/ISP6322 */	
+	#define	NV_PR_ENABLE	BIT_13	/* protection register enable */
+	#define	NV_WR_ENABLE	BIT_14	/* write enable */
 
     uint16_t mailbox0;                  /* Mailbox 0 */
     uint16_t mailbox1;                  /* Mailbox 1 */
@@ -490,6 +493,9 @@ typedef volatile struct
         #define NV_SELECT       BIT_1
         #define NV_DATA_OUT     BIT_2
         #define NV_DATA_IN      BIT_3
+	/* Only applicable to ISP2322/ISP6322 */	
+	#define	NV_PR_ENABLE	BIT_13	/* protection register enable */
+	#define	NV_WR_ENABLE	BIT_14	/* write enable */
         #define NV_BUSY         BIT_15
     uint16_t req_q_in;                  /* @0x10 */
     uint16_t req_q_out;                 /* @0x12 */
@@ -1171,22 +1177,32 @@ struct qla2xxx_host_p
 struct qla2x00_seriallink_firmware_options
 {
 #if defined(__BIG_ENDIAN)
+	uint16_t rx_sens_2g	:4;			
+	uint16_t tx_sens_2g	:4;
+	uint16_t rx_sens_1g	:4;
+	uint16_t tx_sens_1g	:4;
+
         uint16_t unused_15              :1;
         uint16_t unused_14              :1;
         uint16_t unused_13              :1;
         uint16_t unused_12              :1;
         uint16_t unused_11              :1;
-		uint16_t output_enable			:1;
-		uint16_t output_emphasis_2g		:2;
-		uint16_t output_swing_2g		:3;
-		uint16_t output_emphasis_1g		:2;
-		uint16_t output_swing_1g		:3;
+	uint16_t output_enable			:1;
+	uint16_t output_emphasis_2g		:2;
+	uint16_t output_swing_2g		:3;
+	uint16_t output_emphasis_1g		:2;
+	uint16_t output_swing_1g		:3;
 #else
-		uint16_t output_swing_1g		:3;
-		uint16_t output_emphasis_1g		:2;
-		uint16_t output_swing_2g		:3;
-		uint16_t output_emphasis_2g		:2;
-		uint16_t output_enable			:1;
+	uint16_t tx_sens_1g	:4;
+	uint16_t rx_sens_1g	:4;
+	uint16_t tx_sens_2g	:4;
+	uint16_t rx_sens_2g	:4;			
+
+	uint16_t output_swing_1g	:3;
+	uint16_t output_emphasis_1g	:2;
+	uint16_t output_swing_2g	:3;
+	uint16_t output_emphasis_2g	:2;
+	uint16_t output_enable		:1;
         uint16_t unused_11              :1;
         uint16_t unused_12              :1;
         uint16_t unused_13              :1;
@@ -1295,11 +1311,11 @@ typedef struct
 	/* special options */
     struct qla2x00_special_options special_options;
 
-    uint16_t    reserved_2[12];
+    uint16_t    reserved_2[11];
 	/*========End of ICB block ====================*/
 
 	/*
-	 * Serial Link Control for output Swing and Emphasis
+	 * Serial Link Control for output Swing, Emphasis and Sensitivity
 	 */
     struct qla2x00_seriallink_firmware_options	serial_options;
 
@@ -1320,7 +1336,20 @@ typedef struct
     uint16_t    reserved_6[7];
 
     /* Offset 100 */
-    uint8_t    reserved_7_1[11];
+    uint8_t    reserved_7_1[10];
+
+    /* Offset 110 */
+    /*
+     * BIT 0 = Selective Login
+     * BIT 1 = Alt-Boot Enable
+     * BIT 2 =
+     * BIT 3 = Boot Order List
+     * BIT 4 =
+     * BIT 5 = Selective LUN
+     * BIT 6 =
+     * BIT 7 = unused
+     */
+    uint8_t efi_parameters;	
 
     /* Offset 111 */
     uint8_t    link_down_timeout;		
@@ -1588,6 +1617,7 @@ typedef struct
     uint16_t comp_status;               /* Completion status. */
     uint16_t state_flags;               /* State flags. */
     uint16_t status_flags;              /* Status flags. */
+    #define ABTS_TERMINATED     BIT_10	/* Transfer terminated by an ABTS */
     #define IOCBSTAT_SF_LOGO	BIT_13	/* logo after 2 abts w/no */
     					/*   response (2 sec) */
     uint16_t rsp_info_len;              /* Response Info Length. */
@@ -2132,10 +2162,25 @@ typedef struct {
 	uint8_t inq[INQ_DATA_SIZE];
 } inq_cmd_rsp_t;
 
-#define VITAL_PRODUCT_DATA_SIZE 32
+#define VITAL_PRODUCT_DATA_SIZE 50		/* old value 32 */
 #define INQ_EVPD_SET	1
 #define INQ_DEV_IDEN_PAGE  0x83  	
 #define WWLUN_SIZE	32	
+/* code set values */
+#define  CODE_SET_BINARY	0x01
+
+/* Association field values */
+#define  ASSOCIATION_LOGICAL_DEVICE	0x00	
+#define  ASSOCIATION_TARGET_PORT	0x01	
+#define  ASSOCIATION_TARGET_DEVICE	0x02	
+
+/* Identifier type values */
+#define  TYPE_REL_TGT_PORT	0x04
+#define  TYPE_TPG_GROUP		0x05
+
+/* Identifier length */
+#define  DEFAULT_IDENT_LEN	4
+
 
 typedef struct {
 	union {
@@ -2185,6 +2230,74 @@ typedef struct {
 	rpt_lun_lst_t list;
 } rpt_lun_cmd_rsp_t;
 
+/* We know supports 2 x 2 - 2 target port groups with 2 relative 
+*  target ports each. */
+/* SCSI Report/Set Target Port Groups command and data definitions */
+#define SCSIOP_MAINTENANCE_IN       0xA3
+#define SCSIOP_MAINTENANCE_OUT      0xA4
+
+#define SCSISA_TARGET_PORT_GROUPS   0x0A
+
+#define TGT_PORT_GRP_COUNT	2
+#define	REL_TGT_PORT_GRP_COUNT	2
+typedef struct {
+	struct {
+		/* indicates the state of corresponding tgt port group */
+		uint8_t	asym_acc_state : 4;
+		uint8_t	rsvd_1 : 3;
+		uint8_t	pref :1;
+
+		uint8_t	supp_acc_state : 4;
+		uint8_t	rsvd_2 : 4;
+	} state;
+	/* identifies the controller */
+	uint8_t tgt_port_grp[2]; 
+	uint8_t rsvd;
+	/* indicates reason for the last fail over operation */
+	uint8_t	status_code;
+	uint8_t vendor_unique;
+	/* no of ports on corresponding controller */
+	uint8_t tgt_port_count;
+	uint8_t	rel_tgt_port[REL_TGT_PORT_GRP_COUNT][4];
+} tgt_port_grp_desc;	
+
+typedef struct {
+	uint32_t len;	
+	//rename it to descriptor ??
+	tgt_port_grp_desc tport_grp[TGT_PORT_GRP_COUNT]; 
+} rpt_tport_grp_data_t;   	
+
+typedef struct {
+	union {
+		cmd_a64_entry_t cmd;
+		sts_entry_t rsp;
+	} p;
+	rpt_tport_grp_data_t list;
+} rpt_tport_grp_rsp_t;
+
+typedef struct {
+	/* indicates the state of corresponding tgt port group */
+	uint8_t	asym_acc_state : 4;
+	uint8_t	rsvd_1 : 4;
+	uint8_t	rsvd_2; 
+	/* identifies the controller */
+	uint8_t tgt_port_grp[2]; 
+} set_tgt_port_grp_desc;	
+
+typedef struct {
+	uint32_t rsvd;	
+	set_tgt_port_grp_desc descriptor[TGT_PORT_GRP_COUNT];
+} set_tport_grp_data_t;   	
+
+typedef struct {
+	union {
+		cmd_a64_entry_t cmd;
+		sts_entry_t rsp;
+	} p;
+	set_tport_grp_data_t list;
+} set_tport_grp_rsp_t;
+
+
 /*
  * SCSI Target Queue structure
  */
@@ -2224,6 +2337,7 @@ typedef struct os_lun {
 	u_long		resp_time;  /* total response time (target + f/w) */
 
 	unsigned long	q_flag;
+#define LUN_MPIO_RESET_CNTS	1	/* Reset fo_retry_cnt */
 #define	LUN_MPIO_BUSY		2	/* Lun is changing paths  */
 #define	LUN_SCSI_SCAN_DONE	BIT_3	/* indicates the scsi scan is done */
 #define	LUN_EXEC_DELAYED	7	/* Lun execution is delayed */
@@ -2237,7 +2351,7 @@ typedef struct os_lun {
 #define	LUN_STATE_RUN	2	/* indicates the lun has a timer running */
 #define	LUN_STATE_WAIT	3	/* indicates the lun is suspended */
 #define	LUN_STATE_TIMEOUT  4	/* indicates the lun has timed out */
-
+	void  *fo_info; 
 } os_lun_t;
 
 
@@ -2248,7 +2362,7 @@ typedef struct os_lun {
 typedef struct lun_bit_mask {
 	/* Must allocate at least enough bits to accomodate all LUNs */
 #if ((MAX_FIBRE_LUNS & 0x7) == 0)
-	UINT8	mask[MAX_FIBRE_LUNS >> 3];
+	uint8_t	mask[MAX_FIBRE_LUNS >> 3];
 #else
 	uint8_t	mask[(MAX_FIBRE_LUNS + 8) >> 3];
 #endif
@@ -2266,6 +2380,7 @@ typedef struct lun_bit_mask {
 	FCT_TARGET
 } fc_port_type_t;
 
+struct fc_lun;
 /*
  * Fibre channel port structure.
  */
@@ -2293,22 +2408,27 @@ typedef struct fc_port {
 #define FC_DEVICE_LOST		2		/* Device is missing */
 #define FC_ONLINE		3		/* Device is ready and online */
 
-	uint16_t		flags;
+	uint32_t		flags;
 #define	FC_FABRIC_DEVICE	BIT_0
 #define	FC_TAPE_DEVICE		BIT_1
 #define	FC_INITIATOR_DEVICE	BIT_2
 #define	FC_CONFIG		BIT_3
+
 #define	FC_VSA			BIT_4
 #define	FC_HD_DEVICE		BIT_5
 #define	FC_SUPPORT_RPT_LUNS	BIT_6
 #define FC_XP_DEVICE            BIT_7
+
 #define FC_CONFIG_DEVICE        BIT_8
-#define FC_MSA_DEVICE            BIT_9
-#define FC_MSA_PORT_ACTIVE     BIT_10
+#define FC_MSA_DEVICE           BIT_9
+#define FC_MSA_PORT_ACTIVE      BIT_10
 #define FC_FAILBACK_DISABLE    	BIT_11
+
 #define FC_LOGIN_NEEDED		BIT_12
-#define FC_EVA_DEVICE            BIT_13
+#define FC_EVA_DEVICE           BIT_13
 #define FC_FAILOVER_DISABLE    	BIT_14
+#define FC_DSXXX_DEVICE         BIT_15
+#define FC_AA_EVA_DEVICE        BIT_16
 	int16_t		 	cfg_id;		/* index into cfg device table */
 	uint16_t	notify_type;
 	atomic_t		port_down_timer;
@@ -2317,6 +2437,7 @@ typedef struct fc_port {
 	int	(*fo_detect)(void);
 	int	(*fo_notify)(void);
 	int	(*fo_select)(void);
+	int (*fo_target_port)(struct fc_port *, struct fc_lun *, int);
 
 	fc_port_type_t	port_type;
 
@@ -2337,10 +2458,15 @@ typedef struct fc_lun {
 #define	FC_VISIBLE_LUN		BIT_2
 #define	FC_ACTIVE_LUN		BIT_3
 	uint8_t			inq0;
+	uint8_t 		asymm_support;	
+#define	 TGT_PORT_GRP_UNSUPPORTED  	0		
+#define	 SET_TGT_PORT_GRP_UNSUPPORTED   1		
 	u_long			kbytes;
 	void			*mplun;	
-	void			*mpbuf;	/* ptr to buffer use by multi-path driver */
+	void			*mpbuf;	/* ptr to buffer use by 
+					   multi-path driver */
 	int			mplen;
+    	uint8_t 		path_id; /* path id */
 } fc_lun_t;
 
 
@@ -2996,6 +3122,7 @@ typedef struct scsi_qla_host
                 uint32_t     enable_ip               :1;   /* 27 */
 #endif
 		uint32_t     process_response_queue  :1;   /* 28 */
+		uint32_t     enable_led_scheme	     :1;   /* 29 */	
 	} flags;
 
 	uint32_t     device_flags;
@@ -3259,13 +3386,6 @@ static int __init qla2100_setup (char *s);
 void qla2x00_setup(char *s);
 #endif
 
-/* It seems we cannot depend on CONFIG_COMPAT (RH) since it is 
- * defined for the ia64 platform, yet does not define the 
- * (un)register_ioctl32_*() functions.
- */
-#if defined(CONFIG_PPC64) || defined(CONFIG_X86_64)
-#define	QLA_CONFIG_COMPAT
-#endif
 
 /*
  * Scsi_Host_template (see hosts.h) 

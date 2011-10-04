@@ -10,7 +10,7 @@
 #include <linux/iobuf.h>
 #include <linux/vmalloc.h>
 #include <linux/locks.h>
-
+#include <linux/interrupt.h>
 
 kmem_cache_t *kiobuf_cachep;
 
@@ -41,9 +41,12 @@ static int kiobuf_init(struct kiobuf *iobuf)
 	atomic_set(&iobuf->io_count, 0);
 	iobuf->end_io = NULL;
 	iobuf->initialized = 0;
-	retval = expand_kiobuf(iobuf, KIO_STATIC_PAGES);
-	if (retval) return retval;
-	iobuf->initialized = 1;
+	if (!in_interrupt()) {
+		retval = expand_kiobuf(iobuf, KIO_STATIC_PAGES);
+		if (retval)
+			return retval;
+		iobuf->initialized = 1;
+	}
 	return 0;
 }
 

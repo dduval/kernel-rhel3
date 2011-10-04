@@ -57,6 +57,23 @@
 	st8	[_tmp]=r17,0x08;;			\
 	st8	[_tmp]=r18,0x08
 
+#define SAL_TO_OS_MCA_HANDOFF_STATE_SAVE_INIT(_tmp1, _tmp2)	\
+	movl	_tmp1=ia64_sal_to_os_handoff_state_addr;;	\
+	DATA_VA_TO_PA(_tmp1);;					\
+	mov	_tmp2=IA64_KR(CURRENT);;			\
+	adds	_tmp2=IA64_TASK_CPU_OFFSET,_tmp2;;		\
+	ld4	_tmp2=[_tmp2];;					\
+	shladd	_tmp2=_tmp2,3,_tmp1;;				\
+	ld8	_tmp1=[_tmp2];;					\
+	st8	[_tmp1]=r1,0x08;;			\
+	st8	[_tmp1]=r8,0x08;;			\
+	st8	[_tmp1]=r9,0x08;;			\
+	st8	[_tmp1]=r10,0x08;;			\
+	st8	[_tmp1]=r11,0x08;;			\
+	st8	[_tmp1]=r12,0x08;;			\
+	st8	[_tmp1]=r17,0x08;;			\
+	st8	[_tmp1]=r18,0x08
+
 /*
  * OS_MCA_TO_SAL_HANDOFF_STATE (SAL 3.0 spec)
  * (p6) is executed if we never entered virtual mode (TLB error)
@@ -102,6 +119,7 @@
 	.global ia64_os_mca_dispatch
 	.global ia64_os_mca_dispatch_end
 	.global ia64_sal_to_os_handoff_state
+	.global ia64_sal_to_os_handoff_state_addr
 	.global	ia64_os_to_sal_handoff_state
 	.global	ia64_mca_proc_state_dump
 	.global	ia64_mca_stack
@@ -869,7 +887,7 @@ end_os_mca_restore:
 GLOBAL_ENTRY(ia64_monarch_init_handler)
 
 	// stash the information the SAL passed to os
-	SAL_TO_OS_MCA_HANDOFF_STATE_SAVE(r2)
+	SAL_TO_OS_MCA_HANDOFF_STATE_SAVE_INIT(r2, r16)
 	;;
 	SAVE_MIN_WITH_COVER
 	;;
@@ -914,13 +932,3 @@ IVirtual_Switch:
 return_from_init:
 	br.sptk return_from_init
 END(ia64_monarch_init_handler)
-
-//
-// SAL to OS entry point for INIT on the slave processor
-// This has been defined for registration purposes with SAL
-// as a part of ia64_mca_init.
-//
-
-GLOBAL_ENTRY(ia64_slave_init_handler)
-1:	br.sptk 1b
-END(ia64_slave_init_handler)

@@ -28,11 +28,13 @@ struct vxtime_data {
 	long quot;
 	int last;
 	int mode;
+	long last_pmtmr;
 };
 
 #define VXTIME_STUPID	0
 #define VXTIME_TSC	1
-#define	VXTIME_HPET	2
+#define VXTIME_HPET	2
+#define VXTIME_PMTMR	3
 
 #define hpet_readl(a)           readl(fix_to_virt(FIX_HPET_BASE) + a)
 #define hpet_writel(d,a)        writel(d, fix_to_virt(FIX_HPET_BASE) + a)

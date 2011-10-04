@@ -1,9 +1,9 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
- * Enterprise Fibre Channel Host Bus Adapters.                     *
+ * Fibre Channel Host Bus Adapters.                                *
  * Refer to the README file included with this package for         *
  * driver version and adapter support.                             *
- * Copyright (C) 2004 Emulex Corporation.                          *
+ * Copyright (C) 2003-2005 Emulex.  All rights reserved.           *
  * www.emulex.com                                                  *
  *                                                                 *
  * This program is free software; you can redistribute it and/or   *
@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: hbaapi.h 1.4.1.2 2004/07/29 20:23:28EDT sf_support Exp  $
+ * $Id: hbaapi.h 1.3 2005/05/03 11:20:36EDT sf_support Exp  $
  */
 
 #ifdef __cplusplus
@@ -162,7 +162,8 @@ extern "C" {
 						 * of reporting */
 #define HBA_PORTSPEED_1GBIT                 1	/* 1 GBit/sec */
 #define HBA_PORTSPEED_2GBIT                 2	/* 2 GBit/sec */
-#define HBA_PORTSPEED_4GBIT                 8	/* 2 GBit/sec */
+#define HBA_PORTSPEED_4GBIT                 8	/* 4 GBit/sec */
+#define HBA_PORTSPEED_8GBIT                16 	/* 8 GBit/sec */
 #define HBA_PORTSPEED_10GBIT                4	/* 10 GBit/sec */
 #define HBA_PORTSPEED_NOT_NEGOTIATED        5	/* Speed not established */
 

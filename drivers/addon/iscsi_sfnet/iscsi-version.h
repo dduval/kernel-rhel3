@@ -24,8 +24,8 @@
 
 #define DRIVER_MAJOR_VERSION 3
 #define DRIVER_MINOR_VERSION 6
-#define DRIVER_PATCH_VERSION	1
-#define DRIVER_INTERNAL_VERSION	0
+#define DRIVER_PATCH_VERSION 2
+#define DRIVER_INTERNAL_VERSION 1
 
 /* DRIVER_EXTRAVERSION is intended to be customized by Linux
  * distributors, similar to the kernel Makefile's EXTRAVERSION.  This

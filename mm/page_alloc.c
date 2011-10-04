@@ -526,6 +526,13 @@ struct page * __alloc_pages(unsigned int gfp_mask, unsigned int order, zonelist_
 	 */
 
 	/*
+	 * Clear any possible error bits that might have been propagated
+	 * from the "gfp_mask" field of the "address_space" structure via
+	 * page_cache_alloc() or grab_cache_page().
+	 */
+	gfp_mask &= __GFP_BITS_MASK;
+
+	/*
 	 * Can we take pages directly from the inactive_clean
 	 * list?
 	 */

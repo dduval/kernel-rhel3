@@ -1256,7 +1256,6 @@ void ip_vs_conn_expire_now(struct ip_vs_conn *cp)
 {
 	cp->timeout = 0;
 	mod_timer(&cp->conn_timer, jiffies);
-	__ip_vs_conn_put(cp);
 }
 
 /*
@@ -1422,7 +1421,6 @@ void ip_vs_random_dropentry(void)
 	int idx;
 	struct ip_vs_conn *cp;
 	struct list_head *l,*e;
-	struct ip_vs_conn *ct;
 
 	/*
 	 * Randomly scan 1/32 of the whole table every second
@@ -1456,21 +1454,12 @@ void ip_vs_random_dropentry(void)
 				continue;
 			}
 
-			/*
-			 * Drop the entry, and drop its ct if not referenced
-			 */
-			atomic_inc(&cp->refcnt);
-			ct_write_unlock(hash);
-
-			if ((ct = cp->control))
-				atomic_inc(&ct->refcnt);
 			IP_VS_DBG(4, "del connection\n");
 			ip_vs_conn_expire_now(cp);
-			if (ct) {
+			if (cp->control) {
 				IP_VS_DBG(4, "del conn template\n");
-				ip_vs_conn_expire_now(ct);
+				ip_vs_conn_expire_now(cp->control);
 			}
-			ct_write_lock(hash);
 		}
 		ct_write_unlock(hash);
 	}
@@ -1485,7 +1474,6 @@ static void ip_vs_conn_flush(void)
 	int idx;
 	struct ip_vs_conn *cp;
 	struct list_head *l,*e;
-	struct ip_vs_conn *ct;
 
   flush_again:
 	for (idx=0; idx<IP_VS_CONN_TAB_SIZE; idx++) {
@@ -1497,18 +1485,12 @@ static void ip_vs_conn_flush(void)
 		l = &ip_vs_conn_tab[idx];
 		for (e=l->next; e!=l; e=e->next) {
 			cp = list_entry(e, struct ip_vs_conn, c_list);
-			atomic_inc(&cp->refcnt);
-			ct_write_unlock(idx);
-
-			if ((ct = cp->control))
-				atomic_inc(&ct->refcnt);
 			IP_VS_DBG(4, "del connection\n");
 			ip_vs_conn_expire_now(cp);
-			if (ct) {
+			if (cp->control) {
 				IP_VS_DBG(4, "del conn template\n");
-				ip_vs_conn_expire_now(ct);
+				ip_vs_conn_expire_now(cp->control);
 			}
-			ct_write_lock(idx);
 		}
 		ct_write_unlock_bh(idx);
 	}

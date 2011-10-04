@@ -1,9 +1,9 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
- * Enterprise Fibre Channel Host Bus Adapters.                     *
+ * Fibre Channel Host Bus Adapters.                                *
  * Refer to the README file included with this package for         *
  * driver version and adapter support.                             *
- * Copyright (C) 2004 Emulex Corporation.                          *
+ * Copyright (C) 2003-2005 Emulex.  All rights reserved.           *
  * www.emulex.com                                                  *
  *                                                                 *
  * This program is free software; you can redistribute it and/or   *
@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_cfgparm.h 1.11.1.4 2004/07/16 15:51:23EDT sf_support Exp  $
+ * $Id: lpfc_cfgparm.h 1.3 2005/05/03 11:21:17EDT sf_support Exp  $
  */
 
 #ifndef _H_LPFC_CFGPARAM
@@ -271,7 +271,7 @@ iCfgParam lpfc_icfgparam[LPFC_TOTAL_NUM_OF_CFG_PARAM] = {
 	 "Start scanning for devices from highest ALPA to lowest"},
 
 	{"link_speed",
-	 0, 2, 0, 0,
+	 0, 4, 0, 0,
 	 (ushort) (CFG_EXPORT),
 	 (ushort) CFG_RESTART,
 	 "Select link speed"},

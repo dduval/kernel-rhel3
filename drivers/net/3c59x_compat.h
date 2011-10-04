@@ -18,4 +18,8 @@ static inline struct mii_ioctl_data *if_mii(struct ifreq *rq)
 	return (struct mii_ioctl_data *) &rq->ifr_ifru;
 }
 
+#ifndef WARN_ON
+#define WARN_ON(x)	do { } while (0)
+#endif
+
 #endif /* __3C59X_COMPAT_H__ */

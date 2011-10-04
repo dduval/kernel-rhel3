@@ -20,6 +20,7 @@
  * Compile time Options:
  *     0 - Disable and 1 - Enable
  */
+#define  DEBUG_QLA2100                 0  /* For Debug of qla2x00 */
 #define  LOOP_ID_FROM_ONE              0   /* loop ID start from 1 when P2P */
 #define  MEMORY_MAPPED_IO              1
 #define  DEBUG_QLA2100_INTR            0
@@ -47,7 +48,6 @@
 #define  CHECK_BINDING
 #define  DUMP_INQ_DATA                 0  /* DEBUG_QLA2100 */
 
-#define  DEBUG_QLA2100                 0  /* For Debug of qla2x00 */
 #define  DEBUG_GET_FW_DUMP             0  /* also set DEBUG_QLA2100 and
 					   * use COM1 and capture it */
 #define  NO_LONG_DELAYS			0

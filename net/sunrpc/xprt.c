@@ -1447,7 +1447,7 @@ xprt_bindresvport(struct socket *sock)
 
 	memset(&myaddr, 0, sizeof(myaddr));
 	myaddr.sin_family = AF_INET;
-	port = 800;
+	port = 1023;
 	do {
 		myaddr.sin_port = htons(port);
 		err = sock->ops->bind(sock, (struct sockaddr *) &myaddr,
@@ -1538,6 +1538,9 @@ xprt_create_socket(int proto, struct rpc_timeout *to, int resvport)
 	/* bind to a reserved port */
 	if (resvport && xprt_bindresvport(sock) < 0)
 		goto failed;
+
+	/* don't hang waiting for kswapd */
+	sock->sk->allocation = GFP_NOFS;
 
 	return sock;
 

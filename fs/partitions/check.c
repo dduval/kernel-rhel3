@@ -119,6 +119,23 @@ char *disk_name (struct gendisk *hd, int minor, char *buf)
 			return buf + pos;
 	}
 
+	/* The device driver can provide its own naming -- a callback
+	 * function for such drivers would have been registered with
+	 * global callback_devname_table[]. Check this and call it!
+	 *
+	 * The driver callback function would return 0 on SUCCESS
+	 */
+	if (get_callback_from_devname_table(hd->major)) {
+		devname_t devname_callback;
+		kdev_t dev = MKDEV(hd->major, minor);
+		*buf = 0;
+	        devname_callback = (devname_t)get_callback_from_devname_table(hd->major);
+		if ((*devname_callback)(dev, buf))
+			printk (KERN_ERR "disk_name():devname() failed!\n");
+		else
+	 		return buf;
+	}
+
 #ifdef CONFIG_ARCH_S390
 	if (genhd_dasd_name
 	    && genhd_dasd_name (buf, unit, part, hd) == 0)

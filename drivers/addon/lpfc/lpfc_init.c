@@ -1,9 +1,9 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
- * Enterprise Fibre Channel Host Bus Adapters.                     *
+ * Fibre Channel Host Bus Adapters.                                *
  * Refer to the README file included with this package for         *
  * driver version and adapter support.                             *
- * Copyright (C) 2004 Emulex Corporation.                          *
+ * Copyright (C) 2003-2005 Emulex.  All rights reserved.           *
  * www.emulex.com                                                  *
  *                                                                 *
  * This program is free software; you can redistribute it and/or   *
@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_init.c 1.2 2004/11/01 09:48:33EST sf_support Exp  $
+ * $Id: lpfc_init.c 1.10 2005/05/03 11:21:45EDT sf_support Exp  $
  */
 
 #include <linux/version.h>
@@ -187,26 +187,49 @@ lpfc_config_port_prep(lpfcHBA_t * phba)
 		       sizeof (phba->RandomData));
 	}
 
-	if (lpfc_check_for_vpd) {
-		/* Get adapter VPD information */
-		lpfc_dump_mem(phba, pmb);
-		if (lpfc_sli_issue_mbox(phba, pmb, MBX_POLL) != MBX_SUCCESS) {
-			/*
-			 * Let it go through even if failed.
-			 */
-			/* Adapter failed to init, mbxCmd <cmd> DUMP VPD,
-			   mbxStatus <status> */
-			lpfc_printf_log(phba->brd_no, &lpfc_msgBlk0441,
-				       lpfc_mes0441,
-				       lpfc_msgBlk0441.msgPreambleStr,
-				       mb->mbxCommand, mb->mbxStatus);
+	/* Get the default values for Model Name and Description */
+	lpfc_get_hba_model_desc(phba, phba->ModelName, phba->ModelDesc);
 
-		} else {
-			if (mb->un.varDmp.ra == 1) { 
-				lpfc_parse_vpd(phba, 
-					(uint8_t *)&mb->un.varDmp.resp_offset);
+	if (lpfc_check_for_vpd) {
+		uint32_t *lpfc_vpd_data = 0;
+		uint16_t offset = 0;
+
+		/* Get adapter VPD information */
+		lpfc_vpd_data = kmalloc(DMP_VPD_SIZE, GFP_ATOMIC);
+		pmb->context2 = kmalloc(DMP_RSP_SIZE, GFP_ATOMIC);
+
+		do {
+			lpfc_dump_mem(phba, pmb, offset);
+
+			if (lpfc_sli_issue_mbox(phba, pmb, MBX_POLL) != MBX_SUCCESS) {
+				/*
+				 * Let it go through even if failed.
+				 */
+				/* Adapter failed to init, mbxCmd <cmd> DUMP VPD,
+				   mbxStatus <status> */
+				lpfc_printf_log(phba->brd_no, &lpfc_msgBlk0441,
+						lpfc_mes0441,
+						lpfc_msgBlk0441.msgPreambleStr,
+						mb->mbxCommand, mb->mbxStatus);
+				kfree(lpfc_vpd_data);
+				lpfc_vpd_data = 0;
+				break;
 			}
-		}
+
+			lpfc_sli_pcimem_bcopy((uint32_t *)pmb->context2,
+					      (uint32_t*)((uint8_t*)lpfc_vpd_data + offset),
+					      mb->un.varDmp.word_cnt);
+
+			offset += mb->un.varDmp.word_cnt;
+		} while (mb->un.varDmp.word_cnt);
+
+		lpfc_parse_vpd(phba, (uint8_t *)lpfc_vpd_data);
+
+		if (pmb->context2)
+			kfree(pmb->context2);
+		if (lpfc_vpd_data)
+			kfree(lpfc_vpd_data);
+		pmb->context2 = 0;
 	}
 	lpfc_mbox_free(phba, pmb);
 	return (0);
@@ -276,13 +299,6 @@ lpfc_config_port_post(lpfcHBA_t * phba)
 
 	mp = (DMABUF_t *) pmb->context1;
 
-	/* The mailbox was populated by the HBA.  Flush it to main store for the
-	 * driver.  Note that all context buffers are from the driver's
-	 * dma pool and have length LPFC_BPL_SIZE.
-	 */
-	 pci_dma_sync_single(phba->pcidev, mp->phys, LPFC_BPL_SIZE,
-				PCI_DMA_FROMDEVICE);
-
 	memcpy((uint8_t *) & phba->fc_sparam, (uint8_t *) mp->virt,
 	       sizeof (SERV_PARM));
 	lpfc_mbuf_free(phba, mp->virt, mp->phys);
@@ -345,23 +361,22 @@ lpfc_config_port_post(lpfcHBA_t * phba)
 		/* Reset the DFT_HBA_Q_DEPTH to the max xri  */
 		clp[LPFC_CFG_DFT_HBA_Q_DEPTH].a_current = mb->un.varRdConfig.max_xri + 1;
 	}
+	phba->lmt = mb->un.varRdConfig.lmt;
 
-	if (mb->un.varRdConfig.lmt & LMT_2125_10bit) {
-		/* HBA is 2G capable */
-		phba->fc_flag |= FC_2G_CAPABLE;
-	} else {
-		/* If the HBA is not 2G capable, don't let link speed ask for
-		   it */
-		if (clp[LPFC_CFG_LINK_SPEED].a_current > 1) {
-			/* Reset link speed to auto. 1G HBA cfg'd for 2G */
+	/* HBA is not 4GB capable, or HBA is not 2GB capable, 
+	don't let link speed ask for it */
+	if ((((phba->lmt & LMT_4250_10bit) != LMT_4250_10bit) &&
+		(clp[LPFC_CFG_LINK_SPEED].a_current > LINK_SPEED_2G)) || 
+		(((phba->lmt & LMT_2125_10bit) != LMT_2125_10bit) &&
+		 (clp[LPFC_CFG_LINK_SPEED].a_current > LINK_SPEED_1G))) {
+			/* Reset link speed to auto. 1G/2GB HBA cfg'd for 4G */
 			lpfc_printf_log(phba->brd_no, &lpfc_msgBlk1302,
 					lpfc_mes1302,
 					lpfc_msgBlk1302.msgPreambleStr,
 					clp[LPFC_CFG_LINK_SPEED].a_current);
 			clp[LPFC_CFG_LINK_SPEED].a_current = LINK_SPEED_AUTO;
-		}
 	}
-
+	
 	if (phba->intr_inited != 1) {
 		/* Add our interrupt routine to kernel's interrupt chain &
 		   enable it */
@@ -548,9 +563,6 @@ int
 lpfc_hba_down_prep(lpfcHBA_t * phba)
 {
 	LPFC_SLI_t *psli;
-	LPFC_SLI_RING_t *pring;
-	DMABUF_t *mp;
-	struct list_head *curr, *next;
 
 	psli = &phba->sli;
 	/* Disable interrupts */
@@ -723,10 +735,13 @@ int
 lpfc_parse_vpd(lpfcHBA_t * phba, uint8_t * vpd)
 {
 	uint8_t lenlo, lenhi;
-	uint8_t *Length;
+	uint32_t Length;
 	int i, j;
 	int finished = 0;
 	int index = 0;
+
+	if (!vpd)
+		return (0);
 
 	/* Vital Product */
 	lpfc_printf_log(phba->brd_no, &lpfc_msgBlk0455,
@@ -751,42 +766,103 @@ lpfc_parse_vpd(lpfcHBA_t * phba, uint8_t * vpd)
 			index += 1;
 			lenhi = vpd[index];
 			index += 1;
-			i = ((((unsigned short)lenhi) << 8) + lenlo);
-			do {
-				/* Look for Serial Number */
-				if ((vpd[index] == 'S')
-				    && (vpd[index + 1] == 'N')) {
-					index += 2;
-					Length = &vpd[index];
-					index += 1;
-					i = *Length;
-					j = 0;
-					while (i--) {
-						phba->SerialNumber[j++] =
-						    vpd[index++];
-						if (j == 31)
-							break;
-					}
-					phba->SerialNumber[j] = 0;
-					return (1);
-				} else {
-					index += 2;
-					Length = &vpd[index];
-					index += 1;
-					j = (int)(*Length);
-					index += j;
-					i -= (3 + j);
+			Length = ((((unsigned short)lenhi) << 8) + lenlo);
+
+			while (Length > 0) {
+			/* Look for Serial Number */
+			if ((vpd[index] == 'S') && (vpd[index+1] == 'N')) {
+				index += 2;
+				i = vpd[index];
+				index += 1;
+				j = 0;
+				Length -= (3+i);
+				while(i--) {
+					phba->SerialNumber[j++] = vpd[index++];
+					if(j == 31)
+						break;
 				}
-			} while (i > 0);
+				phba->SerialNumber[j] = 0;
+				continue;
+			}
+			else if ((vpd[index] == 'V') && (vpd[index+1] == '1')) {
+				phba->vpd_flag |= VPD_MODEL_DESC;
+				index += 2;
+				i = vpd[index];
+				index += 1;
+				j = 0;
+				Length -= (3+i);
+				while(i--) {
+					phba->ModelDesc[j++] = vpd[index++];
+					if(j == 255)
+						break;
+				}
+				phba->ModelDesc[j] = 0;
+				continue;
+			}
+			else if ((vpd[index] == 'V') && (vpd[index+1] == '2')) {
+				phba->vpd_flag |= VPD_MODEL_NAME;
+				index += 2;
+				i = vpd[index];
+				index += 1;
+				j = 0;
+				Length -= (3+i);
+				while(i--) {
+					phba->ModelName[j++] = vpd[index++];
+					if(j == 79)
+						break;
+				}
+				phba->ModelName[j] = 0;
+				continue;
+			}
+			else if ((vpd[index] == 'V') && (vpd[index+1] == '3')) {
+				phba->vpd_flag |= VPD_PROGRAM_TYPE;
+				index += 2;
+				i = vpd[index];
+				index += 1;
+				j = 0;
+				Length -= (3+i);
+				while(i--) {
+					phba->ProgramType[j++] = vpd[index++];
+					if(j == 255)
+						break;
+				}
+				phba->ProgramType[j] = 0;
+				continue;
+			}
+			else if ((vpd[index] == 'V') && (vpd[index+1] == '4')) {
+				phba->vpd_flag |= VPD_PORT;
+				index += 2;
+				i = vpd[index];
+				index += 1;
+				j = 0;
+				Length -= (3+i);
+				while(i--) {
+				phba->Port[j++] = vpd[index++];
+				if(j == 19)
+					break;
+				}
+				phba->Port[j] = 0;
+				continue;
+			}
+			else {
+				index += 2;
+				i = vpd[index];
+				index += 1;
+				index += i;
+				Length -= (3 + i);
+			}
+			}
 			finished = 0;
 			break;
 		case 0x78:
 			finished = 1;
 			break;
 		default:
-			return (0);
+			index++;
+			break;
 		}
-	} while (!finished);
+	} while (!finished && (index < 108));
+
 	return (1);
 }
 
@@ -1080,6 +1156,12 @@ lpfc_establish_link_tmo(unsigned long ptr)
 	clkData = (struct clk_data *)ptr;
 	phba = clkData->phba;
 	LPFC_DRVR_LOCK(phba, iflag);
+        	if (clkData->flags & TM_CANCELED) {
+		list_del((struct list_head *)clkData);
+		kfree(clkData);	
+		goto out;
+	}
+
 	clkData->timeObj->function = 0;
 	list_del((struct list_head *)clkData);
 	kfree(clkData);
@@ -1090,6 +1172,7 @@ lpfc_establish_link_tmo(unsigned long ptr)
 		       lpfc_msgBlk1300.msgPreambleStr,
 		       phba->fc_flag, phba->hba_state);
 	phba->fc_flag &= ~FC_ESTABLISH_LINK;
+out:
 	LPFC_DRVR_UNLOCK(phba, iflag);
 }
 

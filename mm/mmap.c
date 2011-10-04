@@ -914,50 +914,6 @@ struct vm_area_struct * find_vma_prev(struct mm_struct * mm, unsigned long addr,
 /* vma is the first one with  address < vma->vm_end,
  * and even  address < vma->vm_start. Have to extend vma. */
  
-#ifdef ARCH_STACK_GROWSUP
-static inline int expand_stack(struct vm_area_struct * vma, unsigned long address)
-{
-	unsigned long grow;
-
-	if (!(vma->vm_flags & VM_GROWSUP))
-		return -EFAULT;
-
-	vm_validate_enough("entering expand_stack");
-
-	/*
-	 * vma->vm_start/vm_end cannot change under us because the caller is required
-	 * to hold the mmap_sem in write mode. We need to get the spinlock only
-	 * before relocating the vma range ourself.
-	 */
- 	spin_lock(&vma->vm_mm->page_table_lock);
-
-	address += 4 + PAGE_SIZE - 1;
-	address &= PAGE_MASK;
-	grow = (address - vma->vm_end) >> PAGE_SHIFT;
-	
-	/* Overcommit.. */
-	if(!vm_enough_memory(grow)) {
-		spin_unlock(&vma->vm_mm->page_table_lock);
-		return -ENOMEM;
-	}
-	
-	if (address - vma->vm_start > current->rlim[RLIMIT_STACK].rlim_cur ||
-	    ((vma->vm_mm->total_vm + grow) << PAGE_SHIFT) > current->rlim[RLIMIT_AS].rlim_cur)
-	{
-		spin_unlock(&vma->vm_mm->page_table_lock);
-		vm_unacct_memory(grow);
-		vm_validate_enough("exiting expand_stack - FAIL");
-		return -ENOMEM;
-	}
-	vma->vm_end = address;
-	vma->vm_mm->total_vm += grow;
-	if (vma->vm_flags & VM_LOCKED)
-		vma->vm_mm->locked_vm += grow;
-	vm_validate_enough("exiting expand_stack");
-	return 0;
-}
-#else
-
 int expand_stack(struct vm_area_struct * vma, unsigned long address)
 {
 	unsigned long grow;
@@ -997,6 +953,15 @@ int expand_stack(struct vm_area_struct * vma, unsigned long address)
 		vm_validate_enough("exiting expand_stack - FAIL");
 		return -ENOMEM;
 	}
+	if ((vma->vm_flags & VM_LOCKED) &&
+	    ((vma->vm_mm->locked_vm + grow) << PAGE_SHIFT) >
+	     current->rlim[RLIMIT_MEMLOCK].rlim_cur &&
+	    !capable(CAP_IPC_LOCK)) {
+		spin_unlock(&vma->vm_mm->page_table_lock);
+		vm_unacct_memory(grow);
+		vm_validate_enough("exiting expand_stack - FAIL");
+		return -ENOMEM;
+	}
 	vma->vm_start = address;
 	vma->vm_pgoff -= grow;
 	vma->vm_mm->total_vm += grow;
@@ -1006,8 +971,6 @@ int expand_stack(struct vm_area_struct * vma, unsigned long address)
 	vm_validate_enough("exiting expand_stack");
 	return 0;
 }
-
-#endif
 
 struct vm_area_struct * find_extend_vma(struct mm_struct * mm, unsigned long addr)
 {

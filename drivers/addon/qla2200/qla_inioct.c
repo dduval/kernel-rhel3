@@ -16,7 +16,7 @@
  * General Public License for more details.
  *
  ******************************************************************************/
-
+#include <linux/vmalloc.h>
 #include "inioct.h"
 
 extern int qla2x00_loopback_test(scsi_qla_host_t *ha, INT_LOOPBACK_REQ *req,
@@ -222,6 +222,8 @@ qla2x00_update_nvram(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 {
 #if defined(ISP2300) 
 	device_reg_t	*reg = ha->iobase;
+	uint32_t	word;
+	uint16_t	wprot, wprot_old;
 #endif
 #if defined(ISP2100)
 	nvram21_t	*pnew_nv;
@@ -315,6 +317,52 @@ qla2x00_update_nvram(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	} else {
 		base = 0;
 	}
+
+	/* Clear write protection, if necessary. */
+	wprot_old = cpu_to_le16(qla2x00_get_nvram_word(ha, base));
+	qla2x00_write_nvram_word(ha, base, __constant_cpu_to_le16(0x1234));
+	wprot = cpu_to_le16(qla2x00_get_nvram_word(ha, base));
+	if (wprot != __constant_cpu_to_le16(0x1234)) {
+		/* write enable */
+		qla2x00_nv_write(ha, NV_DATA_OUT);
+		qla2x00_nv_write(ha, 0);
+		qla2x00_nv_write(ha, 0);
+
+		for (word = 0; word < 8; word++) {
+			qla2x00_nv_write(ha, NV_DATA_OUT);
+		}
+
+		qla2x00_nv_deselect(ha);
+
+		/* enable protection register */
+		qla2x00_nv_write(ha, NV_PR_ENABLE | NV_DATA_OUT);
+		qla2x00_nv_write(ha, NV_PR_ENABLE);
+		qla2x00_nv_write(ha, NV_PR_ENABLE);
+
+		for (word = 0; word < 8; word++) {
+			qla2x00_nv_write(ha, NV_DATA_OUT | NV_PR_ENABLE);
+		}
+
+		qla2x00_nv_deselect(ha);
+
+		/* clear protection register (ffff is cleared) */
+		qla2x00_nv_write(ha, NV_PR_ENABLE | NV_DATA_OUT);
+		qla2x00_nv_write(ha, NV_PR_ENABLE | NV_DATA_OUT);
+		qla2x00_nv_write(ha, NV_PR_ENABLE | NV_DATA_OUT);
+
+		for (word = 0; word < 8; word++) {
+			qla2x00_nv_write(ha, NV_DATA_OUT | NV_PR_ENABLE);
+		}
+		qla2x00_nv_deselect(ha);
+
+		/* Wait for NVRAM to become ready */
+		WRT_REG_WORD(&reg->nvram, NV_SELECT);
+		do {
+			NVRAM_DELAY();
+			word = RD_REG_WORD(&reg->nvram);
+		} while ((word & NV_DATA_IN) == 0);
+	} else
+		qla2x00_write_nvram_word(ha, base, wprot_old);
 #else
 	base = 0;
 #endif
@@ -359,35 +407,14 @@ qla2x00_write_nvram_word(scsi_qla_host_t *ha, uint8_t addr, uint16_t data)
 	uint32_t nv_cmd;
 	device_reg_t *reg = ha->iobase;
 
+	DEBUG9(printk("%s entered\n",__func__);)
+
 	qla2x00_nv_write(ha, NV_DATA_OUT);
 	qla2x00_nv_write(ha, 0);
 	qla2x00_nv_write(ha, 0);
 
 	for (word = 0; word < 8; word++)
 		qla2x00_nv_write(ha, NV_DATA_OUT);
-
-	qla2x00_nv_deselect(ha);
-
-	/* Erase Location */
-	nv_cmd = (addr << 16) | NV_ERASE_OP;
-	nv_cmd <<= 5;
-	for (count = 0; count < 11; count++) {
-		if (nv_cmd & BIT_31)
-			qla2x00_nv_write(ha, NV_DATA_OUT);
-		else
-			qla2x00_nv_write(ha, 0);
-
-		nv_cmd <<= 1;
-	}
-
-	qla2x00_nv_deselect(ha);
-
-	/* Wait for Erase to Finish */
-	WRT_REG_WORD(&reg->nvram, NV_SELECT);
-	do {
-		NVRAM_DELAY();
-		word = RD_REG_WORD(&reg->nvram);
-	} while ((word & NV_DATA_IN) == 0);
 
 	qla2x00_nv_deselect(ha);
 
@@ -783,7 +810,7 @@ qla2x00_update_option_rom_ext(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	/* Read from user buffer */
 	usr_tmp = (uint8_t *)pext->RequestAdr;
 
-	kern_tmp = (uint8_t *)KMEM_ZALLOC(length, 30);
+	kern_tmp = (uint8_t *)vmalloc(length);
 	if (kern_tmp == NULL) {
 		pext->Status = EXT_STATUS_COPY_ERR;
 		printk(KERN_WARNING
@@ -792,18 +819,17 @@ qla2x00_update_option_rom_ext(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	}
 	ret = copy_from_user(kern_tmp, usr_tmp, length);
 	if (ret) {
-		KMEM_FREE(kern_tmp, length);
+		vfree(kern_tmp);
 		pext->Status = EXT_STATUS_COPY_ERR;
 		DEBUG9_10(printk("%s: ERROR in buffer copy READ. "
 		    "RequestAdr=%p\n", __func__, pext->RequestAdr));
 		return (ret);
 	}
-
 	/* Go with update */
 	status = qla2x00_update_or_read_flash(ha, kern_tmp, saddr, 
 	    		length, QLA2X00_WRITE);
 
-	KMEM_FREE(kern_tmp, length);
+	vfree(kern_tmp);
 
 	if (status) {
 		ret = 1;

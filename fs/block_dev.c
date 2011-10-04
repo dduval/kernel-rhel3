@@ -430,18 +430,27 @@ static struct {
 	struct block_device_operations *bdops;
 } blkdevs[MAX_BLKDEV];
 
-int get_blkdev_list(char * p)
+int get_blkdev_list(char *p, int avail)
 {
-	int i;
-	int len;
+	int i, len;
 
-	len = sprintf(p, "\nBlock devices:\n");
+	len = snprintf(p, avail, "\nBlock devices:\n");
+	if (len >= avail)
+		return avail;
+	avail -= len;
+	p += len;
+
 	for (i = 0; i < MAX_BLKDEV ; i++) {
 		if (blkdevs[i].bdops) {
-			len += sprintf(p+len, "%3d %s\n", i, blkdevs[i].name);
+			len = snprintf(p, avail,
+				"%3d %s\n", i, blkdevs[i].name);
+			if (len >= avail)
+				break;
+			avail -= len;
+			p += len;
 		}
 	}
-	return len;
+	return avail;
 }
 
 /*

@@ -14,6 +14,35 @@
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
 
+#ifndef PCI_SEGMENT
+static inline int PCI_SEGMENT(struct pci_bus *bus) { return 0; }
+#endif
+
+#ifndef min
+#define min(x,y) ({ \
+         const typeof(x) _x = (x);       \
+         const typeof(y) _y = (y);       \
+         (void) (&_x == &_y);            \
+         _x < _y ? _x : _y; })
+#endif
+
+#ifndef min_t
+#define min_t(type,x,y) \
+         ({ type __x = (x); type __y = (y); __x < __y ? __x: __y; })
+#endif
+
+#ifndef max
+#define max(x,y) ({ \
+         const typeof(x) _x = (x);       \
+         const typeof(y) _y = (y);       \
+         (void) (&_x == &_y);            \
+         _x > _y ? _x : _y; })
+#endif
+
+#ifndef max_t
+#define max_t(type,x,y) \
+         ({ type __x = (x); type __y = (y); __x > __y ? __x: __y; })
+#endif
 
 #if (defined(__sparc__) && defined(__sparc_v9__)) || defined(__x86_64__)
 #define MPT_CONFIG_COMPAT
@@ -161,6 +190,7 @@ typedef void (*__cleanup_module_func_t)(void);
 #define DEVICE_COUNT_RESOURCE           6
 #define PCI_BASEADDR_FLAGS(idx)         base_address[idx]
 #define PCI_BASEADDR_START(idx)         base_address[idx] & ~0xFUL
+#define PCI_BASEADDR_END(idx)           base_address[idx+1]
 /*
  * We have to keep track of the original value using
  * a temporary, and not by just sticking pdev->base_address[x]
@@ -181,6 +211,7 @@ typedef void (*__cleanup_module_func_t)(void);
 #define PCI_BASEADDR_FLAGS(idx)         resource[idx].flags
 #define PCI_BASEADDR_START(idx)         resource[idx].start
 #define PCI_BASEADDR_SIZE(dev,idx)      (dev)->resource[idx].end - (dev)->resource[idx].start + 1
+#define PCI_BASEADDR_END(idx)           resource[idx].end
 #endif		/* } ifndef pci_for_each_dev */
 
 

@@ -5852,8 +5852,8 @@ qla2x00_set_led_state(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 			/* Turn off both LEDs */
 			spin_lock_irqsave(&ha->hardware_lock, cpu_flags);
 			if (ha->pio_address) {
-				gpio_enable = RD_REG_WORD_IOMEM(&reg->gpioe);
-				gpio_data   = RD_REG_WORD_IOMEM(&reg->gpiod);
+				gpio_enable = RD_REG_WORD_PIO(&reg->gpioe);
+				gpio_data   = RD_REG_WORD_PIO(&reg->gpiod);
 			} else {
 				gpio_enable = RD_REG_WORD(&reg->gpioe);
 				gpio_data   = RD_REG_WORD(&reg->gpiod);
@@ -5862,8 +5862,7 @@ qla2x00_set_led_state(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 
 			/* Set the modified gpio_enable values */
 			if (ha->pio_address) {
-				WRT_REG_WORD_IOMEM(&reg->gpioe,gpio_enable);
-				RD_REG_WORD_IOMEM(&reg->gpioe);
+				WRT_REG_WORD_PIO(&reg->gpioe,gpio_enable);
 			} else {	
 				WRT_REG_WORD(&reg->gpioe,gpio_enable);
 				PCI_POSTING(&reg->gpioe);
@@ -5872,8 +5871,7 @@ qla2x00_set_led_state(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 			/* Clear out previously set LED colour */
 			gpio_data &= ~LED_MASK;
 			if (ha->pio_address) {
-				WRT_REG_WORD_IOMEM(&reg->gpiod,gpio_data);
-				RD_REG_WORD_IOMEM(&reg->gpiod);
+				WRT_REG_WORD_PIO(&reg->gpiod,gpio_data);
 			} else {
 				WRT_REG_WORD(&reg->gpiod,gpio_data);
 				PCI_POSTING(&reg->gpiod);

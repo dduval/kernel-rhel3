@@ -207,3 +207,4 @@ EXPORT_SYMBOL(init_dump);
 EXPORT_SYMBOL_GPL(show_mem);
 EXPORT_SYMBOL_GPL(show_state);
 EXPORT_SYMBOL_GPL(show_regs);
+EXPORT_SYMBOL(pm_power_off);

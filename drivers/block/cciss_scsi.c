@@ -46,7 +46,10 @@ static int sendcmd(
 				      2: address is in scsi3addr */
 	unsigned int log_unit,
 	__u8	page_code,
-	unsigned char *scsi3addr );
+	unsigned char *scsi3addr,
+	int block_nr,
+	int diskdump ); 	/* 0: this is not a diskdump command
+				   1: this is a diskdump command */
 
 
 int __init cciss_scsi_detect(Scsi_Host_Template *tpnt);
@@ -322,6 +325,8 @@ print_cmd(CommandList_struct *cp)
 	printk("sgs..........Errorinfo:\n");
 	printk("scsistatus:%d\n", cp->err_info->ScsiStatus);
 	printk("senselen:%d\n", cp->err_info->SenseLen);
+	printk("SenseInfo: ");
+	print_bytes(cp->err_info->SenseInfo, cp->err_info->SenseLen, 1, 0); 
 	printk("cmd status:%d\n", cp->err_info->CommandStatus);
 	printk("resid cnt:%d\n", cp->err_info->ResidualCnt);
 	printk("offense size:%d\n", cp->err_info->MoreErrInfo.Invalid_Cmd.offense_size);
@@ -574,7 +579,7 @@ cciss_find_non_disk_devices(int cntl_num)
 
 	/* Get the physical luns */
 	return_code = sendcmd(CISS_REPORT_PHYS, cntl_num, ld_buff,
-			reportlunsize, 0, 0, 0, NULL );
+			reportlunsize, 0, 0, 0, NULL, 0, 0);
 
 	if( return_code == IO_OK) {
 		unsigned char *c = &ld_buff->LUNListLength[0];
@@ -607,7 +612,7 @@ cciss_find_non_disk_devices(int cntl_num)
 		memset(inq_buff, 0, sizeof(InquiryData_struct));
 		memcpy(scsi3addr, ld_buff->LUN[i], 8); /* ugly... */
 		return_code = sendcmd(CISS_INQUIRY, cntl_num, inq_buff,
-			sizeof(InquiryData_struct), 2, 0 ,0, scsi3addr );
+			sizeof(InquiryData_struct), 2, 0 ,0, scsi3addr, 0, 0);
 	  	if (return_code == IO_OK) {
 			if(inq_buff->data_byte[8] == 0xFF)
 			{

@@ -72,6 +72,7 @@ static int adpt_device_reset(Scsi_Cmnd* cmd);
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,3,00)
 #define _DPT_I2O  \
+	name: "Adaptec I2O RAID Controller",				\
 	proc_info: adpt_proc_info,					\
 	detect: adpt_detect,						\
 	release: adpt_release,						\
@@ -92,6 +93,7 @@ static int adpt_device_reset(Scsi_Cmnd* cmd);
 #else				/* KERNEL_VERSION > 2.2.16 */
 
 #define _DPT_I2O  \
+	name: "Adaptec I2O RAID Controller",				\
 	proc_info: adpt_proc_info,					\
 	detect: adpt_detect,						\
 	release: adpt_release,						\

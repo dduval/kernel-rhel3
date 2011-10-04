@@ -690,12 +690,48 @@ void buffer_insert_list(struct buffer_head *bh, struct list_head *list)
 	spin_unlock(&lru_list_lock);
 }
 
+int get_and_clear_as_eio_error(struct address_space *m)
+{
+	int ret = 0;
+
+	spin_lock(&lru_list_lock);
+	if (m->gfp_mask & AS_EIO_MASK) {
+		m->gfp_mask &= ~AS_EIO_MASK;
+		ret = -EIO;
+	}
+	spin_unlock(&lru_list_lock);
+	return ret;
+}
+
+static inline void push_bh_error_state(struct buffer_head *bh) 
+{
+	struct page *page;
+	struct address_space *mapping;
+	
+	page = bh->b_page;
+	if (!page || !page->mapping) 
+		return;
+	if (!TryLockPage(page)) {
+		mapping = page->mapping;
+		if (mapping)
+			mapping->gfp_mask |= AS_EIO_MASK;
+		UnlockPage(page);
+	}
+}
+
 /*
  * The caller must have the lru_list lock before calling the 
  * remove_inode_queue functions.
  */
 static void __remove_inode_queue(struct buffer_head *bh)
 {
+	/* Nasty: if some inode is waiting for error
+	 * state notification on the buffer in
+	 * fsync/osync, and we remove the bh from the
+	 * inode's queue, it may lose EIO information.
+	 * Try to propagate that into the inode now. */
+	if (buffer_mapped(bh) && !buffer_uptodate(bh) && !buffer_locked(bh))
+		push_bh_error_state(bh);
 	list_del(&bh->b_inode_buffers);
 	clear_buffer_attached(bh);
 }

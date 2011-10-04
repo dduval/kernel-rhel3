@@ -51,6 +51,8 @@ static mp_device_t * qla2x00_find_or_allocate_mp_dev (mp_host_t *, uint16_t,
 static mp_path_t * qla2x00_find_or_allocate_path(mp_host_t *, mp_device_t *,
     uint16_t, uint16_t, fc_port_t *);
 
+static lu_path_t * qla2x00_find_or_allocate_lu_path(mp_host_t *, fc_lun_t *, uint16_t );
+
 static uint32_t qla2x00_cfg_register_failover_lun(mp_device_t *,srb_t *,
     fc_lun_t *);
 static uint32_t qla2x00_send_failover_notify(mp_device_t *, uint8_t,
@@ -62,6 +64,7 @@ static BOOL qla2x00_update_mp_host(mp_host_t  *);
 static uint32_t qla2x00_update_mp_tree (void);
 
 static fc_lun_t *qla2x00_find_matching_lun(uint8_t , mp_device_t *, mp_path_t *);
+static lu_path_t * qla2x00_find_lu_path_by_id(mp_lun_t *, uint8_t );
 static mp_path_t *qla2x00_find_path_by_id(mp_device_t *, uint8_t);
 static mp_device_t *qla2x00_find_mp_dev_by_id(mp_host_t *, uint8_t);
 static mp_device_t *qla2x00_find_mp_dev_by_nodename(mp_host_t *, uint8_t *);
@@ -80,7 +83,8 @@ static BOOL qla2x00_is_portname_in_device(mp_device_t *, uint8_t *);
 static void qla2x00_failback_single_lun(mp_device_t *, uint8_t, uint8_t);
 static void qla2x00_failback_luns(mp_host_t *);
 static void qla2x00_setup_new_path(mp_device_t *, mp_path_t *, fc_port_t *);
-static int  qla2x00_get_wwuln_from_device(mp_host_t *, fc_lun_t *, char	*, int);
+static int  qla2x00_get_wwuln_from_device(mp_host_t *, fc_lun_t *, char *,
+                int , uint8_t *, uint8_t *);
 #if 0
 static mp_device_t  * qla2x00_is_nn_and_pn_in_device(mp_device_t *, 
 	uint8_t *, uint8_t *);
@@ -100,8 +104,13 @@ static BOOL qla2x00_is_nodename_in_device(mp_device_t *, uint8_t *);
 static mp_port_t	*
 qla2x00_find_or_allocate_port(mp_host_t *, mp_lun_t *, 
 	mp_path_t *);
+static mp_tport_grp_t *
+qla2x00_find_or_allocate_tgt_port_grp(mp_host_t *, mp_port_t *, fc_lun_t *,
+                mp_path_t * );
 static mp_port_t	*
 qla2x00_find_port_by_name(mp_lun_t *, mp_path_t *);
+static struct _mp_path *
+qla2x00_find_first_path_to_active_tpg( mp_device_t *, mp_lun_t *);
 static struct _mp_path *
 qla2x00_find_first_active_path(mp_device_t *, mp_lun_t *);
 #if 0
@@ -155,6 +164,7 @@ int16_t qla2x00_cfg_lookup_device(unsigned char *response_data)
 static int qla2x00_configure_cfg_device(fc_port_t	*fcport)
 {
 	int		id = fcport->cfg_id;
+	int		exclude = 0;
 
 	DEBUG3(printk("Entering %s - id= %d\n", __func__, fcport->cfg_id);)
 
@@ -167,14 +177,43 @@ static int qla2x00_configure_cfg_device(fc_port_t	*fcport)
 	}   
 
 	DEBUG3(printk("%s - Configuring device \n", __func__);) 
-	/* Disable failover capability if needed  and return */
 		
 	fcport->fo_combine = cfg_device_list[id].fo_combine;
+ 	fcport->fo_target_port = cfg_device_list[id].fo_target_port;
 #if 0
 	fcport->fo_detect = cfg_device_list[id].fo_detect;
 	fcport->fo_notify = cfg_device_list[id].fo_notify;
 	fcport->fo_select = cfg_device_list[id].fo_select;
 #endif
+
+	/* Disable failover capability if needed  and return */
+	if (ql2xexcludemodel) {
+		if ( (ql2xexcludemodel & BIT_0)  && 
+		   (fcport->flags & FC_XP_DEVICE)) {
+			exclude++;
+		} else if ( (ql2xexcludemodel & BIT_1) && 
+			( fcport->flags & FC_MSA_DEVICE ) ) {
+			exclude++;
+		} else if ( (ql2xexcludemodel & BIT_2) && 
+			(fcport->flags & FC_EVA_DEVICE) ) {
+			exclude++;
+		} else if ( (ql2xexcludemodel & BIT_4) && 
+			(fcport->flags & FC_DSXXX_DEVICE) ){
+			exclude++;
+		} else if ( (ql2xexcludemodel & BIT_5) &&
+			(fcport->flags & FC_AA_EVA_DEVICE) ){
+			exclude++;
+		}
+		if (exclude) {
+			printk(KERN_INFO
+		    "scsi(%ld) :Excluding Loopid 0x%04x as a failover capable device.\n",
+		    fcport->ha->host_no, fcport->loop_id);
+			fcport->flags |= FC_FAILOVER_DISABLE;
+			fcport->fo_combine = qla2x00_export_target;
+			fcport->fo_target_port = NULL;
+		}
+	}
+
 	DEBUG3(printk("Exiting %s - id= %d\n", __func__, fcport->cfg_id); )
 		return 1;
 }
@@ -373,6 +412,92 @@ qla2x00_cfg_event_notify(scsi_qla_host_t *ha, uint32_t i_type)
 	return QLA2X00_SUCCESS;
 }
 
+ static int
+ qla2x00_set_preferred_path(mp_lun_t *mplun, int order)
+ {
+ 	mp_device_t 	 *dp;
+ 	lu_path_t   	 *lun_path;
+ 	struct list_head *list, *temp;
+ 	int 		 paths_cnt = 0, path_id, path_order;
+ 	mp_path_t 	 *path;
+ 
+ 	DEBUG(printk("%s entered\n",__func__);)
+ 
+ 	if ( mplun == NULL ) {
+ 		return 0;
+ 	}
+ 
+ 	path_id = 0;
+ 	dp = mplun->dp;
+ 	switch (mplun->load_balance_type) {
+ 
+ 		case LB_STATIC:	/* distrubute luns across all active-optmisied paths */
+ 			/* Determine how many active paths we have */
+ 			paths_cnt = 0;
+ 			list_for_each_safe(list, temp, &mplun->active_list) {
+ 				lun_path = list_entry(list, lu_path_t, next_active);
+ 				paths_cnt++;
+ 			}
+ 			
+ 			if (paths_cnt == 0 ) {
+ 				printk("%s no active_path\n",__func__);
+ 				return 0;
+ 			} else 
+ 				DEBUG2(printk("%s active_path_cnt=%d\n",__func__, paths_cnt);)
+ 
+ 			path_order = order % paths_cnt; 		
+ 			paths_cnt = 0;
+ 			list_for_each_safe(list, temp, &mplun->active_list) {
+ 				lun_path = list_entry(list, lu_path_t, next_active);
+ 				if (paths_cnt == path_order) {
+ 					path_id = lun_path->path_id;
+ 					break;
+ 				}
+ 				paths_cnt++;
+ 			}
+ 			
+ 			break;
+ 		
+ 		case LB_NONE:
+ 			/* default is first active path */
+ 			path = qla2x00_find_first_path_to_active_tpg(dp, mplun);
+ 			if (path) {
+ 				path_id = path->id;
+ 				path->lun_data.data[mplun->number] |= LUN_DATA_PREFERRED_PATH;
+ 				DEBUG2(printk( "%s: Found preferred lun lun=%d,"
+ 					" pathid=%d\n", __func__, mplun->number,
+ 					  path->id);)
+ 				printk( "%s: Found preferred lun lun=%d,"
+ 					" pathid=%d\n", __func__, mplun->number,
+ 					  path->id);
+ 				break;
+ 			} else {
+ 				DEBUG(printk("%s could not find an active path=%p\n",
+ 				   __func__, path);)
+ 				printk("%s could not find an active path=%p\n",
+ 				   __func__, path);
+ 			}
+ 		default:
+ 			path = qla2x00_find_first_active_path(dp, mplun);
+ 			if (path) { 
+ 				path_id = path->id;
+ 				path->lun_data.data[mplun->number] |= LUN_DATA_PREFERRED_PATH;
+ 				DEBUG2(printk( "%s: Found preferred lun lun=%d,"
+ 					" pathid=%d\n", __func__, mplun->number,
+ 					  path->id);)
+ 			}
+ 	}
+ 	
+ 	dp->path_list->current_path[mplun->number] = path_id;
+ 	mplun->pref_path_id = path_id;
+ DEBUG(printk("%s lun=%d path_id=%d lb_type=%d order=%d paths_cnt=%d\n",__func__,
+ 		mplun->number, path_id,mplun->load_balance_type, order, paths_cnt);)
+ 	DEBUG3(printk("%s leaving\n");)
+ 	
+ 	return 1;
+ }
+ 
+
 int qla2x00_cfg_remap(scsi_qla_host_t *halist)
 {
 	scsi_qla_host_t *ha;
@@ -446,7 +571,7 @@ qla2x00_find_port_by_name(mp_lun_t *mplun,
 
 	list_for_each_safe(list, temp, &mplun->ports_list) {
 		temp_port = list_entry(list, mp_port_t, list);
-		if ( memcmp(temp_port->portname, path->portname, WWN_SIZE) == 0 ) {
+		if (memcmp(temp_port->portname, path->portname, WWN_SIZE) == 0) {
 			port = temp_port;
 			break;
 		}
@@ -463,12 +588,14 @@ qla2x00_find_or_allocate_port(mp_host_t *host, mp_lun_t *mplun,
 	struct list_head *list, *temp;
 	unsigned long	instance = host->instance;
 
-	if( instance == MAX_HOSTS - 1) {
+	DEBUG3(printk("%s entered\n",__func__);)
+
+	if (instance == MAX_HOSTS - 1) {
 		printk(KERN_INFO "%s: Fail no room\n", __func__);
 		return NULL;
 	}
 
-	if ( mplun == NULL ) {
+	if (mplun == NULL) {
 		return NULL;
 	}
 
@@ -494,7 +621,7 @@ qla2x00_find_or_allocate_port(mp_host_t *host, mp_lun_t *mplun,
 		}
 	}
 	port = qla2x00_allocate_mp_port(path->portname);
-	if( port ) {
+	if (port) {
 		port->cnt++;
 		DEBUG(printk("%s: allocate and adding portname - port[%d] = "
 			    "%p at index = %d with path id %d\n",
@@ -504,10 +631,115 @@ qla2x00_find_or_allocate_port(mp_host_t *host, mp_lun_t *mplun,
 		port->hba_list[instance] = host->ha;
 		/* add port to list */
 		list_add_tail(&port->list,&mplun->ports_list );
+		port->flags = MP_NO_REL_TPORT_ID;
 	}
+	DEBUG3(printk("%s exit port=%p\n",__func__,port);)	
 	return port;
-}
+}  
 
+/* Find or allocates target port group and adds mp_port to it so. */
+static mp_tport_grp_t *
+qla2x00_find_or_allocate_tgt_port_grp(mp_host_t *host, mp_port_t *port, 
+	fc_lun_t *fclun, mp_path_t *path)
+{
+	uint8_t rel_tport_id[2];
+	uint8_t tpg_id[2];
+	uint16_t len;
+	char	wwulnbuf[WWULN_SIZE];
+	mp_tport_grp_t	*tport_grp = NULL;
+	mp_lun_t *mplun = fclun->mplun;
+	struct list_head *list, *temp;
+	unsigned long	instance = host->instance;
+
+	DEBUG3(printk("%s entered\n",__func__);)
+
+	if( instance == MAX_HOSTS - 1) {
+		printk(KERN_INFO "%s: Fail no room\n", __func__);
+		return NULL;
+	}
+
+	if ( mplun == NULL ) {
+		return NULL;
+	}
+	DEBUG(printk("%s(%ld) entered\n",__func__,instance);)
+	len = qla2x00_get_wwuln_from_device(host, fclun, 
+		&wwulnbuf[0], WWULN_SIZE, &rel_tport_id[0] , &tpg_id[0]); 
+
+	DEBUG5(printk("scsi(%d): tpg_id[0]:0x%x tpg_id[1]:0x%x rtport_id[0]:0x%x rtport_id[1]:0x%x" 
+			 " loop_id=0x%x lun=%d\n", instance, tpg_id[0],
+		 tpg_id[1], rel_tport_id[0], rel_tport_id[1], fclun->fcport->loop_id, fclun->lun);)
+
+	/* if fail to do the inq then exit */
+	if( len == 0 ) {
+		return tport_grp;
+	}
+
+	list_for_each_safe(list, temp, &mplun->tport_grps_list) {
+		tport_grp = list_entry(list, mp_tport_grp_t, list);
+		if (memcmp(tport_grp->tpg_id, &tpg_id[0], sizeof(tpg_id))
+				 == 0) {
+			if (port->flags & MP_NO_REL_TPORT_ID) {
+			   DEBUG(printk("scsi%ld %s: Adding mp port" 
+			    " %02x%02x%02x%02x%02x%02x%02x%02x.\n",
+			    instance, __func__, port->portname[0], 
+			    port->portname[1], port->portname[2], 
+			    port->portname[3], 
+			    port->portname[4], port->portname[5], 
+			    port->portname[6], port->portname[7]);)
+			   DEBUG(printk("%s(%ld): tpg_id[0]=0x%0x tpg_id[1]=0x%0x\n",
+				 __func__,instance,tpg_id[0],tpg_id[1]);)
+			   /* add port to list */
+			   memcpy(&port->rel_tport_id[0],&rel_tport_id[0],
+					 sizeof(rel_tport_id));
+			   if (tport_grp->ports_list[path->id] == NULL) {
+				tport_grp->ports_list[path->id] = port;
+				DEBUG(printk("Updated tpg ports_list[%d]= %p\n",
+					 path->id, port);)
+			   }
+			   port->flags &= ~MP_NO_REL_TPORT_ID;	
+			} else {
+				DEBUG(printk("%s: found an existing tport_grp=%p tpg_id[0]:0x%x"
+					" tpg_id[1]:0x%x\n", __func__, tport_grp, tpg_id[0],
+					 tpg_id[1]);)
+			}
+			
+			return tport_grp;
+		}
+	}
+
+	/* allocate the target port group */
+	tport_grp = kmalloc(sizeof(mp_tport_grp_t), GFP_KERNEL);
+	if (tport_grp == NULL)
+		return NULL;
+
+	memset(tport_grp, 0, sizeof(*tport_grp));
+	memcpy(&tport_grp->tpg_id[0], &tpg_id[0], sizeof(tpg_id));
+	list_add_tail(&tport_grp->list,&mplun->tport_grps_list);
+
+	DEBUG(printk("%s: mp_tport_grp_t allocated at %p tpg_id[0]:0x%x"
+		" tpg_id[1]:0x%x\n", __func__, tport_grp, tpg_id[0],
+		 tpg_id[1]);)
+
+	memcpy(&port->rel_tport_id[0], &rel_tport_id[0], sizeof(rel_tport_id));
+	port->flags &= ~MP_NO_REL_TPORT_ID;	
+	/* Add port to tgt port group list */
+	if (tport_grp->ports_list[path->id] == NULL) {
+		tport_grp->ports_list[path->id] = port;
+		DEBUG2(printk("Updated tpg ports_list[%d]= %p \n",
+			path->id, port);)
+	}
+
+	DEBUG(printk("%s(%ld): Adding mp port" 
+	" %02x%02x%02x%02x%02x%02x%02x%02x to it.\n",__func__, instance,
+	port->portname[0], port->portname[1], port->portname[2], 
+	port->portname[3], port->portname[4], port->portname[5], 
+	port->portname[6], port->portname[7]);)
+
+	DEBUG3(printk("%s leaving\n",__func__);)
+
+	return tport_grp;
+
+}
 
 /*
  * qla2x00_cfg_failover_port
@@ -638,6 +870,7 @@ qla2x00_cfg_failover(scsi_qla_host_t *ha, fc_lun_t *fp,
 	mp_path_t	*new_path;		/* new path pointer */
 	fc_lun_t	*new_fp = NULL;
 	fc_port_t	*fcport, *new_fcport;
+	struct fo_information	*mp_info = NULL;
 
 	ENTER("qla2x00_cfg_failover");
 	DEBUG2(printk("%s entered\n",__func__);)
@@ -675,95 +908,106 @@ qla2x00_cfg_failover(scsi_qla_host_t *ha, fc_lun_t *fp,
 				 */
        				fcport->flags &= ~(FC_MSA_PORT_ACTIVE);
 				if( qla2x00_cfg_failover_port( host, dp, 
-						new_path, fcport, sp) == NULL ) {
+					new_path, fcport, sp) == NULL ) {
+					mp_info = (struct fo_information *)
+						sp->lun_queue->fo_info;
+					mp_info->fo_retry_cnt[new_path->id]
+					    += qla_fo_params.MaxRetriesPerPath;
 					printk(KERN_INFO
 						"scsi(%ld): Fail to failover device "
-						" - fcport = %p\n",
-						host->ha->host_no, fcport);
+						" - fcport = %p path_id=%d\n",
+						host->ha->host_no, fcport,
+						new_path->id);
 					goto cfg_failover_done;
 				}
-			} else if( (fcport->flags & FC_EVA_DEVICE) ) { 
+			} else if( (fcport->flags & FC_EVA_DEVICE) ||
+				    fcport->fo_target_port) { 
 				new_fcport = new_path->port;
 				if ( qla2x00_test_active_lun( 
-					new_fcport, new_fp ) ) {
-					qla2x00_cfg_register_failover_lun(dp, 
-						sp, new_fp);
-				 	 /* send a reset lun command as well */
-				 	 printk(KERN_INFO 
-			    	 	 "scsi(%ld:0x%x:%d) sending"
-					 " reset lun \n",
-					 new_fcport->ha->host_no,
-					 new_fcport->loop_id, new_fp->lun);
-				 	 qla2x00_lun_reset(new_fcport->ha,
-					 new_fcport->loop_id, new_fp->lun);
+				        new_fcport, new_fp, (uint8_t *)NULL ) ) {
+				        qla2x00_cfg_register_failover_lun(dp, 
+				        	sp, new_fp);
+				         /* send a reset lun command as well */
+				         printk(KERN_INFO 
+			    	         "scsi(%ld:0x%x:%d) sending"
+				         " reset lun \n",
+				         new_fcport->ha->host_no,
+				         new_fcport->loop_id, new_fp->lun);
+				         if (fcport->flags & (FC_EVA_DEVICE | FC_AA_EVA_DEVICE))
+				        	 qla2x00_lun_reset(new_fcport->ha,
+				        		 new_fcport->loop_id, new_fp->lun);
 				} else {
-					DEBUG2(printk(
-						"scsi(%ld): %s Fail to failover lun "
-						"old fclun= %p, new fclun= %p\n",
-						host->ha->host_no,
-						 __func__,fp, new_fp);)
-					goto cfg_failover_done;
-				}
+				        mp_info = (struct fo_information *)
+				        	sp->lun_queue->fo_info;
+				        mp_info->fo_retry_cnt[new_path->id]
+				            += qla_fo_params.MaxRetriesPerPath;
+				        DEBUG2(printk(
+				        	"scsi(%ld): %s Fail to failover lun "
+				        	"old fclun= %p, new fclun= %p\n",
+				        	host->ha->host_no,
+				        	 __func__,fp, new_fp);)
+				        goto cfg_failover_done;
+				}      
 			} else { /*default */
 				new_fp = qla2x00_find_matching_lun(fp->lun, 
-					dp, new_path);
+				        dp, new_path);
 				qla2x00_cfg_register_failover_lun(dp, sp, new_fp);
-			}
-
-		} else {
+			}              
+                                       
+		} else {               
 			printk(KERN_INFO
 				"qla2x00(%d): Couldn't find device "
 				"to failover: dp = %p\n",
 				host->instance, dp);
-		}
-	}
-
-cfg_failover_done:
+		}                      
+	}                              
+                                       
+cfg_failover_done:                     
 	clear_bit(CFG_ACTIVE, &ha->cfg_flags);
-
-	LEAVE("qla2x00_cfg_failover");
-
-	return new_fp;
-}
-
-/*
- * IOCTL support
- */
-#define CFG_IOCTL
-#if defined(CFG_IOCTL)
-/*
- * qla2x00_cfg_get_paths
+                                       
+	LEAVE("qla2x00_cfg_failover"); 
+                                       
+	return new_fp;                 
+}                                      
+                                       
+/*                                     
+ * IOCTL support                       
+ */                                    
+#define CFG_IOCTL                      
+#if defined(CFG_IOCTL)                 
+/*                                     
+ * qla2x00_cfg_get_paths               
  *      Get list of paths EXT_FO_GET_PATHS.
- *
- * Input:
- *      ha = pointer to adapter
- *      bp = pointer to buffer
+ *                                     
+ * Input:                              
+ *      ha = pointer to adapter        
+ *      bp = pointer to buffer         
  *      cmd = Pointer to kernel copy of EXT_IOCTL.
- *
- * Return;
- *      0 on success or errno.
+ *                                     
+ * Return;                             
+ *      0 on success or errno.         
  *	driver ioctl errors are returned via cmd->Status.
- *
- * Context:
- *      Kernel context.
- */
-int
+ *                                     
+ * Context:                            
+ *      Kernel context.                
+ */                                    
+int                                    
 qla2x00_cfg_get_paths(EXT_IOCTL *cmd, FO_GET_PATHS *bp, int mode)
-{
-	int	cnt;
-	int	rval = 0;
-	uint16_t	idx;
-
+{                                      
+	int	cnt;                   
+	int	rval = 0;              
+	uint16_t	idx;           
+                                       
 	FO_PATHS_INFO	*paths,	*u_paths;
-	FO_PATH_ENTRY	*entry;
+	FO_PATH_ENTRY	*entry;        
 	EXT_DEST_ADDR   *sap = &bp->HbaAddr;
-	mp_host_t	*host = NULL;	/* host adapter pointer */
-	mp_device_t	*dp;		/* virtual device pointer */
-	mp_path_t	*path;		/* path pointer */
-	mp_path_list_t	*path_list;	/* path list pointer */
-	scsi_qla_host_t *ha;
-
-
+	mp_host_t	*host = NULL;   /* host adapter pointer */
+	mp_device_t	*dp;	        /* virtual device pointer */
+	mp_path_t	*path;	        /* path pointer */
+	mp_path_list_t	*path_list;     /* path list pointer */
+	scsi_qla_host_t *ha;           
+                                       
+                                       
 	DEBUG9(printk("%s: entered.\n", __func__);)
 
 	u_paths = (FO_PATHS_INFO *) cmd->ResponseAdr;
@@ -1693,7 +1937,7 @@ qla2x00_found_hidden_path(mp_device_t *dp)
 
 static int
 qla2x00_get_wwuln_from_device(mp_host_t *host, fc_lun_t *fclun, 
-	char	*evpd_buf, int wwlun_size)
+    char *evpd_buf, int wwlun_size , uint8_t *rel_tport_id, uint8_t *tpg_id)
 {
 
 	evpd_inq_cmd_rsp_t	*pkt;
@@ -1704,6 +1948,10 @@ qla2x00_get_wwuln_from_device(mp_host_t *host, fc_lun_t *fclun,
 	uint16_t	scsi_status;
 	scsi_qla_host_t *ha;
 	uint16_t	next_loopid;
+ 	uint16_t        page_length = 0;
+        uint16_t        next_desc = 0;
+        uint16_t        hdr;
+        uint32_t        iden_len = 0;
 
 	ENTER(__func__);
 	//printk("%s entered\n",__func__);
@@ -1801,6 +2049,65 @@ qla2x00_get_wwuln_from_device(mp_host_t *host, fc_lun_t *fclun,
 		}
 		rval = pkt->inq[7] ; /* lun wwlun_size */
 		DEBUG3(qla2x00_dump_buffer(evpd_buf, rval);)
+ 
+ 		/* Copy the other identifiers for devices which
+                  * support report target port group cmd */
+                 if (fclun->fcport->fo_target_port == NULL)
+                         goto out;
+                 if (rel_tport_id == NULL || tpg_id == NULL)
+                         goto out;
+ 
+                 /* page length of identifier descriptor list */
+                 hdr = 4;
+                 page_length = (pkt->inq[2] << 8 | pkt->inq[3]);
+                 page_length =  page_length + hdr;
+                 /* identifier descriptor next to logical unit */
+                 next_desc = hdr + (pkt->inq[7] + hdr);
+ 
+                DEBUG5(printk("%s next_desc =%d page_length=%d\n",
+ 			__func__,next_desc,page_length);)
+ 		while (next_desc < page_length) {
+ 			iden_len = pkt->inq[next_desc + hdr -1];
+                         DEBUG(printk("%s iden len =%d code_set=0x%x type=0x%x\n",__func__,iden_len,
+ 				(pkt->inq[next_desc] & 0x0f),(pkt->inq[next_desc + 1] & 0x3f) );)
+ 
+                         if((pkt->inq[next_desc] & 0x0f) == CODE_SET_BINARY &&
+ 				(((pkt->inq[next_desc + 1] & 0x3f) ==
+ 				 (ASSOCIATION_LOGICAL_DEVICE << 4 |
+                                           TYPE_REL_TGT_PORT)) ||
+ 				((pkt->inq[next_desc + 1] & 0x3f) ==
+ 				 (ASSOCIATION_TARGET_PORT << 4 |
+                                           TYPE_REL_TGT_PORT)))) {
+                                 iden_len = pkt->inq[next_desc + hdr -1];
+                                 rel_tport_id[0] =
+                                         pkt->inq[next_desc + hdr + iden_len -2];
+                                 rel_tport_id[1] =
+                                         pkt->inq[next_desc + hdr + iden_len -1];
+ 			       DEBUG(printk("%s rel_tport_id[0]=0x%x"
+ 					" rel_tport_id[1]=0x%x\n", __func__,
+ 					rel_tport_id[0], rel_tport_id[1]);)
+                         }
+                         if((pkt->inq[next_desc] & 0x0f) == CODE_SET_BINARY &&
+ 				(((pkt->inq[next_desc + 1] & 0x3f) ==
+ 				 (ASSOCIATION_LOGICAL_DEVICE << 4 |
+                                           TYPE_TPG_GROUP)) ||
+ 				((pkt->inq[next_desc + 1] & 0x3f) ==
+ 				 (ASSOCIATION_TARGET_PORT << 4 |
+                                           TYPE_TPG_GROUP)))) {
+ 
+                                 DEBUG(printk("%s rel tpg id lsb=%d msb=%d\n",
+                                         __func__, pkt->inq[next_desc + hdr + iden_len -1],
+                                         pkt->inq[next_desc + hdr + iden_len -2]);)
+                                 iden_len = pkt->inq[next_desc + hdr -1];
+                                 tpg_id[0] = pkt->inq[next_desc + hdr + iden_len -2]; 
+                                 tpg_id[1] = pkt->inq[next_desc + hdr + iden_len -1];
+                                 DEBUG(printk("%s tpg_id[0]=0x%x "
+                                         "tpg_id[1]=0x%x\n",__func__,
+                                         tpg_id[0],tpg_id[1]);)
+                         }
+                         /* increment to the next identifier descriptor */
+                         next_desc += iden_len + hdr;
+                 }
 
 	} else {
 		if (scsi_status & SS_CHECK_CONDITION) {
@@ -1838,6 +2145,7 @@ qla2x00_get_wwuln_from_device(mp_host_t *host, fc_lun_t *fclun,
 		}
 		rval = 0 ;
 	}
+out:
 
 	pci_free_consistent(ha->pdev, sizeof(evpd_inq_cmd_rsp_t), 
 	    			pkt, phys_address);
@@ -1896,6 +2204,213 @@ qla2x00_find_matching_lunid(char	*buf)
 	return NULL;
 
 }
+
+void
+qla2x00_update_lu_path_state(scsi_qla_host_t *ha, rpt_tport_grp_rsp_t *tpg, 
+	fc_lun_t *fclun,
+	uint16_t	tpg_count,
+	uint8_t		*tpg_id)
+{
+	struct list_head *list, *temp;
+	lu_path_t	*lu_path = NULL;
+	mp_lun_t *mplun;
+
+	/* update the lu_path state */
+	mplun = fclun->mplun;	
+	list_for_each_safe(list, temp, &mplun->lu_paths) {
+		lu_path = list_entry(list, lu_path_t, list);
+
+		if (lu_path->tpg_id[0] != tpg_id[0] || lu_path->tpg_id[1] != tpg_id[1])
+			continue;	
+
+		/* copy the tgt port group state */
+		lu_path->asym_acc_state = 
+			tpg->list.tport_grp[tpg_count].state.asym_acc_state;	
+
+		/* FIXMEdg: Is this really needed ?????  */
+		if(lu_path->asym_acc_state == TPG_ACT_OPT) {
+			fclun->flags |= FC_ACTIVE_LUN;
+		}
+		DEBUG2(printk(
+		"%s(%ld): index=%d Update state of lu_path %d tpg_id=0x%x rel_tport_id=0x%x, tpg state=%d \n",
+		__func__, ha->instance, tpg_count, lu_path->path_id, lu_path->tpg_id[1], 
+		lu_path->rel_tport_id[1], 
+		tpg->list.tport_grp[tpg_count].state.asym_acc_state);)
+
+		DEBUG5(printk("%s tgt port state =%d fclun_flags=0x%x loop_id=0x%02x\n",
+		__func__,tport_grp->asym_acc_state,lu_path->fclun->flags,
+		lu_path->fclun->fcport->loop_id);)
+	}
+}
+
+int
+qla2x00_get_target_ports(fc_port_t *fcport, fc_lun_t *fclun, int modify)
+{
+	int		rval = 0 ; 
+	int		retry;
+	uint16_t	comp_status;
+	uint16_t	scsi_status;
+	uint16_t	tpg_count;
+	uint8_t		tpg_id[2];
+	// uint16_t	tpg_id;
+	uint16_t	lun = 0;
+	dma_addr_t	tpg_dma;
+	scsi_qla_host_t *ha;
+	mp_lun_t *mplun;
+	rpt_tport_grp_rsp_t *tpg;
+	struct list_head *list, *temp;
+	mp_tport_grp_t *tport_grp = NULL;
+
+	ENTER(__func__);
+	DEBUG(printk(KERN_INFO "%s  entered\n",__func__);)
+
+	ha = fcport->ha;
+	if (atomic_read(&fcport->state) == FC_DEVICE_DEAD) {
+		DEBUG2(printk("scsi(%ld) %s leaving: Port 0x%02x is marked "
+			"DEAD\n", ha->host_no,__func__,fcport->loop_id);)
+			return rval;
+	}
+
+	lun = fclun->lun;
+	mplun = fclun->mplun;	
+	if (fclun->mplun ==  NULL) {
+		DEBUG(printk("%s mplun does not exist for fclun=%p\n",
+				__func__,fclun);)
+		return rval;
+	}
+
+	/* LUN 0 on EVA/MSA device is a controller lun and does not support ALUA */
+	if (fclun->asymm_support == TGT_PORT_GRP_UNSUPPORTED)  {
+		//qla2x00_test_active_lun(fcport, fclun); 
+		printk("%s(%ld): for lun=%d does not suuport ALUA \n",__func__,
+				ha->instance,lun);
+		rval = 1;
+		return rval;
+	}
+
+	tpg = pci_alloc_consistent(ha->pdev, sizeof(rpt_tport_grp_rsp_t),
+					 &tpg_dma);
+	if (tpg == NULL) {
+		printk(KERN_WARNING
+				"scsi(%ld): Memory Allocation failed - TPG\n",
+				ha->host_no);
+		ha->mem_err++;
+		return rval;
+	}
+
+	retry = 2;
+	do {
+		memset(tpg, 0, sizeof(rpt_tport_grp_rsp_t));
+		tpg->p.cmd.entry_type = COMMAND_A64_TYPE;
+		tpg->p.cmd.entry_count = 1;
+		tpg->p.cmd.lun = cpu_to_le16(lun);
+#if defined(EXTENDED_IDS)
+		tpg->p.cmd.target = cpu_to_le16(fclun->fcport->loop_id);
+#else
+		tpg->p.cmd.target = (uint8_t)fclun->fcport->loop_id;
+#endif
+		tpg->p.cmd.control_flags =
+			__constant_cpu_to_le16(CF_READ | CF_SIMPLE_TAG);
+		tpg->p.cmd.scsi_cdb[0] = SCSIOP_MAINTENANCE_IN;
+		tpg->p.cmd.scsi_cdb[1] = SCSISA_TARGET_PORT_GROUPS;
+		tpg->p.cmd.scsi_cdb[8] = ((sizeof(rpt_tport_grp_data_t) >> 8)
+						& 0xff); 
+		tpg->p.cmd.scsi_cdb[9] = sizeof(rpt_tport_grp_data_t) & 0xff;
+		tpg->p.cmd.dseg_count = __constant_cpu_to_le16(1);
+		tpg->p.cmd.timeout = __constant_cpu_to_le16(10);
+		tpg->p.cmd.byte_count =
+			__constant_cpu_to_le32(sizeof(rpt_tport_grp_data_t));
+		tpg->p.cmd.dseg_0_address[0] = cpu_to_le32(
+				LSD(tpg_dma + sizeof(sts_entry_t)));
+		tpg->p.cmd.dseg_0_address[1] = cpu_to_le32(
+				MSD(tpg_dma + sizeof(sts_entry_t)));
+		tpg->p.cmd.dseg_0_length =
+			__constant_cpu_to_le32(sizeof(rpt_tport_grp_data_t));
+
+		rval = qla2x00_issue_iocb(ha, tpg, tpg_dma,
+				sizeof(rpt_tport_grp_data_t));
+
+		comp_status = le16_to_cpu(tpg->p.rsp.comp_status);
+		scsi_status = le16_to_cpu(tpg->p.rsp.scsi_status);
+
+		DEBUG5(printk("%s: lun (%d) Report Target Port group "
+			" comp status 0x%x, scsi status 0x%x, rval=%d\n",
+			__func__, lun, comp_status, scsi_status, rval);)
+			/* Port Logged Out, so don't retry */
+		if (comp_status == CS_PORT_LOGGED_OUT ||
+		    comp_status == CS_PORT_CONFIG_CHG ||
+		    comp_status == CS_PORT_BUSY ||
+		    comp_status == CS_INCOMPLETE ||
+		    comp_status == CS_PORT_UNAVAILABLE)
+				break;
+
+		DEBUG2(printk("scsi(%ld:%04x:%d) %s: Report Target Port group"
+			",cs=0x%x, ss=0x%x, rval=%d\n", 
+			ha->host_no, fcport->loop_id, lun,__func__, comp_status,
+			scsi_status, rval));
+
+		if ((scsi_status & SS_CHECK_CONDITION)) {
+			DEBUG2(printk("%s: check status bytes = "
+					"0x%02x 0x%02x 0x%02x\n", __func__,
+					tpg->p.rsp.req_sense_data[2],
+					tpg->p.rsp.req_sense_data[12],
+					tpg->p.rsp.req_sense_data[13]));
+			
+		}
+	} while ((rval != QLA2X00_SUCCESS || comp_status != CS_COMPLETE ||
+			(scsi_status & SS_CHECK_CONDITION)) && --retry);
+
+	if (rval == QLA2X00_SUCCESS && retry &&
+		(!((scsi_status & SS_CHECK_CONDITION) &&
+		(tpg->p.rsp.req_sense_data[2] == NOT_READY )) &&
+		 comp_status == CS_COMPLETE)) {
+		memset(&tpg_id[0], 0, sizeof(tpg_id));
+		/* find matching tpg_id and copy the asym_acc_state */
+		for ( tpg_count = 0; tpg_count < TGT_PORT_GRP_COUNT; 
+				tpg_count++) {
+			memcpy(&tpg_id[0], 
+			    &tpg->list.tport_grp[tpg_count].tgt_port_grp[0], 
+			    sizeof(tpg_id)); 
+			
+			DEBUG2(printk("%s tpg_id[0]=0x%x tpg_id[1]=0x%x tpg_state=%d\n",
+				__func__,tpg_id[0], tpg_id[1],
+				tpg->list.tport_grp[tpg_count].state.asym_acc_state);)	
+
+			list_for_each_safe(list, temp, &mplun->tport_grps_list){
+				tport_grp = list_entry(list, mp_tport_grp_t,
+						 list);
+				if (memcmp(tport_grp->tpg_id, &tpg_id[0],
+					 sizeof(tpg_id)) != 0) 
+						continue;	
+				/* copy the tgt port group state */
+				tport_grp->asym_acc_state = 
+					tpg->list.tport_grp[tpg_count].state.
+						asym_acc_state;	
+				DEBUG(printk("%s Update target port state =%d for mplun %p\n",
+					__func__,tport_grp->asym_acc_state,mplun);)
+			}
+			if( modify ) {
+				qla2x00_update_lu_path_state(ha, tpg, fclun, 
+					tpg_count, &tpg_id[0]);
+			}	
+
+		}
+		rval = 1;
+	} else {
+		DEBUG2(printk(KERN_INFO "%s Failed to issue Report tgt port"
+			" group -- lun (%d) cs=0x%x ss=0x%x, rval=%d\n",
+			__func__, lun, comp_status, scsi_status, rval);)
+		rval = 0;
+	}
+
+	pci_free_consistent(ha->pdev, sizeof(rpt_tport_grp_rsp_t), 
+	    			tpg, tpg_dma);
+
+	LEAVE(__func__);
+
+	return rval;
+}
+
 
 #if 0
 /*
@@ -2136,10 +2651,12 @@ qla2x00_combine_by_lunid( void *vhost, uint16_t dev_id,
 	mp_host_t	*temp_host;  /* pointer to temporary host */
 	mp_device_t	*temp_dp;
 	mp_port_t	*port;
+	mp_tport_grp_t  *tpg;
+	lu_path_t	*lu_path = NULL;
 	int		l;
 
 	ENTER("qla2x00_combine_by_lunid");
-	//printk("Entering %s\n", __func__); 
+	DEBUG3(printk("Entering %s\n", __func__);) 
 
 	/* 
 	 * Currently, not use because we create common nodename for
@@ -2287,8 +2804,10 @@ qla2x00_combine_by_lunid( void *vhost, uint16_t dev_id,
  			* a new one and put it in the list if it doesn't exist.
  			*/
 			dp = lun->dp;
-			if( fclun->mplun == NULL )
+			if( fclun->mplun == NULL ) {
 				fclun->mplun = lun; 
+				lun->asymm_support = fclun->asymm_support; 
+			}
 			path = qla2x00_find_or_allocate_path(host, dp,
 				       	dp->dev_id, pathid, fcport);
 			if (path == NULL || dp == NULL) {
@@ -2296,11 +2815,19 @@ qla2x00_combine_by_lunid( void *vhost, uint16_t dev_id,
 				continue;
 			}
 
+			/* set up the path at lun level */
+                        lu_path = qla2x00_find_or_allocate_lu_path(host,
+                                        fclun, path->id);
+                        if (lu_path == NULL) {
+                                fail++;
+                                continue;
+                        }
+
 			/* set the lun active flag */
-			if (mp_initialized &&
-			 (fcport->flags & FC_EVA_DEVICE) ) { 
-			     qla2x00_test_active_lun( 
-				path->port, fclun );
+ 			if (mp_initialized && (fcport->flags & 
+					(FC_EVA_DEVICE | FC_AA_EVA_DEVICE))) {
+			     qla2x00_test_active_lun (path->port, 
+						fclun, (uint8_t *)NULL);
 			}
 
 			/* Add fclun to path list */
@@ -2316,7 +2843,7 @@ qla2x00_combine_by_lunid( void *vhost, uint16_t dev_id,
 			 * the target visible as well 
 			 */
 			l = lun->number;
-			if( (fclun->flags & FC_VISIBLE_LUN)  ) {  
+ 			if (fclun->flags & FC_VISIBLE_LUN) {
 				if (dp->path_list->visible ==
 				    PATH_INDEX_INVALID) {
 					dp->path_list->visible = path->id;
@@ -2328,7 +2855,10 @@ qla2x00_combine_by_lunid( void *vhost, uint16_t dev_id,
 				path->lun_data.data[l] |=  LUN_DATA_PREFERRED_PATH;
 				DEBUG2(printk("%s: Found a controller path 0x%x "
 				    "- lun %d\n", __func__, path->id,l);)
-			} else if (mp_initialized) {
+				printk("%s: Found a controller path 0x%x "
+				    "- lun %d\n", __func__, path->id,l);
+			} else if (mp_initialized &&
+				   ((fcport->fo_target_port == NULL))) { 
 	   			/*
 				* Whenever a port or lun is "active" 
 				* then force it to be a preferred path.
@@ -2343,7 +2873,7 @@ qla2x00_combine_by_lunid( void *vhost, uint16_t dev_id,
 					"%s: Found preferred lun at loopid=0x%02x, lun=%d, pathid=%d\n",
 	    			__func__, fcport->loop_id, l, path->id);)
 				}
-	    	}
+			}
 
 			/* if (port->flags & FC_CONFIG)
 				path->config = TRUE;  */
@@ -2353,7 +2883,45 @@ qla2x00_combine_by_lunid( void *vhost, uint16_t dev_id,
 				fail++;
 				continue;
 			}
-		}
+
+			if (fcport->fo_target_port) {
+			        if (fclun->asymm_support == TGT_PORT_GRP_UNSUPPORTED) {
+					DEBUG(printk("%s lun = %d does not support"
+						" ALUA\n",__func__,fclun->lun);)
+					memcpy(&lu_path->rel_tport_id[0], &port->rel_tport_id[0], 
+					sizeof(port->rel_tport_id));
+				} else {
+					tpg = qla2x00_find_or_allocate_tgt_port_grp(
+							host, port, fclun,path);
+					if (tpg == NULL) {
+						fail++;
+						continue;
+					}
+					if (lu_path->flags & LPF_TPG_UNKNOWN) {
+						memcpy(&lu_path->tpg_id[0], &tpg->tpg_id[0], 
+						sizeof(tpg->tpg_id));
+						memcpy(&lu_path->rel_tport_id[0], &port->rel_tport_id[0], 
+						sizeof(port->rel_tport_id));
+					}
+					if (mp_initialized) {
+					   /* set the tgt port grp state */
+					    fcport->fo_target_port(fcport, fclun, 1);
+					}
+				}
+                        } 
+			if ((lu_path->flags & LPF_TPG_UNKNOWN) && !(fclun->flags & FC_VISIBLE_LUN)) {
+				if (fclun->flags & FC_ACTIVE_LUN) {
+					list_add_tail(&lu_path->next_active,
+							&lun->active_list);
+				}					
+				lu_path->flags &= ~LPF_TPG_UNKNOWN;
+				DEBUG(printk("%s(%d): lu_path tpg_id=0x%x" 
+				      " rel_tport_id=0x%x lun=%d\n fclun_flags=%d", __func__, 
+					host->instance, lu_path->tpg_id[1],
+					lu_path->rel_tport_id[1],l, fclun->flags);)
+			}
+
+                } /* end of list_for_each_entry() */
 	}
 
 	if (fail)
@@ -3219,6 +3787,73 @@ qla2x00_find_or_allocate_path(mp_host_t *host, mp_device_t *dp,
 	return path;
 }
 
+static lu_path_t *
+qla2x00_find_or_allocate_lu_path(mp_host_t *host, fc_lun_t *fclun, 
+	uint16_t pathid)
+{
+	mp_lun_t		*mplun = NULL;
+	struct list_head	*list, *temp;
+	lu_path_t		*lu_path = NULL;
+	fc_port_t		*fcport = fclun->fcport;
+
+	DEBUG3(printk("%s entered\n",__func__);)
+
+	if (fclun->mplun ==  NULL) {
+		DEBUG(printk("%s mplun does not exist for fclun=%p\n",
+				__func__,fclun);)
+		goto failed;
+	}
+	mplun = fclun->mplun;	
+	/*
+	 * Loop through each known path in the lun_path list.  Look for
+	 * a PATH that matches fclun. */
+	list_for_each_safe(list, temp, &mplun->lu_paths) {
+		lu_path = list_entry(list, lu_path_t, list);
+		if (lu_path->fclun == fclun){
+			DEBUG(printk("%s found an existing path lu_path=%p"
+					" lu_path_id=%d fclun=%p\n",__func__,
+					lu_path, lu_path->path_id, fclun);)
+			goto found_lu_path;
+		}
+	}
+
+	lu_path = kmalloc(sizeof(lu_path_t), GFP_KERNEL);
+	if (lu_path == NULL) {
+		DEBUG4(printk("%s: Failed\n", __func__);)
+		goto failed;
+	}
+	memset(lu_path, 0, sizeof(*lu_path));
+
+	DEBUG(printk("%s(%ld): allocated path %p at path id %d.\n",
+	    __func__, host->ha->host_no, lu_path, pathid);)
+
+	/* Copy the supplied information into the lu_path. */
+	lu_path->host = host;
+	lu_path->hba_instance = host->instance;
+	lu_path->path_id = pathid;
+	lu_path->fclun = fclun;
+	lu_path->flags = LPF_TPG_UNKNOWN;
+	fclun->path_id = pathid;
+	memcpy(lu_path->portname, fcport->port_name, WWN_SIZE);
+	list_add_tail(&lu_path->list,&mplun->lu_paths);
+
+	DEBUG3(printk("%s(%ld): path id %d copied portname "
+	    "%02x%02x%02x%02x%02x%02x%02x%02x.\n",
+	    __func__, host->ha->host_no, pathid,
+	    fcport->port_name[0], fcport->port_name[1],
+	    fcport->port_name[2], fcport->port_name[3],
+	    fcport->port_name[4], fcport->port_name[5],
+	    fcport->port_name[6], fcport->port_name[7]);)
+
+	DEBUG3(printk("%s leaving\n",__func__);)
+
+found_lu_path :
+	return lu_path;
+failed :
+	return NULL;
+
+}
+
 /*
  *  qla2x00_find_or_allocate_lun
  *      Look through the existing multipath control tree, and find
@@ -3265,7 +3900,7 @@ qla2x00_find_or_allocate_lun(mp_host_t *host, uint16_t dev_id,
 	if( fclun == NULL )
 		return NULL;
 
-	DEBUG2(printk("%s: "
+	DEBUG(printk("%s: "
 		    " lun num=%d fclun %p mplun %p hba inst=%d, port =%p, dev id = %d\n",
 		    __func__, fclun->lun, fclun, fclun->mplun, host->instance, port,
 		    dev_id);)
@@ -3278,7 +3913,7 @@ qla2x00_find_or_allocate_lun(mp_host_t *host, uint16_t dev_id,
 				memcpy(wwulnbuf, fclun->mpbuf, len); 
 	} else {
 		len = qla2x00_get_wwuln_from_device(host, fclun, 
-			&wwulnbuf[0], WWULN_SIZE); 
+			&wwulnbuf[0], WWULN_SIZE, NULL, NULL); 
 		/* if fail to do the inq then exit */
 		if( len == 0 ) {
 			return lun;
@@ -3463,6 +4098,17 @@ qla2x00_find_or_allocate_lun(mp_host_t *host, uint16_t dev_id,
 					lun->dp = dp;
 					qla2x00_add_lun(dp, lun);
 					INIT_LIST_HEAD(&lun->ports_list);
+					INIT_LIST_HEAD(&lun->lu_paths);
+					INIT_LIST_HEAD(&lun->active_list);
+				    	INIT_LIST_HEAD(&lun->tport_grps_list);
+					if (fclun->fcport->fo_target_port) {
+						if(ql2xlbType){
+							lun->load_balance_type = ql2xlbType;
+						} else {		
+							/* use the first active path */	
+							lun->load_balance_type = LB_NONE;
+						}
+					}
 				}
 			}
 			else
@@ -3655,7 +4301,19 @@ qla2x00_send_failover_notify(mp_device_t *dp,
 				DEBUG(printk("%s: Send CDB Error "
 				    "lun=(%d).\n", __func__, lun);)
 			}
-	} else {
+	} else if (qla_fo_params.FailoverNotifyType == FO_NOTIFY_TYPE_TPGROUP_CDB ||
+                   old_lp->fcport->notify_type == FO_NOTIFY_TYPE_TPGROUP_CDB) {
+                                                                                                               
+			status = qla2x00_send_fo_notification(old_lp, new_lp);
+			if (status == QLA2X00_SUCCESS) {
+				DEBUG(printk("%s: Set Tgt Port Group CDB succeeded.\n",
+					__func__);)
+			} else {
+				DEBUG(printk("%s: Set Tgt Port Group CDB Error "
+                                                "lun=(%d).\n", __func__, lun);)
+			}
+
+	 } else {
 		/* EMPTY */
 		DEBUG4(printk("%s: failover disabled or no notify routine "
 		    "defined.\n", __func__);)
@@ -3698,6 +4356,22 @@ qla2x00_find_host_from_port(mp_device_t *dp,
 	return( path );
 }
 
+static inline mp_tport_grp_t *
+qla2x00_find_tgt_port_grp_by_state(mp_lun_t *mplun, uint8_t asym_acc_state)
+{
+	mp_tport_grp_t  *tport_grp = NULL, *tmp_tpg;
+	struct list_head *list, *temp;
+
+	list_for_each_safe(list, temp, &mplun->tport_grps_list) {
+		tmp_tpg = list_entry(list, mp_tport_grp_t, list);
+		if (tmp_tpg->asym_acc_state == asym_acc_state) {
+			tport_grp = tmp_tpg;
+			break;
+		}
+	}
+	return tport_grp;
+}
+
 /*
  * Find_best_port
  * This routine tries to locate the best port to the target that 
@@ -3713,14 +4387,13 @@ qla2x00_find_best_port(mp_device_t *dp,
 	mp_path_t	*path = NULL;
 	mp_path_t	*new_path;
 	mp_port_t	*temp_port;
-	int		i, found;
+	int		i;
 	fc_lun_t 	*new_fp;
 	struct list_head *list, *temp;
 	mp_lun_t *mplun = (mp_lun_t *)fclun->mplun; 
 	unsigned long	instance;
 	uint16_t	id;
 
-	found = 0;
 	list_for_each_safe(list, temp, &mplun->ports_list) {
 		temp_port = list_entry(list, mp_port_t, list);
 		if ( port == temp_port ) {
@@ -3777,6 +4450,25 @@ qla2x00_find_best_port(mp_device_t *dp,
 			(int)new_path->host->instance, __func__,
 			new_path->port->loop_id);)
 				continue;
+			}
+			/* Is this path on the same active controller? */
+			/* FixME:Luns on the same Tgt port grp have the same asym access state */
+			if (new_path->port->fo_target_port) {
+				lu_path_t *new_lu_path;
+				/* find lu_path for the current fclun */	
+				new_lu_path = qla2x00_find_lu_path_by_id(mplun,new_fp->path_id);
+				if (new_lu_path->asym_acc_state != TPG_ACT_OPT) {
+					 DEBUG(printk("qla(%d) %s - Port (0x%04x)"
+						" does not belong to the active tgt port grp.\n",
+						(int)new_path->host->instance, __func__,
+						new_path->port->loop_id);)
+					continue;
+				} else {
+					DEBUG2(printk("qla(%d) %s - Port (0x%04x) Found path %d belonging"
+						   " to the active tgt port grp\n",
+						(int)new_path->host->instance,__func__,
+						 new_path->port->loop_id,new_lu_path->path_id);) 	
+				}
 			}
 
 			/* found a good path */
@@ -3924,8 +4616,9 @@ qla2x00_select_next_path(mp_host_t *host, mp_device_t *dp, uint8_t lun,
 	if ((orig_path = qla2x00_find_path_by_id(dp, id)) != NULL) {
 
 		/* select next path */
-       		if ( orig_path->port &&
-		   (orig_path->port->flags & (FC_MSA_DEVICE|FC_EVA_DEVICE)) ) {
+		if (orig_path->port && ((orig_path->port->flags &
+ 		    (FC_MSA_DEVICE|FC_EVA_DEVICE)) ||
+ 			orig_path->port->fo_target_port)) {
 			path = qla2x00_smart_path( dp, orig_path, 
 				sp, &skip_notify ); 
 		} else
@@ -3952,16 +4645,19 @@ qla2x00_select_next_path(mp_host_t *host, mp_device_t *dp, uint8_t lun,
 		    orig_path->host->nodename[5],
 		    orig_path->host->nodename[6],
 		    orig_path->host->nodename[7]);)
-		DEBUG(printk("   portname: "
-		    "%02x%02x%02x%02x%02x%02x%02x%02x\n",
-		    orig_path->port->port_name[0],
-		    orig_path->port->port_name[1],
-		    orig_path->port->port_name[2],
-		    orig_path->port->port_name[3],
-		    orig_path->port->port_name[4],
-		    orig_path->port->port_name[5],
-		    orig_path->port->port_name[6],
-		    orig_path->port->port_name[7]);)
+
+		if (orig_path->port)
+			DEBUG(printk("   portname: "
+			    "%02x%02x%02x%02x%02x%02x%02x%02x\n",
+			    orig_path->port->port_name[0],
+			    orig_path->port->port_name[1],
+			    orig_path->port->port_name[2],
+			    orig_path->port->port_name[3],
+			    orig_path->port->port_name[4],
+			    orig_path->port->port_name[5],
+			    orig_path->port->port_name[6],
+			    orig_path->port->port_name[7]);)
+
 		DEBUG(printk(" New  - host nodename: "
 		    "%02x%02x%02x%02x%02x%02x%02x%02x\n",
 		    new_host->nodename[0], new_host->nodename[1],
@@ -3998,7 +4694,6 @@ qla2x00_select_next_path(mp_host_t *host, mp_device_t *dp, uint8_t lun,
 }
 
 
-
 /*
  *  qla2x00_update_mp_host
  *      Update the multipath control information from the port
@@ -4019,6 +4714,9 @@ qla2x00_update_mp_host(mp_host_t  *host)
 	uint16_t	dev_id;
 	fc_port_t 	*fcport;
 	scsi_qla_host_t *ha = host->ha;
+	int		order;
+	mp_device_t	*temp_dp;
+	mp_lun_t 	*lun;
 
 	ENTER("qla2x00_update_mp_host");
 	DEBUG3(printk("%s: inst %ld entered.\n", __func__, ha->instance);)
@@ -4047,6 +4745,21 @@ qla2x00_update_mp_host(mp_host_t  *host)
 		success |= qla2x00_update_mp_device(host, fcport, dev_id, 0);
 		dev_id++;
 	}
+	if (mp_initialized) { 
+		for (dev_id = 0; dev_id < MAX_MP_DEVICES; dev_id++) {
+			temp_dp = host->mp_devs[dev_id];
+
+			if (temp_dp == NULL)
+				continue;
+
+			for (order = 0, lun = temp_dp->luns; lun != NULL; 
+			    lun = lun->next, order++) {
+
+				qla2x00_set_preferred_path(lun, order);
+			}
+		}
+	}
+
 	if (success) {
 		DEBUG2(printk(KERN_INFO "%s: Exit OK\n", __func__);)
 		qla2x00_map_os_targets(host);
@@ -4102,6 +4815,12 @@ qla2x00_update_mp_device(mp_host_t *host, fc_port_t *port, uint16_t dev_id,
 		if( port->fo_combine ) {
 			return( port->fo_combine(host, dev_id, port, pathid) );
 		}
+
+		/* Only export tape devices */
+		if (port->flags & FC_TAPE_DEVICE) {
+			return( qla2x00_export_target(
+					host, dev_id, port, pathid )); 
+		} 
 		/*
 		* Search for a device with a matching node name,
 		* portname or create one.
@@ -4334,6 +5053,38 @@ qla2x00_find_path_by_name(mp_host_t *host, mp_path_list_t *plp,
 }
 
 /*
+* qla2x00_find_lu_path_by_id
+ *      Find the path for the specified path id.
+ *
+ * Input:
+ * 	mp_lun 		multi-path lun
+ * 	id 		path id
+ *
+ * Returns:
+ *      pointer to the lu_path or NULL
+ *
+ * Context:
+ *      Kernel context.
+ */
+static lu_path_t *
+qla2x00_find_lu_path_by_id(mp_lun_t *mplun, uint8_t path_id)
+{
+	struct list_head *list, *temp;
+	lu_path_t  *tmp_path = NULL;
+	lu_path_t	*lu_path = NULL;
+
+	list_for_each_safe(list, temp, &mplun->lu_paths){
+		tmp_path = list_entry(list, lu_path_t, list);
+		if (tmp_path->path_id == path_id) {
+			lu_path = tmp_path;
+			break;
+		}
+	}
+	return lu_path ;
+}
+
+
+/*
  * qla2x00_find_path_by_id
  *      Find the path for the specified path id.
  *
@@ -4421,7 +5172,6 @@ qla2x00_find_mp_dev_by_nodename(mp_host_t *host, uint8_t *name )
 			return dp;
 		}
 #else
-DEBUG(printk("%s mpdev_nodename=%0x nodename_from_gui=%0x",__func__,dp->nodename[7],name[7]);)
 		if (qla2x00_is_nodename_equal(dp->nodename, name)) {
 			DEBUG3(printk("%s: Found matching device @ index %d:\n",
 			    __func__, id);)
@@ -4599,7 +5349,15 @@ qla2x00_map_os_targets(mp_host_t *host)
 			/* if not the visible path skip it */
 			if (path->host == host) {
 				if (TGT_Q(ha, t) == NULL) {
-					tgt = qla2x00_tgt_alloc(ha, t);
+					if ((tgt = qla2x00_tgt_alloc(ha, t))
+						== NULL) {
+						DEBUG(printk(KERN_WARNING
+						"%s(%d) Unable to"
+						" allocate tgt struct,"
+						"skipping device target %d\n",	
+						__func__, host->instance, t);)
+						continue;
+					}
 					memcpy(tgt->node_name,
 							dp->nodename,
 							WWN_SIZE);
@@ -4688,9 +5446,14 @@ qla2x00_map_os_luns(mp_host_t *host, mp_device_t *dp, uint16_t t)
 			qla2x00_map_or_failover_oslun(host, dp, 
 				t, lun_no);
 			up = (os_lun_t *) GET_LU_Q(host->ha, t, lun_no);
-			if (up == NULL || up->fclun == NULL) {
-			DEBUG2(printk("%s: instance %d: No FCLUN for target %d, lun %d.. \n",
-				__func__,host->instance,t,lun->number);)
+			if (up == NULL) {
+				DEBUG2(printk("%s: instance %d: No LUN_Q for target %d, lun %d..\n",
+					__func__,host->instance,t,lun->number);)
+				continue;
+			}
+			if (up->fclun == NULL) {
+			DEBUG2(printk("%s: instance %d: No FCLUN for target %d, lun %d.. lp=%p \n",
+				__func__,host->instance,t,lun->number,up);)
 				continue;
 			}
 			DEBUG2(printk("%s: instance %d: Mapping target %d, lun %d.. to path id %d\n",
@@ -4732,6 +5495,7 @@ qla2x00_map_a_oslun(mp_host_t *host, mp_device_t *dp, uint16_t t, uint16_t lun)
 	mp_path_t	*path, *vis_path;
 	mp_host_t 	*vis_host;
 	BOOL		status = FALSE;
+	struct fo_information 	*mp_info;
 
 	if ((id = dp->path_list->current_path[lun]) != PATH_INDEX_INVALID) {
 		DEBUG(printk( "qla2x00(%d): Current path for lun %d is path id %d\n",
@@ -4789,6 +5553,8 @@ qla2x00_map_a_oslun(mp_host_t *host, mp_device_t *dp, uint16_t t, uint16_t lun)
 							t, lun)) != NULL) {
 
 						lq->fclun = fclun;
+						mp_info	= (struct fo_information *) lq->fo_info;
+						mp_info->path_cnt = dp->path_list->path_cnt;
 					}
 		DEBUG(printk( "qla2x00(%d): lun allocated %p for lun %d\n",
 			 host->instance,lq,lun);)
@@ -5008,6 +5774,7 @@ qla2x00_failback_single_lun(mp_device_t *dp, uint8_t lun, uint8_t new)
 	os_lun_t *lq;
 	mp_path_t	*vis_path;
 	mp_host_t 	*vis_host;
+	struct fo_information 	*mp_info;
 
 	/* Failback and update statistics. */
 	if ((pathlist = dp->path_list) == NULL)
@@ -5066,6 +5833,8 @@ qla2x00_failback_single_lun(mp_device_t *dp, uint8_t lun, uint8_t new)
 
 	vis_host = vis_path->host;
 	if ((lq = qla2x00_lun_alloc(vis_host->ha, dp->dev_id, lun)) != NULL) {
+		mp_info	= (struct fo_information *) lq->fo_info;
+		mp_info->path_cnt = dp->path_list->path_cnt;
 		qla2x00_delay_lun(vis_host->ha, lq, recoveryTime);
 		qla2x00_flush_failover_q(vis_host->ha, lq);
 		qla2x00_reset_lun_fo_counts(vis_host->ha, lq);
@@ -5264,6 +6033,52 @@ qla2x00_failback_luns( mp_host_t  *host)
 }
 
 static struct _mp_path *
+qla2x00_find_first_path_to_active_tpg( mp_device_t *dp, mp_lun_t *mplun)
+{
+	mp_tport_grp_t	*tport_grp = NULL;
+	mp_path_t 	*path = NULL;
+	mp_path_list_t  *plp = dp->path_list;
+	mp_path_t  	*tmp_path;
+	fc_port_t 	*fcport;
+	mp_port_t 	*mp_port;
+	int 		cnt;
+	
+	/* Find an Active Optimised Tgt port group */
+	tport_grp = qla2x00_find_tgt_port_grp_by_state(mplun, TPG_ACT_OPT);
+	if (tport_grp == NULL) {
+		/* Find an Active Non Optimised Tgt port group */
+		tport_grp = qla2x00_find_tgt_port_grp_by_state(mplun, TPG_ACT_NON_OPT);
+		if (tport_grp == NULL)
+			return path;
+	}
+	DEBUG(printk("%s found active tpg asym_state=%d tpg_id=%d\n",__func__,
+			tport_grp->asym_acc_state,  tport_grp->tpg_id[1]);)
+	printk("%s found active tpg asym_state=%d tpg_id=%d\n",__func__,
+			tport_grp->asym_acc_state,  tport_grp->tpg_id[1]);
+	/* Find first active path to this tgt port grp */
+	if ((tmp_path = plp->last) != NULL) {
+		tmp_path = tmp_path->next;
+		for (cnt = 0; (tmp_path) && cnt < plp->path_cnt;
+		    tmp_path = tmp_path->next, cnt++) {
+			fcport = tmp_path->port;
+			if (fcport == NULL) 
+				continue;
+			mp_port = tport_grp->ports_list[tmp_path->id];
+			if (mp_port == NULL)
+				continue;
+			if (memcmp(fcport->port_name, mp_port->portname, 
+					WWN_SIZE) == 0) {
+				path = tmp_path;
+				break;
+			}
+		}
+	}
+	return path;
+		
+
+}
+
+static struct _mp_path *
 qla2x00_find_first_active_path( mp_device_t *dp, mp_lun_t *lun)
 {
 	mp_path_t *path= NULL;
@@ -5279,7 +6094,8 @@ qla2x00_find_first_active_path( mp_device_t *dp, mp_lun_t *lun)
 			tmp_path = tmp_path->next, cnt++) {
 			fcport = tmp_path->port;
 			if ( fcport != NULL  ) {
-			     if( (fcport->flags & FC_EVA_DEVICE) ) { 
+ 				if ((fcport->flags & FC_EVA_DEVICE) ||
+ 					fcport->fo_target_port) { 
 				  fclun = lun->paths[tmp_path->id];
 				  if ( fclun == NULL )
 					continue;
@@ -5387,7 +6203,9 @@ qla2x00_setup_new_path( mp_device_t *dp, mp_path_t *path, fc_port_t *fcport)
 		}
 	}
 
-	if( !(fcport->flags & (FC_MSA_DEVICE|FC_EVA_DEVICE)) ) { 
+ 	if ( (!(fcport->flags & (FC_MSA_DEVICE | FC_EVA_DEVICE)) && 
+		fcport->fo_target_port == NULL) ||
+		(fcport->flags & FC_FAILOVER_DISABLE) ) { 
 		/*
 		 * For each LUN, evaluate whether the new path that is added is
 		 * better than the existing path.  If it is, make it the
@@ -5444,6 +6262,8 @@ qla2x00_cfg_mem_free(scsi_qla_host_t *ha)
 	mp_path_t       *tmp_path, *path;
 	mp_host_t       *host, *temp;
 	mp_port_t	*temp_port;
+        mp_tport_grp_t  *tport_grp;
+        lu_path_t       *lu_path;
 	struct list_head *list, *temp_list;
 	int	id, cnt;
 
@@ -5492,17 +6312,52 @@ qla2x00_cfg_mem_free(scsi_qla_host_t *ha)
 						cur_lun,dp);)
 				list_for_each_safe(list, temp_list, 
 					&cur_lun->ports_list) {
-		
-					temp_port = list_entry(list, mp_port_t, list);
+					temp_port = list_entry(list, 
+							mp_port_t, list);
 					list_del_init(&temp_port->list);
-				
 					DEBUG(printk(KERN_INFO
 						"host%d - Removing port:%p "
 						"attached to lun:%p\n",
 						host->instance, temp_port,
 						cur_lun);)
-	
+					kfree(temp_port);
 				}
+				list_for_each_safe(list, temp_list, &cur_lun->active_list) {
+					lu_path = list_entry(list, lu_path_t, next_active);
+					DEBUG(printk(KERN_INFO
+						"host%d - Deleting active lu_path:%p "
+						"attached to lun:%p\n",
+						host->instance, lu_path,
+						cur_lun);)
+					list_del_init(&lu_path->next_active);
+				}
+				list_for_each_safe(list, temp_list, 
+					&cur_lun->lu_paths) {
+					lu_path = list_entry(list, lu_path_t,
+							 list);
+					list_del_init(&lu_path->list);
+					DEBUG(printk(KERN_INFO
+						"host%d - Removing lu_path:%p "
+						"attached to lun:%p\n",
+						host->instance, lu_path,
+						cur_lun);)
+					kfree(lu_path);
+				}
+				if (cur_lun->asymm_support) {
+					list_for_each_safe(list, temp_list,
+						 &cur_lun->tport_grps_list) {
+						tport_grp = list_entry(list, 
+								mp_tport_grp_t, list);
+						DEBUG(printk(KERN_INFO
+							"host%d - Removing tpg:%p "
+							"attached to lun:%p\n",
+							host->instance, tport_grp,
+							cur_lun);)
+						list_del_init(&tport_grp->list);
+						kfree(tport_grp);
+					}
+				}
+
 				tmp_lun = cur_lun;
 				KMEM_FREE(tmp_lun,sizeof(mp_lun_t));
 			}

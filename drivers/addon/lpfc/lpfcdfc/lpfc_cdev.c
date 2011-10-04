@@ -1,9 +1,9 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
- * Enterprise Fibre Channel Host Bus Adapters.                     *
+ * Fibre Channel Host Bus Adapters.                                *
  * Refer to the README file included with this package for         *
  * driver version and adapter support.                             *
- * Copyright (C) 2004 Emulex Corporation.                          *
+ * Copyright (C) 2003-2005 Emulex.  All rights reserved.           *
  * www.emulex.com                                                  *
  *                                                                 *
  * This program is free software; you can redistribute it and/or   *
@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: ioctls/lpfc_cdev.c 1.1 2004/10/26 17:00:18EDT sf_support Exp  $
+ * $Id: ioctls/lpfc_cdev.c 1.4 2005/05/03 11:20:44EDT sf_support Exp  $
  */
 
 #ifndef EXPORT_SYMTAB
@@ -293,6 +293,7 @@ static int __init
 lpfc_cdev_init(void)
 {
 	printk(LPFCDFC_MODULE_DESC "\n");
+	printk(LPFCDFC_COPYRIGHT "\n");
 
 	if (strcmp(lpfc_release_version, LPFC_DRIVER_VERSION) != 0) {
 		printk("lpfcdfc requires lpfc version %s.  Current version is %s.\n",

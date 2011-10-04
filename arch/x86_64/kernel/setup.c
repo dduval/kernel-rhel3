@@ -469,6 +469,25 @@ static struct _cache_table cache_table[] __initdata =
 
 int select_idle_routine(struct cpuinfo_x86 *c);
 
+
+/*
+ * find out the number of processor cores on the die
+ */
+static int __init num_cpu_cores(struct cpuinfo_x86 *c)
+{
+	unsigned int eax;
+	if (c->cpuid_level < 4)
+		return 1;
+	__asm__("cpuid"
+		: "=a" (eax)
+		: "0" (4), "c" (0)
+		: "bx", "dx");
+	if (eax & 0x1f)
+		return ((eax >> 26) + 1);
+	else
+		return 1;
+}
+
 static void __init init_intel(struct cpuinfo_x86 *c)
 {
 	unsigned int trace = 0, l1i = 0, l1d = 0, l2 = 0, l3 = 0; /* Cache sizes */
@@ -557,6 +576,7 @@ static void __init init_intel(struct cpuinfo_x86 *c)
 #ifdef CONFIG_SMP
 	if (test_bit(X86_FEATURE_HT, &c->x86_capability)) {
 		extern	u8 phys_proc_id[NR_CPUS];
+		extern  u8 cpu_core_id[NR_CPUS];
 		
 		int 	index_lsb, index_msb, tmp;
 		int	initial_apic_id;
@@ -569,6 +589,10 @@ static void __init init_intel(struct cpuinfo_x86 *c)
 		if (smp_num_siblings == 1) {
 			printk(KERN_INFO  "CPU: Hyper-Threading is disabled\n");
 		} else if (smp_num_siblings > 1 ) {
+
+			smp_num_cores = num_cpu_cores(c);
+
+			smp_num_siblings /= smp_num_cores;
 			index_lsb = 0;
 			index_msb = 31;
 			/*
@@ -576,7 +600,7 @@ static void __init init_intel(struct cpuinfo_x86 *c)
 			 * processor package.
 			 */
 #define NR_SIBLINGS	2
-			if (smp_num_siblings != NR_SIBLINGS) {
+			if (smp_num_siblings > NR_SIBLINGS) {
 				printk(KERN_WARNING "CPU: Unsupported number of the siblings %d", smp_num_siblings);
 				smp_num_siblings = 1;
 				return;
@@ -594,13 +618,42 @@ static void __init init_intel(struct cpuinfo_x86 *c)
 			if (index_lsb != index_msb )
 				index_msb++;
 			initial_apic_id = ebx >> 24 & 0xff;
-			phys_proc_id[cpu] = initial_apic_id >> index_msb;
+			cpu_core_id[cpu] = initial_apic_id >> index_msb;
 
-			printk(KERN_INFO  "CPU: Physical Processor ID: %d\n",
-                               phys_proc_id[cpu]);
+			if (smp_num_cores == 1) {
+				phys_proc_id[cpu] = cpu_core_id[cpu];
+				printk(KERN_INFO  "CPU%d: Initial APIC ID: %d, Physical Processor ID: %d\n",
+						   cpu, initial_apic_id, phys_proc_id[cpu]);
+				goto end;
+			}
+
+			index_lsb = 0;
+			index_msb = 31;
+
+			tmp = smp_num_siblings * smp_num_cores;
+			while ((tmp & 1) == 0) {
+				tmp >>=1 ;
+				index_lsb++;
+			}
+			tmp = smp_num_siblings * smp_num_cores;
+			while ((tmp & 0x80000000 ) == 0) {
+				tmp <<=1 ;
+				index_msb--;
+			}
+			if (index_lsb != index_msb )
+				index_msb++;
+
+			phys_proc_id[cpu] = initial_apic_id >> index_msb;
+			printk(KERN_INFO  "CPU%d: Physical Processor ID: %d\n",
+                               cpu, phys_proc_id[cpu]);
+			printk(KERN_INFO  "CPU%d: Processor Core ID: %d\n",
+                               cpu, cpu_core_id[cpu]);
+			printk(KERN_INFO  "CPU%d: Initial APIC ID: %d\n",
+				cpu, initial_apic_id);
 		}
 
 	}
+end:
 #endif
 
 	n = cpuid_eax(0x80000000);
@@ -676,6 +729,11 @@ void __init identify_cpu(struct cpuinfo_x86 *c)
 	      (int *)&c->x86_vendor_id[4]);
 		
 	get_cpu_vendor(c);
+#ifndef CONFIG_IA32E
+	if (c->x86_vendor == X86_VENDOR_INTEL)
+		panic("no EM64T cpu support in this kernel"
+			" -- use an ia32e rpm instead");
+#endif
 	/* Initialize the standard set of capabilities */
 	/* Note that the vendor-specific code below might override */
 
@@ -787,6 +845,7 @@ static int show_cpuinfo(struct seq_file *m, void *v)
 	int n = c - cpu_data;
 #ifdef CONFIG_SMP
 	extern	u8 phys_proc_id[NR_CPUS];
+	extern  u8 cpu_core_id[NR_CPUS];
 #endif
 
 	/* 
@@ -802,7 +861,7 @@ static int show_cpuinfo(struct seq_file *m, void *v)
 	        "fpu", "vme", "de", "pse", "tsc", "msr", "pae", "mce",
 	        "cx8", "apic", NULL, "sep", "mtrr", "pge", "mca", "cmov",
 	        "pat", "pse36", "pn", "clflush", NULL, "dts", "acpi", "mmx",
-	        "fxsr", "sse", "sse2", "ss", NULL, "tm", "ia64", "ferr", 
+	        "fxsr", "sse", "sse2", "ss", "ht", "tm", "ia64", "ferr", 
 
 		/* AMD-defined */
 		NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
@@ -853,7 +912,11 @@ static int show_cpuinfo(struct seq_file *m, void *v)
 	
 #ifdef CONFIG_SMP
 	seq_printf(m, "physical id\t: %d\n",phys_proc_id[n]);
-	seq_printf(m, "siblings\t: %d\n",smp_num_siblings);
+	seq_printf(m, "siblings\t: %d\n",smp_num_siblings*smp_num_cores);
+	if (smp_num_cores > 1) {
+		seq_printf(m, "core id\t\t: %d\n",cpu_core_id[n]);
+		seq_printf(m, "cpu cores\t: %d\n",smp_num_cores);
+	}
 #if CONFIG_SHARE_RUNQUEUE
 {
 	extern long __rq_idx[NR_CPUS];

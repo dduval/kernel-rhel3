@@ -1,4 +1,4 @@
-#define QLA_MODEL_NAMES         0x1B
+#define QLA_MODEL_NAMES         0x32
 
 /*
  * Adapter model names.
@@ -19,18 +19,41 @@ char	*qla2x00_model_name[QLA_MODEL_NAMES] = {
 	"QLA2350",	/* 0x10c */
 	"QLA2352",	/* 0x10d */
 	"QLA2352",	/* 0x10e */
-	"HPQSVS ",	/* 0x10f */
-	"HPQSVS ",	/* 0x110 */
-	"QLA4010",	/* 0x111 */
-	"QLA4010",	/* 0x112 */
-	"QLA4010C",	/* 0x113 */
-	"QLA4010C",	/* 0x114 */
-	"QLA2360",	/* 0x115 */
-	"QLA2362",	/* 0x116 */
-	" ",		/* 0x117 */
-	" ",		/* 0x118 */
-	"QLA200",	/* 0x119 */
-	"QLA200C"	/* 0x11A */
+	"HPQ SVS",	/* 0x10f */
+	"HPQ SVS",	/* 0x110 */
+	" ",		/* 0x111 */
+	" ",		/* 0x112 */
+	" ",		/* 0x113 */
+	" ",		/* 0x114 */
+ 	"QLA2360",	/* 0x115 */
+ 	"QLA2362",	/* 0x116 */
+	"QLE2360",	/* 0x117 */
+	"QLE2362",	/* 0x118 */
+ 	"QLA200",	/* 0x119 */
+	"QLA200C",	/* 0x11a */
+	"QLA200P",	/* 0x11b */
+	"QLA200P",	/* 0x11c */
+	" ",		/* 0x11d */
+	" ",		/* 0x11e */
+	" ",		/* 0x11f */
+	" ",		/* 0x120 */
+	" ",		/* 0x121 */
+	" ",		/* 0x122 */
+	" ",		/* 0x123 */
+	" ",		/* 0x124 */
+	" ",		/* 0x125 */
+	" ",		/* 0x126 */
+	" ",		/* 0x127 */
+	" ",		/* 0x128 */
+	" ",		/* 0x129 */
+	" ",		/* 0x12a */
+	" ",		/* 0x12b */
+	" ",		/* 0x12c */
+	" ",		/* 0x12d */
+	" ",		/* 0x12e */
+	"QLA210",	/* 0x12f */
+	"EMC 250",	/* 0x130 */
+	"HP A7538A"	/* 0x131 */
 };
 
 char	*qla2x00_model_desc[QLA_MODEL_NAMES] = {
@@ -48,19 +71,42 @@ char	*qla2x00_model_desc[QLA_MODEL_NAMES] = {
 	" ",						/* 0x10b */
 	"133MHz PCI-X to 2Gb FC, Single Channel",	/* 0x10c */
 	"133MHz PCI-X to 2Gb FC, Dual Channel",		/* 0x10d */
-	" ",						/* 0x10e */
-	"HPQ SVS HBA- Initiator device",		/* 0x10f */
-	"HPQ SVS HBA- Target device",			/* 0x110 */
-	"Optical- 133MHz to 1Gb iSCSI- networking",	/* 0x111 */
-	"Optical- 133MHz to 1Gb iSCSI- storage",	/* 0x112 */
-	"Copper- 133MHz to 1Gb iSCSI- networking",	/* 0x113 */
-	"Copper- 133MHz to 1Gb iSCSI- storage",		/* 0x114 */
-	"133MHz PCI-X to 2Gb FC Single Channel",	/* 0x115 */
-	"133MHz PCI-X to 2Gb FC Dual Channel",		/* 0x116 */
-	" ",						/* 0x117 */
-	" ",						/* 0x118 */
-	"133MHz PCI-X to 2Gb FC Optical",		/* 0x119 */
-	"133MHz PCI-X to 2Gb FC Copper"			/* 0x11A */
+ 	" ",						/* 0x10e */
+ 	"HPQ SVS HBA- Initiator device",		/* 0x10f */
+ 	"HPQ SVS HBA- Target device",			/* 0x110 */
+	" ",						/* 0x111 */
+	" ",						/* 0x112 */
+	" ",						/* 0x113 */
+	" ",						/* 0x114 */
+ 	"133MHz PCI-X to 2Gb FC Single Channel",	/* 0x115 */
+ 	"133MHz PCI-X to 2Gb FC Dual Channel",		/* 0x116 */
+	"PCI-Express to 2Gb FC, Single Channel",	/* 0x117 */
+	"PCI-Express to 2Gb FC, Dual Channel",		/* 0x118 */
+ 	"133MHz PCI-X to 2Gb FC Optical",		/* 0x119 */
+	"133MHz PCI-X to 2Gb FC Copper",		/* 0x11a */
+	"133MHz PCI-X to 2Gb FC SFP",			/* 0x11b */
+	"133MHz PCI-X to 2Gb FC SFP",			/* 0x11c */
+	" ",						/* 0x11d */
+	" ",						/* 0x11e */
+	" ",						/* 0x11f */
+	" ",						/* 0x120 */
+	" ",						/* 0x121 */
+	" ",						/* 0x122 */
+	" ",						/* 0x123 */
+	" ",						/* 0x124 */
+	" ",						/* 0x125 */
+	" ",						/* 0x126 */
+	" ",						/* 0x127 */
+	" ",						/* 0x128 */
+	" ",						/* 0x129 */
+	" ",						/* 0x12a */
+	" ",						/* 0x12b */
+	" ",						/* 0x12c */
+	" ",						/* 0x12d */
+	" ",						/* 0x12e */
+	"133MHz PCI-X to 2Gb FC SFF",			/* 0x12f */
+	"133MHz PCI-X to 2Gb FC SFF",			/* 0x130 */
+	"HP 1p2g QLA2340"				/* 0x131 */
 };
 
 
@@ -73,9 +119,13 @@ struct cfg_device_info {
 				/* bit 1 (0x2) -- MSA 1000  */
 				/* bit 2 (0x4) -- EVA  */
 				/* bit 3 (0x8) -- DISABLE FAILOVER  */
+				/* bit 4 (16) -- Adaptec failover */
+				/* bit 5 (32) -- EVA AA failover */
 	const int  notify_type;	/* support the different types: 1 - 4 */
 	int	( *fo_combine)(void *,
 		 uint16_t, fc_port_t *, uint16_t );
+	 /* Devices which support Report Target Port Groups */
+        int     (*fo_target_port) (fc_port_t *, fc_lun_t *, int);
 	int	( *fo_detect)(void);
 	int	( *fo_notify)(void);
 	int	( *fo_select)(void);
@@ -102,6 +152,12 @@ static struct cfg_device_info cfg_device_list[] = {
 		qla2x00_combine_by_lunid, NULL, NULL, NULL },
 	{"DEC", "HSG80", 8, FO_NOTIFY_TYPE_NONE,   
 		qla2x00_export_target, NULL, NULL, NULL },
+	{"IBM", "DS400    S320", 16, FO_NOTIFY_TYPE_TPGROUP_CDB,
+                qla2x00_combine_by_lunid, qla2x00_get_target_ports,
+                NULL, NULL, NULL},
+	{"HP", "HSV210", 32, FO_NOTIFY_TYPE_TPGROUP_CDB,
+                qla2x00_combine_by_lunid, qla2x00_get_target_ports,
+                NULL, NULL, NULL},
 
 	/*
 	 * Must be at end of list...
@@ -180,7 +236,6 @@ struct qla_fw_info {
 #define ISP23XX_FW_INDEX	0
 #define ISP232X_FW_INDEX	2
 #define ISP63XX_FW_INDEX	6
-#define ISP632X_FW_INDEX	8
 
 typedef struct _qlaboards
 {
@@ -249,21 +304,6 @@ static struct qla_fw_info qla_fw_tbl[] = {
 	},
 	{ FW_INFO_ADDR_NOMORE, },
 	/* End of 63xx firmware list */
-
-	/* 8 - Start of 632x firmware list */
-	{
-		FW_INFO_ADDR_NORMAL, &fw2322flx_code01[0],
-		&fw2322flx_length01, &fw2322flx_addr01, 
-	},
-	{
-		FW_INFO_ADDR_EXTENDED, &rseqflx_code01[0],
-		&rseqflx_code_length01, 0, &rseqflx_code_addr01,
-	},
-	{
-		FW_INFO_ADDR_EXTENDED, &xseqflx_code01[0],
-		&xseqflx_code_length01, 0, &xseqflx_code_addr01,
-	},
-	{ FW_INFO_ADDR_NOMORE, },
 	/* End of firmware list */
 #endif
 };
@@ -289,7 +329,7 @@ static struct _qlaboards   QLBoardTbl_fc[NUM_OF_ISP_DEVICES] =
 	},
 
 	{"QLA6322 ", QLA6322_DEVICE_ID,           MAX_BUSES,
-		&fw2322flx_version_str[0] , &qla_fw_tbl[ISP632X_FW_INDEX]
+		&fw2300flx_version_str[0] , &qla_fw_tbl[ISP63XX_FW_INDEX]
 	},
 #endif
 

@@ -1,9 +1,9 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
- * Enterprise Fibre Channel Host Bus Adapters.                     *
+ * Fibre Channel Host Bus Adapters.                                *
  * Refer to the README file included with this package for         *
  * driver version and adapter support.                             *
- * Copyright (C) 2004 Emulex Corporation.                          *
+ * Copyright (C) 2003-2005 Emulex.  All rights reserved.           *
  * www.emulex.com                                                  *
  *                                                                 *
  * This program is free software; you can redistribute it and/or   *
@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: ioctls/lpfc_hbaapi_ioctl.c 1.5.1.2 2004/11/09 10:19:43EST sf_support Exp  $
+ * $Id: ioctls/lpfc_hbaapi_ioctl.c 1.11 2005/05/03 11:20:53EDT sf_support Exp  $
  */
 #include <linux/version.h>
 #include <linux/kernel.h>
@@ -49,12 +49,6 @@
 #include <asm/io.h>
 #include <asm/dma.h>
 #include <asm/irq.h>
-
-#ifdef IPFC
-#include <linux/netdevice.h>
-#include <linux/etherdevice.h>
-#endif /* IPFC */
-
 #include <sd.h>			/* From drivers/scsi */
 #include <hosts.h>
 
@@ -312,10 +306,8 @@ lpfc_ioctl_hba_adapterattributes(lpfcHBA_t * phba,
 	memcpy((uint8_t *) & ha->NodeWWN,
 	       (uint8_t *) & phba->fc_sparam.nodeName, sizeof (HBA_WWN));
 	memcpy(ha->Manufacturer, "Emulex Corporation", 20);
-
-	lpfc_get_hba_model_desc(phba, (uint8_t *) ha->Model,
-				(uint8_t *) ha->ModelDescription);
-
+	memcpy(ha->Model, phba->ModelName, 80);
+	memcpy(ha->ModelDescription, phba->ModelDesc, 256);
 	memcpy(ha->DriverName, LPFC_DRIVER_NAME, 7);
 	memcpy(ha->SerialNumber, phba->SerialNumber, 32);
 	memcpy(ha->OptionROMVersion, phba->OptionROMVersion, 32);
@@ -367,13 +359,27 @@ lpfc_ioctl_hba_portattributes(lpfcHBA_t * phba,
 	       (uint8_t *) & phba->fc_sparam.nodeName, sizeof (HBA_WWN));
 	memcpy((uint8_t *) & hp->PortWWN,
 	       (uint8_t *) & phba->fc_sparam.portName, sizeof (HBA_WWN));
-	if (phba->fc_linkspeed == LA_2GHZ_LINK)
-		hp->PortSpeed = HBA_PORTSPEED_2GBIT;
-	else
+
+	switch(phba->fc_linkspeed) {
+	case LA_1GHZ_LINK:
 		hp->PortSpeed = HBA_PORTSPEED_1GBIT;
+		break;
+	case LA_2GHZ_LINK:
+		hp->PortSpeed = HBA_PORTSPEED_2GBIT;
+		break;
+	case LA_4GHZ_LINK:
+		hp->PortSpeed = HBA_PORTSPEED_4GBIT;
+		break;
+	default:
+		hp->PortSpeed = HBA_PORTSPEED_UNKNOWN;
+		break;
+	}
 
 	if (FC_JEDEC_ID(vp->rev.biuRev) == VIPER_JEDEC_ID)
 		hp->PortSupportedSpeed = HBA_PORTSPEED_10GBIT;
+	else if ((FC_JEDEC_ID(vp->rev.biuRev) == HELIOS_JEDEC_ID) ||
+		 (FC_JEDEC_ID(vp->rev.biuRev) == ZEPHYR_JEDEC_ID))
+		hp->PortSupportedSpeed = HBA_PORTSPEED_4GBIT;
 	else if ((FC_JEDEC_ID(vp->rev.biuRev) == CENTAUR_2G_JEDEC_ID) ||
 		 (FC_JEDEC_ID(vp->rev.biuRev) == PEGASUS_JEDEC_ID) ||
 		 (FC_JEDEC_ID(vp->rev.biuRev) == THOR_JEDEC_ID))
@@ -1812,9 +1818,6 @@ lpfc_ioctl_port_attrib(lpfcHBA_t * phba, void *dataout)
 	SERV_PARM *hsp;
 	HBA_PORTATTRIBUTES *hp;
 	HBA_OSDN *osdn;
-#ifdef IPFC
-	lpfcCfgParam_t *clp = &phba->config[0];
-#endif /* IPFC */
 	uint32_t cnt;
 	int rc = 0;
 

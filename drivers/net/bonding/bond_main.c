@@ -779,6 +779,58 @@ struct vlan_entry *bond_next_vlan(struct bonding *bond, struct vlan_entry *curr)
 	return next;
 }
 
+#ifdef HAVE_POLL_CONTROLLER
+static void bond_zap_completion_queue(void)
+{
+	int cpu = smp_processor_id();
+
+	if (softnet_data[cpu].completion_queue) {
+		struct sk_buff *clist;
+		unsigned long flags;
+
+		local_irq_save(flags);
+		clist = softnet_data[cpu].completion_queue;
+		softnet_data[cpu].completion_queue = NULL;
+		local_irq_restore(flags);
+
+		while (clist != NULL) {
+			struct sk_buff *skb = clist;
+			clist = clist->next;
+			__kfree_skb(skb);
+		}
+	}
+}
+
+static void bond_transmit_raw_skb(struct sk_buff *skb, struct net_device *dev)
+{
+	int poll_count = 0;
+
+repeat_poll:
+	/* drop the packet if we are making no progress */
+	if (likely(!netdump_mode) && poll_count++ > 32) {
+		dev_kfree_skb_any(skb);
+		return;
+	}
+
+	spin_lock(&dev->xmit_lock);
+	dev->xmit_lock_owner = smp_processor_id();
+
+	if (netif_queue_stopped(dev)) {
+		dev->xmit_lock_owner = -1;
+		spin_unlock(&dev->xmit_lock);
+
+		dev->poll_controller(dev);
+		bond_zap_completion_queue();
+		goto repeat_poll;
+	}
+
+	dev->hard_start_xmit(skb, dev);
+
+	dev->xmit_lock_owner = -1;
+	spin_unlock(&dev->xmit_lock);
+}
+#endif
+
 /**
  * bond_dev_queue_xmit - Prepare skb for xmit.
  * 
@@ -823,7 +875,12 @@ int bond_dev_queue_xmit(struct bonding *bond, struct sk_buff *skb, struct net_de
 	}
 
 	skb->priority = 1;
-	dev_queue_xmit(skb);
+#ifdef HAVE_POLL_CONTROLLER
+	if (bond->dev->priv_flags & IFF_NETCONSOLE)
+		bond_transmit_raw_skb(skb, skb->dev);
+	else
+#endif
+		dev_queue_xmit(skb);
 
 	return 0;
 }
@@ -1569,6 +1626,34 @@ static void bond_detach_slave(struct bonding *bond, struct slave *slave)
 	bond->slave_cnt--;
 }
 
+#ifdef HAVE_POLL_CONTROLLER
+static int slaves_support_netpoll(struct net_device *bond_dev)
+{
+	struct bonding *bond = bond_dev->priv;
+	struct slave *slave;
+	int i;
+
+	bond_for_each_slave(bond, slave, i) {
+		if (!slave->dev->poll_controller)
+			return 0;
+	}
+
+	return 1;
+}
+
+static void bond_poll_controller(struct net_device *bond_dev)
+{
+	struct bonding *bond = bond_dev->priv;
+	struct slave *slave;
+	int i;
+
+	bond_for_each_slave(bond, slave, i) {
+		if (slave->dev->poll_controller)
+			slave->dev->poll_controller(slave->dev);
+	}
+}
+#endif
+
 /*---------------------------------- IOCTL ----------------------------------*/
 
 static int bond_sethwaddr(struct net_device *bond_dev, struct net_device *slave_dev)
@@ -1971,6 +2056,16 @@ static int bond_enslave(struct net_device *bond_dev, struct net_device *slave_de
 	       new_slave->state == BOND_STATE_ACTIVE ? "n active" : " backup",
 	       new_slave->link != BOND_LINK_DOWN ? "n up" : " down");
 
+#ifdef CONFIG_NET_POLL_CONTROLLER
+	if (slaves_support_netpoll(bond_dev)) {
+		bond_dev->poll_controller = bond_poll_controller;
+	} else if (bond_dev->poll_controller) {
+		bond_dev->poll_controller = NULL;
+		printk("New slave device %s does not support netconsole.\n",
+			slave_dev->name);
+		printk("netconsole disabled for %s.\n", bond_dev->name);
+	}
+#endif
 	/* enslave is successful */
 	return 0;
 
@@ -3039,7 +3134,7 @@ static void bond_activebackup_arp_mon(struct net_device *bond_dev)
 			bond_set_slave_inactive_flags(bond->current_arp_slave);
 
 			/* search for next candidate */
-			bond_for_each_slave_from(bond, slave, i, bond->current_arp_slave) {
+			bond_for_each_slave_from(bond, slave, i, bond->current_arp_slave->next) {
 				if (IS_UP(slave->dev)) {
 					slave->link = BOND_LINK_BACK;
 					bond_set_slave_active_flags(slave);
@@ -4296,6 +4391,9 @@ static int __init bond_init(struct net_device *bond_dev, struct bond_params *par
 	bond_dev->accept_fastpath = bond_accept_fastpath;
 #endif
 
+#ifdef HAVE_POLL_CONTROLLER
+	bond_dev->poll_controller = bond_poll_controller;
+#endif
 	/* Initialize the device options */
 	bond_dev->tx_queue_len = 0;
 	bond_dev->flags |= IFF_MASTER|IFF_MULTICAST;

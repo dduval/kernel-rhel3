@@ -29,8 +29,9 @@
 #include <asm/io.h>
 
     /* Override mptbase.h by pre-defining these! */
-    #define MODULEAUTHOR "Noah Romer, Eddie C. Dost"
+    #define MODULEAUTHOR "LSI Logic"
 
+#include "linux_compat.h"	/* linux-2.2.x (vs. -2.4.x) tweaks */
 #include "mptbase.h"
 
 /*****************************************************************************/

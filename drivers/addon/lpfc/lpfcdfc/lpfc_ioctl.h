@@ -1,9 +1,9 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
- * Enterprise Fibre Channel Host Bus Adapters.                     *
+ * Fibre Channel Host Bus Adapters.                                *
  * Refer to the README file included with this package for         *
  * driver version and adapter support.                             *
- * Copyright (C) 2004 Emulex Corporation.                          *
+ * Copyright (C) 2003-2005 Emulex.  All rights reserved.           *
  * www.emulex.com                                                  *
  *                                                                 *
  * This program is free software; you can redistribute it and/or   *
@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: ioctls/lpfc_ioctl.h 1.1 2004/10/26 17:00:27EDT sf_support Exp  $
+ * $Id: ioctls/lpfc_ioctl.h 1.4 2005/05/03 11:20:57EDT sf_support Exp  $
  */
 
 #ifndef _H_LPFC_IOCTL
@@ -28,7 +28,7 @@
 #define MAX_LPFC_BRDS 32
 
 #define DFC_MAJOR_REV	1
-#define DFC_MINOR_REV	18
+#define DFC_MINOR_REV	19
 
 /* LPFC Ioctls() 0x00 - 0x3F. */
 
@@ -108,7 +108,8 @@
 #define LPFC_SETCFG			0x65	/* Set config parameters */
 #define LPFC_STAT			0x67	/* Statistics for SLI/FC/IP */
 #define LPFC_GET_DFC_REV		0x68	/* Get the rev of the ioctl driver */
-/*  LPFC_LAST_IOCTL_USED 	        0x68 Last LPFC Ioctl used  */
+#define LPFC_GET_VPD			0x69	/* Get Adapter VPD */
+/*  LPFC_LAST_IOCTL_USED 	        0x69 Last LPFC Ioctl used  */
 
 /*
 Data structure definitions:
@@ -173,6 +174,17 @@ struct out_fcp_devp {
 	uint32_t iodonecnt;
 	uint32_t errorcnt;
 	uint8_t  pad[4]; /* pad structure to 8 byte boundary */
+};
+
+/* Structure for VPD command */
+
+struct vpd {
+	uint32_t version;
+#define VPD_VERSION1     1
+	uint8_t  ModelDescription[256];    /* VPD field V1 */
+	uint8_t  Model[80];                /* VPD field V2 */
+	uint8_t  ProgramType[256];         /* VPD field V3 */
+	uint8_t  PortNum[20];              /* VPD field V4 */
 };
 
 #define MREC_MAX 16

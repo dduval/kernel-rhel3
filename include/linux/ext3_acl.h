@@ -7,6 +7,7 @@
 #include <linux/init.h>
 #include <linux/posix_acl.h>
 #include <linux/xattr_acl.h>
+#include <linux/stat.h>
 
 #define EXT3_ACL_VERSION	0x0001
 #define EXT3_ACL_MAX_ENTRIES	32
@@ -88,8 +89,10 @@ ext3_acl_chmod(handle_t *handle, struct inode *inode)
 static inline int
 ext3_init_acl(handle_t *handle, struct inode *inode, struct inode *dir)
 {
-	inode->i_mode &= ~current->fs->umask;
-	ext3_mark_inode_dirty(handle, inode);
+	if (!S_ISLNK(inode->i_mode)) {
+		inode->i_mode &= ~current->fs->umask;
+		ext3_mark_inode_dirty(handle, inode);
+	}
 	return 0;
 }
 

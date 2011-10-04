@@ -631,6 +631,8 @@ root_found:
 	  s->u.isofs_sb.s_log_zone_size = isonum_723 (h_pri->logical_block_size);
 	  s->u.isofs_sb.s_max_size = isonum_733(h_pri->volume_space_size);
 	} else {
+	  if (!pri)
+		goto out_freebh;
 	  rootp = (struct iso_directory_record *) pri->root_directory_record;
 #ifndef IGNORE_WRONG_MULTI_VOLUME_SPECS
 	  if (isonum_723 (pri->volume_set_size) != 1)

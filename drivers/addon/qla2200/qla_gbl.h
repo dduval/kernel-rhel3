@@ -55,6 +55,7 @@ extern scsi_qla_host_t *qla2x00_get_hba(int);
 extern uint32_t qla2x00_send_fo_notification(fc_lun_t *fclun_p, fc_lun_t *olun_p);
 extern void qla2x00_fo_init_params(scsi_qla_host_t *ha);
 extern BOOL qla2x00_fo_enabled(scsi_qla_host_t *ha, int instance);
+extern uint32_t qla2x00_wait_for_tpg_ready(fc_lun_t *);
 
 /*
  * Global Data in qla_cfg.c source file.
@@ -85,6 +86,7 @@ extern int qla2x00_combine_by_lunid( void *host, uint16_t dev_id,
 	fc_port_t *port, uint16_t pathid); 
 extern int qla2x00_export_target( void *host, uint16_t dev_id, 
 	fc_port_t *port, uint16_t pathid); 
+extern int qla2x00_get_target_ports(fc_port_t *, fc_lun_t *, int);
 
 /*
  * Global Function Prototypes in qla_cfgln.c source file.

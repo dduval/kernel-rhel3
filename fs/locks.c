@@ -1620,6 +1620,7 @@ int fcntl_setlk(unsigned int fd, unsigned int cmd, struct flock *l)
 		}
 	}
 
+again:
 	error = flock_to_posix_lock(filp, file_lock, &flock);
 	if (error)
 		goto out_putf;
@@ -1664,6 +1665,16 @@ int fcntl_setlk(unsigned int fd, unsigned int cmd, struct flock *l)
 			goto out_putf;
 	}
 	error = posix_lock_file(filp, file_lock, cmd == F_SETLKW);
+
+	/*
+	 * Attempt to detect a close/fcntl race and recover by
+	 * releasing the lock that was just acquired.
+	 */
+	if (!error &&
+	    cmd != F_UNLCK && fcheck(fd) != filp && flock.l_type != F_UNLCK) {
+		flock.l_type = F_UNLCK;
+		goto again;
+	}
 
 out_putf:
 	fput(filp);
@@ -1776,6 +1787,7 @@ int fcntl_setlk64(unsigned int fd, unsigned int cmd, struct flock64 *l)
 		}
 	}
 
+again:
 	error = flock64_to_posix_lock(filp, file_lock, &flock);
 	if (error)
 		goto out_putf;
@@ -1805,6 +1817,16 @@ int fcntl_setlk64(unsigned int fd, unsigned int cmd, struct flock64 *l)
 			goto out_putf;
 	}
 	error = posix_lock_file(filp, file_lock, cmd == F_SETLKW64);
+
+	/*
+	 * Attempt to detect a close/fcntl race and recover by
+	 * releasing the lock that was just acquired.
+	 */
+	if (!error &&
+	    cmd != F_UNLCK && fcheck(fd) != filp && flock.l_type != F_UNLCK) {
+		flock.l_type = F_UNLCK;
+		goto again;
+	}
 
 out_putf:
 	fput(filp);

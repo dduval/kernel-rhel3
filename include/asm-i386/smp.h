@@ -34,6 +34,7 @@ extern unsigned long cpu_online_map;
 extern volatile unsigned long smp_invalidate_needed;
 extern int pic_mode;
 extern int smp_num_siblings;
+extern int smp_num_cores;
 extern int cpu_sibling_map[];
 
 extern void smp_flush_tlb(void);

@@ -59,7 +59,9 @@ int smp_num_cpus = 1;
 
 /* Number of siblings per CPU package */
 int smp_num_siblings = 1;
+int smp_num_cores = 1;
 int phys_proc_id[NR_CPUS]; /* Package ID of each logical CPU */
+int cpu_core_id[NR_CPUS]; /* Core ID of each logical CPU */
 
 /* Bitmask of currently online CPUs */
 unsigned long cpu_online_map;
@@ -1220,7 +1222,7 @@ void __init smp_boot_cpus(void)
 			for (i = 0; i < smp_num_cpus; i++) {
 				if (i == cpu)
 					continue;
-				if (phys_proc_id[cpu] == phys_proc_id[i]) {
+				if (cpu_core_id[cpu] == cpu_core_id[i]) {
 					cpu_sibling_map[cpu] = i;
 					printk("cpu_sibling_map[%d] = %d\n", cpu, cpu_sibling_map[cpu]);
 					break;

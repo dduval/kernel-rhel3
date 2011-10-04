@@ -23,6 +23,8 @@
 
 /* #define DEBUG */
 
+int oom_kill_limit = 1; /* limit on concurrent OOM kills (-1 => unlimited) */
+
 /**
  * int_sqrt - oom_kill.c internal function, rough approximation to sqrt
  * @x: integer of which to calculate the sqrt
@@ -38,7 +40,7 @@ static unsigned int int_sqrt(unsigned int x)
 }	
 
 /**
- * oom_badness - calculate a numeric value for how bad this task has been
+ * badness - calculate a numeric value for how bad this task has been
  * @p: task struct of which task we should calculate
  *
  * The formula used is relatively simple and documented inline in the
@@ -114,15 +116,23 @@ static int badness(struct task_struct *p)
  *
  * (not docbooked, we don't want this one cluttering up the manual)
  */
-static struct task_struct * select_bad_process(void)
+static struct task_struct *select_bad_process(int *pending_countp)
 {
 	int maxpoints = 0;
 	struct task_struct *g, *p;
 	struct task_struct *chosen = NULL;
+	int pending, points;
 
+	pending = 0;
 	do_each_thread(g, p) {
 		if (p->pid) {
-			int points = badness(p);
+			if (p->flags & PF_MEMDIE) {
+				if (p->state < TASK_ZOMBIE &&
+				    thread_group_leader(p))
+					pending++;
+				continue;
+			}
+			points = badness(p);
 			if (points > maxpoints) {
 				chosen = p;
 				maxpoints = points;
@@ -130,6 +140,7 @@ static struct task_struct * select_bad_process(void)
 		}
 	} while_each_thread(g, p);
 
+	*pending_countp = pending;
 	return chosen;
 }
 
@@ -140,8 +151,6 @@ static struct task_struct * select_bad_process(void)
  */
 static void __oom_kill_task(struct task_struct *p)
 {
-	printk(KERN_ERR "Out of Memory: Killed process %d (%s).\n", p->pid, p->comm);
-
 	/*
 	 * We give our sacrificial lamb high priority and access to
 	 * all the memory it needs. That way it should be able to
@@ -162,14 +171,17 @@ static struct mm_struct *oom_kill_task(struct task_struct *p)
 {
 	struct mm_struct *mm = get_task_mm(p);
 
-	if (mm) {
-		if (mm != &init_mm)
-			__oom_kill_task(p);
-		else {
-			mmput(mm);	/* don't overflow init_mm.mm_users */
-			mm = NULL;
-		}
+	if (!mm)
+		return NULL;
+
+	if (mm == &init_mm) {
+		mmput(mm);
+		return NULL;
 	}
+
+	printk(KERN_ERR "Out of Memory: Killed process %d (%s).\n",
+		p->tgid, p->comm);
+	__oom_kill_task(p);
 	return mm;
 }
 
@@ -186,12 +198,19 @@ static void oom_kill(void)
 	struct task_struct *g, *p, *q;
 	extern wait_queue_head_t kswapd_done;
 	struct mm_struct *mm;
+	int pending;
 
 	/* print the memory stats whenever we OOM kill */
 	show_mem();
 retry:
 	read_lock(&tasklist_lock);
-	p = select_bad_process();
+	p = select_bad_process(&pending);
+
+	if (pending >= oom_kill_limit && oom_kill_limit >= 0) {
+		read_unlock(&tasklist_lock);
+		printk("Avoiding OOM kill due to %d pending\n", pending);
+		return;
+	}
 
 	/* Found nothing?!?! Either we hang forever, or we panic. */
 	if (p == NULL)
@@ -204,11 +223,11 @@ retry:
 	}
 	/* kill all processes that share the ->mm (i.e. all threads) */
 	do_each_thread(g, q)
-		if (q->mm == mm)
+		if (q->mm == mm && !(q->flags & PF_MEMDIE))
 			__oom_kill_task(q);
 	while_each_thread(g, q);
 	if (!p->mm)
-		printk(KERN_INFO "Fixed up OOM kill of mm-less task\n");
+		printk("Fixed up OOM kill of mm-less task\n");
 	read_unlock(&tasklist_lock);
 	mmput(mm);
 
@@ -225,8 +244,8 @@ retry:
 	{
 		extern int numa_nodes;
 		if (numa_nodes > 1) {
-			printk(KERN_INFO "OOM kill occurred on an x86_64 NUMA system!\n");
-			printk(KERN_INFO "The numa=off boot option might help avoid this.\n");
+			printk("OOM kill occurred on an x86_64 NUMA system!\n");
+			printk("The numa=off boot option might help avoid this.\n");
 		}
 	}
 #endif
@@ -245,6 +264,9 @@ void out_of_memory(void)
 	static spinlock_t oom_lock = SPIN_LOCK_UNLOCKED;
 	static unsigned long first, last, count, lastkill;
 	unsigned long now, since;
+
+	if (oom_kill_limit == 0)
+		return;
 
 	spin_lock(&oom_lock);
 	now = jiffies;

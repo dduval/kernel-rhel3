@@ -50,6 +50,8 @@
 #include <asm/apic.h>
 #endif
 
+#define IPMI_WATCHDOG_VERSION "35.4"
+
 /*
  * The IPMI command/response information for the watchdog timer.
  */
@@ -153,10 +155,18 @@ static struct fasync_struct *fasync_q = NULL;
 static char pretimeout_since_last_heartbeat = 0;
 
 MODULE_PARM(timeout, "i");
+MODULE_PARM_DESC(timeout, "Timeout value in seconds.");
 MODULE_PARM(pretimeout, "i");
+MODULE_PARM_DESC(pretimeout, "Pretimeout value in seconds.");
 MODULE_PARM(action, "s");
+MODULE_PARM_DESC(action, "Timeout action. One of: "
+		 "reset, none, power_cycle, power_off.");
 MODULE_PARM(preaction, "s");
+MODULE_PARM_DESC(preaction, "Pretimeout action.  One of: "
+		 "pre_none, pre_smi, pre_nmi, pre_int.");
 MODULE_PARM(preop, "s");
+MODULE_PARM_DESC(preop, "Pretimeout driver operation.  One of: "
+		 "preop_none, preop_panic, preop_give_data.");
 
 /* Default state of the timer. */
 static unsigned char ipmi_watchdog_state = WDOG_TIMEOUT_NONE;
@@ -260,6 +270,7 @@ static int i_ipmi_set_timeout(struct ipmi_smi_msg  *smi_msg,
 				      (struct ipmi_addr *) &addr,
 				      0,
 				      &msg,
+				      NULL,
 				      smi_msg,
 				      recv_msg,
 				      1);
@@ -435,6 +446,7 @@ static int ipmi_heartbeat(void)
 				      (struct ipmi_addr *) &addr,
 				      0,
 				      &msg,
+				      NULL,
 				      &heartbeat_smi_msg,
 				      &heartbeat_recv_msg,
 				      1);
@@ -483,6 +495,7 @@ static void panic_halt_ipmi_heartbeat(void)
 				 (struct ipmi_addr *) &addr,
 				 0,
 				 &msg,
+				 NULL,
 				 &panic_halt_heartbeat_smi_msg,
 				 &panic_halt_heartbeat_recv_msg,
 				 1);
@@ -862,14 +875,12 @@ static int wdog_panic_handler(struct notifier_block *this,
 
 	/* On a panic, if we have a panic timeout, make sure that the thing
 	   reboots, even if it hangs during that panic. */
-	if (watchdog_user && !panic_event_handled && (panic_timeout > 0)) {
+	if (watchdog_user && !panic_event_handled) {
 		/* Make sure the panic doesn't hang, and make sure we
 		   do this only once. */
 		panic_event_handled = 1;
 	    
-		timeout = panic_timeout + 120;
-		if (timeout > 255)
-			timeout = 255;
+		timeout = 255;
 		pretimeout = 0;
 		ipmi_watchdog_state = WDOG_TIMEOUT_RESET;
 		panic_halt_ipmi_set_timeout();
@@ -899,6 +910,7 @@ static void ipmi_smi_gone(int if_num)
 
 static struct ipmi_smi_watcher smi_watcher =
 {
+	.owner    = THIS_MODULE,
 	.new_smi  = ipmi_new_smi,
 	.smi_gone = ipmi_smi_gone
 };
@@ -906,6 +918,9 @@ static struct ipmi_smi_watcher smi_watcher =
 static int __init ipmi_wdog_init(void)
 {
 	int rv;
+
+	printk(KERN_INFO "IPMI watchdog driver version "
+	       IPMI_WATCHDOG_VERSION "\n");
 
 	if (strcmp(action, "reset") == 0) {
 		action_val = WDOG_TIMEOUT_RESET;
@@ -995,9 +1010,6 @@ static int __init ipmi_wdog_init(void)
 	register_reboot_notifier(&wdog_reboot_notifier);
 	notifier_chain_register(&panic_notifier_list, &wdog_panic_notifier);
 
-	printk(KERN_INFO "IPMI watchdog by "
-	       "Corey Minyard (minyard@mvista.com)\n");
-
 	return 0;
 }
 
@@ -1022,14 +1034,11 @@ static void ipmi_unregister_watchdog(void)
 	/* Make sure no one can call us any more. */
 	misc_deregister(&ipmi_wdog_miscdev);
 
-	/*  Disable the timer. */
-	ipmi_watchdog_state = WDOG_TIMEOUT_NONE;
-	ipmi_set_timeout(IPMI_SET_TIMEOUT_NO_HB);
-
 	/* Wait to make sure the message makes it out.  The lower layer has
 	   pointers to our buffers, we want to make sure they are done before
 	   we release our memory. */
 	while (atomic_read(&set_timeout_tofree)) {
+		set_current_state(TASK_UNINTERRUPTIBLE);
 		schedule_timeout(1);
 	}
 
@@ -1127,3 +1136,5 @@ EXPORT_SYMBOL(ipmi_delayed_shutdown);
 
 module_init(ipmi_wdog_init);
 MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Corey Minyard <minyard@mvista.com>");
+MODULE_DESCRIPTION("watchdog timer based upon the IPMI interface.");

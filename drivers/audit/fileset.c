@@ -77,8 +77,11 @@ audit_fileset_lock(void)
 void
 audit_fileset_unlock(int invalidate)
 {
-	if (lock_holder != current)
-		return;
+	if (lock_holder != current) {
+		if (!invalidate)
+			return;
+		(void)audit_fileset_lock();
+	}
 	if (invalidate)
 		audit_fileset_invalidate();
 	lock_holder = NULL;
@@ -107,9 +110,13 @@ audit_fileset_add(char *path)
 void
 audit_fileset_release(struct aud_file_object *obj)
 {
-	if (atomic_dec_and_test(&obj->refcnt) != 0)
+	if (!atomic_dec_and_test(&obj->refcnt))
 		return;
 	list_del(&obj->link);
+	if (obj->dentry)
+		dput(obj->dentry);
+	if (obj->vfsmnt)
+		mntput(obj->vfsmnt);
 	kfree(obj->name);
 	kfree(obj);
 }

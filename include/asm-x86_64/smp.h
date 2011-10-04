@@ -48,6 +48,7 @@ extern unsigned long cpu_online_map;
 extern volatile unsigned long smp_invalidate_needed;
 extern int pic_mode;
 extern int smp_num_siblings;
+extern int smp_num_cores;
 extern int cpu_sibling_map[];
 extern u8 phys_proc_id[NR_CPUS];
 

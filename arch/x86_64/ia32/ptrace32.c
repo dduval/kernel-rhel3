@@ -185,14 +185,12 @@ static struct task_struct *find_target(int request, int pid, int *err)
 			goto out;
 		*err = ptrace_check_attach(child, request == PTRACE_KILL); 
 		if (*err < 0) 
-				goto out;
-		return child; 
-	} 
-
- out:
-	put_task_struct(child);
-	return NULL; 
-	
+			goto out;
+		return child;
+out:
+		put_task_struct(child);
+	}
+	return NULL;
 } 
 
 extern asmlinkage long sys_ptrace(long request, long pid, unsigned long addr, unsigned long data);

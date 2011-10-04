@@ -1,9 +1,9 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
- * Enterprise Fibre Channel Host Bus Adapters.                     *
+ * Fibre Channel Host Bus Adapters.                                *
  * Refer to the README file included with this package for         *
  * driver version and adapter support.                             *
- * Copyright (C) 2004 Emulex Corporation.                          *
+ * Copyright (C) 2003-2005 Emulex.  All rights reserved.           *
  * www.emulex.com                                                  *
  *                                                                 *
  * This program is free software; you can redistribute it and/or   *
@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_ct.c 1.2 2004/11/02 11:28:58EST sf_support Exp  $
+ * $Id: lpfc_ct.c 1.10 2005/05/03 11:21:25EDT sf_support Exp  $
  *
  * Fibre Channel SCSI LAN Device Driver CT support
  */
@@ -451,10 +451,6 @@ lpfc_ns_rsp(lpfcHBA_t * phba, DMABUF_t * mp, uint32_t Size)
 		mp = list_entry(curr, DMABUF_t, list);
 		mlast = mp;
 
-		pci_dma_sync_single(phba->pcidev, mp->phys, LPFC_BPL_SIZE,
-				    PCI_DMA_FROMDEVICE);
-
-		
 		if (Size > FCELSSIZE)
 			Cnt = FCELSSIZE;
 		else
@@ -505,7 +501,8 @@ lpfc_ns_rsp(lpfcHBA_t * phba, DMABUF_t * mp, uint32_t Size)
 					 * Don't call state machine if NLP_LOGO_ACC is set
 					 * Let lpfc_cmpl_els_logo_acc() to handle this node
 					 */
-					if (!(ndlp->nlp_flag & NLP_LOGO_ACC)) {
+					if (!(ndlp->nlp_flag & NLP_LOGO_ACC) &&
+					    !(ndlp->nlp_flag & NLP_PRLI_SND)) {
 						lpfc_disc_state_machine(phba, ndlp, (void *)0,
 									NLP_EVT_DEVICE_ADD);
 					}
@@ -639,9 +636,6 @@ lpfc_issue_ct_rsp(lpfcHBA_t * phba,
 	icmd->un.xseq64.w5.hcsw.Rctl = FC_SOL_CTL;
 	icmd->un.xseq64.w5.hcsw.Type = FC_COMMON_TRANSPORT_ULP;
 
-	pci_dma_sync_single(phba->pcidev, bmp->phys,
-				LPFC_BPL_SIZE, PCI_DMA_TODEVICE);
-
 	icmd->ulpIoTag = lpfc_sli_next_iotag(phba, pring);
 
 	/* Fill in rest of iocb */
@@ -705,9 +699,6 @@ lpfc_gen_req(lpfcHBA_t * phba,
 
 	/* Fill in payload, bp points to frame payload */
 	icmd->ulpCommand = CMD_GEN_REQUEST64_CR;
-
-	pci_dma_sync_single(phba->pcidev, bmp->phys,
-				LPFC_BPL_SIZE, PCI_DMA_TODEVICE);
 
 	icmd->ulpIoTag = lpfc_sli_next_iotag(phba, pring);
 
@@ -909,7 +900,6 @@ lpfc_fdmi_cmd(lpfcHBA_t * phba, LPFC_NODELIST_t * ndlp, int cmdcode)
 	PREG_PORT_ATTRIBUTE pab;
 	PATTRIBUTE_BLOCK ab;
 	PATTRIBUTE_ENTRY ae;
-	uint32_t id;
 	void (*cmpl) (struct lpfcHBA *, LPFC_IOCBQ_t *, LPFC_IOCBQ_t *);
 
 	clp = &phba->config[0];
@@ -1030,419 +1020,24 @@ lpfc_fdmi_cmd(lpfcHBA_t * phba, LPFC_NODELIST_t * ndlp, int cmdcode)
 			size += FOURBYTES + len;
 
 			/* #4 HBA attribute entry */
-			pci_read_config_dword(phba->pcidev, PCI_VENDOR_ID, &id);
-			switch ((id >> 16) & 0xffff) {
-			case PCI_DEVICE_ID_SUPERFLY:
-				if ((vp->rev.biuRev == 1)
-				    || (vp->rev.biuRev == 2)
-				    || (vp->rev.biuRev == 3)) {
-					ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) rh
-								  + size);
-					ae->ad.bits.AttrType =
-					    be16_to_cpu(MODEL);
-					strcpy((char *)ae->un.Model, "LP7000");
-					len = strlen((char *)ae->un.Model);
-					len += (len & 3) ? (4 - (len & 3)) : 4;
-					ae->ad.bits.AttrLen =
-					    be16_to_cpu(FOURBYTES + len);
-					ab->EntryCnt++;
-					size += FOURBYTES + len;
+			ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) rh + size);
+			ae->ad.bits.AttrType = be16_to_cpu(MODEL);
+			strcpy((char *)ae->un.Model, phba->ModelName);
+			len = strlen((char *)ae->un.Model);
+			len += (len & 3) ? (4 - (len & 3)) : 4;
+			ae->ad.bits.AttrLen = be16_to_cpu(FOURBYTES + len);
+			ab->EntryCnt++;
+			size += FOURBYTES + len;
 
-					/* #5 HBA attribute entry */
-					ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) rh
-								  + size);
-					ae->ad.bits.AttrType =
-					    be16_to_cpu(MODEL_DESCRIPTION);
-					strcpy((char *)ae->un.
-					       ModelDescription,
-					       "Emulex LightPulse LP7000 1 "
-					       "Gigabit PCI Fibre Channel "
-					       "Adapter");
-					len =
-					    strlen((char *)ae->un.
-						   ModelDescription);
-					len += (len & 3) ? (4 - (len & 3)) : 4;
-					ae->ad.bits.AttrLen =
-					    be16_to_cpu(FOURBYTES + len);
-					ab->EntryCnt++;
-					size += FOURBYTES + len;
-				} else {
-					ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) rh
-								  + size);
-					ae->ad.bits.AttrType =
-					    be16_to_cpu(MODEL);
-					strcpy((char *)ae->un.Model, "LP7000E");
-					len = strlen((char *)ae->un.Model);
-					len += (len & 3) ? (4 - (len & 3)) : 4;
-					ae->ad.bits.AttrLen =
-					    be16_to_cpu(FOURBYTES + len);
-					ab->EntryCnt++;
-					size += FOURBYTES + len;
-
-					/* #5 HBA attribute entry */
-					ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) rh
-								  + size);
-					ae->ad.bits.AttrType =
-					    be16_to_cpu(MODEL_DESCRIPTION);
-					strcpy((char *)ae->un.
-					       ModelDescription,
-					       "Emulex LightPulse LP7000E 1 "
-					       "Gigabit PCI Fibre Channel "
-					       "Adapter");
-					len =
-					    strlen((char *)ae->un.
-						   ModelDescription);
-					len += (len & 3) ? (4 - (len & 3)) : 4;
-					ae->ad.bits.AttrLen =
-					    be16_to_cpu(FOURBYTES + len);
-					ab->EntryCnt++;
-					size += FOURBYTES + len;
-				}
-				break;
-			case PCI_DEVICE_ID_DRAGONFLY:
-				ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) rh +
-							  size);
-				ae->ad.bits.AttrType = be16_to_cpu(MODEL);
-				strcpy((char *)ae->un.Model, "LP8000");
-				len = strlen((char *)ae->un.Model);
-				len += (len & 3) ? (4 - (len & 3)) : 4;
-				ae->ad.bits.AttrLen =
-				    be16_to_cpu(FOURBYTES + len);
-				ab->EntryCnt++;
-				size += FOURBYTES + len;
-
-				/* #5 HBA attribute entry */
-				ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) rh +
-							  size);
-				ae->ad.bits.AttrType =
-				    be16_to_cpu(MODEL_DESCRIPTION);
-				strcpy((char *)ae->un.ModelDescription,
-				       "Emulex LightPulse LP8000 1 Gigabit PCI "
-				       "Fibre Channel Adapter");
-				len = strlen((char *)ae->un.ModelDescription);
-				len += (len & 3) ? (4 - (len & 3)) : 4;
-				ae->ad.bits.AttrLen =
-				    be16_to_cpu(FOURBYTES + len);
-				ab->EntryCnt++;
-				size += FOURBYTES + len;
-				break;
-			case PCI_DEVICE_ID_CENTAUR:
-				if (FC_JEDEC_ID(vp->rev.biuRev) ==
-				    CENTAUR_2G_JEDEC_ID) {
-					ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) rh
-								  + size);
-					ae->ad.bits.AttrType =
-					    be16_to_cpu(MODEL);
-					strcpy((char *)ae->un.Model, "LP9002");
-					len = strlen((char *)ae->un.Model);
-					len += (len & 3) ? (4 - (len & 3)) : 4;
-					ae->ad.bits.AttrLen =
-					    be16_to_cpu(FOURBYTES + len);
-					ab->EntryCnt++;
-					size += FOURBYTES + len;
-
-					/* #5 HBA attribute entry */
-					ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) rh
-								  + size);
-					ae->ad.bits.AttrType =
-					    be16_to_cpu(MODEL_DESCRIPTION);
-					strcpy((char *)ae->un.
-					       ModelDescription,
-					       "Emulex LightPulse LP9002 2 "
-					       "Gigabit PCI Fibre Channel "
-					       "Adapter");
-					len =
-					    strlen((char *)ae->un.
-						   ModelDescription);
-					len += (len & 3) ? (4 - (len & 3)) : 4;
-					ae->ad.bits.AttrLen =
-					    be16_to_cpu(FOURBYTES + len);
-					ab->EntryCnt++;
-					size += FOURBYTES + len;
-				} else {
-					ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) rh
-								  + size);
-					ae->ad.bits.AttrType =
-					    be16_to_cpu(MODEL);
-					strcpy((char *)ae->un.Model, "LP9000");
-					len = strlen((char *)ae->un.Model);
-					len += (len & 3) ? (4 - (len & 3)) : 4;
-					ae->ad.bits.AttrLen =
-					    be16_to_cpu(FOURBYTES + len);
-					ab->EntryCnt++;
-					size += FOURBYTES + len;
-
-					/* #5 HBA attribute entry */
-					ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) rh
-								  + size);
-					ae->ad.bits.AttrType =
-					    be16_to_cpu(MODEL_DESCRIPTION);
-					strcpy((char *)ae->un.
-					       ModelDescription,
-					       "Emulex LightPulse LP9000 1 "
-					       "Gigabit PCI Fibre Channel "
-					       "Adapter");
-					len =
-					    strlen((char *)ae->un.
-						   ModelDescription);
-					len += (len & 3) ? (4 - (len & 3)) : 4;
-					ae->ad.bits.AttrLen =
-					    be16_to_cpu(FOURBYTES + len);
-					ab->EntryCnt++;
-					size += FOURBYTES + len;
-				}
-				break;
-			case PCI_DEVICE_ID_RFLY:
-				{
-					ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) rh
-								  + size);
-					ae->ad.bits.AttrType =
-					    be16_to_cpu(MODEL);
-					strcpy((char *)ae->un.Model, "LP952");
-					len = strlen((char *)ae->un.Model);
-					len += (len & 3) ? (4 - (len & 3)) : 4;
-					ae->ad.bits.AttrLen =
-					    be16_to_cpu(FOURBYTES + len);
-					ab->EntryCnt++;
-					size += FOURBYTES + len;
-
-					/* #5 HBA attribute entry */
-					ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) rh
-								  + size);
-					ae->ad.bits.AttrType =
-					    be16_to_cpu(MODEL_DESCRIPTION);
-					strcpy((char *)ae->un.
-					       ModelDescription,
-					       "Emulex LightPulse LP952 2 "
-					       "Gigabit PCI Fibre Channel "
-					       "Adapter");
-					len =
-					    strlen((char *)ae->un.
-						   ModelDescription);
-					len += (len & 3) ? (4 - (len & 3)) : 4;
-					ae->ad.bits.AttrLen =
-					    be16_to_cpu(FOURBYTES + len);
-					ab->EntryCnt++;
-					size += FOURBYTES + len;
-				}
-				break;
-			case PCI_DEVICE_ID_PEGASUS:
-				ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) rh +
-							  size);
-				ae->ad.bits.AttrType = be16_to_cpu(MODEL);
-				strcpy((char *)ae->un.Model, "LP9802");
-				len = strlen((char *)ae->un.Model);
-				len += (len & 3) ? (4 - (len & 3)) : 4;
-				ae->ad.bits.AttrLen =
-				    be16_to_cpu(FOURBYTES + len);
-				ab->EntryCnt++;
-				size += FOURBYTES + len;
-
-				/* #5 HBA attribute entry */
-				ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) rh +
-							  size);
-				ae->ad.bits.AttrType =
-				    be16_to_cpu(MODEL_DESCRIPTION);
-				strcpy((char *)ae->un.ModelDescription,
-				       "Emulex LightPulse LP9802 2 Gigabit PCI "
-				       "Fibre Channel Adapter");
-				len = strlen((char *)ae->un.ModelDescription);
-				len += (len & 3) ? (4 - (len & 3)) : 4;
-				ae->ad.bits.AttrLen =
-				    be16_to_cpu(FOURBYTES + len);
-				ab->EntryCnt++;
-				size += FOURBYTES + len;
-				break;
-			case PCI_DEVICE_ID_PFLY:
-				ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) rh +
-							  size);
-				ae->ad.bits.AttrType = be16_to_cpu(MODEL);
-				strcpy((char *)ae->un.Model, "LP982");
-				len = strlen((char *)ae->un.Model);
-				len += (len & 3) ? (4 - (len & 3)) : 4;
-				ae->ad.bits.AttrLen =
-				    be16_to_cpu(FOURBYTES + len);
-				ab->EntryCnt++;
-				size += FOURBYTES + len;
-
-				/* #5 HBA attribute entry */
-				ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) rh +
-							  size);
-				ae->ad.bits.AttrType =
-				    be16_to_cpu(MODEL_DESCRIPTION);
-				strcpy((char *)ae->un.ModelDescription,
-				       "Emulex LightPulse LP982 2 Gigabit PCI "
-				       "Fibre Channel Adapter");
-				len = strlen((char *)ae->un.ModelDescription);
-				len += (len & 3) ? (4 - (len & 3)) : 4;
-				ae->ad.bits.AttrLen =
-				    be16_to_cpu(FOURBYTES + len);
-				ab->EntryCnt++;
-				size += FOURBYTES + len;
-				break;
-			case PCI_DEVICE_ID_THOR:
-				ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) rh +
-							  size);
-				ae->ad.bits.AttrType = be16_to_cpu(MODEL);
-				strcpy((char *)ae->un.Model, "LP10000");
-				len = strlen((char *)ae->un.Model);
-				len += (len & 3) ? (4 - (len & 3)) : 4;
-				ae->ad.bits.AttrLen =
-				    be16_to_cpu(FOURBYTES + len);
-				ab->EntryCnt++;
-				size += FOURBYTES + len;
-
-				/* #5 HBA attribute entry */
-				ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) rh +
-							  size);
-				ae->ad.bits.AttrType =
-				    be16_to_cpu(MODEL_DESCRIPTION);
-				strcpy((char *)ae->un.ModelDescription,
-				       "Emulex LightPulse LP10000 2 Gigabit "
-				       "PCI Fibre Channel Adapter");
-				len = strlen((char *)ae->un.ModelDescription);
-				len += (len & 3) ? (4 - (len & 3)) : 4;
-				ae->ad.bits.AttrLen =
-				    be16_to_cpu(FOURBYTES + len);
-				ab->EntryCnt++;
-				size += FOURBYTES + len;
-				break;
-			case PCI_DEVICE_ID_VIPER:
-				ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) rh +
-							  size);
-				ae->ad.bits.AttrType = be16_to_cpu(MODEL);
-				strcpy((char *)ae->un.Model, "LPX1000");
-				len = strlen((char *)ae->un.Model);
-				len += (len & 3) ? (4 - (len & 3)) : 4;
-				ae->ad.bits.AttrLen =
-				    be16_to_cpu(FOURBYTES + len);
-				ab->EntryCnt++;
-				size += FOURBYTES + len;
-
-				/* #5 HBA attribute entry */
-				ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) rh +
-							  size);
-				ae->ad.bits.AttrType =
-				    be16_to_cpu(MODEL_DESCRIPTION);
-				strcpy((char *)ae->un.ModelDescription,
-				       "Emulex LightPulse LPX1000 10 Gigabit "
-				       "PCI Fibre Channel Adapter");
-				len = strlen((char *)ae->un.ModelDescription);
-				len += (len & 3) ? (4 - (len & 3)) : 4;
-				ae->ad.bits.AttrLen =
-				    be16_to_cpu(FOURBYTES + len);
-				ab->EntryCnt++;
-				size += FOURBYTES + len;
-				break;
-			case PCI_DEVICE_ID_TFLY:
-				ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) rh +
-							  size);
-				ae->ad.bits.AttrType = be16_to_cpu(MODEL);
-				strcpy((char *)ae->un.Model, "LP1050");
-				len = strlen((char *)ae->un.Model);
-				len += (len & 3) ? (4 - (len & 3)) : 4;
-				ae->ad.bits.AttrLen =
-				    be16_to_cpu(FOURBYTES + len);
-				ab->EntryCnt++;
-				size += FOURBYTES + len;
-
-				/* #5 HBA attribute entry */
-				ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) rh +
-							  size);
-				ae->ad.bits.AttrType =
-				    be16_to_cpu(MODEL_DESCRIPTION);
-				strcpy((char *)ae->un.ModelDescription,
-				       "Emulex LightPulse LP1050 2 Gigabit PCI "
-				       "Fibre Channel Adapter");
-				len = strlen((char *)ae->un.ModelDescription);
-				len += (len & 3) ? (4 - (len & 3)) : 4;
-				ae->ad.bits.AttrLen =
-				    be16_to_cpu(FOURBYTES + len);
-				ab->EntryCnt++;
-				size += FOURBYTES + len;
-				break;
-			case PCI_DEVICE_ID_HELIOS:
-				ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) rh +
-							  size);
-				ae->ad.bits.AttrType = be16_to_cpu(MODEL);
-				strcpy((char *)ae->un.Model, "LP11000");
-				len = strlen((char *)ae->un.Model);
-				len += (len & 3) ? (4 - (len & 3)) : 4;
-				ae->ad.bits.AttrLen =
-				    be16_to_cpu(FOURBYTES + len);
-				ab->EntryCnt++;
-				size += FOURBYTES + len;
-
-				/* #5 HBA attribute entry */
-				ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) rh +
-							  size);
-				ae->ad.bits.AttrType =
-				    be16_to_cpu(MODEL_DESCRIPTION);
-				strcpy((char *)ae->un.ModelDescription,
-				       "Emulex LightPulse LP1100 4 Gigabit PCI "
-				       "Fibre Channel Adapter");
-				len = strlen((char *)ae->un.ModelDescription);
-				len += (len & 3) ? (4 - (len & 3)) : 4;
-				ae->ad.bits.AttrLen =
-				    be16_to_cpu(FOURBYTES + len);
-				ab->EntryCnt++;
-				size += FOURBYTES + len;
-				break;
-			case PCI_DEVICE_ID_JFLY:
-				ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) rh +
-							  size);
-				ae->ad.bits.AttrType = be16_to_cpu(MODEL);
-				strcpy((char *)ae->un.Model, "LP1150");
-				len = strlen((char *)ae->un.Model);
-				len += (len & 3) ? (4 - (len & 3)) : 4;
-				ae->ad.bits.AttrLen =
-				    be16_to_cpu(FOURBYTES + len);
-				ab->EntryCnt++;
-				size += FOURBYTES + len;
-
-				/* #5 HBA attribute entry */
-				ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) rh +
-							  size);
-				ae->ad.bits.AttrType =
-				    be16_to_cpu(MODEL_DESCRIPTION);
-				strcpy((char *)ae->un.ModelDescription,
-				       "Emulex LightPulse LP1150 4 Gigabit PCI "
-				       "Fibre Channel Adapter");
-				len = strlen((char *)ae->un.ModelDescription);
-				len += (len & 3) ? (4 - (len & 3)) : 4;
-				ae->ad.bits.AttrLen =
-				    be16_to_cpu(FOURBYTES + len);
-				ab->EntryCnt++;
-				size += FOURBYTES + len;
-				break;
-			case PCI_DEVICE_ID_LP101:
-				ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) rh +
-							  size);
-				ae->ad.bits.AttrType = be16_to_cpu(MODEL);
-				strcpy((char *)ae->un.Model, "LP101");
-				len = strlen((char *)ae->un.Model);
-				len += (len & 3) ? (4 - (len & 3)) : 4;
-				ae->ad.bits.AttrLen =
-				    be16_to_cpu(FOURBYTES + len);
-				ab->EntryCnt++;
-				size += FOURBYTES + len;
-
-				/* #5 HBA attribute entry */
-				ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) rh +
-							  size);
-				ae->ad.bits.AttrType =
-				    be16_to_cpu(MODEL_DESCRIPTION);
-				strcpy((char *)ae->un.ModelDescription,
-				       "Emulex LightPulse LP101 2 Gigabit PCI "
-				       "Fibre Channel Adapter");
-				len = strlen((char *)ae->un.ModelDescription);
-				len += (len & 3) ? (4 - (len & 3)) : 4;
-				ae->ad.bits.AttrLen =
-				    be16_to_cpu(FOURBYTES + len);
-				ab->EntryCnt++;
-				size += FOURBYTES + len;
-				break;
-			}
+			/* #5 HBA attribute entry */
+			ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) rh + size);
+			ae->ad.bits.AttrType = be16_to_cpu(MODEL_DESCRIPTION);
+			strcpy((char *)ae->un.ModelDescription, phba->ModelDesc);
+			len = strlen((char *)ae->un.ModelDescription);
+			len += (len & 3) ? (4 - (len & 3)) : 4;
+			ae->ad.bits.AttrLen = be16_to_cpu(FOURBYTES + len);
+			ab->EntryCnt++;
+			size += FOURBYTES + len;
 
 			/* #6 HBA attribute entry */
 			ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) rh + size);
@@ -1559,8 +1154,10 @@ lpfc_fdmi_cmd(lpfcHBA_t * phba, LPFC_NODELIST_t * ndlp, int cmdcode)
 			ae->ad.bits.AttrLen = be16_to_cpu(FOURBYTES + 4);
 			if (FC_JEDEC_ID(vp->rev.biuRev) == VIPER_JEDEC_ID)
 				ae->un.SupportSpeed = HBA_PORTSPEED_10GBIT;
-			else if (FC_JEDEC_ID(vp->rev.biuRev) ==
+			else if ((FC_JEDEC_ID(vp->rev.biuRev) ==
 				  HELIOS_JEDEC_ID)
+				 || (FC_JEDEC_ID(vp->rev.biuRev) ==
+				     ZEPHYR_JEDEC_ID))
 				ae->un.SupportSpeed = HBA_PORTSPEED_4GBIT;
 			else if ((FC_JEDEC_ID(vp->rev.biuRev) ==
 				  CENTAUR_2G_JEDEC_ID)
@@ -1578,10 +1175,20 @@ lpfc_fdmi_cmd(lpfcHBA_t * phba, LPFC_NODELIST_t * ndlp, int cmdcode)
 			ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) pab + size);
 			ae->ad.bits.AttrType = be16_to_cpu(PORT_SPEED);
 			ae->ad.bits.AttrLen = be16_to_cpu(FOURBYTES + 4);
-			if (phba->fc_linkspeed == LA_2GHZ_LINK)
-				ae->un.PortSpeed = HBA_PORTSPEED_2GBIT;
-			else
-				ae->un.PortSpeed = HBA_PORTSPEED_1GBIT;
+			switch(phba->fc_linkspeed) {
+				case LA_1GHZ_LINK:
+					ae->un.PortSpeed = HBA_PORTSPEED_1GBIT;
+				break;
+				case LA_2GHZ_LINK:
+					ae->un.PortSpeed = HBA_PORTSPEED_2GBIT;
+				break;
+				case LA_4GHZ_LINK:
+					ae->un.PortSpeed = HBA_PORTSPEED_4GBIT;
+				break;
+				default:
+					ae->un.PortSpeed = HBA_PORTSPEED_UNKNOWN;
+				break;
+			}
 			pab->ab.EntryCnt++;
 			size += FOURBYTES + 4;
 
@@ -1741,6 +1348,13 @@ lpfc_fdmi_tmo(unsigned long ptr)
 	clkData = (struct clk_data *)ptr;
 	phba = clkData->phba;
 	LPFC_DRVR_LOCK(phba, iflag);
+	if (clkData->flags & TM_CANCELED) {
+		list_del((struct list_head *)clkData);
+		kfree(clkData);	
+		goto out; 
+	}
+
+
 	ndlp = (LPFC_NODELIST_t *)clkData->clData1;
 	clkData->timeObj->function = 0;
 	list_del((struct list_head *)clkData);
@@ -1753,6 +1367,8 @@ lpfc_fdmi_tmo(unsigned long ptr)
 		phba->fc_fdmitmo.function = 0;
 		lpfc_fdmi_cmd(phba, ndlp, SLI_MGMT_DHBA);
 	}
+
+out:
 	LPFC_DRVR_UNLOCK(phba, iflag);
 	return;
 }
@@ -2012,7 +1628,7 @@ lpfc_get_hba_model_desc(lpfcHBA_t * phba, uint8_t * mdp, uint8_t * descp)
 			       64);
 		}
 		break;
-	case PCI_DEVICE_ID_JFLY:
+	case PCI_DEVICE_ID_BMID:
 		if (mdp) {
 			memcpy(mdp, "LP1150", 8);
 		}
@@ -2023,16 +1639,69 @@ lpfc_get_hba_model_desc(lpfcHBA_t * phba, uint8_t * mdp, uint8_t * descp)
 			       63);
 		}
 		break;
+	case PCI_DEVICE_ID_BSMB:
+		if (mdp) {
+			memcpy(mdp, "LP111", 7);
+		}
+		if (descp) {
+			memcpy(descp,
+			       "Emulex LightPulse LP111 4 Gigabit PCI Fibre "
+			       "Channel Adapter",
+			       62);
+		}
+		break;
+	case PCI_DEVICE_ID_ZEPHYR:
+		if (mdp) {
+			memcpy(mdp, "LP11000e", 10);
+		}
+		if (descp) {
+			memcpy(descp,
+			       "Emulex LightPulse LP11000e 4 Gigabit PCI Fibre "
+			       "Channel Adapter",
+			       65);
+		}
+		break;
+	case PCI_DEVICE_ID_ZMID:
+		if (mdp) {
+			memcpy(mdp, "LP1150e", 9);
+		}
+		if (descp) {
+			memcpy(descp,
+			       "Emulex LightPulse LP1150e 4 Gigabit PCI Fibre "
+			       "Channel Adapter",
+			       64);
+		}
+		break;
+	case PCI_DEVICE_ID_ZSMB:
+		if (mdp) {
+			memcpy(mdp, "LP111e", 8);
+		}
+		if (descp) {
+			memcpy(descp,
+			       "Emulex LightPulse LP111e 4 Gigabit PCI Fibre "
+			       "Channel Adapter",
+			       63);
+		}
+		break;
+	case PCI_DEVICE_ID_LP10000S:
+		if (mdp) {
+			memcpy(mdp, "LP10000-S", 10);
+		}
+		if (descp) {
+			memcpy(descp,
+			       "Emulex LightPulse LP10000-S 2 Gigabit PCI-X Fibre "
+			       "Channel Adapter",
+			       66);
+		}
+		break;
 	}
 }
 
 void
 lpfc_get_hba_sym_node_name(lpfcHBA_t * phba, uint8_t * symbp)
 {
-	uint8_t buf[16];
 	char fwrev[16];
 
 	lpfc_decode_firmware_rev(phba, fwrev, 0);
-	lpfc_get_hba_model_desc(phba, buf, 0);
-	sprintf(symbp, "Emulex %s FV%s DV%s", buf, fwrev, lpfc_release_version);
+	sprintf(symbp, "Emulex %s FV%s DV%s", phba->ModelName, fwrev, lpfc_release_version);
 }

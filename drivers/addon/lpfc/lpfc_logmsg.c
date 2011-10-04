@@ -1,9 +1,9 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
- * Enterprise Fibre Channel Host Bus Adapters.                     *
+ * Fibre Channel Host Bus Adapters.                                *
  * Refer to the README file included with this package for         *
  * driver version and adapter support.                             *
- * Copyright (C) 2004 Emulex Corporation.                          *
+ * Copyright (C) 2003-2005 Emulex.  All rights reserved.           *
  * www.emulex.com                                                  *
  *                                                                 *
  * This program is free software; you can redistribute it and/or   *
@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_logmsg.c 1.2 2004/11/02 10:17:23EST sf_support Exp  $
+ * $Id: lpfc_logmsg.c 1.8 2005/07/08 19:29:48EDT sf_support Exp  $
  */
 #include <linux/version.h>
 #include <linux/spinlock.h>
@@ -1873,6 +1873,27 @@ msgLogDef lpfc_msgBlk0260 = {
 };
 
 /*
+msgName: lpfc_mes0261
+message:  FAN received
+descript: A FAN was received from the fabric
+data:     NONE
+severity: Information
+log:      LOG_DISCOVERY verbose
+action:   No action needed, informational
+*/
+char lpfc_mes0261[] = "%sFAN received";
+msgLogDef lpfc_msgBlk0261 = {
+	LPFC_LOG_MSG_DI_0261,
+	lpfc_mes0261,
+	lpfc_msgPreambleDIi,
+	LPFC_MSG_OPUT_GLOB_CTRL,
+	LPFC_LOG_MSG_TYPE_INFO,
+	LOG_DISCOVERY,
+	ERRID_LOG_UNEXPECT_EVENT
+};
+
+
+/*
  *  Begin MAILBOX LOG Message Structures
  */
 
@@ -1969,7 +1990,7 @@ msgLogDef lpfc_msgBlk0304 = {
 	lpfc_msgPreambleMBe,
 	LPFC_MSG_OPUT_GLOB_CTRL,
 	LPFC_LOG_MSG_TYPE_ERR,
-	LOG_MBOX,
+	LOG_MBOX | LOG_SLI,
 	ERRID_LOG_UNEXPECT_EVENT
 };
 
@@ -1990,7 +2011,7 @@ msgLogDef lpfc_msgBlk0305 = {
 	lpfc_msgPreambleMBi,
 	LPFC_MSG_OPUT_GLOB_CTRL,
 	LPFC_LOG_MSG_TYPE_INFO,
-	LOG_MBOX,
+	LOG_MBOX | LOG_SLI,
 	ERRID_LOG_UNEXPECT_EVENT
 };
 
@@ -2017,22 +2038,22 @@ msgLogDef lpfc_msgBlk0306 = {
 
 /*
 msgName: lpfc_mes0307
-message:  Mailbox Cmpl, wd0 <pmbox> wd1 <varWord> wd2 <varWord>
-          cmpl <mbox_cmpl)
-descript: A mailbox command completed.. 
+message:  Mailbox cmd <cmd> cmpl <mbox_cmpl> <pmbox> <varWord> <varWord>
+          <varWord> <varWord> <varWord> <varWord> <varWord> <varWord>
+descript: A mailbox command completed.
 data:     none
 severity: Information
 log:      LOG_MBOX verbose
 action:   No action needed, informational
 */
-char lpfc_mes0307[] = "%sMailbox Cmpl, wd0 x%x wd1 x%x wd2 x%x cmpl x%lx";
+char lpfc_mes0307[] = "%sMailbox cmd x%x cmpl x%p, x%x x%x x%x x%x x%x x%x x%x x%x x%x";
 msgLogDef lpfc_msgBlk0307 = {
 	LPFC_LOG_MSG_MB_0307,
 	lpfc_mes0307,
 	lpfc_msgPreambleMBi,
 	LPFC_MSG_OPUT_GLOB_CTRL,
 	LPFC_LOG_MSG_TYPE_INFO,
-	LOG_MBOX,
+	LOG_MBOX | LOG_SLI,
 	ERRID_LOG_UNEXPECT_EVENT
 };
 
@@ -2054,7 +2075,7 @@ msgLogDef lpfc_msgBlk0308 = {
 	lpfc_msgPreambleMBi,
 	LPFC_MSG_OPUT_GLOB_CTRL,
 	LPFC_LOG_MSG_TYPE_INFO,
-	LOG_MBOX,
+	LOG_MBOX | LOG_SLI,
 	ERRID_LOG_UNEXPECT_EVENT
 };
 
@@ -2074,7 +2095,7 @@ msgLogDef lpfc_msgBlk0309 = {
 	lpfc_msgPreambleMBi,
 	LPFC_MSG_OPUT_GLOB_CTRL,
 	LPFC_LOG_MSG_TYPE_INFO,
-	LOG_MBOX,
+	LOG_MBOX | LOG_SLI,
 	ERRID_LOG_UNEXPECT_EVENT
 };
 
@@ -2098,7 +2119,7 @@ msgLogDef lpfc_msgBlk0310 = {
 	lpfc_msgPreambleMBe,
 	LPFC_MSG_OPUT_GLOB_CTRL,
 	LPFC_LOG_MSG_TYPE_ERR,
-	LOG_MBOX,
+	LOG_MBOX | LOG_SLI,
 	ERRID_LOG_TIMEOUT
 };
 
@@ -2118,7 +2139,7 @@ msgLogDef lpfc_msgBlk0311 = {
 	lpfc_msgPreambleMBi,
 	LPFC_MSG_OPUT_GLOB_CTRL,
 	LPFC_LOG_MSG_TYPE_INFO,
-	LOG_MBOX,
+	LOG_MBOX | LOG_SLI,
 	ERRID_LOG_UNEXPECT_EVENT
 };
 
@@ -2390,7 +2411,7 @@ msgLogDef lpfc_msgBlk0323 = {
 	lpfc_msgPreambleMBe,
 	LPFC_MSG_OPUT_GLOB_CTRL,
 	LPFC_LOG_MSG_TYPE_ERR,
-	LOG_MBOX,
+	LOG_MBOX | LOG_SLI,
 	ERRID_LOG_UNEXPECT_EVENT
 };
 
@@ -2414,6 +2435,50 @@ msgLogDef lpfc_msgBlk0324 = {
 	LPFC_MSG_OPUT_GLOB_CTRL,
 	LPFC_LOG_MSG_TYPE_ERR,
 	LOG_MBOX,
+	ERRID_LOG_UNEXPECT_EVENT
+};
+
+/*
+msgName: lpfc_mes0325
+message:  Rsp ring <ringno> error: IOCB
+descript: Received an IOCB response error
+data:     (1) wd0 (2) wd1 (3) wd2 (4) wd3 (5) wd4 (6) wd5 (7) wd6 (8) wd7
+severity: Warning
+log:      LOG_SLI verbose
+action:   This error could indicate a software driver
+          problem. If problems persist report these errors to 
+          Technical Support.
+*/
+char lpfc_mes0325[] =
+    "%sRsp ring %d error: IOCB Data: x%x x%x x%x x%x x%x x%x x%x x%x";
+msgLogDef lpfc_msgBlk0325 = {
+	LPFC_LOG_MSG_MB_0325,
+	lpfc_mes0325,
+	lpfc_msgPreambleSLw,
+	LPFC_MSG_OPUT_GLOB_CTRL,
+	LPFC_LOG_MSG_TYPE_WARN,
+	LOG_SLI,
+	ERRID_LOG_UNEXPECT_EVENT
+};
+
+/*
+msgName: lpfc_mes0326
+message:  Reset HBA
+descript: The HBA has been reset
+data:     (1) hba_state (2) sli_flag
+severity: Information
+log:      LOG_SLI verbose
+action:   No action needed, informational
+*/
+char lpfc_mes0326[] =
+    "%sReset HBA Data:x%x x%x";
+msgLogDef lpfc_msgBlk0326 = {
+	LPFC_LOG_MSG_MB_0326,
+	lpfc_mes0326,
+	lpfc_msgPreambleSLi,
+	LPFC_MSG_OPUT_GLOB_CTRL,
+	LPFC_LOG_MSG_TYPE_INFO,
+	LOG_SLI,
 	ERRID_LOG_UNEXPECT_EVENT
 };
 
@@ -4030,7 +4095,7 @@ log:      LOG_LINK_EVENT verbose
 action:   None required
 */
 char lpfc_mes1302[] =
-    "%sReset link speed to auto. 1G HBA cfg'd for 2G Data: x%x";
+    "%s Invalid speed for this board: Reset link speed to auto: x%x";
 msgLogDef lpfc_msgBlk1302 = {
 	LPFC_LOG_MSG_LK_1302,
 	lpfc_mes1302,

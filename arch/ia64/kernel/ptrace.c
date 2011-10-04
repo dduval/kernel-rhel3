@@ -827,6 +827,13 @@ access_uarea (struct task_struct *child, unsigned long addr, unsigned long *data
 			else
 				*data = (pt->cr_ipsr & IPSR_READ_MASK);
 			return 0;
+		
+		      case PT_AR_RSC:
+			if (write_access)
+				pt->ar_rsc = *data | (3 << 2); /* force PL3 */
+			else
+				*data = pt->ar_rsc;
+			return 0;
 
 		      case PT_AR_RNAT:
 			urbs_end = ia64_get_user_rbs_end(child, pt, NULL);
@@ -846,8 +853,7 @@ access_uarea (struct task_struct *child, unsigned long addr, unsigned long *data
 		      case PT_B0:  case PT_B6:  case PT_B7:
 		      case PT_F6:  case PT_F6+8: case PT_F7: case PT_F7+8:
 		      case PT_F8:  case PT_F8+8: case PT_F9: case PT_F9+8:
-		      case PT_AR_BSPSTORE:
-		      case PT_AR_RSC: case PT_AR_UNAT: case PT_AR_PFS:
+		      case PT_AR_BSPSTORE: case PT_AR_UNAT: case PT_AR_PFS:
 		      case PT_AR_CCV: case PT_AR_FPSR: case PT_CR_IIP: case PT_PR:
 			/* scratch register */
 			ptr = (unsigned long *) ((long) pt + addr - PT_CR_IPSR);
@@ -1043,6 +1049,7 @@ ptrace_getregs (struct task_struct *child, struct pt_all_user_regs *ppr)
 static long
 ptrace_setregs (struct task_struct *child, struct pt_all_user_regs *ppr)
 {
+	unsigned long rsc;
 	struct switch_stack *sw;
 	struct pt_regs *pt;
 	long ret, retval;
@@ -1077,7 +1084,7 @@ ptrace_setregs (struct task_struct *child, struct pt_all_user_regs *ppr)
 	/* app regs */
 
 	retval |= __get_user(pt->ar_pfs, &ppr->ar[PT_AUR_PFS]);
-	retval |= __get_user(pt->ar_rsc, &ppr->ar[PT_AUR_RSC]);
+	retval |= __get_user(rsc, &ppr->ar[PT_AUR_RSC]);
 	retval |= __get_user(pt->ar_bspstore, &ppr->ar[PT_AUR_BSPSTORE]);
 	retval |= __get_user(pt->ar_unat, &ppr->ar[PT_AUR_UNAT]);
 	retval |= __get_user(pt->ar_ccv, &ppr->ar[PT_AUR_CCV]);
@@ -1164,6 +1171,8 @@ ptrace_setregs (struct task_struct *child, struct pt_all_user_regs *ppr)
 	/* nat bits */
 
 	retval |= access_uarea(child, PT_NAT_BITS, &ppr->nat, 1);
+
+	retval |= access_uarea(child, PT_AR_RSC, &rsc, 1);
 
 	ret = retval ? -EIO : 0;
 	return ret;

@@ -63,6 +63,7 @@ enum {
 	ich6_sata		= 3,
 	ich6_sata_rm		= 4,
 	ich7_sata		= 5,
+	esb2_sata		= 6,
 
 	PIIX_AHCI_DEVICE	= 6,
 };
@@ -97,6 +98,7 @@ static struct pci_device_id piix_pci_tbl[] = {
 	{ 0x8086, 0x2653, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich6_sata_rm },
 	{ 0x8086, 0x27c0, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich7_sata },
 	{ 0x8086, 0x27c4, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich7_sata },
+	{ 0x8086, 0x2680, PCI_ANY_ID, PCI_ANY_ID, 0, 0, esb2_sata },
 
 	{ }	/* terminate list */
 };
@@ -155,6 +157,7 @@ static struct ata_port_operations piix_pata_ops = {
 
 	.port_start		= ata_port_start,
 	.port_stop		= ata_port_stop,
+	.host_stop		= ata_host_stop,
 };
 
 static struct ata_port_operations piix_sata_ops = {
@@ -182,6 +185,7 @@ static struct ata_port_operations piix_sata_ops = {
 
 	.port_start		= ata_port_start,
 	.port_stop		= ata_port_stop,
+	.host_stop		= ata_host_stop,
 };
 
 static struct ata_port_info piix_port_info[] = {
@@ -250,6 +254,18 @@ static struct ata_port_info piix_port_info[] = {
 	},
 
 	/* ich7_sata */
+	{
+		.sht		= &piix_sht,
+		.host_flags	= ATA_FLAG_SATA | ATA_FLAG_SRST |
+				  PIIX_FLAG_COMBINED | PIIX_FLAG_CHECKINTR |
+				  ATA_FLAG_SLAVE_POSS | PIIX_FLAG_AHCI,
+		.pio_mask	= 0x1f,	/* pio0-4 */
+		.mwdma_mask	= 0x07, /* mwdma0-2 */
+		.udma_mask	= 0x7f,	/* udma0-6 */
+		.port_ops	= &piix_sata_ops,
+	},
+
+	/* esb2_sata */
 	{
 		.sht		= &piix_sht,
 		.host_flags	= ATA_FLAG_SATA | ATA_FLAG_SRST |
@@ -692,13 +708,6 @@ err_out:
 	pci_unregister_driver(&piix_pci_driver);
 	return rc;
 }
-
-/**
- *	piix_exit -
- *
- *	LOCKING:
- *
- */
 
 static void __exit piix_exit(void)
 {

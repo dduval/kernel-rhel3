@@ -38,23 +38,33 @@ struct device_struct {
 static rwlock_t chrdevs_lock = RW_LOCK_UNLOCKED;
 static struct device_struct chrdevs[MAX_CHRDEV];
 
-extern int get_blkdev_list(char *);
+extern int get_blkdev_list(char *, int);
 
-int get_device_list(char * page)
+int get_device_list(char *page)
 {
-	int i;
-	int len;
+	int i, len, avail;
 
-	len = sprintf(page, "Character devices:\n");
+	avail = PAGE_SIZE;
+
+	len = snprintf(page, avail, "Character devices:\n");
+	avail -= len;
+	page += len;
+
 	read_lock(&chrdevs_lock);
 	for (i = 0; i < MAX_CHRDEV ; i++) {
 		if (chrdevs[i].fops) {
-			len += sprintf(page+len, "%3d %s\n", i, chrdevs[i].name);
+			len = snprintf(page, avail,
+				"%3d %s\n", i, chrdevs[i].name);
+			if (len >= avail)
+				break;
+			avail -= len;
+			page += len;
 		}
 	}
 	read_unlock(&chrdevs_lock);
-	len += get_blkdev_list(page+len);
-	return len;
+
+	avail = get_blkdev_list(page, avail);
+	return (int)PAGE_SIZE - avail;
 }
 
 /*

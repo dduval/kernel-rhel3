@@ -1167,11 +1167,8 @@ __nfs_revalidate_inode(struct nfs_server *server, struct inode *inode)
 	if (status) {
 		dfprintk(PAGECACHE, "nfs_revalidate_inode: (%x/%Ld) getattr failed, error=%d\n",
 			 inode->i_dev, (long long)NFS_FILEID(inode), status);
-		if (status == -ESTALE) {
+		if (status == -ESTALE)
 			NFS_FLAGS(inode) |= NFS_INO_STALE;
-			if (inode != inode->i_sb->s_root->d_inode)
-				remove_inode_hash(inode);
-		}
 		goto out;
 	}
 

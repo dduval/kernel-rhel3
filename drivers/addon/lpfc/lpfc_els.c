@@ -1,9 +1,9 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
- * Enterprise Fibre Channel Host Bus Adapters.                     *
+ * Fibre Channel Host Bus Adapters.                                *
  * Refer to the README file included with this package for         *
  * driver version and adapter support.                             *
- * Copyright (C) 2004 Emulex Corporation.                          *
+ * Copyright (C) 2003-2005 Emulex.  All rights reserved.           *
  * www.emulex.com                                                  *
  *                                                                 *
  * This program is free software; you can redistribute it and/or   *
@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_els.c 1.2 2004/10/29 20:40:50EDT sf_support Exp  $
+ * $Id: lpfc_els.c 1.7 2005/07/08 19:29:44EDT sf_support Exp  $
  */
 #include <linux/version.h>
 #include <linux/spinlock.h>
@@ -82,7 +82,6 @@ lpfc_issue_els_flogi(lpfcHBA_t * phba, LPFC_NODELIST_t * ndlp, uint8_t retry)
 	LPFC_IOCBQ_t *elsiocb;
 	LPFC_SLI_RING_t *pring;
 	LPFC_SLI_t *psli;
-	DMABUF_t *bmp;
 	uint8_t *pCmd;
 	uint16_t cmdsize;
 
@@ -116,13 +115,6 @@ lpfc_issue_els_flogi(lpfcHBA_t * phba, LPFC_NODELIST_t * ndlp, uint8_t retry)
 		sp->cmn.fcphHigh = FC_PH3;
 
 	lpfc_set_disctmo(phba);
-
-	/* Flush the els buffer to main store for the HBA.  This context always 
-	 * comes from the driver's dma pool and is always LPFC_BPL_SIZE. 
-	 */
-	bmp = (DMABUF_t *) (elsiocb->context2);
-	pci_dma_sync_single(phba->pcidev, bmp->phys, LPFC_BPL_SIZE,
-			    PCI_DMA_TODEVICE);
 
 	phba->fc_stat.elsXmitFLOGI++;
 	elsiocb->iocb_cmpl = lpfc_cmpl_els_flogi;
@@ -195,11 +187,6 @@ lpfc_cmpl_els_flogi(lpfcHBA_t * phba,
 		pRsp = (DMABUF_t *) pCmd->list.next;
 		lp = (uint32_t *) pRsp->virt;
 
-		/* The HBA populated the response buffer.  Flush cpu cache to
-		 * before the driver touches this memory.
-		 */
-		pci_dma_sync_single(phba->pcidev, pRsp->phys, LPFC_BPL_SIZE,
-				    PCI_DMA_FROMDEVICE);
 		sp = (SERV_PARM *) ((uint8_t *) lp + sizeof (uint32_t));
 
 		/* FLOGI completes successfully */
@@ -456,7 +443,6 @@ lpfc_issue_els_plogi(lpfcHBA_t * phba, LPFC_NODELIST_t * ndlp, uint8_t retry)
 	LPFC_IOCBQ_t *elsiocb;
 	LPFC_SLI_RING_t *pring;
 	LPFC_SLI_t *psli;
-	DMABUF_t *bmp;
 	uint8_t *pCmd;
 	uint16_t cmdsize;
 
@@ -483,14 +469,6 @@ lpfc_issue_els_plogi(lpfcHBA_t * phba, LPFC_NODELIST_t * ndlp, uint8_t retry)
 
 	if (sp->cmn.fcphHigh < FC_PH3)
 		sp->cmn.fcphHigh = FC_PH3;
-
-	/* The lpfc iocb is fully initialize.  Flush it to main store for the
-	 * HBA.  Note that all els iocb context buffer are from the driver's
-	 * dma pool and have length LPFC_BPL_SIZE.
-	 */
-	bmp = (DMABUF_t *) (elsiocb->context2);
-	pci_dma_sync_single(phba->pcidev, bmp->phys, LPFC_BPL_SIZE,
-			    PCI_DMA_TODEVICE);
 
 	phba->fc_stat.elsXmitPLOGI++;
 	elsiocb->iocb_cmpl = lpfc_cmpl_els_plogi;
@@ -595,7 +573,6 @@ lpfc_issue_els_prli(lpfcHBA_t * phba, LPFC_NODELIST_t * ndlp, uint8_t retry)
 	LPFC_IOCBQ_t *elsiocb;
 	LPFC_SLI_RING_t *pring;
 	LPFC_SLI_t *psli;
-	DMABUF_t *bmp;
 	uint8_t *pCmd;
 	uint16_t cmdsize;
 
@@ -633,14 +610,6 @@ lpfc_issue_els_prli(lpfcHBA_t * phba, LPFC_NODELIST_t * ndlp, uint8_t retry)
 	/* For FCP support */
 	npr->prliType = PRLI_FCP_TYPE;
 	npr->initiatorFunc = 1;
-
-	/* The lpfc iocb is fully initialize.  Flush it to main store for the
-	 * HBA.  Note that all els iocb context buffer are from the driver's
-	 * dma pool and have length LPFC_BPL_SIZE.
-	 */
-	bmp = (DMABUF_t *) (elsiocb->context2);
-	pci_dma_sync_single(phba->pcidev, bmp->phys, LPFC_BPL_SIZE,
-			    PCI_DMA_TODEVICE);
 
 	phba->fc_stat.elsXmitPRLI++;
 	elsiocb->iocb_cmpl = lpfc_cmpl_els_prli;
@@ -689,8 +658,9 @@ lpfc_cmpl_els_prli(lpfcHBA_t * phba,
 			goto out;
 		}
 		/* PRLI failed */
-		if (!((irsp->ulpStatus == IOSTAT_LOCAL_REJECT) &&
-		      (irsp->un.ulpWord[4] == IOERR_SLI_ABORTED)))
+		if ((!((irsp->ulpStatus == IOSTAT_LOCAL_REJECT) &&
+		       (irsp->un.ulpWord[4] == IOERR_SLI_ABORTED))) ||
+		    (ndlp->nlp_state == NLP_STE_PRLI_ISSUE))
 			lpfc_disc_state_machine(phba, ndlp, cmdiocb, NLP_EVT_CMPL_PRLI);
 	} else {
 		/* Good status, call state machine */
@@ -710,7 +680,6 @@ lpfc_issue_els_adisc(lpfcHBA_t * phba, LPFC_NODELIST_t * ndlp, uint8_t retry)
 	LPFC_IOCBQ_t *elsiocb;
 	LPFC_SLI_RING_t *pring;
 	LPFC_SLI_t *psli;
-	DMABUF_t *bmp;
 	uint8_t *pCmd;
 	uint16_t cmdsize;
 
@@ -736,15 +705,6 @@ lpfc_issue_els_adisc(lpfcHBA_t * phba, LPFC_NODELIST_t * ndlp, uint8_t retry)
 	memcpy(&ap->portName, &phba->fc_portname, sizeof (NAME_TYPE));
 	memcpy(&ap->nodeName, &phba->fc_nodename, sizeof (NAME_TYPE));
 	ap->DID = be32_to_cpu(phba->fc_myDID);
-
-	/* The lpfc iocb is fully initialize.  Flush it to main store for the
-	 * HBA.  Note that all els iocb context buffer are from the driver's
-	 * dma pool and have length LPFC_BPL_SIZE. Get a short-hand pointer to
-	 * the physical address.
-	 */
-	bmp = (DMABUF_t *) (elsiocb->context2);
-	pci_dma_sync_single(phba->pcidev, bmp->phys, LPFC_BPL_SIZE,
-			    PCI_DMA_TODEVICE);
 
 	phba->fc_stat.elsXmitADISC++;
 	elsiocb->iocb_cmpl = lpfc_cmpl_els_adisc;
@@ -916,7 +876,6 @@ lpfc_issue_els_logo(lpfcHBA_t * phba, LPFC_NODELIST_t * ndlp, uint8_t retry)
 	LPFC_IOCBQ_t *elsiocb;
 	LPFC_SLI_RING_t *pring;
 	LPFC_SLI_t *psli;
-	DMABUF_t *bmp;
 	uint8_t *pCmd;
 	uint16_t cmdsize;
 
@@ -938,15 +897,6 @@ lpfc_issue_els_logo(lpfcHBA_t * phba, LPFC_NODELIST_t * ndlp, uint8_t retry)
 	*((uint32_t *) (pCmd)) = be32_to_cpu(phba->fc_myDID);
 	pCmd += sizeof (uint32_t);
 	memcpy(pCmd, &phba->fc_portname, sizeof (NAME_TYPE));
-
-	/* The els iocb is fully initialize.  Flush it to main store for the
-	 * HBA.  Note that all els iocb context buffer are from the driver's
-	 * dma pool and have length LPFC_BPL_SIZE. Get a short-hand pointer to
-	 * the physical address.
-	 */
-	bmp = (DMABUF_t *) (elsiocb->context2);
-	pci_dma_sync_single(phba->pcidev, bmp->phys, LPFC_BPL_SIZE,
-			    PCI_DMA_TODEVICE);
 
 	phba->fc_stat.elsXmitLOGO++;
 	elsiocb->iocb_cmpl = lpfc_cmpl_els_logo;
@@ -1013,7 +963,6 @@ lpfc_issue_els_scr(lpfcHBA_t * phba, uint32_t nportid, uint8_t retry)
 	LPFC_IOCBQ_t *elsiocb;
 	LPFC_SLI_RING_t *pring;
 	LPFC_SLI_t *psli;
-	DMABUF_t *bmp;
 	uint8_t *pCmd;
 	uint16_t cmdsize;
 	LPFC_NODELIST_t *ndlp;
@@ -1044,15 +993,6 @@ lpfc_issue_els_scr(lpfcHBA_t * phba, uint32_t nportid, uint8_t retry)
 	memset(pCmd, 0, sizeof (SCR));
 	((SCR *) pCmd)->Function = SCR_FUNC_FULL;
 
-	/* The els iocb is fully initialize.  Flush it to main store for the
-	 * HBA.  Note that all els iocb context buffer are from the driver's
-	 * dma pool and have length LPFC_BPL_SIZE. Get a short-hand pointer to
-	 * the physical address.
-	 */
-	bmp = (DMABUF_t *) (elsiocb->context2);
-	pci_dma_sync_single(phba->pcidev, bmp->phys, LPFC_BPL_SIZE,
-			    PCI_DMA_TODEVICE);
-
 	phba->fc_stat.elsXmitSCR++;
 	elsiocb->iocb_cmpl = lpfc_cmpl_els_cmd;
 	if (lpfc_sli_issue_iocb(phba, pring, elsiocb, SLI_IOCB_USE_TXQ) ==
@@ -1073,7 +1013,6 @@ lpfc_issue_els_farp(lpfcHBA_t * phba, uint8_t * arg,
 	LPFC_IOCBQ_t *elsiocb;
 	LPFC_SLI_RING_t *pring;
 	LPFC_SLI_t *psli;
-	DMABUF_t *bmp;
 	FARP *fp;
 	uint8_t *pCmd;
 	uint32_t *lp;
@@ -1138,15 +1077,6 @@ lpfc_issue_els_farp(lpfcHBA_t * phba, uint8_t * arg,
 		break;
 	}
 
-	/* The els iocb is fully initialize.  Flush it to main store for the
-	 * HBA.  Note that all els iocb context buffer are from the driver's
-	 * dma pool and have length LPFC_BPL_SIZE. Get a short-hand pointer to
-	 * the physical address.
-	 */
-	bmp = (DMABUF_t *) (elsiocb->context2);
-	pci_dma_sync_single(phba->pcidev, bmp->phys, LPFC_BPL_SIZE,
-			    PCI_DMA_TODEVICE);
-
 	phba->fc_stat.elsXmitFARP++;
 
 	elsiocb->iocb_cmpl = lpfc_cmpl_els_cmd;
@@ -1173,7 +1103,6 @@ lpfc_issue_els_farpr(lpfcHBA_t * phba, uint32_t nportid, uint8_t retry)
 	LPFC_IOCBQ_t *elsiocb;
 	LPFC_SLI_RING_t *pring;
 	LPFC_SLI_t *psli;
-	DMABUF_t *bmp;
 	FARP *fp;
 	uint8_t *pCmd;
 	uint32_t *lp;
@@ -1219,15 +1148,6 @@ lpfc_issue_els_farpr(lpfcHBA_t * phba, uint32_t nportid, uint8_t retry)
 		memcpy(&fp->OnodeName, &ondlp->nlp_nodename,
 		       sizeof (NAME_TYPE));
 	}
-
-	/* The els iocb is fully initialize.  Flush it to main store for the
-	 * HBA.  Note that all els iocb context buffer are from the driver's
-	 * dma pool and have length LPFC_BPL_SIZE. Get a short-hand pointer to
-	 * the physical address.
-	 */
-	bmp = (DMABUF_t *) (elsiocb->context2);
-	pci_dma_sync_single(phba->pcidev, bmp->phys, LPFC_BPL_SIZE,
-			    PCI_DMA_TODEVICE);
 
 	phba->fc_stat.elsXmitFARPR++;
 	elsiocb->iocb_cmpl = lpfc_cmpl_els_cmd;
@@ -1275,6 +1195,12 @@ lpfc_els_retry_delay(unsigned long ptr)
 	clkData = (struct clk_data *)ptr;
 	phba = clkData->phba;
 	LPFC_DRVR_LOCK(phba, iflag);
+       	if (clkData->flags & TM_CANCELED) {
+		list_del((struct list_head *)clkData);
+		kfree(clkData);	
+		goto out;
+	}
+
 	did = (uint32_t) (unsigned long)(clkData->clData1);
 	cmd = (uint32_t) (unsigned long)(clkData->clData2);
 	clkData->timeObj->function = 0;
@@ -1313,6 +1239,7 @@ lpfc_els_retry_delay(unsigned long ptr)
 		lpfc_issue_els_logo(phba, ndlp, retry);
 		break;
 	}
+out:
 	LPFC_DRVR_UNLOCK(phba, iflag);
 	return;
 }
@@ -1652,14 +1579,6 @@ lpfc_prep_els_iocb(lpfcHBA_t * phba,
 		list_add(&pRsp->list, &pCmd->list);
 	}
 
-	/* The els iocb is fully initialize.  Flush it to main store for the
-	 * HBA.  Note that all els iocb context buffer are from the driver's
-	 * dma pool and have length LPFC_BPL_SIZE. Get a short-hand pointer to
-	 * the physical address.
-	 */
-	pci_dma_sync_single(phba->pcidev, pBufList->phys, LPFC_BPL_SIZE,
-			    PCI_DMA_TODEVICE);
-
 	if (expectRsp) {
 		/* Xmit ELS command <elsCmd> to remote NPORT <did> */
 		lpfc_printf_log(phba->brd_no, &lpfc_msgBlk0116, lpfc_mes0116,
@@ -1863,7 +1782,6 @@ lpfc_els_rsp_acc(lpfcHBA_t * phba,
 	LPFC_IOCBQ_t *elsiocb;
 	LPFC_SLI_RING_t *pring;
 	LPFC_SLI_t *psli;
-	DMABUF_t *bmp;
 	uint8_t *pCmd;
 	uint16_t cmdsize;
 
@@ -1910,10 +1828,6 @@ lpfc_els_rsp_acc(lpfcHBA_t * phba,
 	if (newnode)
 		elsiocb->context1 = 0;
 
-	bmp = (DMABUF_t *) (elsiocb->context2);
-	pci_dma_sync_single(phba->pcidev, bmp->phys, LPFC_BPL_SIZE,
-			    PCI_DMA_TODEVICE);
-
 	if (ndlp->nlp_flag & NLP_LOGO_ACC) {
 		elsiocb->iocb_cmpl = lpfc_cmpl_els_logo_acc;
 	} else {
@@ -1938,7 +1852,6 @@ lpfc_els_rsp_reject(lpfcHBA_t * phba, uint32_t rejectError,
 	LPFC_IOCBQ_t *elsiocb;
 	LPFC_SLI_RING_t *pring;
 	LPFC_SLI_t *psli;
-	DMABUF_t *bmp;
 	uint8_t *pCmd;
 	uint16_t cmdsize;
 
@@ -1959,15 +1872,6 @@ lpfc_els_rsp_reject(lpfcHBA_t * phba, uint32_t rejectError,
 	*((uint32_t *) (pCmd)) = ELS_CMD_LS_RJT;
 	pCmd += sizeof (uint32_t);
 	*((uint32_t *) (pCmd)) = rejectError;
-
-	/* The els iocb is fully initialize.  Flush it to main store for the
-	 * HBA.  Note that all els iocb context buffer are from the driver's
-	 * dma pool and have length LPFC_BPL_SIZE. Get a short-hand pointer to
-	 * the physical address.
-	 */
-	bmp = (DMABUF_t *) (elsiocb->context2);
-	pci_dma_sync_single(phba->pcidev, bmp->phys, LPFC_BPL_SIZE,
-			    PCI_DMA_TODEVICE);
 
 	phba->fc_stat.elsXmitLSRJT++;
 	elsiocb->iocb_cmpl = lpfc_cmpl_els_acc;
@@ -1990,7 +1894,6 @@ lpfc_els_rsp_adisc_acc(lpfcHBA_t * phba,
 	LPFC_IOCBQ_t *elsiocb;
 	LPFC_SLI_RING_t *pring;
 	LPFC_SLI_t *psli;
-	DMABUF_t *bmp;
 	uint8_t *pCmd;
 	uint16_t cmdsize;
 
@@ -2017,15 +1920,6 @@ lpfc_els_rsp_adisc_acc(lpfcHBA_t * phba,
 	memcpy(&ap->nodeName, &phba->fc_nodename, sizeof (NAME_TYPE));
 	ap->DID = be32_to_cpu(phba->fc_myDID);
 
-	/* The els iocb is fully initialize.  Flush it to main store for the
-	 * HBA.  Note that all els iocb context buffer are from the driver's
-	 * dma pool and have length LPFC_BPL_SIZE. Get a short-hand pointer to
-	 * the physical address.
-	 */
-	bmp = (DMABUF_t *) (elsiocb->context2);
-	pci_dma_sync_single(phba->pcidev, bmp->phys, LPFC_BPL_SIZE,
-			    PCI_DMA_TODEVICE);
-
 	phba->fc_stat.elsXmitACC++;
 	elsiocb->iocb_cmpl = lpfc_cmpl_els_acc;
 
@@ -2048,7 +1942,6 @@ lpfc_els_rsp_prli_acc(lpfcHBA_t * phba,
 	LPFC_IOCBQ_t *elsiocb;
 	LPFC_SLI_RING_t *pring;
 	LPFC_SLI_t *psli;
-	DMABUF_t *bmp;
 	uint8_t *pCmd;
 	uint16_t cmdsize;
 
@@ -2095,15 +1988,6 @@ lpfc_els_rsp_prli_acc(lpfcHBA_t * phba,
 	npr->prliType = PRLI_FCP_TYPE;
 	npr->initiatorFunc = 1;
 
-	/* The els iocb is fully initialize.  Flush it to main store for the
-	 * HBA.  Note that all els iocb context buffer are from the driver's
-	 * dma pool and have length LPFC_BPL_SIZE. Get a short-hand pointer to
-	 * the physical address.
-	 */
-	bmp = (DMABUF_t *) (elsiocb->context2);
-	pci_dma_sync_single(phba->pcidev, bmp->phys, LPFC_BPL_SIZE,
-			    PCI_DMA_TODEVICE);
-
 	phba->fc_stat.elsXmitACC++;
 	elsiocb->iocb_cmpl = lpfc_cmpl_els_acc;
 
@@ -2126,7 +2010,6 @@ lpfc_els_rsp_rnid_acc(lpfcHBA_t * phba,
 	LPFC_IOCBQ_t *elsiocb;
 	LPFC_SLI_RING_t *pring;
 	LPFC_SLI_t *psli;
-	DMABUF_t *bmp;
 	uint8_t *pCmd;
 	uint16_t cmdsize;
 	lpfcCfgParam_t *clp;
@@ -2176,15 +2059,6 @@ lpfc_els_rsp_rnid_acc(lpfcHBA_t * phba,
 		rn->SpecificLen = 0;
 		break;
 	}
-
-	/* The els iocb is fully initialize.  Flush it to main store for the
-	 * HBA.  Note that all els iocb context buffer are from the driver's
-	 * dma pool and have length LPFC_BPL_SIZE. Get a short-hand pointer to
-	 * the physical address.
-	 */
-	bmp = (DMABUF_t *) (elsiocb->context2);
-	pci_dma_sync_single(phba->pcidev, bmp->phys, LPFC_BPL_SIZE,
-			    PCI_DMA_TODEVICE);
 
 	phba->fc_stat.elsXmitACC++;
 	elsiocb->iocb_cmpl = lpfc_cmpl_els_acc;
@@ -2597,13 +2471,6 @@ lpfc_els_rcv_rscn(lpfcHBA_t * phba,
 	pCmd = (DMABUF_t *) cmdiocb->context2;
 	lp = (uint32_t *) pCmd->virt;
 
-	/* The response iocb was populated by the HBA.  Flush it to main store
-	 * for the driver.  Note that all iocb context buffers are from the
-	 * driver's dma pool and have length LPFC_BPL_SIZE.
-	 */
-	pci_dma_sync_single(phba->pcidev, pCmd->phys, LPFC_BPL_SIZE,
-			    PCI_DMA_FROMDEVICE);
-
 	cmd = *lp++;
 	payload_len = be32_to_cpu(cmd) & 0xffff;	/* payload length */
 	payload_len -= sizeof (uint32_t);	/* take off word 0 */
@@ -2738,13 +2605,6 @@ lpfc_els_rcv_flogi(lpfcHBA_t * phba,
 	pCmd = (DMABUF_t *) cmdiocb->context2;
 	lp = (uint32_t *) pCmd->virt;
 
-	/* The response iocb was populated by the HBA.  Flush it to main store
-	 * for the driver.  Note that all iocb context buffers are from the
-	 * driver's dma pool and have length LPFC_BPL_SIZE.
-	 */
-	pci_dma_sync_single(phba->pcidev, pCmd->phys, LPFC_BPL_SIZE,
-			    PCI_DMA_FROMDEVICE);
-
 	cmd = *lp++;
 	sp = (SERV_PARM *) lp;
 
@@ -2829,13 +2689,6 @@ lpfc_els_rcv_rnid(lpfcHBA_t * phba,
 	pCmd = (DMABUF_t *) cmdiocb->context2;
 	lp = (uint32_t *) pCmd->virt;
 
-	/* The response iocb was populated by the HBA.  Flush it to main store
-	 * for the driver.  Note that all iocb context buffers are from the
-	 * driver's dma pool and have length LPFC_BPL_SIZE.
-	 */
-	pci_dma_sync_single(phba->pcidev, pCmd->phys, LPFC_BPL_SIZE,
-			    PCI_DMA_FROMDEVICE);
-
 	cmd = *lp++;
 	rn = (RNID *) lp;
 
@@ -2877,13 +2730,6 @@ lpfc_els_rcv_rrq(lpfcHBA_t * phba, LPFC_IOCBQ_t * cmdiocb,
 	pCmd = (DMABUF_t *) cmdiocb->context2;
 	lp = (uint32_t *) pCmd->virt;
 
-	/* The response iocb was populated by the HBA.  Flush it to main store
-	 * for the driver.  Note that all iocb context buffers are from the
-	 * driver's dma pool and have length LPFC_BPL_SIZE.
-	 */
-	pci_dma_sync_single(phba->pcidev, pCmd->phys, LPFC_BPL_SIZE,
-			    PCI_DMA_FROMDEVICE);
-
 	cmd = *lp++;
 	rrq = (RRQ *) lp;
 
@@ -2914,13 +2760,6 @@ lpfc_els_rcv_farp(lpfcHBA_t * phba,
 	did = icmd->un.elsreq64.remoteID;
 	pCmd = (DMABUF_t *) cmdiocb->context2;
 	lp = (uint32_t *) pCmd->virt;
-
-	/* The response iocb was populated by the HBA.  Flush it to main store
-	 * for the driver.  Note that all iocb context buffers are from the
-	 * driver's dma pool and have length LPFC_BPL_SIZE.
-	 */
-	pci_dma_sync_single(phba->pcidev, pCmd->phys, LPFC_BPL_SIZE,
-			    PCI_DMA_FROMDEVICE);
 
 	cmd = *lp++;
 	fp = (FARP *) lp;
@@ -2980,13 +2819,6 @@ lpfc_els_rcv_farpr(lpfcHBA_t * phba,
 	pCmd = (DMABUF_t *) cmdiocb->context2;
 	lp = (uint32_t *) pCmd->virt;
 
-	/* The response iocb was populated by the HBA.  Flush it to main store
-	 * for the driver.  Note that all iocb context buffers are from the
-	 * driver's dma pool and have length LPFC_BPL_SIZE.
-	 */
-	pci_dma_sync_single(phba->pcidev, pCmd->phys, LPFC_BPL_SIZE,
-			    PCI_DMA_FROMDEVICE);
-
 	cmd = *lp++;
 	/* FARP-RSP received from DID <did> */
 	lpfc_printf_log(phba->brd_no, &lpfc_msgBlk0600,
@@ -3002,53 +2834,9 @@ int
 lpfc_els_rcv_fan(lpfcHBA_t * phba, LPFC_IOCBQ_t * cmdiocb,
 		 LPFC_NODELIST_t * ndlp)
 {
-	DMABUF_t *pCmd;
-	uint32_t *lp;
-	IOCB_t *icmd;
-	FAN *fp;
-	uint32_t cmd, did;
-
-	icmd = &cmdiocb->iocb;
-	did = icmd->un.elsreq64.remoteID;
-	pCmd = (DMABUF_t *) cmdiocb->context2;
-	lp = (uint32_t *) pCmd->virt;
-
-	/* The response iocb was populated by the HBA.  Flush it to main store
-	 * for the driver.  Note that all iocb context buffers are from the
-	 * driver's dma pool and have length LPFC_BPL_SIZE.
-	 */
-	pci_dma_sync_single(phba->pcidev, pCmd->phys, LPFC_BPL_SIZE,
-			    PCI_DMA_FROMDEVICE);
-
-	cmd = *lp++;
-	fp = (FAN *) lp;
-
-	/* FAN received */
-
-	/* ACCEPT the FAN request */
-	lpfc_els_rsp_acc(phba, ELS_CMD_ACC, cmdiocb, ndlp, 0, 0);
-
-	if (phba->hba_state == LPFC_LOCAL_CFG_LINK) {
-		/* The discovery state machine needs to take a different
-		 * action if this node has switched fabrics 
-		 */
-		if ((lpfc_geportname((NAME_TYPE *) & fp->FportName,
-				     (NAME_TYPE *) & phba->fc_fabparam.
-				     portName) != 2)
-		    ||
-		    (lpfc_geportname
-		     ((NAME_TYPE *) & fp->FnodeName,
-		      (NAME_TYPE *) & phba->fc_fabparam.nodeName) != 2)) {
-			/* This node has switched fabrics.  An FLOGI is required
-			 * after the timeout
-			 */
-			return (0);
-		}
-
-		/* Start discovery */
-		lpfc_disc_start(phba);
-	}
-
+	lpfc_printf_log(phba->brd_no, &lpfc_msgBlk0261,
+			lpfc_mes0261,
+			lpfc_msgBlk0261.msgPreambleStr);
 	return (0);
 }
 
@@ -3136,6 +2924,12 @@ lpfc_els_timeout_handler(unsigned long ptr)
 	elsClkData = (struct clk_data *)ptr;
 	phba = elsClkData->phba;
 	LPFC_DRVR_LOCK(phba, iflag);
+       	if (elsClkData->flags & TM_CANCELED) {
+		list_del((struct list_head *)elsClkData);
+		kfree(elsClkData);	
+		goto out;
+	}
+
 	timeout = (uint32_t) (unsigned long)(elsClkData->clData1);
 	phba->els_tmofunc.function = 0;
 	list_del((struct list_head *)elsClkData);
@@ -3204,6 +2998,7 @@ lpfc_els_timeout_handler(unsigned long ptr)
 	lpfc_start_timer(phba, next_timeout, &phba->els_tmofunc,
 			 lpfc_els_timeout_handler,
 			 (unsigned long)next_timeout, (unsigned long)0);
+out:
 	LPFC_DRVR_UNLOCK(phba, iflag);
 }
 

@@ -971,7 +971,8 @@ int __get_user_pages(struct task_struct *tsk, struct mm_struct *mm, unsigned lon
 				 */
 				if (!page)
 					goto bad_page;
-				page_cache_get(page);
+				if (!PageReserved(page))
+					page_cache_get(page);
 				/* It's important to do this while still
 				 * holding page_table_lock! */
 				if (pin && !PageReserved(page))

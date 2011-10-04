@@ -1,9 +1,9 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
- * Enterprise Fibre Channel Host Bus Adapters.                     *
+ * Fibre Channel Host Bus Adapters.                                *
  * Refer to the README file included with this package for         *
  * driver version and adapter support.                             *
- * Copyright (C) 2004 Emulex Corporation.                          *
+ * Copyright (C) 2003-2005 Emulex.  All rights reserved.           *
  * www.emulex.com                                                  *
  *                                                                 *
  * This program is free software; you can redistribute it and/or   *
@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_mbox.c 1.32.1.2 2004/07/14 09:13:51EDT sf_support Exp  $
+ * $Id: lpfc_mbox.c 1.9 2005/05/03 11:21:52EDT sf_support Exp  $
  */
 #include <linux/version.h>
 #include <linux/spinlock.h>
@@ -45,21 +45,27 @@
 /*                mailbox command             */
 /**********************************************/
 void
-lpfc_dump_mem(lpfcHBA_t * phba, LPFC_MBOXQ_t * pmb)
+lpfc_dump_mem(lpfcHBA_t * phba, LPFC_MBOXQ_t * pmb, uint16_t offset)
 {
 	MAILBOX_t *mb;
+	void *ctx;
 
 	mb = &pmb->mb;
+	ctx = pmb->context2;
+
 	/* Setup to dump VPD region */
 	memset(pmb, 0, sizeof (LPFC_MBOXQ_t));
 	mb->mbxCommand = MBX_DUMP_MEMORY;
 	mb->un.varDmp.cv = 1;
 	mb->un.varDmp.type = DMP_NV_PARAMS;
+	mb->un.varDmp.entry_index = offset;
 	mb->un.varDmp.region_id = DMP_REGION_VPD;
-	mb->un.varDmp.word_cnt = (DMP_VPD_SIZE / sizeof (uint32_t));
+	mb->un.varDmp.word_cnt = (DMP_RSP_SIZE / sizeof (uint32_t));
 
 	mb->un.varDmp.co = 0;
 	mb->un.varDmp.resp_offset = 0;
+	pmb->context2 = ctx;
+
 	mb->mbxOwner = OWN_HOST;
 	return;
 }
@@ -111,10 +117,6 @@ lpfc_read_la(lpfcHBA_t * phba, LPFC_MBOXQ_t * pmb)
 	mb->un.varReadLA.un.lilpBde64.tus.f.bdeSize = 128;
 	mb->un.varReadLA.un.lilpBde64.addrHigh = putPaddrHigh(mp->phys);
 	mb->un.varReadLA.un.lilpBde64.addrLow = putPaddrLow(mp->phys);
-
-	/* Sync the mailbox data with its PCI memory address now. */
-	pci_dma_sync_single(phba->pcidev, mp->phys, LPFC_BPL_SIZE,
-				PCI_DMA_TODEVICE);
 
 	/* Save address for later completion and set the owner to host so that
 	 * the FW knows this mailbox is available for processing. 
@@ -216,16 +218,21 @@ lpfc_init_link(lpfcHBA_t * phba,
 		break;
 	}
 
-	/* NEW_FEATURE
-	 * Setting up the link speed
-	 */
 	vpd = &phba->vpd;
-	if (phba->fc_flag & FC_2G_CAPABLE) {
-		if ((vpd->rev.feaLevelHigh >= 0x02) && (linkspeed > 0)) {
+	if (vpd->rev.feaLevelHigh >= 0x02) {
+		switch(linkspeed) {
+		case LINK_SPEED_1G:
+		case LINK_SPEED_2G:
+		case LINK_SPEED_4G:
 			mb->un.varInitLnk.link_flags |= FLAGS_LINK_SPEED;
 			mb->un.varInitLnk.link_speed = linkspeed;
+			break;
+		case LINK_SPEED_AUTO:
+		default:
+			mb->un.varInitLnk.link_speed = LINK_SPEED_AUTO;
 		}
-	}
+	} else
+		mb->un.varInitLnk.link_speed = LINK_SPEED_AUTO;
 
 	mb->mbxCommand = (volatile uint8_t)MBX_INIT_LINK;
 	mb->mbxOwner = OWN_HOST;
@@ -267,9 +274,6 @@ lpfc_read_sparam(lpfcHBA_t * phba, LPFC_MBOXQ_t * pmb)
 	mb->un.varRdSparm.un.sp64.tus.f.bdeSize = sizeof (SERV_PARM);
 	mb->un.varRdSparm.un.sp64.addrHigh = putPaddrHigh(mp->phys);
 	mb->un.varRdSparm.un.sp64.addrLow = putPaddrLow(mp->phys);
-
-	pci_dma_sync_single(phba->pcidev, mp->phys, LPFC_BPL_SIZE,
-				PCI_DMA_TODEVICE);
 
 	/* save address for completion */
 	pmb->context1 = mp;
@@ -433,10 +437,6 @@ lpfc_reg_login(lpfcHBA_t * phba,
 	/* Copy param's into a new buffer */
 	memcpy(sparam, param, sizeof (SERV_PARM));
 
-	/* Sync the mailbox data with its PCI memory address now. */
-	pci_dma_sync_single(phba->pcidev, mp->phys, LPFC_BPL_SIZE,
-				PCI_DMA_TODEVICE);
-
 	/* save address for completion */
 	pmb->context1 = (uint8_t *) mp;
 
@@ -537,10 +537,6 @@ lpfc_config_pcb_setup(lpfcHBA_t * phba)
 		iocbCnt += pringinit->numRiocb;
 	}
 
-	/* Sync the mailbox data with its PCI memory address now. */
-	pci_dma_sync_single(phba->pcidev, phba->slim2p.phys, 
-				LPFC_SLIM2_PAGE_AREA, PCI_DMA_TODEVICE);
-
 	/* special handling for LC HBAs */
 	if (lpfc_is_LC_HBA(phba->pcidev->device)) {
 		lpfc_hba_init(phba);
@@ -613,6 +609,9 @@ lpfc_config_port(lpfcHBA_t * phba, LPFC_MBOXQ_t * pmb)
 	uint32_t *hbainit;
 	dma_addr_t pdma_addr;
 	uint32_t offset;
+	HGP hgp;
+	void *to_slim;
+	uint32_t bar0_config_word, bar1_config_word;
 
 	mb = &pmb->mb;
 	memset(pmb, 0, sizeof (LPFC_MBOXQ_t));
@@ -647,42 +646,28 @@ lpfc_config_port(lpfcHBA_t * phba, LPFC_MBOXQ_t * pmb)
 	((SLI2_SLIM_t *) phba->slim2p.virt)->un.slim.pcb.mbAddrLow =
 	    putPaddrLow(pdma_addr);
 
-	/* Setup Host Group ring counters */
-	if (psli->sliinit.sli_flag & LPFC_HGP_HOSTSLIM) {
-		offset =
-		    (uint8_t *) (&((SLI2_SLIM_t *) phba->slim2p.virt)->un.slim.
-				 mbx.us.s2.host) -
-		    (uint8_t *) phba->slim2p.virt;
-		pdma_addr = phba->slim2p.phys + offset;
-		((SLI2_SLIM_t *) phba->slim2p.virt)->un.slim.pcb.hgpAddrHigh =
-		    putPaddrHigh(pdma_addr);
-		((SLI2_SLIM_t *) phba->slim2p.virt)->un.slim.pcb.hgpAddrLow =
-		    putPaddrLow(pdma_addr);
+	
+	pci_read_config_dword(phba->pcidev, PCI_BASE_ADDRESS_0, &bar0_config_word);
+	pci_read_config_dword(phba->pcidev, PCI_BASE_ADDRESS_1, &bar1_config_word);
+	if (bar0_config_word & PCI_BASE_ADDRESS_MEM_TYPE_64) {
+		((SLI2_SLIM_t *) phba->slim2p.virt)->
+			un.slim.pcb.hgpAddrHigh = bar1_config_word;
 	} else {
-		HGP hgp;
-		void *to_slim;
-		uint32_t bar0_config_word, bar1_config_word;
-		pci_read_config_dword(phba->pcidev, PCI_BASE_ADDRESS_0, &bar0_config_word);
-		pci_read_config_dword(phba->pcidev, PCI_BASE_ADDRESS_1, &bar1_config_word);
-		if (bar0_config_word & PCI_BASE_ADDRESS_MEM_TYPE_64) {
-			((SLI2_SLIM_t *) phba->slim2p.virt)->
-				un.slim.pcb.hgpAddrHigh = bar1_config_word;
-		} else {
-			((SLI2_SLIM_t *) phba->slim2p.virt)->
-				un.slim.pcb.hgpAddrHigh = 0;
-		}
-		bar0_config_word &= PCI_BASE_ADDRESS_MEM_MASK;
-
-		((SLI2_SLIM_t *) phba->slim2p.virt)->un.slim.pcb.hgpAddrLow = 
-			(uint32_t) (bar0_config_word
-				    + (SLIMOFF * sizeof (uint32_t)));
-		memset(&hgp, 0, sizeof (HGP));
-
-		/* write HGP data to SLIM */
-		to_slim = (uint8_t *) phba->MBslimaddr
-			+ (SLIMOFF * sizeof (uint32_t));
-		lpfc_memcpy_to_slim( to_slim,  &hgp, sizeof (HGP));
+		((SLI2_SLIM_t *) phba->slim2p.virt)->
+			un.slim.pcb.hgpAddrHigh = 0;
 	}
+	bar0_config_word &= PCI_BASE_ADDRESS_MEM_MASK;
+
+	((SLI2_SLIM_t *) phba->slim2p.virt)->un.slim.pcb.hgpAddrLow = 
+		(uint32_t) (bar0_config_word
+			    + (SLIMOFF * sizeof (uint32_t)));
+	memset(&hgp, 0, sizeof (HGP));
+
+	/* write HGP data to SLIM */
+	to_slim = (uint8_t *) phba->MBslimaddr
+		+ (SLIMOFF * sizeof (uint32_t));
+	lpfc_memcpy_to_slim( to_slim,  &hgp, sizeof (HGP));
+	
 
 	/* Setup Port Group ring counters */
 	offset =
@@ -706,9 +691,6 @@ lpfc_config_port(lpfcHBA_t * phba, LPFC_MBOXQ_t * pmb)
 			     (uint32_t
 			      *) (&((SLI2_SLIM_t *) phba->slim2p.virt)->un.slim.
 				  pcb), sizeof (PCB_t));
-
-	pci_dma_sync_single(phba->pcidev, phba->slim2p.phys, 
-				LPFC_SLIM2_PAGE_AREA, PCI_DMA_TODEVICE);
 
 	/* Service Level Interface (SLI) 2 selected */
 	lpfc_printf_log(phba->brd_no, &lpfc_msgBlk0405,

@@ -118,13 +118,13 @@ static int putreg(struct task_struct *child,
 			child->thread.es = value & 0xffff;
 			return 0;
 		case offsetof(struct user_regs_struct,fs_base):
-			if (!((value >> 48) == 0 || (value >> 48) == 0xffff))
-				return -EIO; 
+			if (value >= TASK_SIZE)
+				return -EIO;
 			child->thread.fs = value;
 			return 0;
 		case offsetof(struct user_regs_struct,gs_base):
-			if (!((value >> 48) == 0 || (value >> 48) == 0xffff))
-				return -EIO; 
+			if (value >= TASK_SIZE)
+				return -EIO;
 			child->thread.gs = value;
 			return 0;
 		case offsetof(struct user_regs_struct, eflags):
@@ -142,8 +142,20 @@ static int putreg(struct task_struct *child,
 			if ((value & 3) != 3)
 				return -EIO;
 			value &= 0xffff;
-            break;
-	}      
+			break;
+		case offsetof(struct user_regs_struct, rip):
+			/*
+			 * If the %rip value is bogus (noncanonical), then
+			 * sysretq can take a #GP fault in kernel mode.  We
+			 * can't afford to let it, because the trap won't
+			 * switch stacks and so would try to run on the
+			 * user stack.  So just disallow directly setting
+			 * any value in danger of being noncanonical.
+			 */
+			if (value >= TASK_SIZE)
+				return -EIO;
+			break;
+	}
 	put_stack_long(child, regno - sizeof(struct pt_regs), value);
 	return 0;
 }
@@ -446,15 +458,6 @@ asmlinkage long sys_ptrace(long request, long pid, long addr, long data)
 		ret = set_fpregs(child, (struct user_i387_struct *)data);
 		if (!ret) 
 			child->used_math = 1;
-		break;
-	}
-
-	case PTRACE_SETOPTIONS: {
-		if (data & PTRACE_O_TRACESYSGOOD)
-			child->ptrace |= PT_TRACESYSGOOD;
-		else
-			child->ptrace &= ~PT_TRACESYSGOOD;
-		ret = 0;
 		break;
 	}
 

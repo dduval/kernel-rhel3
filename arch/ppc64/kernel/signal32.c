@@ -944,6 +944,9 @@ setup_rt_frame32(struct pt_regs *regs, int sig, struct k_sigaction *ka,
 	 */
 	newsp -= __SIGNAL_FRAMESIZE32;
 
+	if (put_user((u32)(regs->gpr[1]), (unsigned int *)(u64)newsp))
+		goto badframe;
+
 	regs->gpr[1] = newsp;
 	regs->gpr[3] = sig;
 	regs->gpr[4] = (unsigned long) &rt_sf->info;
@@ -951,9 +954,6 @@ setup_rt_frame32(struct pt_regs *regs, int sig, struct k_sigaction *ka,
 	regs->gpr[6] = (unsigned long) rt_sf;
 	regs->nip    = (unsigned long) ka->sa.sa_handler;
 	regs->link   = (unsigned long) frame->tramp;
-
-	if (put_user((u32)(regs->gpr[1]), (unsigned int *)(u64)newsp))
-		goto badframe;
 
 	if (current->ptrace & PT_SINGLESTEP)
 		ptrace_notify(SIGTRAP);
@@ -1040,17 +1040,6 @@ handle_signal32(unsigned long sig, siginfo_t *info, sigset_t *oldset,
 			goto badframe;
 	}
 
-	if (ka->sa.sa_flags & SA_ONESHOT)
-		ka->sa.sa_handler = SIG_DFL;
-
-	if (!(ka->sa.sa_flags & SA_NODEFER)) {
-		spin_lock_irq(&current->sighand->siglock);
-		sigorsets(&current->blocked,&current->blocked,&ka->sa.sa_mask);
-		sigaddset(&current->blocked,sig);
-		recalc_sigpending();
-		spin_unlock_irq(&current->sighand->siglock);
-	}
-	
 	return;
 
 badframe:
@@ -1169,6 +1158,18 @@ int do_signal32(sigset_t *oldset, struct pt_regs *regs)
 	else
 		setup_frame32(regs, signr, ka,
 			      (struct sigregs32*)(u64)frame, newsp);
+
+        if (ka->sa.sa_flags & SA_ONESHOT)
+                ka->sa.sa_handler = SIG_DFL;
+
+        if (!(ka->sa.sa_flags & SA_NODEFER)) {
+                spin_lock_irq(&current->sighand->siglock);
+                sigorsets(&current->blocked,&current->blocked,&ka->sa.sa_mask);
+                sigaddset(&current->blocked,signr);
+                recalc_sigpending();
+                spin_unlock_irq(&current->sighand->siglock);
+        }
+
 	return 1;
 }
 

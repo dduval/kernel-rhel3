@@ -1,32 +1,12 @@
 /*
  *  linux/drivers/message/fusion/mptlan.c
  *      IP Over Fibre Channel device driver.
- *      For use with PCI chip/adapter(s):
- *          LSIFC9xx/LSI409xx Fibre Channel
+ *      For use with LSI Logic Fibre Channel PCI chip/adapters
  *      running LSI Logic Fusion MPT (Message Passing Technology) firmware.
  *
- *  Credits:
- *      This driver would not exist if not for Alan Cox's development
- *      of the linux i2o driver.
+ *  Copyright (c) 2000-2005 LSI Logic Corporation
  *
- *      Special thanks goes to the I2O LAN driver people at the
- *      University of Helsinki, who, unbeknownst to them, provided
- *      the inspiration and initial structure for this driver.
- *
- *      A huge debt of gratitude is owed to David S. Miller (DaveM)
- *      for fixing much of the stupid and broken stuff in the early
- *      driver while porting to sparc64 platform.  THANK YOU!
- *
- *      A really huge debt of gratitude is owed to Eddie C. Dost
- *      for gobs of hard work fixing and optimizing LAN code.
- *      THANK YOU!
- *
- *      (see also mptbase.c)
- *
- *  Copyright (c) 2000-2004 LSI Logic Corporation
- *  Originally By: Noah Romer
- *
- *  $Id: mptlan.c,v 1.55 2003/05/07 14:08:32 pdelaney Exp $
+ *  $Id: mptlan.c,v 1.55 2003/05/07 14:08:32 Exp $
  */
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
 /*
@@ -176,11 +156,9 @@ static int LanCtx = -1;
 static u32 max_buckets_out = 127;
 static u32 tx_max_out_p = 127 - 16;
 
-static struct net_device *mpt_landev[MPT_MAX_ADAPTERS+1];
-
 #ifdef QLOGIC_NAA_WORKAROUND
 static struct NAA_Hosed *mpt_bad_naa = NULL;
-rwlock_t bad_naa_lock;
+rwlock_t bad_naa_lock = RW_LOCK_UNLOCKED;
 #endif
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
@@ -202,7 +180,7 @@ extern int mpt_lan_index;
 static int
 lan_reply (MPT_ADAPTER *ioc, MPT_FRAME_HDR *mf, MPT_FRAME_HDR *reply)
 {
-	struct net_device *dev = mpt_landev[ioc->id];
+	struct net_device *dev = ioc->mpt_landev;
 	int FreeReqFrame = 0;
 
 	dioprintk((KERN_INFO MYNAM ": %s/%s: Got reply.\n",
@@ -222,7 +200,7 @@ lan_reply (MPT_ADAPTER *ioc, MPT_FRAME_HDR *mf, MPT_FRAME_HDR *reply)
 
 		// NOTE!  (Optimization) First case here is now caught in
 		//  mptbase.c::mpt_interrupt() routine and callcack here
-		//  is now skipped for this case!  20001218 -sralston
+		//  is now skipped for this case!
 #if 0
 		case LAN_REPLY_FORM_MESSAGE_CONTEXT:
 //			dioprintk((KERN_INFO MYNAM "/lan_reply: "
@@ -235,7 +213,7 @@ lan_reply (MPT_ADAPTER *ioc, MPT_FRAME_HDR *mf, MPT_FRAME_HDR *reply)
 //			dioprintk((MYNAM "/lan_reply: "
 //				  "calling mpt_lan_send_reply (turbo)\n"));
 
-			// Potential BUG here?  -sralston
+			// Potential BUG here?
 			//	FreeReqFrame = mpt_lan_send_turbo(dev, tmsg);
 			//  If/when mpt_lan_send_turbo would return 1 here,
 			//  calling routine (mptbase.c|mpt_interrupt)
@@ -311,8 +289,7 @@ lan_reply (MPT_ADAPTER *ioc, MPT_FRAME_HDR *mf, MPT_FRAME_HDR *reply)
 
 	case MPI_FUNCTION_EVENT_NOTIFICATION:
 	case MPI_FUNCTION_EVENT_ACK:
-		/* UPDATE!  20010120 -sralston
-		 *  _EVENT_NOTIFICATION should NOT come down this path any more.
+		/*  _EVENT_NOTIFICATION should NOT come down this path any more.
 		 *  Should be routed to mpt_lan_event_process(), but just in case...
 		 */
 		FreeReqFrame = 1;
@@ -328,6 +305,12 @@ lan_reply (MPT_ADAPTER *ioc, MPT_FRAME_HDR *mf, MPT_FRAME_HDR *reply)
 		break;
 	}
 
+#ifdef MPT_LAN_IO_DEBUG
+	if (FreeReqFrame == 0) {
+		dioprintk((MYIOC_s_WARN_FMT "lan_reply: does not return Request frame %p\n",
+			ioc->name, reply));
+	}
+#endif
 	return FreeReqFrame;
 }
 
@@ -335,7 +318,7 @@ lan_reply (MPT_ADAPTER *ioc, MPT_FRAME_HDR *mf, MPT_FRAME_HDR *reply)
 static int
 mpt_lan_ioc_reset(MPT_ADAPTER *ioc, int reset_phase)
 {
-	struct net_device *dev = mpt_landev[ioc->id];
+	struct net_device *dev = ioc->mpt_landev;
 	struct mpt_lan_priv *priv = (struct mpt_lan_priv *) dev->priv;
 
 	dlprintk((KERN_INFO MYNAM ": IOC %s_reset routed to LAN driver!\n",
@@ -501,7 +484,7 @@ mpt_lan_reset(struct net_device *dev)
 	LANResetRequest_t *pResetReq;
 	struct mpt_lan_priv *priv = (struct mpt_lan_priv *)dev->priv;
 
-	mf = mpt_get_msg_frame(LanCtx, priv->mpt_dev->id);
+	mf = mpt_get_msg_frame(LanCtx, priv->mpt_dev);
 
 	if (mf == NULL) {
 /*		dlprintk((KERN_ERR MYNAM "/reset: Evil funkiness abounds! "
@@ -519,7 +502,7 @@ mpt_lan_reset(struct net_device *dev)
 	pResetReq->MsgFlags	= 0;
 	pResetReq->Reserved2	= 0;
 
-	mpt_put_msg_frame(LanCtx, priv->mpt_dev->id, mf);
+	mpt_put_msg_frame(LanCtx, priv->mpt_dev, mf);
 
 	return 0;
 }
@@ -722,6 +705,12 @@ out:
 		FreeReqFrame = 1;
 
 	netif_wake_queue(dev);
+#ifdef MPT_LAN_IO_DEBUG
+	if (FreeReqFrame == 0) {
+		dioprintk((MYIOC_s_WARN_FMT "mpt_lan_send_reply: does not return Request frame %p\n",
+			mpt_dev->name, pSendRep));
+	}
+#endif
 	return FreeReqFrame;
 }
 
@@ -753,7 +742,7 @@ mpt_lan_sdu_send (struct sk_buff *skb, struct net_device *dev)
 		return 1;
 	}
 
-	mf = mpt_get_msg_frame(LanCtx, mpt_dev->id);
+	mf = mpt_get_msg_frame(LanCtx, mpt_dev);
 	if (mf == NULL) {
 		netif_stop_queue(dev);
 		spin_unlock_irqrestore(&priv->txfidx_lock, flags);
@@ -858,7 +847,7 @@ mpt_lan_sdu_send (struct sk_buff *skb, struct net_device *dev)
 	else
 		pSimple->Address.High = 0;
 
-	mpt_put_msg_frame (LanCtx, mpt_dev->id, mf);
+	mpt_put_msg_frame (LanCtx, mpt_dev, mf);
 	dev->trans_start = jiffies;
 
 	dioprintk((KERN_INFO MYNAM ": %s/%s: Sending packet. FlagsLength = %08x.\n",
@@ -1238,7 +1227,7 @@ mpt_lan_post_receive_buckets(void *dev_id)
 			(MPT_LAN_TRANSACTION32_SIZE + sizeof(SGESimple64_t));
 
 	while (buckets) {
-		mf = mpt_get_msg_frame(LanCtx, mpt_dev->id);
+		mf = mpt_get_msg_frame(LanCtx, mpt_dev);
 		if (mf == NULL) {
 			printk (KERN_ERR "%s: Unable to alloc request frame\n",
 				__FUNCTION__);
@@ -1247,6 +1236,9 @@ mpt_lan_post_receive_buckets(void *dev_id)
 			goto out;
 		}
 		pRecvReq = (LANReceivePostRequest_t *) mf;
+
+		i = le16_to_cpu(mf->u.frame.hwhdr.msgctxu.fld.req_idx);
+		mpt_dev->RequestNB[i] = 0;
 
 		count = buckets;
 		if (count > max)
@@ -1328,7 +1320,7 @@ mpt_lan_post_receive_buckets(void *dev_id)
 		if (pSimple == NULL) {
 /**/			printk (KERN_WARNING MYNAM "/%s: No buckets posted\n",
 /**/				__FUNCTION__);
-			mpt_free_msg_frame(LanCtx, mpt_dev->id, mf);
+			mpt_free_msg_frame(mpt_dev, mf);
 			goto out;
 		}
 
@@ -1342,7 +1334,7 @@ mpt_lan_post_receive_buckets(void *dev_id)
  *	printk ("\n");
  */
 
-		mpt_put_msg_frame(LanCtx, mpt_dev->id, mf);
+		mpt_put_msg_frame(LanCtx, mpt_dev, mf);
 
 		priv->total_posted += i;
 		buckets -= i;
@@ -1446,7 +1438,7 @@ int __init
 mpt_lan_init (void)
 {
 	struct net_device *dev;
-	MPT_ADAPTER *curadapter;
+	MPT_ADAPTER *ioc;
 	int i, j;
 
 	show_mptmod_ver(LANAME, LANVER);
@@ -1470,30 +1462,24 @@ mpt_lan_init (void)
 	if (mpt_reset_register(LanCtx, mpt_lan_ioc_reset) == 0) {
 		dlprintk((KERN_INFO MYNAM ": Registered for IOC reset notifications\n"));
 	} else {
-		printk(KERN_ERR MYNAM ": Eieee! unable to register a reset "
-		       "handler with mptbase! The world is at an end! "
-		       "Everything is fading to black! Goodbye.\n");
+		printk(KERN_ERR MYNAM ": Unable to register a reset "
+		       "handler with mptbase!\n");
 		return -EBUSY;
 	}
 
-	for (j = 0; j < MPT_MAX_ADAPTERS; j++) {
-		mpt_landev[j] = NULL;
-	}
-
-	curadapter = mpt_adapter_find_first();
-	while (curadapter != NULL) {
-		for (i = 0; i < curadapter->facts.NumberOfPorts; i++) {
+	list_for_each_entry(ioc,&ioc_list,list) {
+		for (i = 0; i < ioc->facts.NumberOfPorts; i++) {
 			printk (KERN_INFO MYNAM ": %s: PortNum=%x, ProtocolFlags=%02Xh (%c%c%c%c)\n",
-					curadapter->name,
-					curadapter->pfacts[i].PortNumber,
-					curadapter->pfacts[i].ProtocolFlags,
-					MPT_PROTOCOL_FLAGS_c_c_c_c(curadapter->pfacts[i].ProtocolFlags));
+					ioc->name,
+					ioc->pfacts[i].PortNumber,
+					ioc->pfacts[i].ProtocolFlags,
+					MPT_PROTOCOL_FLAGS_c_c_c_c(ioc->pfacts[i].ProtocolFlags));
 
-			if (curadapter->pfacts[i].ProtocolFlags & MPI_PORTFACTS_PROTOCOL_LAN) {
-				dev = mpt_register_lan_device (curadapter, i);
+			if (ioc->pfacts[i].ProtocolFlags & MPI_PORTFACTS_PROTOCOL_LAN) {
+				dev = mpt_register_lan_device (ioc, i);
 				if (dev != NULL) {
 					printk (KERN_INFO MYNAM ": %s: Fusion MPT LAN device registered as '%s'\n",
-							curadapter->name, dev->name);
+							ioc->name, dev->name);
 					printk (KERN_INFO MYNAM ": %s/%s: LanAddr = %02X:%02X:%02X:%02X:%02X:%02X\n",
 							IOC_AND_NETDEV_NAMES_s_s(dev),
 							dev->dev_addr[0], dev->dev_addr[1],
@@ -1502,22 +1488,20 @@ mpt_lan_init (void)
 //					printk (KERN_INFO MYNAM ": %s/%s: Max_TX_outstanding = %d\n",
 //							IOC_AND_NETDEV_NAMES_s_s(dev),
 //							NETDEV_TO_LANPRIV_PTR(dev)->tx_max_out);
-					j = curadapter->id;
-					mpt_landev[j] = dev;
+					ioc->mpt_landev = dev;
 					dlprintk((KERN_INFO MYNAM "/init: dev_addr=%p, mpt_landev[%d]=%p\n",
-							dev, j,  mpt_landev[j]));
+						dev, ioc->id, ioc->mpt_landev));
 
 				} else {
 					printk (KERN_ERR MYNAM ": %s: Unable to register port%d as a LAN device\n",
-							curadapter->name,
-							curadapter->pfacts[i].PortNumber);
+							ioc->name,
+							ioc->pfacts[i].PortNumber);
 				}
 			} else {
 				printk (KERN_INFO MYNAM ": %s: Hmmm... LAN protocol seems to be disabled on this adapter port!\n",
-						curadapter->name);
+						ioc->name);
 			}
 		}
-		curadapter = mpt_adapter_find_next(curadapter);
 	}
 
 	return 0;
@@ -1526,18 +1510,18 @@ mpt_lan_init (void)
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
 static void mpt_lan_exit(void)
 {
-	int i;
+	MPT_ADAPTER *ioc;
 
 	mpt_reset_deregister(LanCtx);
 
-	for (i = 0; mpt_landev[i] != NULL; i++) {
-		struct net_device *dev = mpt_landev[i];
+	list_for_each_entry(ioc,&ioc_list,list) {
+		struct net_device *dev = ioc->mpt_landev;
 
-		printk (KERN_INFO ": %s/%s: Fusion MPT LAN device unregistered\n",
+		if ( dev ) {
+			printk (KERN_INFO ": %s/%s: Fusion MPT LAN device unregistered\n",
 			       IOC_AND_NETDEV_NAMES_s_s(dev));
-		unregister_fcdev(dev);
-		//mpt_landev[i] = (struct net_device *) 0xdeadbeef; /* Debug */
-		mpt_landev[i] = NULL;
+			unregister_fcdev(dev);
+		}
 	}
 
 	if (LanCtx >= 0) {

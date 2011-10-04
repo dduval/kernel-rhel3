@@ -215,13 +215,10 @@ void __init cpu_init (void)
 	wrmsrl(MSR_CSTAR, ia32_cstar_target); 
 #endif
 
-	rdmsrl(MSR_EFER, efer); 
-	if (!(efer & EFER_NX) || do_not_nx) { 
-		__supported_pte_mask &= ~_PAGE_NX; 
-	} else { 
-		__supported_pte_mask |= _PAGE_NX; 
-	}
-		
+	rdmsrl(MSR_EFER, efer);
+	if (!(efer & EFER_NX) || do_not_nx)
+		__supported_pte_mask &= ~_PAGE_NX;
+
 	t->io_map_base = INVALID_IO_BITMAP_OFFSET;	
 	memset(t->io_bitmap, 0xff, sizeof(t->io_bitmap));
 

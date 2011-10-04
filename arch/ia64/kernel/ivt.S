@@ -44,6 +44,7 @@
 #include <asm/ptrace.h>
 #include <asm/system.h>
 #include <asm/unistd.h>
+#include <asm/errno.h>
 
 #if 1
 # define PSR_DEFAULT_BITS	psr.ac
@@ -688,12 +689,12 @@ ENTRY(break_fault)
 	movl r15=ia64_ret_from_syscall
 (p7)	adds r16=(__NR_ni_syscall-1024)*8,r16	// force __NR_ni_syscall
 	;;
-	ld8 r16=[r16]				// load address of syscall entry point
+(p9)	ld8 r16=[r16]				// load address of syscall entry point
 	mov rp=r15				// set the real return addr
 	;;
 	ld8 r2=[r2]				// r2 = current->ptrace
 	mov r19=PT_TRACEAUDITMASK		// r19 = PT_TRACESYS|PT_AUDITED
-	mov b6=r16
+(p9)	mov b6=r16
 
 	// arrange things so we skip over break instruction when returning:
 
@@ -717,40 +718,11 @@ ENTRY(break_fault)
 	dep r18=r20,r18,41,2			// insert new ei into cr.isr
 	;;
 	st8 [r16]=r18				// store new value for cr.isr
-
+(p10)	br.cond.spnt.many ia64_ret_from_syscall
 (p8)	br.call.sptk.many b6=b6			// ignore this return addr
 	br.cond.sptk ia64_trace_syscall
 	// NOT REACHED
 END(break_fault)
-
-ENTRY(demine_args)
-	alloc r2=ar.pfs,8,0,0,0
-	tnat.nz p8,p0=in0
-	tnat.nz p9,p0=in1
-	;;
-(p8)	mov in0=-1
-	tnat.nz p10,p0=in2
-	tnat.nz p11,p0=in3
-
-(p9)	mov in1=-1
-	tnat.nz p12,p0=in4
-	tnat.nz p13,p0=in5
-	;;
-(p10)	mov in2=-1
-	tnat.nz p14,p0=in6
-	tnat.nz p15,p0=in7
-
-(p11)	mov in3=-1
-	tnat.nz p8,p0=r15	// demining r15 is not a must, but it is safer
-
-(p12)	mov in4=-1
-(p13)	mov in5=-1
-	;;
-(p14)	mov in6=-1
-(p15)	mov in7=-1
-(p8)	mov r15=-1
-	br.ret.sptk.many rp
-END(demine_args)
 
 	.align 1024
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -784,6 +756,46 @@ END(interrupt)
 // 0x3400 Entry 13 (size 64 bundles) Reserved
 	DBG_FAULT(13)
 	FAULT(13)
+
+// Ensure that the syscall arguments plus r15 (syscall number) are valid.
+// Exit with r2 containing the frame size when the syscall was issued.
+// This function belongs to break_fault and can live anywhere (even outside
+// the IVT); it's being placed here just to save a little space.
+// On exit:
+//	- p10: TRUE if syscall is invoked with more than 8 out
+//	       Registers or r15's Nat is true
+//	- p9:  !(p10)
+ENTRY(demine_args)
+	alloc r2=ar.pfs,8,0,0,0
+	tnat.nz p8,p0=in0
+	tnat.nz p9,p0=in1
+	;;
+	and r18=0x7f,r2				// get sof of issuer's cfm
+	extr.u r17=r2,7,7			// get sol of issuer's cfm
+	tnat.nz p10,p0=in2
+(p8)	mov in0=-1
+	tnat.nz p11,p0=in3
+	tnat.nz p12,p0=in4
+	;;
+(p9)	mov in1=-1
+	tnat.nz p13,p0=in5
+	add r17=8,r17				// sol + 8
+(p10)	mov in2=-1
+	tnat.nz p14,p0=in6
+	tnat.nz p15,p0=in7
+	;;
+	cmp.lt p10,p9=r17,r18			// frame size can't be more than local+8
+(p11)	mov in3=-1
+(p12)	mov in4=-1
+	;;
+(p13)	mov in5=-1
+(p9)	tnat.nz p10,p9=r15	// demining r15 is not a must, but it is safer
+(p14)	mov in6=-1
+	;;
+(p15)	mov in7=-1
+(p10)	mov r8=-EINVAL
+	br.ret.sptk.many rp
+END(demine_args)
 
 	.align 1024
 /////////////////////////////////////////////////////////////////////////////////////////

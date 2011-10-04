@@ -529,7 +529,7 @@ dump_fpu (struct pt_regs *pt, elf_fpregset_t dst)
 	return 1;	/* f0-f31 are always valid so we always return 1 */
 }
 
-asmlinkage long
+long
 sys_execve (char *filename, char **argv, char **envp, struct pt_regs *regs)
 {
 	int error;
@@ -562,6 +562,15 @@ arch_kernel_thread (int (*fn)(void *), void *arg, unsigned long flags)
 
 	tid = clone(flags | CLONE_VM, 0);
 	if (parent != current) {
+#ifdef CONFIG_IA32_SUPPORT
+		if (IS_IA32_PROCESS(ia64_task_regs(current))) {
+			/* A kernel thread is always a 64-bit process. */
+			current->thread.map_base  = DEFAULT_MAP_BASE;
+			current->thread.task_size = DEFAULT_TASK_SIZE;
+			ia64_set_kr(IA64_KR_IO_BASE, current->thread.old_iob);
+			ia64_set_kr(IA64_KR_TSSD, current->thread.old_k1);
+		}
+#endif
 		result = (*fn)(arg);
 		_exit(result);
 	}

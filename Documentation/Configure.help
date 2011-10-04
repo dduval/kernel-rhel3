@@ -27835,18 +27835,41 @@ CONFIG_IPMI_PANIC_EVENT
   generate an IPMI event describing the panic to each interface
   registered with the message handler.
 
+Generate OEM events containing the panic string
+CONFIG_IPMI_PANIC_STRING
+  When a panic occurs, this will cause the IPMI message handler to
+  generate IPMI OEM type f0 events holding the IPMB address of the
+  panic generator (byte 4 of the event), a sequence number for the
+  string (byte 5 of the event) and part of the string (the rest of the
+  event).  Bytes 1, 2, and 3 are the normal usage for an OEM event.
+  You can fetch these events and use the sequence numbers to piece the
+  string together.
+
 Device interface for IPMI
 CONFIG_IPMI_DEVICE_INTERFACE
   This provides an IOCTL interface to the IPMI message handler so
   userland processes may use IPMI.  It supports poll() and select().
 
+IPMI SI handler
+CONFIG_IPMI_SI
+  Provides a driver for System Interfaces (KCS, SMIC, BT).
+  Currently, only KCS and SMIC are supported.  If
+  you are using IPMI, you should probably say "y" here.
+
 IPMI KCS handler
 CONFIG_IPMI_KCS
-  Provides a driver for a KCS-style interface to a BMC.
+  Provides a driver for a KCS-style interface to a BMC.  This
+  is deprecated, please use the IPMI System Interface handler
+  instead.
 
 IPMI Watchdog Timer
 CONFIG_IPMI_WATCHDOG
   This enables the IPMI watchdog timer.
+
+IPMI Poweroff
+CONFIG_IPMI_POWEROFF
+  This enables a function to power off the system with IPMI if
+  the IPMI management controller is capable of this.
 
 CONFIG_CRYPTO
   This option provides the core Cryptographic API.

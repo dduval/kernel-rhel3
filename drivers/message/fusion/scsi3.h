@@ -4,12 +4,10 @@
  *      (Ultimately) SCSI-3 definitions; for now, inheriting
  *      SCSI-2 definitions.
  *
- *  Copyright (c) 1996-2004 Steven J. Ralston
- *  Written By: Steven J. Ralston (19960517)
- *  (mailto:sjralston1@netscape.net)
+ *  Copyright (c) 1996-2005 LSI Logic
  *  (mailto:mpt_linux_developer@lsil.com)
  *
- *  $Id: scsi3.h,v 1.9 2002/02/27 18:45:02 sralston Exp $
+ *  $Id: scsi3.h,v 1.9 2002/02/27 18:45:02 Exp $
  */
 
 #ifndef SCSI3_H_INCLUDED
@@ -55,8 +53,8 @@
 #define CMD_Reserve6           0x16
 #define CMD_Release6           0x17
 #define CMD_Erase              0x19
-#define CMD_StartStopUnit      0x1b  /* direct-access devices */
-#define CMD_LoadUnload         0x1b  /* sequential-access devices */
+#define CMD_StartStopUnit      0x1B  /* direct-access devices */
+#define CMD_LoadUnload         0x1B  /* sequential-access devices */
 #define CMD_ReceiveDiagnostic  0x1C
 #define CMD_SendDiagnostic     0x1D
 #define CMD_ReadCapacity       0x25
@@ -69,6 +67,8 @@
 #define CMD_WriteBuffer        0x3B
 #define CMD_ReadBuffer         0x3C
 #define CMD_ReadLong           0x3E
+#define CMD_WriteLong          0x3F
+#define CMD_WriteSame          0x41
 #define CMD_LogSelect          0x4C
 #define CMD_LogSense           0x4D
 #define CMD_ModeSelect10       0x55
@@ -77,7 +77,16 @@
 #define CMD_ModeSense10        0x5A
 #define CMD_PersistReserveIn   0x5E
 #define CMD_PersistReserveOut  0x5F
+#define CMD_Read16             0x88
+#define CMD_Write16            0x8A
+#define CMD_WriteVerify16      0x8E
+#define CMD_WriteSame16        0x93
+#define CMD_ServiceActionIn    0x9E
+#define CMD_ServiceActionOut   0x9F
 #define CMD_ReportLuns         0xA0
+#define CMD_Read12             0xA8
+#define CMD_Write12            0xAA
+#define CMD_WriteVerify12      0xAE
 
 /*
  *    Control byte field

@@ -848,15 +848,23 @@ void update_process_time_intertick(struct task_struct *p,
 				   struct kernel_stat_tick_times *time)
 {
 	int u_ticks;
+	int s_ticks;
 	int cpu = smp_processor_id();
 
 	u_ticks = kernel_timeval_to_jiffies(&p->utime);
+	s_ticks = kernel_timeval_to_jiffies(&p->stime);
 	update_one_process(p, time, cpu);
 	u_ticks = kernel_timeval_to_jiffies(&p->utime) - u_ticks;
+	s_ticks = kernel_timeval_to_jiffies(&p->stime) - s_ticks;
+
 	if (u_ticks) {
 		do_it_virt(p, u_ticks);
 		do_it_prof(p);
 	}
+
+	if (s_ticks)
+		do_it_prof(p);
+
 	update_kstatpercpu(p, time);
 }
 

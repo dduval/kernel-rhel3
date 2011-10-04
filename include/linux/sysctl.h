@@ -159,6 +159,8 @@ enum
 	VM_INACTIVE_CLEAN_PERCENT=25, /* int: percent of inactive thats clean */
 	VM_STACK_DEFER_THRESHOLD=26, /* int: softirq-defer threshold */
 	VM_SKIP_MAPPED_PAGES=27,/* int: don't reclaim pages w/active mappings */
+	VM_OOM_KILL=28,		/* int: limit on concurrent OOM kills */
+	VM_KSCAND_WORK_PERCENT=29, /* int: % of work on each kscand iteration */
 };
 
 

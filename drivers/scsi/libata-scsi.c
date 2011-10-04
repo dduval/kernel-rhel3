@@ -904,7 +904,7 @@ unsigned int ata_scsiop_inq_83(struct ata_scsi_args *args, u8 *rbuf,
 }
 
 /**
- *	ata_scsiop_noop -
+ *	ata_scsiop_noop - Command handler that simply returns success.
  *	@args: device IDENTIFY data / SCSI command of interest.
  *	@rbuf: Response buffer, to which simulated SCSI cmd output is sent.
  *	@buflen: Response buffer length.
@@ -998,7 +998,12 @@ static unsigned int ata_msense_caching(u16 *id, u8 **ptr_io,
 
 static unsigned int ata_msense_ctl_mode(u8 **ptr_io, const u8 *last)
 {
-	const u8 page[] = {0xa, 0xa, 2, 0, 0, 0, 0, 0, 0xff, 0xff, 0, 30};
+	const u8 page[] = {0xa, 0xa, 6, 0, 0, 0, 0, 0, 0xff, 0xff, 0, 30};
+
+	/* byte 2: set the descriptor format sense data bit (bit 2)
+	 * since we need to support returning this format for SAT
+	 * commands and any SCSI commands against a 48b LBA device.
+	 */
 
 	ata_msense_push(ptr_io, last, page, sizeof(page));
 	return sizeof(page);
@@ -1128,8 +1133,12 @@ unsigned int ata_scsiop_read_cap(struct ata_scsi_args *args, u8 *rbuf,
 		n_sectors = ata_id_u32(args->id, 60);
 	n_sectors--;		/* ATA TotalUserSectors - 1 */
 
-	tmp = n_sectors;	/* note: truncates, if lba48 */
 	if (args->cmd->cmnd[0] == READ_CAPACITY) {
+		if( n_sectors >= 0xffffffffULL )
+			tmp = 0xffffffff ;  /* Return max count on overflow */
+		else
+			tmp = n_sectors ;
+
 		/* sector count, 32-bit */
 		rbuf[0] = tmp >> (8 * 3);
 		rbuf[1] = tmp >> (8 * 2);
@@ -1143,10 +1152,12 @@ unsigned int ata_scsiop_read_cap(struct ata_scsi_args *args, u8 *rbuf,
 
 	} else {
 		/* sector count, 64-bit */
-		rbuf[2] = n_sectors >> (8 * 7);
-		rbuf[3] = n_sectors >> (8 * 6);
-		rbuf[4] = n_sectors >> (8 * 5);
-		rbuf[5] = n_sectors >> (8 * 4);
+		tmp = n_sectors >> (8 * 4);
+		rbuf[2] = tmp >> (8 * 3);
+		rbuf[3] = tmp >> (8 * 2);
+		rbuf[4] = tmp >> (8 * 1);
+		rbuf[5] = tmp;
+		tmp = n_sectors;
 		rbuf[6] = tmp >> (8 * 3);
 		rbuf[7] = tmp >> (8 * 2);
 		rbuf[8] = tmp >> (8 * 1);

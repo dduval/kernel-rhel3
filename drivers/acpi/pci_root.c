@@ -336,8 +336,11 @@ acpi_pci_root_add (
 			root->id.bus);
 
 end:
-	if (result)
+	if (result) {
+		if (root->node.next && !list_empty(&root->node))
+			list_del(&root->node);
 		kfree(root);
+	}
 
 	return_VALUE(result);
 }

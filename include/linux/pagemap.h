@@ -16,6 +16,21 @@
 #include <linux/highmem.h>
 
 /*
+ * Bits in mapping->flags.  The lower __GFP_BITS_SHIFT bits are the page
+ * allocation mode flags.
+ */
+#define AS_EIO		(__GFP_BITS_SHIFT + 0)	/* IO error on async write */
+#define AS_EIO_MASK	(1 << AS_EIO)
+
+/* 2.6 does this in wait_on_page_writeback_range() only. */
+static inline int mapping_get_error(struct address_space *m) 
+{
+	extern int get_and_clear_as_eio_error(struct address_space *m);
+	
+	return (m->gfp_mask & AS_EIO_MASK) ? get_and_clear_as_eio_error(m) : 0;
+}
+
+/*
  * The page cache can done in larger chunks than
  * one page, because it allows for more efficient
  * throughput (it can then be mapped into user

@@ -1,3 +1,71 @@
+Changes from 20050503 to 20050711:
+
+	* Changed version to 7.3.2.
+	* Fixed incorrect FAN handling.
+
+Changes from 20050401 to 20050503:
+
+	* Changed version to 7.3.1.
+	* Updated copyright messages.
+	* Added printk of copyright string at driver load.
+	* Removed PCI DMA sync calls to coherent/consistent PCI memory.
+
+Changes from 20050224 to 20050401
+
+	* Changed version to 7.3.0
+	* Fixed lpfc_stop_timer race condition.
+	* Added PCI devices ID definitions for Emulex HBAs.
+	* Fixed multiple simultaneous RSCNs from causing an outstanding
+	  PRLI from being prematurely aborted.
+	* Removed use of host memory for HGP on PowerPC platforms.
+	* Removed free_irq from the error path of HBA.
+
+Changes from 20050131 to 20050224
+
+	* Changed version to 7.2.4.
+	* Fixed copying of sense data back to midlayer when rsplen valid
+	  bit is cleared but rsplen contains a nonzero value.
+
+Changes from 20050127 to 20050131
+
+	* Changed version to 7.2.3.
+	* Fixed build warnings.
+
+Changes from 20050106 to 20050127
+
+	* Changed version to 7.2.2.
+	* Fixed VPD support.
+	* Changed use of DUMP mailbox command to support HBAs with 256
+	  bytes of SLIM.
+	* Changed max link speed value from 2 to 4.
+
+Changes from 20050105 to 20050106
+
+	* Changed version to 7.2.1.
+	* Fixed lpfc_config_port_prep for VPD info on big-endian
+	  architectures.
+
+Changes from 20041112 to 20050105
+
+	* Changed version to 7.2.0.
+	* Added support for four gigabit HBAs.
+	* Added VPD support.
+	* Removed unused Install.sh and Remove.sh scripts.
+	* Removed references to IPFC in Makefile.
+	* Removed references to KERNEL_VERSION(2,6,0) macro.
+	* Fixed build warnings on SLES 8.1.
+	* Added additional SLI layer logging.
+	* Fixed iotag initialization.
+	* Removed freeing of pmb structure if pmb->mbox_cmpl is set to
+	  lpfc_sli_wake_mbox_wait.
+
+Changes from 20041102 to 20041112
+
+	* Changed version to 7.1.14.
+	* Use data from pci_read_config_dword() to program config_port
+	  mailbox command instead of data from pci_resource_start() on
+	  systems with IOMMU.
+
 Changes from 20041026 to 20041102
 
 	* Changed version to 7.1.13.

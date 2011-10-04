@@ -1,9 +1,9 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
- * Enterprise Fibre Channel Host Bus Adapters.                     *
+ * Fibre Channel Host Bus Adapters.                                *
  * Refer to the README file included with this package for         *
  * driver version and adapter support.                             *
- * Copyright (C) 2004 Emulex Corporation.                          *
+ * Copyright (C) 2003-2005 Emulex.  All rights reserved.           *
  * www.emulex.com                                                  *
  *                                                                 *
  * This program is free software; you can redistribute it and/or   *
@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_scsiport.c 1.3 2004/10/29 15:36:40EDT sf_support Exp  $
+ * $Id: lpfc_scsiport.c 1.7 2005/05/03 11:22:11EDT sf_support Exp  $
  */
 #include <linux/version.h>
 #include <linux/spinlock.h>
@@ -389,11 +389,6 @@ lpfc_scsi_cmd_start(LPFC_SCSI_BUF_t * lpfc_cmd)
 	if (lun_device->pTarget->addrMode == VOLUME_SET_ADDRESSING) {
 		fcp_cmnd->fcpLunMsl |= be32_to_cpu(0x40000000);
 	}
-	pci_dma_sync_single(phba->pcidev, lpfc_cmd->dma_ext->phys,
-			    LPFC_SCSI_DMA_EXT_SIZE, PCI_DMA_TODEVICE);
-
-	pci_dma_sync_single(phba->pcidev, lpfc_cmd->dma_ext->phys,
-			    LPFC_BPL_SIZE, PCI_DMA_TODEVICE);
 
 	if (!(piocbq->iocb_flag & LPFC_IO_POLL)) {
 		/* Pass the command on down to the SLI layer. */
@@ -867,6 +862,11 @@ lpfc_qthrottle_up(unsigned long ptr)
 	clkData = (struct clk_data *)ptr;
 	phba = clkData->phba;
 	LPFC_DRVR_LOCK(phba, iflag);
+       	if (clkData->flags & TM_CANCELED) {
+		list_del((struct list_head *)clkData);
+		kfree(clkData);	
+		goto out;
+	}
 	clkData->timeObj->function = 0;
 	list_del((struct list_head *)clkData);
 	kfree(clkData);
@@ -943,6 +943,7 @@ lpfc_qthrottle_up(unsigned long ptr)
 				 (unsigned long)0);
 	}
 
+out:
 	LPFC_DRVR_UNLOCK(phba, iflag);
 
 	return;
@@ -1034,6 +1035,13 @@ lpfc_npr_timeout(unsigned long ptr)
 	nprClkData = (struct clk_data *)ptr;
 	phba = nprClkData->phba;
 	LPFC_DRVR_LOCK(phba, iflag);
+	if (nprClkData->flags & TM_CANCELED) {
+		list_del((struct list_head *)nprClkData);
+		kfree(nprClkData);  
+		goto out;    
+	}
+
+
 	targetp = (LPFCSCSITARGET_t *) nprClkData->clData1;
 	targetp->tmofunc.function = 0;
 
@@ -1045,8 +1053,8 @@ lpfc_npr_timeout(unsigned long ptr)
 
 	list_del((struct list_head *)nprClkData);
 	kfree(nprClkData);	
+        
 	targetp->targetFlags &= ~FC_NPR_ACTIVE;
-	targetp->tmofunc.function = 0;
 
 	if(targetp->pcontext)
 		lpfc_disc_state_machine(phba, targetp->pcontext,
@@ -1054,7 +1062,7 @@ lpfc_npr_timeout(unsigned long ptr)
 
 	lpfc_sched_flush_target(phba, targetp, IOSTAT_LOCAL_REJECT,
 				IOERR_SLI_ABORTED);
-
+out:
 	LPFC_DRVR_UNLOCK(phba, iflag);
 	return;
 }
@@ -1255,6 +1263,12 @@ lpfc_scsi_timeout_handler(unsigned long ptr)
 	scsiClkData = (struct clk_data *)ptr;
 	phba = scsiClkData->phba;
 	LPFC_DRVR_LOCK(phba, iflag);
+       	if (scsiClkData->flags & TM_CANCELED) {
+		list_del((struct list_head *)scsiClkData);
+		kfree(scsiClkData);   
+		goto out;  
+	}
+
 	timeout = (uint32_t) (unsigned long)(scsiClkData->clData1);
 	phba->scsi_tmofunc.function = 0;
 	list_del((struct list_head *)scsiClkData);
@@ -1316,7 +1330,7 @@ lpfc_scsi_timeout_handler(unsigned long ptr)
 			 (unsigned long)next_timeout, (unsigned long)0);
 	}
 
-
+out:
 	LPFC_DRVR_UNLOCK(phba, iflag);
 }
 
@@ -2034,6 +2048,7 @@ lpfc_os_fcp_err_handle(LPFC_SCSI_BUF_t * lpfc_cmd, lpfc_xlat_err_t * presult)
 	int datadir;
 	uint8_t iostat;
 	uint32_t scsi_status;
+	uint32_t rsplen = 0;
 
 	phba = lpfc_cmd->scsi_hba;
 	plun = lpfc_cmd->pLun;
@@ -2068,8 +2083,6 @@ lpfc_os_fcp_err_handle(LPFC_SCSI_BUF_t * lpfc_cmd, lpfc_xlat_err_t * presult)
 			be32_to_cpu(fcprsp->rspRspLen), fcprsp->rspInfo3);
 
 	if (fcprsp->rspStatus2 & RSP_LEN_VALID) {
-		uint32_t rsplen;
-
 		rsplen = be32_to_cpu(fcprsp->rspRspLen);
 		if ((rsplen > 8) || (fcprsp->rspInfo3 != RSP_NO_FAILURE)) {
 			presult->host_status = DID_ERROR;
@@ -2080,9 +2093,8 @@ lpfc_os_fcp_err_handle(LPFC_SCSI_BUF_t * lpfc_cmd, lpfc_xlat_err_t * presult)
 
 	/* if there's sense data, let's copy it back */
 	if ((fcprsp->rspStatus2 & SNS_LEN_VALID) && (fcprsp->rspSnsLen != 0)) {
-		uint32_t snsLen, rspLen;
+		uint32_t snsLen;
 
-		rspLen = be32_to_cpu(fcprsp->rspRspLen);
 		snsLen = be32_to_cpu(fcprsp->rspSnsLen);
 
 		/* then we return this sense info in the sense buffer for this
@@ -2091,7 +2103,7 @@ lpfc_os_fcp_err_handle(LPFC_SCSI_BUF_t * lpfc_cmd, lpfc_xlat_err_t * presult)
 			snsLen = SCSI_SENSE_BUFFERSIZE;
 		}
 		memcpy(cmnd->sense_buffer,
-		       (((uint8_t *) & fcprsp->rspInfo0) + rspLen), snsLen);
+		       (((uint8_t *) & fcprsp->rspInfo0) + rsplen), snsLen);
 	}
 
 	/*
@@ -2326,6 +2338,12 @@ lpfc_delay_done(unsigned long ptr)
 	clkData = (struct clk_data *)ptr;
 	phba = clkData->phba;
 	LPFC_DRVR_LOCK(phba, iflag);
+        	if (clkData->flags & TM_CANCELED) {
+		list_del((struct list_head *)clkData);
+		kfree(clkData);	
+		goto out;
+	}
+
 	lpfc_cmd = (LPFC_SCSI_BUF_t *) (clkData->clData1);
 	list_del(&lpfc_cmd->listentry);
 	clkData->timeObj->function = 0;
@@ -2333,6 +2351,7 @@ lpfc_delay_done(unsigned long ptr)
 	kfree(clkData);
 
 	lpfc_iodone(phba, lpfc_cmd);
+out:
 	LPFC_DRVR_UNLOCK(phba, iflag);
 	return;
 }

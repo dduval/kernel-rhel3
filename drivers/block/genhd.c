@@ -34,6 +34,69 @@ static struct gendisk *gendisk_head;
 static struct gendisk *gendisk_array[MAX_BLKDEV];
 
 
+/* Global kernel list of callback functions for formatting
+ * device and partition names correctly for registered drivers
+ * in /proc/partitions
+ */
+devname_t callback_devname_table[MAX_BLKDEV];
+static spinlock_t devname_lock = SPIN_LOCK_UNLOCKED;
+
+
+/**
+ * register_callback_devname_table - Used by drivers to specify the
+ * callback functions to be called in the partition check path to
+ * get the right names for the driver controlled devices in /proc/partitions
+ *
+ * This will be invoked during the initialization of such drivers.
+ *
+ * Returns: 0 --> registration of callback function SUCCESS
+            < 0--> registration of callback function FAILURE
+ */
+int
+register_callback_devname_table(int major_num, void *function)
+{
+	if (major_num > MAX_BLKDEV)
+		return -EINVAL;
+	spin_lock(&devname_lock);
+	callback_devname_table[major_num] = function;
+	spin_unlock(&devname_lock);
+	return 0;
+}
+
+EXPORT_SYMBOL(register_callback_devname_table);
+
+/**
+ * unregister_callback_devname_table - Will be used by the drivers which
+ * had registered their callback functions to format the device names
+ * during driver init to do the corresponding unregistrations.
+ *
+ * This will be called during the driver exit paths.
+ */
+int
+unregister_callback_devname_table(int major_num)
+{
+	if (major_num > MAX_BLKDEV)
+		return -EINVAL;
+	spin_lock(&devname_lock);
+	callback_devname_table[major_num] = NULL;
+	spin_unlock(&devname_lock);
+	return 0;
+}
+
+EXPORT_SYMBOL(unregister_callback_devname_table);
+
+/**
+ * get_callback_function_for_disk_name  - Returns the callback function
+ * which is previously registered for that particular driver (major).
+ */
+void *
+get_callback_from_devname_table(int major_num)
+{
+	return (void *)callback_devname_table[major_num];
+}
+
+EXPORT_SYMBOL(get_callback_from_devname_table);
+
 /**
  * add_gendisk - add partitioning information to kernel list
  * @gp: per-device partitioning information

@@ -3,6 +3,8 @@
 
 #define __iomem
 
+#define MODULE_VERSION(ver)
+
 typedef void irqreturn_t;
 #define IRQ_NONE
 #define IRQ_HANDLED
@@ -25,5 +27,98 @@ static inline struct mii_ioctl_data *if_mii(struct ifreq *rq)
 /* Driver transmit return codes */
 #define NETDEV_TX_OK 0          /* driver took care of packet */
 #define NETDEV_TX_BUSY 1        /* driver tx path was busy*/
+
+#define mmiowb() do { } while(0)
+
+#define skb_header_cloned(skb) 0
+
+#define pci_choose_state(pdev, state) (state)
+
+typedef u32 pm_message_t;
+
+#ifndef ADVERTISE_PAUSE
+#define ADVERTISE_PAUSE_CAP		0x0400
+#endif
+#ifndef ADVERTISE_PAUSE_ASYM
+#define ADVERTISE_PAUSE_ASYM		0x0800
+#endif
+#ifndef LPA_PAUSE
+#define LPA_PAUSE_CAP			0x0400
+#endif
+#ifndef LPA_PAUSE_ASYM
+#define LPA_PAUSE_ASYM			0x0800
+#endif
+
+static inline unsigned long msecs_to_jiffies(unsigned long msecs)
+{
+	return ((HZ * msecs + 999) / 1000);
+}
+
+/**
+ *	msleep - sleep for a number of milliseconds
+ *	@msecs: number of milliseconds to sleep
+ *
+ *	Issues schedule_timeout call for the specified number
+ *	of milliseconds.
+ *
+ *	LOCKING:
+ *	None.
+ */
+
+static inline void msleep(unsigned long msecs)
+{
+	set_current_state(TASK_UNINTERRUPTIBLE);
+	schedule_timeout(msecs_to_jiffies(msecs) + 1);
+}
+
+#define pci_dma_sync_single_for_cpu(pdev, dma_addr, len, dir) \
+	pci_dma_sync_single((pdev), (dma_addr), (len), (dir))
+
+#define pci_dma_sync_single_for_device(pdev, dma_addr, len, dir) \
+	pci_dma_sync_single((pdev), (dma_addr), (len), (dir))
+
+#define pci_get_slot(bus, devfn) pci_find_slot((bus)->number, devfn)
+#define pci_dev_put(pdev)
+
+#define pci_enable_msi(pdev)	(-1)
+#define pci_disable_msi(pdev)
+
+/**
+ * PCI_DEVICE - macro used to describe a specific pci device
+ * @vend: the 16 bit PCI Vendor ID
+ * @dev: the 16 bit PCI Device ID
+ *
+ * This macro is used to create a struct pci_device_id that matches a
+ * specific device.  The subvendor and subdevice fields will be set to
+ * PCI_ANY_ID.
+ */
+#define PCI_DEVICE(vend,dev) \
+	.vendor = (vend), .device = (dev), \
+	.subvendor = PCI_ANY_ID, .subdevice = PCI_ANY_ID
+
+/**
+ * pci_dev_present - Returns 1 if device matching the device list is present, 0 if not.
+ * @ids: A pointer to a null terminated list of struct pci_device_id structures
+ * that describe the type of PCI device the caller is trying to find.
+ *
+ * This is a cheap knock-off, just to help in back-porting tg3 from
+ * later kernels...beware of changes in usage...
+ */
+static inline int pci_dev_present(const struct pci_device_id *ids)
+{
+	const struct pci_device_id *dev;
+
+	for (dev = ids; dev->vendor; dev++) {
+		if (pci_find_device(dev->vendor, dev->device, NULL))
+			return 1;
+	}
+	return 0;
+}
+
+/* Workqueue / task queue backwards compatibility stuff */
+
+#define work_struct tq_struct
+#define INIT_WORK INIT_TQUEUE
+#define schedule_work schedule_task
 
 #endif /* __TG3_COMPAT_H__ */

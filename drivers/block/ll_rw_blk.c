@@ -320,7 +320,7 @@ void blk_queue_bounce_limit(request_queue_t *q, u64 dma_addr)
 	 */
 	if (dma_addr != BLK_BOUNCE_HIGH && q != old_q) {
 		old_q = q;
-		printk("blk: queue %p, ", q);
+		printk(KERN_INFO "blk: queue %p, ", q);
 		if (dma_addr == BLK_BOUNCE_ANY)
 			printk("no I/O memory limit\n");
 		else
@@ -855,11 +855,13 @@ void req_finished_io(struct request *req)
 {
 	struct hd_struct *hd1, *hd2;
 
-	locate_hd_struct(req, &hd1, &hd2);
-	if (hd1)
-		account_io_end(hd1, req);
-	if (hd2)	
-		account_io_end(hd2, req);
+	if (blk_fs_request(req)) {
+		locate_hd_struct(req, &hd1, &hd2);
+		if (hd1)
+			account_io_end(hd1, req);
+		if (hd2)
+			account_io_end(hd2, req);
+	}
 }
 EXPORT_SYMBOL(req_finished_io);
 #endif /* CONFIG_BLK_STATS */
@@ -1423,7 +1425,7 @@ queue_next:
 	 * upper bound on the superbh size for bounce buffer deadlock
 	 * safety. */
 	if (q->bounce_pfn < blk_max_pfn && bounce_initialised() &&
-	    superbh_will_bounce(q->bounce_pfn, bh)) {
+	    superbh_will_bounce(q->bounce_pfn, &superbh)) {
 		if (max_size > MAX_SUPERBH)
 			max_size = MAX_SUPERBH;
 	}

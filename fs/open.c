@@ -15,6 +15,7 @@
 #include <linux/slab.h>
 #include <linux/tty.h>
 #include <linux/iobuf.h>
+#include <linux/pagemap.h>
 
 #include <asm/uaccess.h>
 
@@ -939,7 +940,7 @@ asmlinkage long sys_creat(const char * pathname, int mode)
  */
 int filp_close(struct file *filp, fl_owner_t id)
 {
-	int retval;
+	int err, retval;
 
 	if (!file_count(filp)) {
 		printk(KERN_ERR "VFS: Close: file count is 0\n");
@@ -950,6 +951,13 @@ int filp_close(struct file *filp, fl_owner_t id)
 		lock_kernel();
 		retval = filp->f_op->flush(filp);
 		unlock_kernel();
+	}
+	if (filp->f_dentry && filp->f_dentry->d_inode && 
+	    filp->f_dentry->d_inode->i_mapping) {
+		struct address_space *mapping = filp->f_dentry->d_inode->i_mapping;
+		err = mapping_get_error(mapping);
+		if (err && !retval)
+			retval = err;
 	}
 	dnotify_flush(filp, id);
 	locks_remove_posix(filp, id);

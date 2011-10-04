@@ -1,13 +1,13 @@
 				Release Notes
 
 Driver Name  : QLogic QLA22xx/QLA23xx/QLA63xx PCI Fibre Channel Linux Driver
-Version      : 7.01.01
+Version      : 7.05.00
 OS platform  : Red Hat AS2.1 (IA32 & IA64)
                Red Hat RHEL 3 AS (IA32, PPC64, IA64 & AMD64)
                SuSE SLES8 (IA32, PPC64, AMD64 & IA64)
 	       RedHat 9.0 (IA32)		
-HBA Support  : QLA22xx, QLA23xx, QLA63xx
-FW version   : QLA22xx : 2.02.06(tp/ip),  QLA23xx: 3.03.01(ipx/flx)
+HBA Support  : QLA22xx, QLA23xx, QLA63xx, QLE236X
+FW version   : QLA22xx : 2.02.06(tp/ip),  QLA23xx: 3.03.11(ipx/flx)
 
  
 Table of Contents
@@ -64,6 +64,7 @@ III.	Bug Fixes
  - Fixed FCP protocol error checking.
  - Set the firmware options for swing/emphasis before init_fw.
  - Fixed flash issue.
+ - Fixed code that reads the target port group identifer.
 
 IV.	Known Issues
 

@@ -29,6 +29,7 @@
     82801DB		24C3   (HW PEC supported, 32 byte buffer not supported)
     ICH6		266a
     ICH7		27da
+    ESB2		269b
 
     This driver supports several versions of Intel's I/O Controller Hubs (ICH).
     For SMBus support, they are similar to the PIIX4 and are part
@@ -79,7 +80,10 @@ MODULE_LICENSE("GPL");
 #define PCI_DEVICE_ID_INTEL_ICH6_16		0x266a
 #endif
 #ifndef PCI_DEVICE_ID_INTEL_ICH7_17
-#define PCI_DEVICE_ID_INTEL_ICH6_17		0x27da
+#define PCI_DEVICE_ID_INTEL_ICH7_17		0x27da
+#endif
+#ifndef PCI_DEVICE_ID_INTEL_ESB2_17
+#define PCI_DEVICE_ID_INTEL_ESB2_17		0x269b
 #endif
 
 static int supported[] = {PCI_DEVICE_ID_INTEL_82801AA_3,
@@ -90,6 +94,7 @@ static int supported[] = {PCI_DEVICE_ID_INTEL_82801AA_3,
 			  PCI_DEVICE_ID_INTEL_82801EB_SMBUS,
 			  PCI_DEVICE_ID_INTEL_ICH6_16,
 			  PCI_DEVICE_ID_INTEL_ICH7_17,
+			  PCI_DEVICE_ID_INTEL_ESB2_17,
                           0 };
 
 /* I801 SMBus address offsets */

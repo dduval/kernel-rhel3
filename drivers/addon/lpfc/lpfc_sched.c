@@ -1,9 +1,9 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
- * Enterprise Fibre Channel Host Bus Adapters.                     *
+ * Fibre Channel Host Bus Adapters.                                *
  * Refer to the README file included with this package for         *
  * driver version and adapter support.                             *
- * Copyright (C) 2004 Emulex Corporation.                          *
+ * Copyright (C) 2003-2005 Emulex.  All rights reserved.           *
  * www.emulex.com                                                  *
  *                                                                 *
  * This program is free software; you can redistribute it and/or   *
@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_sched.c 1.34.1.7 2004/10/12 19:22:54EDT sf_support Exp  $
+ * $Id: lpfc_sched.c 1.3 2005/05/03 11:22:04EDT sf_support Exp  $
  */
 
 #include <linux/version.h>
@@ -155,9 +155,6 @@ lpfc_sched_sli_done(lpfcHBA_t * pHba,
 	plun->iodonecnt++;
 
 	pHba->hbaSched.currentOutstanding--;
-
-	pci_dma_sync_single(pHba->pcidev, pCommand->dma_ext->phys, 
-			    LPFC_SCSI_DMA_EXT_SIZE, PCI_DMA_FROMDEVICE);
 
 	fcprsp = pCommand->fcp_rsp;
 	if ((pCommand->status == IOSTAT_FCP_RSP_ERROR) &&

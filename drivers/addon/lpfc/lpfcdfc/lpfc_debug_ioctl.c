@@ -1,9 +1,9 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
- * Enterprise Fibre Channel Host Bus Adapters.                     *
+ * Fibre Channel Host Bus Adapters.                                *
  * Refer to the README file included with this package for         *
  * driver version and adapter support.                             *
- * Copyright (C) 2004 Emulex Corporation.                          *
+ * Copyright (C) 2003-2005 Emulex.  All rights reserved.           *
  * www.emulex.com                                                  *
  *                                                                 *
  * This program is free software; you can redistribute it and/or   *
@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: ioctls/lpfc_debug_ioctl.c 1.1 2004/10/26 17:00:19EDT sf_support Exp  $
+ * $Id: ioctls/lpfc_debug_ioctl.c 1.4 2005/05/03 11:20:47EDT sf_support Exp  $
  */
 #include <linux/version.h>
 #include <linux/kernel.h>
@@ -42,12 +42,6 @@
 #include <linux/unistd.h>
 #include <linux/timex.h>
 #include <linux/timer.h>
-
-#ifdef IPFC
-#include <linux/netdevice.h>
-#include <linux/etherdevice.h>
-#endif /* IPFC */
-
 #include <linux/skbuff.h>
 #include <linux/if_arp.h>
 #include <asm/system.h>

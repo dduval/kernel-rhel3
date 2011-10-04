@@ -4,6 +4,152 @@
  ********************************************************************
  *
  * Revision History
+ * Rev   7.05.00	Mar 17, 2005   RA
+ *	- Formal release.
+ *
+ * Rev   7.05.00b5	Mar 14, 2005 	DG
+ *	- Added fix to exclude mask option to export all luns.
+ *
+ * Rev   7.05.00b4	Mar 09, 2005 	RA
+ *	- Added the support for new NVRAM parts
+ *	- Added the check to handle return value of qla2x00_tgt_alloc();
+ *	- Dont check for tgt_port_grp unsupported for handling of 
+ *	  visible/controller lun.  
+ *	- Added the "ql2xexcludemodel" cmd line param to exclude device 
+ *	  models from being marked as failover capable.
+ *	- Export the Tape device across all paths in failover mode.
+ *
+ * Rev   7.05.00b3	Feb 22, 2005 	RA
+ *	- Updated ISP23XX firmware to v3.03.11
+ *
+ * Rev   7.05.00b2	Jan 21, 2005 	RA
+ *	- Updated ISP23XX firmware to v3.03.10
+ *	- If fcport is at DEAD state, avoid making calls
+ *	  trying to issue tur etc in qla2x00_find_all_active_ports().
+ *
+ * Rev   7.05.00b1	Jan 18, 2005 	RA/DG
+ *	- Added code to handle transition state during implicit failover
+ *	  for DSXXX devices.
+ *	- Added code to handle specific check conditions during implicit
+ *	  failover.
+ *
+ * Rev   7.04.00	Jan 05, 2005 	RA
+ *	- Formal release.
+ *
+ * Rev   7.04.00b6	Dec 20, 2004 	DG
+ *	- Correct code for reading target port group id descriptor.
+ *
+ * Rev   7.04.00b5	Dec 17, 2004 	AV
+ *	- Correct code for Guadalupe flash part.
+ *
+ * Rev   7.04.00b4	Dec 6, 2004 	RA/DG/AV
+ *	- Add fix to report the correct target port group based on
+ *	  state.
+ *	- Add fix to address the panic for devices which does not
+ *	  support Tgt Port Group -- initialize the TPG List
+ *	  irrespective whether devices support TPG or not.
+ *	- Add fix to handle the transition wait time from standby
+ *	  to active state for Adaptec storage during the execution
+ *	  of the set_target_port_grp().
+ *
+ * Rev   7.04.00b3	Nov 29, 2004 	RA/DG
+ *	- Added the support for devices which support Target Port Group.
+ *	- Synced with 8.00.02b2
+ *
+ * Rev   7.04.00b2test1/7.04.00b2 	Nov 29, 2004 	RA
+ * 	- Added the support for Guadalupe flash part.
+ *
+ * Rev   7.04.00b1	Oct 26, 2004 	RA/AV/DG
+ *	- Modified the F/W table to use common firmware for QLA6322 and QLA2322.
+ *	- Fixed a typo for flash_id check (0x4e to 0x4f) for AMD flash.
+ *	- Updated the ISP23XX firmware to 3.03.08 - includes common 
+ *	  fibre lite Firmware  for QLA6312/QLA6322. 	
+ *	- Free the failover retry cnt array (fo_information) memory.
+ *	- Use schedule_timeout instead of udelay while polling for mbx cmp.
+ *	- Added the support for aliasing of hba portname.
+ *	- Added the support of missing flash parts to be inline with the AVL.
+ *	- Flag to reset the lun_q fo_retry_cnt upon succesful completion of 
+ *	  an I/O and clear it during the next failed path.
+ *
+ *  Rev  7.03.00	Oct 15, 2004	RA
+ *	- Formal release.
+ *
+ *  Rev  7.03.00b5	Sept 28, 2004	RA/AV
+ *	- For ISP2322/ISP6322 erase the entire flash before updating it.
+ *	- Reset the loop_down_timer when Port update - 0x8014  is ignored.
+ *	- Use vmalloc instead of kmalloc to allocate memory for 1Mbyte
+ *	  flash image.
+ *
+ *  Rev  7.03.00b4	Sept 28, 2004	RA
+ *	- Fixed the issue of lun queue memory not being freed.
+ *	- Added the new SSVID's to the device table
+ *	- Increment the fo_retry_cnt for each path when the path can't
+ *	  be switched in the front end (lq->fclun) when the port is dead.
+ *	- Track the fo_information using void pointer in the lun struct.
+ *	- Add support for new swing/emphasis/sensitivity settings.
+ *      - Add support for new LED scheme.
+ *	- Updated ISP23XX firmware to v3.03.06
+ *
+ *  Rev  7.03.00b3                 Sept 24, 2004	RA
+ *	- Updated ISP23XX firmware to 3.03.05
+ *	- Added the logic to track failover retry count on all the paths 
+ *	  on per lun basis.
+ *	- Fixed the issue of trying to relogin with NO_LOOP_ID.
+ *
+ *  Rev  7.03.00b2test2/7.03.00b2  Sept 17, 2004	RA
+ *	- Dont perform Erase operation while updating NVRAM - not supported 
+ *	  on ISP2322/ISP6322 NVRAM chip and its not required for other 
+ *	  NVRAM parts.
+ *	- Define QL_CONFIG_COMPAT macro in exioctln.h file for ioctl cmd code
+ * 	  to be evaluated correctly for x86_64 or ppc64 platform.
+ * 	- Check for LOOP_DEAD state while processing PORT_UPDATE(0x8014).  
+ *	- Reset the ISP if get_adapter_id() fails.
+ *
+ *  Rev  7.03.00b2test1		Sept 15, 2004	RA
+ *	- Added the support for NVRAM part for ISP2322/ISP6322 chip.
+ *
+ *  Rev  7.03.00b1		Sept 10, 2004	RA/DG
+ *	- Added the additional checking of sense data of 04/02
+ *	  when we cant access port.
+ *
+ *  Rev  7.02.00		Sept 8, 2004	RA
+ *	- Formal release.  
+ *  
+ *  Rev  7.02.00b3		August 12, 2004	RA/RL
+ *  	- Fixed the compilation issue on AS 2.1 - thread_pid variable
+ *  	  undefined
+ *	- Fixed the redefined QL_IOCTL_BASE compliation warning  on x86_64 
+ *	  platform.
+ *
+ *  Rev  7.02.00b2		August 12, 2004	RA/AV
+ *	- Fixed the issue where dpc thread could get stuck in a tight loop
+ *	  whenever configure_local_loop() failed or loop is in a transition
+ *	  state.
+ *	- Fixed the hang if failed to create kernel_thread.
+ *	- Fixed extraneous pci posting for ioport.
+ *	- Fixed panic in debug mode for failover driver.
+ *	- Dont retry fabric login for QLA200 for unsupported FL port.
+ *
+ *  Rev  7.02.00b1test2		August 12, 2004	RA
+ *	- Added logic to retry fabric_login() when it fails with 0x4005.
+ *	  Synchronised the login retry when fabric login fails and the driver
+ *	  recieves 0x8014 (Port Update) for device logo.  
+ *	- Dont reinitialize the HBA if firmware clearly indiciates an 
+ *	  unrecovrable hardware error - system error (mbx[0] = 0x8002) 
+ *	  and mbx[1] = 0. 
+ *	- Fixed the incorrect checking of handle count for RIO type 1 and 2
+ *	  iocb to display the message.
+ *	- Perform a make clean before buidling the driver.
+ *  
+ *  Rev  7.02.00b1test1		August 12, 2004	RA
+ *	- Added the logic to retry for login when the driver recieves 
+ * 	  aen - 0x8014 (Port Update) which is not global and device logged
+ *	  out. Earlier assumption of ignoring 0x8014 waiting for RSCN to come 
+ *	  in incorrect. 
+ *	- Fixed return code for fabric_login().
+ *  
+ *  Rev  7.02.00b1		August 12, 2004	RA/AV
+ *	- Updated the 23XX Firmware to 3.03.02  
  *  
  *  Rev  7.01.01		August 11, 2004	RA/AV
  *  	- Formal release.

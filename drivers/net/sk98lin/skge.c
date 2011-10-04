@@ -2601,11 +2601,18 @@ rx_start:
 						SKCS_STATUS_UDP_CSUM_OK) {
 							pMsg->ip_summed =
 							CHECKSUM_UNNECESSARY;
+					} else if ((Result == SKCS_STATUS_TCP_CSUM_ERROR)    ||
+						   (Result == SKCS_STATUS_UDP_CSUM_ERROR)    ||
+						   (Result == SKCS_STATUS_IP_CSUM_ERROR_UDP) ||
+						   (Result == SKCS_STATUS_IP_CSUM_ERROR_TCP) ||
+						   (Result == SKCS_STATUS_IP_CSUM_ERROR)) {
+
+					  SK_DBG_MSG(NULL, SK_DBGMOD_DRV,
+						     SK_DBGCAT_DRV_RX_PROGRESS,
+						     ("skge: CRC error. Frame dropped!\n"));
+					  goto rx_failed;
 					} else {
-						SK_DBG_MSG(NULL, SK_DBGMOD_DRV,
-						SK_DBGCAT_DRV_RX_PROGRESS,
-						("skge: CRC error. Frame dropped!\n"));
-						goto rx_failed;
+					  pMsg->ip_summed = CHECKSUM_NONE;
 					}
 				}/* checksumControl calculation valid */
 			} /* IP frame */

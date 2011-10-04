@@ -222,8 +222,11 @@ void  scsi_initialize_queue(Scsi_Device * SDpnt, struct Scsi_Host * SHpnt)
 }
 
 #ifdef MODULE
-MODULE_PARM(scsi_logging_level, "i");
-MODULE_PARM_DESC(scsi_logging_level, "SCSI logging level; should be zero or nonzero");
+
+#ifdef CONFIG_MODVERSIONS
+#define UNVERSIONED_scsi_logging_level_MODULE_PARM
+static void set_scsi_logging_level(unsigned int *);
+#endif
 
 #else
 
@@ -1866,7 +1869,7 @@ static int proc_scsi_gen_write(struct file * file, const char * buf,
 			 * If we are busy, or some other context is already
 			 * removing this device, then we leave it alone.
 			 */
-			printk(KERN_INFO "scsi%d: remove-single-device %d %d %d failed, device offline.\n", host, channel, id, lun, scd->access_count);
+			printk(KERN_INFO "scsi%d: remove-single-device %d %d %d failed, device offline.\n", host, channel, id, lun);
 			spin_unlock_irq(scd->request_queue.queue_lock);
 			goto out;
 		}
@@ -2681,6 +2684,9 @@ static int __init init_scsi(void)
 	int i;
 
 	printk(KERN_INFO "SCSI subsystem driver " REVISION "\n");
+#ifdef UNVERSIONED_scsi_logging_level_MODULE_PARM
+	set_scsi_logging_level(&scsi_logging_level);
+#endif
 
         if( scsi_init_minimal_dma_pool() != 0 )
         {
@@ -2925,6 +2931,25 @@ scsi_reset_provider(Scsi_Device *dev, int flag)
 	scsi_delete_timer(SCpnt);
 	return rtn;
 }
+
+/*
+ * The following should be the final set of source code in this source file.
+ */
+#ifdef MODULE
+
+#ifdef UNVERSIONED_scsi_logging_level_MODULE_PARM
+#undef scsi_logging_level
+unsigned int scsi_logging_level;
+static void set_scsi_logging_level(unsigned int *p)
+{
+	*p = scsi_logging_level;
+}
+#endif
+
+MODULE_PARM(scsi_logging_level, "i");
+MODULE_PARM_DESC(scsi_logging_level, "SCSI logging level; should be zero or nonzero");
+
+#endif /* MODULE */
 
 /*
  * Overrides for Emacs so that we follow Linus's tabbing style.

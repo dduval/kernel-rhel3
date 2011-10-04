@@ -117,6 +117,17 @@ char *ctc = NULL;
 
 #undef DEBUG
 
+/*
+ * the worst case stack usage is the sprintf for DBF (more than qdio!)
+ */
+#ifdef CONFIG_ARCH_S390X
+#define STACK_PTR_MASK 0x3fff
+#define WORST_CASE_STACK_USAGE 1400
+#else /* CONFIG_ARCH_S390X */
+#define STACK_PTR_MASK 0x1fff
+#define WORST_CASE_STACK_USAGE 1084
+#endif /* CONFIG_ARCH_S390X */
+
 /**
  * CCW commands, used in this driver.
  */
@@ -2764,6 +2775,20 @@ static int ctc_tx(struct sk_buff *skb, net_device *dev)
 	int       rc = 0;
 	ctc_priv  *privptr = (ctc_priv *)dev->priv;
 	unsigned long saveflags;
+	unsigned long stackptr;
+
+#ifdef CONFIG_ARCH_S390X
+	asm volatile ("lgr %0,15" : "=d" (stackptr));
+#else /* CONFIG_ARCH_S390X */
+	asm volatile ("lr %0,15" : "=d" (stackptr));
+#endif /* CONFIG_ARCH_S390X */
+	/*
+	 * Prevent stack overflows in mvfs.
+	 */
+	if ((stackptr & STACK_PTR_MASK) <
+	    (sizeof(struct task_struct) + WORST_CASE_STACK_USAGE)) {
+		return -EBUSY;
+	}
 
 	/**
 	 * Some sanity checks ...

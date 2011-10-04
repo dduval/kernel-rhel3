@@ -1,9 +1,9 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
- * Enterprise Fibre Channel Host Bus Adapters.                     *
+ * Fibre Channel Host Bus Adapters.                                *
  * Refer to the README file included with this package for         *
  * driver version and adapter support.                             *
- * Copyright (C) 2004 Emulex Corporation.                          *
+ * Copyright (C) 2003-2005 Emulex.  All rights reserved.           *
  * www.emulex.com                                                  *
  *                                                                 *
  * This program is free software; you can redistribute it and/or   *
@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_compat.h 1.14.1.3 2004/07/14 09:13:31EDT sf_support Exp  $
+ * $Id: lpfc_compat.h 1.3 2005/05/03 11:21:21EDT sf_support Exp  $
  *
  * This file provides macros to aid compilation in the Linux 2.4 kernel
  * over various platform architectures.
@@ -39,12 +39,10 @@ asm-i386/dma-mapping.h since that version always returns 0.
 #define DMA_ERROR_CODE		(~(dma_addr_t)0x0)
 #endif
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,5)
 static inline int dma_mapping_error(dma_addr_t dma_addr)
 {
 	return (dma_addr == DMA_ERROR_CODE);
 }
-#endif
 
 
 /*******************************************************************

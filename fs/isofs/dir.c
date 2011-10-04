@@ -229,7 +229,9 @@ static int do_isofs_readdir(struct inode *inode, struct file *filp,
 				len = de->name_len[0];
 			}
 		}
-		if (len > 0) {
+
+		/* Skip names beginning with '/' */
+		if (len > 0 && *p != '/') {
 			if (filldir(dirent, p, len, filp->f_pos, inode_number, DT_UNKNOWN) < 0)
 				break;
 		}

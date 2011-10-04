@@ -62,6 +62,8 @@ rpc_getport(struct rpc_task *task, struct rpc_clnt *clnt)
 	task->tk_status = -EACCES; /* why set this? returns -EIO below */
 	if (!(pmap_clnt = pmap_create(clnt->cl_server, sap, map->pm_prot)))
 		goto bailout;
+	/* Don't need reserved ports to talk to portmappers */
+	pmap_clnt->cl_xprt->resvport = 0;
 	task->tk_status = 0;
 
 	/*

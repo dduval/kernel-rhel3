@@ -609,7 +609,7 @@ int filemap_fdatasync(struct address_space * mapping)
  */
 int filemap_fdatawait(struct address_space * mapping)
 {
-	int ret = 0;
+	int err, ret = 0;
 
 	lock_pagecache();
 
@@ -619,8 +619,11 @@ int filemap_fdatawait(struct address_space * mapping)
 		list_del(&page->list);
 		list_add(&page->list, &mapping->clean_pages);
 
-		if (!PageLocked(page))
+		if (!PageLocked(page)) {
+			if (PageError(page))
+				ret = -EIO;
 			continue;
+		}
 
 		page_cache_get(page);
 		unlock_pagecache();
@@ -633,6 +636,11 @@ int filemap_fdatawait(struct address_space * mapping)
 		lock_pagecache();
 	}
 	unlock_pagecache();
+
+	err = mapping_get_error(mapping);
+	if (!ret)
+		ret = err;
+
 	return ret;
 }
 
@@ -3433,8 +3441,13 @@ done:
 	/* For now, when the user asks for O_SYNC, we'll actually
 	 * provide O_DSYNC. */
 	if (status >= 0) {
-		if ((file->f_flags & O_SYNC) || IS_SYNC(inode))
+		if ((file->f_flags & O_SYNC) || IS_SYNC(inode)) {
 			status = generic_osync_inode(inode, OSYNC_METADATA|OSYNC_DATA);
+			/* If that failed, we don't know _where_ it failed so
+			 * we really need to fail the whole IO. */
+			if (status)
+				written = 0;
+		}
 	}
 	
 	err = written ? written : status;

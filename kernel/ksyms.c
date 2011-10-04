@@ -658,6 +658,7 @@ EXPORT_SYMBOL(init_task_union);
 EXPORT_SYMBOL(tasklist_lock);
 EXPORT_SYMBOL_GPL(next_thread);
 EXPORT_SYMBOL_GPL(find_task_by_pid);
+EXPORT_SYMBOL_GPL(__put_task_struct);
 EXPORT_SYMBOL(sys_wait4);
 EXPORT_SYMBOL_GPL(set_special_pids);
 /* debug */

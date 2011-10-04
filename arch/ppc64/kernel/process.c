@@ -625,54 +625,37 @@ print_backtrace(unsigned long *sp)
 	printk("\n");
 }
 
-#define PPC64_RET_FROM_SYCALL		".ret_from_syscall"
-#define PPC64_DO_PAGE_FAULT		".do_page_fault"
-#define SYMBUF_LEN			256
-
-#define WCHAN_BAD_SP(sp, taskaddr)					\
-	(unsigned long)(sp) < ((taskaddr) + (2 * PAGE_SIZE)) ||		\
-	(unsigned long)(sp) >= ((taskaddr) + THREAD_SIZE)
+/*
+ * These bracket the sleeping functions..
+ */
+extern void scheduling_functions_start_here(void);
+extern void scheduling_functions_end_here(void);
+#define first_sched    (*(unsigned long *)scheduling_functions_start_here)
+#define last_sched     (*(unsigned long *)scheduling_functions_end_here)
 
 unsigned long get_wchan(struct task_struct *p)
 {
-	unsigned long ip = 0L;
-        unsigned long prev_ip;
-	unsigned long *sp;
+	unsigned long ip, sp;
 	unsigned long stack_page = (unsigned long)p;
 	int count = 0;
-	char buffer[SYMBUF_LEN];
-	int len;
-
 	if (!p || p == current || p->state == TASK_RUNNING)
 		return 0;
-	/*
-	 * Dereference the stack pointer saved in p->thread.ksp twice
-	 * to get past stack frame for _switch() which does not save
-	 * the link register.
-	 */
-	sp = (unsigned long *)p->thread.ksp;
-	if (WCHAN_BAD_SP(sp, stack_page) || __get_user(sp, sp))
-		return 0;
-	if (WCHAN_BAD_SP(sp, stack_page) || __get_user(sp, sp))
-		return 0;
+	sp = p->thread.ksp;
 	do {
-		if (WCHAN_BAD_SP(sp, stack_page))
-			break;
-		prev_ip = ip;
-		if (__get_user(ip, &sp[2]))
-			break;
-		len = lookup_symbol(ip, buffer, SYMBUF_LEN);
-		if (len > 0) {
-			if (!strncmp(buffer, PPC64_RET_FROM_SYCALL,
-				     strlen(PPC64_RET_FROM_SYCALL)))
-				return prev_ip;
-			if (!strncmp(buffer, PPC64_DO_PAGE_FAULT,
-				     strlen(PPC64_DO_PAGE_FAULT)))
-				return ip;
+		sp = *(unsigned long *)sp;
+		if (sp < (stack_page + (2 * PAGE_SIZE)) ||
+		    sp >= (stack_page + THREAD_SIZE))
+			return 0;
+		if (count > 0) {
+			ip = *(unsigned long *)(sp + 16);
+			/*
+			 * XXX we mask the upper 32 bits until procps
+			 * gets fixed.
+			 */
+			if (ip < first_sched || ip >= last_sched)
+				return (ip & 0xFFFFFFFF);
 		}
-		if (__get_user(sp, sp))
-			break;
-	} while (++count < 16);
+	} while (count++ < 16);
 	return 0;
 }
 

@@ -413,7 +413,7 @@ setup_rt_frame(int signr, struct k_sigaction *ka, siginfo_t *info,
 
 	/* Allocate a dummy caller frame for the signal handler. */
 	newsp = (unsigned long)frame - __SIGNAL_FRAMESIZE;
-	err |= put_user(0, (unsigned long *)newsp);
+	err |= put_user(regs->gpr[1], (unsigned long *)newsp);
 
 	/* Set up "regs" so we "return" to the signal handler. */
 	err |= get_user(regs->nip, &funct_desc_ptr->entry);
@@ -501,7 +501,7 @@ setup_frame(int signr, struct k_sigaction *ka, sigset_t *set,
 
 	/* Allocate a dummy caller frame for the signal handler. */
 	newsp = (unsigned long)frame - __SIGNAL_FRAMESIZE;
-	err |= put_user(0, (unsigned long *)newsp);
+	err |= put_user(regs->gpr[1], (unsigned long *)newsp);
 
 	/* Set up "regs" so we "return" to the signal handler. */
 	err |= get_user(regs->nip, &funct_desc_ptr->entry);

@@ -93,7 +93,6 @@ static int ext3_xattr_set_handle2(handle_t *, struct inode *,
 static int ext3_xattr_cache_insert(struct buffer_head *);
 static struct buffer_head *ext3_xattr_cache_find(handle_t *, struct inode *,
 						 struct ext3_xattr_header *);
-static void ext3_xattr_cache_remove(struct buffer_head *);
 static void ext3_xattr_rehash(struct ext3_xattr_header *,
 			      struct ext3_xattr_entry *);
 
@@ -610,6 +609,7 @@ bad_block:		ext3_error(sb, "ext3_xattr_set",
 	/* Here we know that we can set the new attribute. */
 
 	if (header) {
+		struct mb_cache_entry *ce;
 		/* assert(header == HDR(bh)); */
 		if (header->h_refcount != cpu_to_le32(1))
 			goto skip_get_write_access;
@@ -618,14 +618,19 @@ bad_block:		ext3_error(sb, "ext3_xattr_set",
 		error = ext3_journal_get_write_access(handle, bh);
 		if (error)
 			goto cleanup;
+		ce = mb_cache_entry_get(ext3_xattr_cache, bh->b_dev,
+					bh->b_blocknr);
 		lock_buffer(bh);
 		if (header->h_refcount == cpu_to_le32(1)) {
 			ea_bdebug(bh, "modifying in-place");
-			ext3_xattr_cache_remove(bh);
+			if (ce)
+				mb_cache_entry_free(ce);
 			/* keep the buffer locked while modifying it. */
 		} else {
 			int offset;
 
+			if (ce)
+				mb_cache_entry_release(ce);
 			unlock_buffer(bh);
 			journal_release_buffer(handle, bh);
 skip_get_write_access:
@@ -832,6 +837,7 @@ getblk_failed:			ext3_free_blocks(handle, inode, block, 1);
 
 	error = 0;
 	if (old_bh && old_bh != new_bh) {
+		struct mb_cache_entry *ce;
 		/*
 		 * If there was an old block and we are no longer using it,
 		 * release the old block.
@@ -840,9 +846,13 @@ getblk_failed:			ext3_free_blocks(handle, inode, block, 1);
 		error = ext3_journal_get_write_access(handle, old_bh);
 		if (error)
 			goto cleanup;
+		ce = mb_cache_entry_get(ext3_xattr_cache, old_bh->b_dev,
+					old_bh->b_blocknr);
 		lock_buffer(old_bh);
 		if (HDR(old_bh)->h_refcount == cpu_to_le32(1)) {
 			/* Free the old block. */
+			if (ce)
+				mb_cache_entry_free(ce);
 			ea_bdebug(old_bh, "freeing");
 			ext3_free_blocks(handle, inode, old_bh->b_blocknr, 1);
 
@@ -853,6 +863,8 @@ getblk_failed:			ext3_free_blocks(handle, inode, block, 1);
 			ext3_forget(handle, 1, inode, old_bh,old_bh->b_blocknr);
 		} else {
 			/* Decrement the refcount only. */
+			if (ce)
+				mb_cache_entry_release(ce);
 			HDR(old_bh)->h_refcount = cpu_to_le32(
 				le32_to_cpu(HDR(old_bh)->h_refcount) - 1);
 			DQUOT_FREE_BLOCK(inode, 1);
@@ -907,6 +919,7 @@ void
 ext3_xattr_delete_inode(handle_t *handle, struct inode *inode)
 {
 	struct buffer_head *bh = NULL;
+	struct mb_cache_entry *ce;
 
 	down_write(&EXT3_I(inode)->xattr_sem);
 	if (!EXT3_I(inode)->i_file_acl)
@@ -928,9 +941,12 @@ ext3_xattr_delete_inode(handle_t *handle, struct inode *inode)
 	}
 	if (ext3_journal_get_write_access(handle, bh) != 0)
 		goto cleanup;
+	ce = mb_cache_entry_get(ext3_xattr_cache, bh->b_dev,
+				bh->b_blocknr);
 	lock_buffer(bh);
 	if (HDR(bh)->h_refcount == cpu_to_le32(1)) {
-		ext3_xattr_cache_remove(bh);
+		if (ce)
+			mb_cache_entry_free(ce);
 		ext3_free_blocks(handle, inode, EXT3_I(inode)->i_file_acl, 1);
 
 		/* ext3_forget() calls bforget() for us, but we release
@@ -938,6 +954,8 @@ ext3_xattr_delete_inode(handle_t *handle, struct inode *inode)
 		get_bh(bh);
 		ext3_forget(handle, 1, inode, bh, EXT3_I(inode)->i_file_acl);
 	} else {
+		if (ce)
+			mb_cache_entry_release(ce);
 		HDR(bh)->h_refcount = cpu_to_le32(
 			le32_to_cpu(HDR(bh)->h_refcount) - 1);
 		ext3_journal_dirty_metadata(handle, bh);
@@ -1060,10 +1078,18 @@ ext3_xattr_cache_find(handle_t *handle, struct inode *inode,
 	if (!header->h_hash)
 		return NULL;  /* never share */
 	ea_idebug(inode, "looking for cached blocks [%x]", (int)hash);
+again:
 	ce = mb_cache_entry_find_first(ext3_xattr_cache, 0, inode->i_dev, hash);
 	while (ce) {
-		struct buffer_head *bh = sb_bread(inode->i_sb, ce->e_block);
+		struct buffer_head *bh;
 
+		if (IS_ERR(ce)) {
+			if (PTR_ERR(ce) == -EAGAIN)
+				goto again;
+			break;
+		}
+
+		bh = sb_bread(inode->i_sb, ce->e_block);
 		if (!bh) {
 			ext3_error(inode->i_sb, "ext3_xattr_cache_find",
 				"inode %ld: block %ld read error",
@@ -1094,26 +1120,6 @@ ext3_xattr_cache_find(handle_t *handle, struct inode *inode,
 		ce = mb_cache_entry_find_next(ce, 0, inode->i_dev, hash);
 	}
 	return NULL;
-}
-
-/*
- * ext3_xattr_cache_remove()
- *
- * Remove the cache entry of a block from the cache. Called when a
- * block becomes invalid.
- */
-static void
-ext3_xattr_cache_remove(struct buffer_head *bh)
-{
-	struct mb_cache_entry *ce;
-
-	ce = mb_cache_entry_get(ext3_xattr_cache, bh->b_dev, bh->b_blocknr);
-	if (ce) {
-		ea_bdebug(bh, "removing (%d cache entries remaining)",
-			  atomic_read(&ext3_xattr_cache->c_entry_count)-1);
-		mb_cache_entry_free(ce);
-	} else 
-		ea_bdebug(bh, "no cache entry");
 }
 
 #define NAME_HASH_SHIFT 5

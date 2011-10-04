@@ -32,6 +32,8 @@
 
 static void refill_freelist(void);
 static void wakeup_memwaiters(void);
+
+int kscand_work_percent = 100;
 /*
  * The "priority" of VM scanning is how much of the queues we
  * will scan in one go. A value of 6 for DEF_PRIORITY implies
@@ -280,12 +282,52 @@ static inline int cache_ratio(struct zone_struct * zone)
         return 100 * zone->active_cache_pages / (zone->active_cache_pages +
                         zone->active_anon_pages + 1);
 }
-                                                                                                                   
+
 struct cache_limits cache_limits = {
         .min = 1,
         .borrow = 15,
         .max = 30,
 };
+
+static int slab_usable_pages(zone_t * inzone)
+{
+	pg_data_t *pgdat;
+	zonelist_t *zonelist;
+	zone_t **zone;
+
+	/* fast path to prevent looking at other zones */
+#if defined(CONFIG_IA64) || !defined(CONFIG_HIGHMEM)
+	if (inzone->free_pages)
+		return 1;
+#else
+	if (inzone->zone_pgdat->node_zones[ZONE_NORMAL].free_pages)
+		return 1;
+#endif
+	if (inzone - inzone->zone_pgdat->node_zones <= ZONE_NORMAL &&
+	    inzone->free_pages)
+		return 1;
+
+	/* slow path */
+	for_each_pgdat(pgdat) {
+		zonelist = pgdat->node_zonelists +
+#if defined(CONFIG_IA64)
+			ZONE_HIGHMEM;
+#else
+			ZONE_NORMAL;
+#endif
+		zone = zonelist->zones;
+		if (*zone) {
+			for (;;) {
+				zone_t *z = *(zone++);
+				if (!z)
+					break;
+				if (z->free_pages)
+					return 1;
+			}
+		}
+	}
+	return 0;
+}
 
 /**
  * launder_page - clean dirty page, move to inactive_laundry list
@@ -315,7 +357,9 @@ int launder_page(zone_t * zone, int gfp_mask, struct page *page)
 	if (cache_ratio(zone) > cache_limits.max && page_anon(page) &&
 			free_min(zone) < 0) {
 		add_page_to_active_list(page, INITIAL_AGE);
+		lru_unlock(zone);
 		page_cache_release(page);
+		lru_lock(zone);
 		return 0;
 	}
 
@@ -424,7 +468,8 @@ int launder_page(zone_t * zone, int gfp_mask, struct page *page)
 		int (*writepage)(struct page *);
 
 		writepage = page->mapping->a_ops->writepage;
-		if ((gfp_mask & __GFP_FS) && writepage) {
+		if ((gfp_mask & __GFP_FS) && writepage &&
+				(page->buffers || slab_usable_pages(zone))) {
 			ClearPageDirty(page);
 			SetPageLaunder(page);
 			lru_unlock(zone);
@@ -516,7 +561,7 @@ int launder_page(zone_t * zone, int gfp_mask, struct page *page)
  * can suddenly come under VM pressure.
  */
 #define MAX_AGING_INTERVAL ((unsigned long)300*HZ)
-#define MIN_AGING_INTERVAL ((unsigned long)HZ/2)
+#define MIN_AGING_INTERVAL ((unsigned long)((HZ*kscand_work_percent)/200))
 static void speedup_aging(struct zone_struct * zone)
 {
 	zone->need_scan++;
@@ -750,21 +795,26 @@ static int need_active_cache_scan(struct zone_struct * zone)
 }
 
 static int scan_active_list(struct zone_struct * zone, int age,
-		struct list_head * list)
+		struct list_head * list, int count)
 {
 	struct list_head *page_lru , *next;
 	struct page * page;
 	int over_rsslimit;
 
+	count = count * kscand_work_percent / 100;
 	/* Take the lock while messing with the list... */
 	lru_lock(zone);
-	list_for_each_safe(page_lru, next, list) {
-		page = list_entry(page_lru, struct page, lru);
+	while (count-- > 0 && !list_empty(list)) {
+		page = list_entry(list->prev, struct page, lru);
 		pte_chain_lock(page);
 		if (page_referenced(page, &over_rsslimit)
 				&& !over_rsslimit
 				&& check_mapping_inuse(page))
 			age_page_up_nolock(page, age);
+		else {
+			list_del(&page->lru);
+			list_add(&page->lru, list);
+		}
 		pte_chain_unlock(page);
 	}
 	lru_unlock(zone);
@@ -804,27 +854,27 @@ int rebalance_laundry_zone(struct zone_struct * zone, int max_work, unsigned int
 			 */
 			if ((gfp_mask & __GFP_WAIT) && (work_done < max_work)) {
 				int timed_out;
-				
+
 				/* Page is being freed, waiting on lru lock */
+				local_count = zone->inactive_laundry_pages;
 				if (!atomic_inc_if_nonzero(&page->count)) {
-					local_count = zone->inactive_laundry_pages;
 					lru_unlock(zone);
 					cpu_relax();
 					lru_lock(zone);
-					if (local_count != zone->inactive_laundry_pages)
+					if (zone->inactive_laundry_pages <
+					    local_count)
 						work_done++;
 					continue;
 				}
 				/* move page to tail so every caller won't wait on it */
 				list_del(&page->lru);
 				list_add(&page->lru, &zone->inactive_laundry_list);
-				local_count = zone->inactive_laundry_pages;
 				lru_unlock(zone);
 				run_task_queue(&tq_disk);
 				timed_out = wait_on_page_timeout(page, 5 * HZ);
 				page_cache_release(page);
 				lru_lock(zone);
-				if (local_count != zone->inactive_laundry_pages)
+				if (zone->inactive_laundry_pages < local_count)
 					work_done++;
 				/*
 				 * If we timed out and the page has been in
@@ -859,10 +909,10 @@ int rebalance_laundry_zone(struct zone_struct * zone, int max_work, unsigned int
 			lru_unlock(zone);
 			try_to_release_page(page, 0);
 			UnlockPage(page);
-			if (local_count != zone->inactive_laundry_pages)
-				work_done++;
 			page_cache_release(page);
 			lru_lock(zone);
+			if (zone->inactive_laundry_pages < local_count)
+				work_done++;
 			if (unlikely((page->buffers != NULL)) &&
 				       	PageInactiveLaundry(page)) {
 				del_page_from_inactive_laundry_list(page);
@@ -1387,7 +1437,8 @@ int kscand(void *unused)
 			if (need_active_anon_scan(zone)) {
 				for (age = MAX_AGE-1; age >= 0; age--)  {
 					scan_active_list(zone, age,
-						&zone->active_anon_list[age]);
+						&zone->active_anon_list[age],
+						zone->active_anon_count[age]);
 					if (current->need_resched)
 						schedule();
 				}
@@ -1396,7 +1447,8 @@ int kscand(void *unused)
 			if (need_active_cache_scan(zone)) {
 				for (age = MAX_AGE-1; age >= 0; age--)  {
 					scan_active_list(zone, age,
-						&zone->active_cache_list[age]);
+						&zone->active_cache_list[age],
+						zone->active_anon_count[age]);
 					if (current->need_resched)
 						schedule();
 				}

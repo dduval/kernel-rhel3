@@ -667,6 +667,7 @@ static void __init quirk_intel_ide_combined(struct pci_dev *pdev)
 	case 0x2651:
 	case 0x2652:
 	case 0x2653:
+	case 0x2680:
 		ich = 6;
 		break;
 	case 0x27c0:

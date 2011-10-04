@@ -86,6 +86,12 @@ struct hd_struct {
 
 #define GENHD_FL_REMOVABLE  1
 
+
+extern int register_callback_devname_table(int major_num, void *function);
+extern int unregister_callback_devname_table(int major_num);
+extern void *get_callback_from_devname_table(int major_num);
+typedef int (*devname_t)(kdev_t dev, char *buffer);
+
 struct gendisk {
 	int major;			/* major number of driver */
 	const char *major_name;		/* name of major driver */

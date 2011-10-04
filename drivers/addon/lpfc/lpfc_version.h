@@ -1,9 +1,9 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
- * Enterprise Fibre Channel Host Bus Adapters.                     *
+ * Fibre Channel Host Bus Adapters.                                *
  * Refer to the README file included with this package for         *
  * driver version and adapter support.                             *
- * Copyright (C) 2004 Emulex Corporation.                          *
+ * Copyright (C) 2003-2005 Emulex.  All rights reserved.           *
  * www.emulex.com                                                  *
  *                                                                 *
  * This program is free software; you can redistribute it and/or   *
@@ -19,12 +19,12 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_version.h 1.2 2004/11/02 15:00:57EST sf_support Exp  $
+ * $Id: lpfc_version.h 1.11 2005/07/11 14:52:16EDT sf_support Exp  $
  */
 
-#define LPFC_DRIVER_VERSION "7.1.14"
-#define LPFN_DRIVER_VERSION "7.1.14"
+#define LPFC_DRIVER_VERSION "7.3.2"
 
 #define LPFC_DRIVER_NAME "lpfc"
 
 #define LPFC_MODULE_DESC "Emulex LightPulse FC SCSI " LPFC_DRIVER_VERSION
+#define LPFC_COPYRIGHT "Copyright(c) 2003-2005 Emulex.  All rights reserved."

@@ -84,6 +84,7 @@
 #define INTEL_SUBSYS_VID		0x8086
 #define FSC_SUBSYS_VID			0x1734
 #define ACER_SUBSYS_VID			0x1025
+#define NEC_SUBSYS_VID			0x1033
 
 #define HBA_SIGNATURE	      		0x3344
 #define HBA_SIGNATURE_471	  	0xCCCC

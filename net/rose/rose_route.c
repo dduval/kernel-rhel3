@@ -654,6 +654,8 @@ int rose_rt_ioctl(unsigned int cmd, void *arg)
 			}
 			if (rose_route.mask > 10) /* Mask can't be more than 10 digits */
 				return -EINVAL;
+			if (rose_route.ndigis > AX25_MAX_DIGIS)
+				return -EINVAL;
 
 			err = rose_add_node(&rose_route, dev);
 			dev_put(dev);

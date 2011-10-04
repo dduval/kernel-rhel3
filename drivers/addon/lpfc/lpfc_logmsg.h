@@ -1,9 +1,9 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
- * Enterprise Fibre Channel Host Bus Adapters.                     *
+ * Fibre Channel Host Bus Adapters.                                *
  * Refer to the README file included with this package for         *
  * driver version and adapter support.                             *
- * Copyright (C) 2004 Emulex Corporation.                          *
+ * Copyright (C) 2003-2005 Emulex.  All rights reserved.           *
  * www.emulex.com                                                  *
  *                                                                 *
  * This program is free software; you can redistribute it and/or   *
@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_logmsg.h 1.2 2004/11/02 10:17:25EST sf_support Exp  $
+ * $Id: lpfc_logmsg.h 1.5 2005/07/08 19:29:37EDT sf_support Exp  $
  */
 
 #ifndef _H_LPFC_LOGMSG
@@ -190,6 +190,7 @@ extern char lpfc_mes0249[];
 extern char lpfc_mes0250[];
 extern char lpfc_mes0256[];
 extern char lpfc_mes0260[];
+extern char lpfc_mes0261[];
 
 /* MAILBOX LOG Messages */
 extern char lpfc_mes0300[];
@@ -216,6 +217,8 @@ extern char lpfc_mes0321[];
 extern char lpfc_mes0322[];
 extern char lpfc_mes0323[];
 extern char lpfc_mes0324[];
+extern char lpfc_mes0325[];
+extern char lpfc_mes0326[];
 
 /* INIT LOG Messages */
 extern char lpfc_mes0405[];
@@ -404,6 +407,7 @@ extern msgLogDef lpfc_msgBlk0249;
 extern msgLogDef lpfc_msgBlk0250;
 extern msgLogDef lpfc_msgBlk0256;
 extern msgLogDef lpfc_msgBlk0260;
+extern msgLogDef lpfc_msgBlk0261;
 
 
 /* MAILBOX LOG Message Structures */
@@ -431,6 +435,8 @@ extern msgLogDef lpfc_msgBlk0321;
 extern msgLogDef lpfc_msgBlk0322;
 extern msgLogDef lpfc_msgBlk0323;
 extern msgLogDef lpfc_msgBlk0324;
+extern msgLogDef lpfc_msgBlk0325;
+extern msgLogDef lpfc_msgBlk0326;
 
 /* INIT LOG Message Structures */
 extern msgLogDef lpfc_msgBlk0405;
@@ -619,6 +625,7 @@ extern msgLogDef lpfc_msgBlk1607;
 #define LPFC_LOG_MSG_DI_0250    250
 #define LPFC_LOG_MSG_DI_0256    256
 #define LPFC_LOG_MSG_DI_0260    260
+#define LPFC_LOG_MSG_DI_0261    261
 
 /* MAILBOX LOG Message Numbers */
 #define LPFC_LOG_MSG_MB_0300    300
@@ -645,6 +652,8 @@ extern msgLogDef lpfc_msgBlk1607;
 #define LPFC_LOG_MSG_MB_0322    322
 #define LPFC_LOG_MSG_MB_0323    323
 #define LPFC_LOG_MSG_MB_0324    324
+#define LPFC_LOG_MSG_MB_0325    325
+#define LPFC_LOG_MSG_MB_0326    326
 
 /* INIT LOG Message Numbers */
 #define LPFC_LOG_MSG_IN_0405    405

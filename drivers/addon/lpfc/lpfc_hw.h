@@ -1,9 +1,9 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
- * Enterprise Fibre Channel Host Bus Adapters.                     *
+ * Fibre Channel Host Bus Adapters.                                *
  * Refer to the README file included with this package for         *
  * driver version and adapter support.                             *
- * Copyright (C) 2004 Emulex Corporation.                          *
+ * Copyright (C) 2003-2005 Emulex.  All rights reserved.           *
  * www.emulex.com                                                  *
  *                                                                 *
  * This program is free software; you can redistribute it and/or   *
@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_hw.h 1.7.1.3 2004/10/12 11:44:18EDT sf_support Exp  $
+ * $Id: lpfc_hw.h 1.8 2005/05/03 11:21:43EDT sf_support Exp  $
  */
 
 #ifndef  _H_LPFC_HW
@@ -1049,11 +1049,13 @@ typedef struct {
 #define PCI_DEVICE_ID_THOR          0xfa00
 #define PCI_DEVICE_ID_VIPER         0xfb00
 #define PCI_DEVICE_ID_HELIOS        0xfd00
-#define PCI_DEVICE_ID_JFLY          0xf0d5
-#define PCI_DEVICE_ID_LP111         0xf0d1
+#define PCI_DEVICE_ID_BMID          0xf0d5
+#define PCI_DEVICE_ID_BSMB          0xf0d1
 #define PCI_DEVICE_ID_ZEPHYR        0xfe00
-#define PCI_DEVICE_ID_ZFLY          0xf0e5
+#define PCI_DEVICE_ID_ZMID          0xf0e5
+#define PCI_DEVICE_ID_ZSMB          0xf0e1
 #define PCI_DEVICE_ID_LP101	    0xf0a1
+#define PCI_DEVICE_ID_LP10000S      0xfc00
 
 #define JEDEC_ID_ADDRESS            0x0080001c
 #define FIREFLY_JEDEC_ID            0x1ACC
@@ -1512,8 +1514,9 @@ typedef struct {
 #define LINK_SPEED_AUTO 0	/* Auto selection */
 #define LINK_SPEED_1G   1	/* 1 Gigabaud */
 #define LINK_SPEED_2G   2	/* 2 Gigabaud */
-#define LINK_SPEED_4G   8	/* 4 Gigabaud */
-#define LINK_SPEED_10G  4 	/* 10 Gigabaud */
+#define LINK_SPEED_4G   4	/* 4 Gigabaud */
+#define LINK_SPEED_8G   8	/* 8 Gigabaud */
+#define LINK_SPEED_10G  16 	/* 10 Gigabaud */
 
 } INIT_LINK_VAR;
 
@@ -1678,11 +1681,14 @@ typedef struct {
 	uint32_t rttov;
 	uint32_t altov;
 	uint32_t lmt;
-#define LMT_RESERVED    0x0	/* Not used */
-#define LMT_266_10bit   0x1	/*  265.625 Mbaud 10 bit iface */
-#define LMT_532_10bit   0x2	/*  531.25  Mbaud 10 bit iface */
-#define LMT_1063_10bit  0x3	/* 1062.5   Mbaud 20 bit iface */
-#define LMT_2125_10bit  0x8	/* 2125     Mbaud 10 bit iface */
+
+#define LMT_RESERVED    0x0	 /* Not used */
+#define LMT_266_10bit   0x1	 /*  265.625 Mbaud 10 bit iface */
+#define LMT_532_10bit   0x2	 /*  531.25  Mbaud 10 bit iface */
+#define LMT_1063_20bit  0x3	 /* 1062.5   Mbaud 20 bit iface */
+#define LMT_1063_10bit  0x4	 /* 1062.5   Mbaud 10 bit iface */
+#define LMT_2125_10bit  0x8	 /* 2125     Mbaud 10 bit iface */
+#define LMT_4250_10bit  0x40	 /* 4250     Mbaud 10 bit iface */
 
 	uint32_t rsvd2;
 	uint32_t rsvd3;
@@ -2071,8 +2077,12 @@ typedef struct {
 	uint32_t Ulu:1;
 #endif
 
-#define LA_1GHZ_LINK   4	/* lnkSpeed */
-#define LA_2GHZ_LINK   8	/* lnkSpeed */
+#define LA_UNKNW_LINK  0x0	/* lnkSpeed */
+#define LA_1GHZ_LINK   0x04	/* lnkSpeed */
+#define LA_2GHZ_LINK   0x08	/* lnkSpeed */
+#define LA_4GHZ_LINK   0x10	/* lnkSpeed */
+#define LA_8GHZ_LINK   0x20	/* lnkSpeed */
+#define LA_10GHZ_LINK  0x40	/* lnkSpeed */
 
 } READ_LA_VAR;
 
@@ -2113,7 +2123,9 @@ typedef struct {
 #define  DMP_NV_PARAMS           0x2
 
 #define  DMP_REGION_VPD          0xe
-#define  DMP_VPD_SIZE            0x100
+#define  DMP_VPD_SIZE            0x400  /* maximum amount of VPD */
+#define  DMP_RSP_OFFSET          0x14   /* word 5 contains first word of rsp */
+#define  DMP_RSP_SIZE            0x6C   /* maximum of 27 words of rsp data */
 
 /* Structure for MB Command CONFIG_PORT (0x88) */
 
@@ -2733,7 +2745,10 @@ lpfc_is_LC_HBA(unsigned short device)
 	if ((device == PCI_DEVICE_ID_TFLY) ||
 	    (device == PCI_DEVICE_ID_PFLY) ||
 	    (device == PCI_DEVICE_ID_LP101) || 
-	    (device == PCI_DEVICE_ID_JFLY) || 
+	    (device == PCI_DEVICE_ID_BMID) || 
+	    (device == PCI_DEVICE_ID_ZMID) || 
+	    (device == PCI_DEVICE_ID_BSMB) || 
+	    (device == PCI_DEVICE_ID_ZSMB) || 
 	    (device == PCI_DEVICE_ID_RFLY))
 		return 1;
 	else

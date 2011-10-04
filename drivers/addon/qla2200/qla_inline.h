@@ -38,6 +38,10 @@ check_all_device_ids(scsi_qla_host_t *ha)
 	    ha->device_id == QLA2322_DEVICE_ID);
 }
 
+#define qla2x00_is_guadalupe(ha) ((ha->device_id == QLA2322_DEVICE_ID) && \
+                              (ha->subsystem_device == 0x0170) && \
+                              (ha->subsystem_vendor == 0x1028))
+
 static inline void 
 set_model_number(scsi_qla_host_t *ha)
 {

@@ -255,8 +255,9 @@ static int check_dump_partition(struct disk_dump_partition *dump_part, unsigned 
 	 * If the device has limitations of transfer size, use it.
 	 */
 	chunk_blks = 1 << block_order;
-	if (dump_part->device->max_blocks)
-		 chunk_blks = min(chunk_blks, dump_part->device->max_blocks);
+	if (dump_part->device->max_blocks &&
+	    dump_part->device->max_blocks < chunk_blks)
+		Warn("I/O size exceeds the maximum block size of SCSI device, signature check may fail");
 	skips = chunk_blks << sample_rate;
 
 	lapse = 0;
@@ -893,6 +894,9 @@ int register_disk_dump_type(struct disk_dump_type *dump_type)
 	spin_lock(&disk_dump_lock);
 	list_add(&dump_type->list, &disk_dump_types);
 	set_crc_modules();
+	list_for_each_entry(dump_type, &disk_dump_types, list)
+		if (dump_type->compute_cksum)
+			dump_type->compute_cksum();
 	spin_unlock(&disk_dump_lock);
 
 	return 0;

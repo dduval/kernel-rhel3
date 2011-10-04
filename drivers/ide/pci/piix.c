@@ -149,6 +149,7 @@ static int piix_get_info (char *buffer, char **addr, off_t offset, int count)
 			case PCI_DEVICE_ID_INTEL_82801BA_9:
 			case PCI_DEVICE_ID_INTEL_82801CA_10:
 			case PCI_DEVICE_ID_INTEL_82801CA_11:
+			case PCI_DEVICE_ID_INTEL_82801DB_1:
 			case PCI_DEVICE_ID_INTEL_82801DB_10:
 			case PCI_DEVICE_ID_INTEL_82801DB_11:
 			case PCI_DEVICE_ID_INTEL_82801EB_11:
@@ -156,6 +157,7 @@ static int piix_get_info (char *buffer, char **addr, off_t offset, int count)
 			case PCI_DEVICE_ID_INTEL_ESB_2:
 			case PCI_DEVICE_ID_INTEL_ICH6_19:
 			case PCI_DEVICE_ID_INTEL_ICH7_21:
+			case PCI_DEVICE_ID_INTEL_ESB2_18:
 				p += sprintf(p, "PIIX4 Ultra 100 ");
 				break;
 			case PCI_DEVICE_ID_INTEL_82372FB_1:
@@ -291,12 +293,14 @@ static u8 piix_ratemask (ide_drive_t *drive)
 		case PCI_DEVICE_ID_INTEL_82801CA_10:
 		case PCI_DEVICE_ID_INTEL_82801CA_11:
 		case PCI_DEVICE_ID_INTEL_82801E_11:
+		case PCI_DEVICE_ID_INTEL_82801DB_1:
 		case PCI_DEVICE_ID_INTEL_82801DB_10:
 		case PCI_DEVICE_ID_INTEL_82801DB_11:
 		case PCI_DEVICE_ID_INTEL_82801EB_11:
 		case PCI_DEVICE_ID_INTEL_ESB_2:
 		case PCI_DEVICE_ID_INTEL_ICH6_19:
 		case PCI_DEVICE_ID_INTEL_ICH7_21:
+		case PCI_DEVICE_ID_INTEL_ESB2_18:
 			mode = 3;
 			break;
 		/* UDMA 66 capable */
@@ -624,6 +628,7 @@ static unsigned int __devinit init_chipset_piix (struct pci_dev *dev, const char
 		case PCI_DEVICE_ID_INTEL_82801BA_9:
 		case PCI_DEVICE_ID_INTEL_82801CA_10:
 		case PCI_DEVICE_ID_INTEL_82801CA_11:
+		case PCI_DEVICE_ID_INTEL_82801DB_1:
 		case PCI_DEVICE_ID_INTEL_82801DB_10:
 		case PCI_DEVICE_ID_INTEL_82801DB_11:
 		case PCI_DEVICE_ID_INTEL_82801EB_11:
@@ -631,6 +636,7 @@ static unsigned int __devinit init_chipset_piix (struct pci_dev *dev, const char
 		case PCI_DEVICE_ID_INTEL_ESB_2:
 		case PCI_DEVICE_ID_INTEL_ICH6_19:
 		case PCI_DEVICE_ID_INTEL_ICH7_21:
+		case PCI_DEVICE_ID_INTEL_ESB2_18:
 		{
 			unsigned int extra = 0;
 			pci_read_config_dword(dev, 0x54, &extra);
@@ -827,6 +833,8 @@ static struct pci_device_id piix_pci_tbl[] __devinitdata = {
 	{ PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_ESB_2, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 19},
 	{ PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_ICH6_19, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 20},
 	{ PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_ICH7_21, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 21},
+	{ PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_82801DB_1, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 22},
+	{ PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_ESB2_18, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 23},
 	{ 0, },
 };
 

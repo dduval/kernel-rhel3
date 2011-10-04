@@ -811,7 +811,8 @@ void __init print_IO_APIC(void)
 		(reg_01.entries != 0x1f) && /* dual Xeon boards */
 		(reg_01.entries != 0x22) && /* bigger Xeon boards */
 		(reg_01.entries != 0x2E) &&
-		(reg_01.entries != 0x3F)
+		(reg_01.entries != 0x3F) &&
+		(reg_01.entries != 0x03)    /* AMD Golem */
 	)
 		UNEXPECTED_IO_APIC();
 

@@ -1,9 +1,9 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
- * Enterprise Fibre Channel Host Bus Adapters.                     *
+ * Fibre Channel Host Bus Adapters.                                *
  * Refer to the README file included with this package for         *
  * driver version and adapter support.                             *
- * Copyright (C) 2004 Emulex Corporation.                          *
+ * Copyright (C) 2003-2005 Emulex.  All rights reserved.           *
  * www.emulex.com                                                  *
  *                                                                 *
  * This program is free software; you can redistribute it and/or   *
@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_fcp.c 1.166.1.44 2004/10/22 16:46:45EDT sf_support Exp  $
+ * $Id: lpfc_fcp.c 1.8 2005/05/03 11:21:36EDT sf_support Exp  $
  */
 
 
@@ -111,6 +111,33 @@ extern int lpfc_biosparam(Disk *, kdev_t, int[]);
 #define FC_MAX_DID_STRING       6
 #define FC_MAX_WW_NN_PN_STRING 16
 
+
+#if VARYIO == 20
+#define VARYIO_ENTRY .can_do_varyio = 1,
+#elif VARYIO == 3
+#define VARYIO_ENTRY .vary_io =1,
+#else
+#define VARYIO_ENTRY
+#endif
+
+#if defined CONFIG_HIGHMEM
+#if USE_HIGHMEM_IO ==2		// i386 & Redhat 2.1
+#define HIGHMEM_ENTRY .can_dma_32 = 1,
+#define SINGLE_SG_OK .single_sg_ok = 1,
+#else
+#if USE_HIGHMEM_IO ==3		// Redhat 3.0, Suse
+#define HIGHMEM_ENTRY .highmem_io = 1,
+#define SINGLE_SG_OK
+#else				// any other
+#define HIGHMEM_ENTRY
+#define SINGLE_SG_OK
+#endif
+#endif
+#else				// no highmem config
+#define HIGHMEM_ENTRY
+#define SINGLE_SG_OK
+#endif
+
 static Scsi_Host_Template driver_template = {
 	.module = THIS_MODULE,
 	.name = LPFC_DRIVER_NAME,
@@ -124,8 +151,9 @@ static Scsi_Host_Template driver_template = {
 	.detect = lpfc_detect,
 	.release = lpfc_release,
 	.use_new_eh_code = 1,
-	.vary_io = 1,
-	.highmem_io = 1,
+	VARYIO_ENTRY
+	HIGHMEM_ENTRY
+	SINGLE_SG_OK
 
 	.bios_param = lpfc_biosparam,
 	.proc_info = lpfc_proc_info,
@@ -171,15 +199,21 @@ static struct pci_device_id lpfc_id_table[] = {
 		PCI_ANY_ID, PCI_ANY_ID, },
 	{PCI_VENDOR_ID_EMULEX, PCI_DEVICE_ID_HELIOS,
 		PCI_ANY_ID, PCI_ANY_ID, },
-	{PCI_VENDOR_ID_EMULEX, PCI_DEVICE_ID_JFLY,
+	{PCI_VENDOR_ID_EMULEX, PCI_DEVICE_ID_BMID,
+		PCI_ANY_ID, PCI_ANY_ID, },
+	{PCI_VENDOR_ID_EMULEX, PCI_DEVICE_ID_BSMB,
 		PCI_ANY_ID, PCI_ANY_ID, },
 	{PCI_VENDOR_ID_EMULEX, PCI_DEVICE_ID_ZEPHYR,
 		PCI_ANY_ID, PCI_ANY_ID, },
-	{PCI_VENDOR_ID_EMULEX, PCI_DEVICE_ID_ZFLY,
+	{PCI_VENDOR_ID_EMULEX, PCI_DEVICE_ID_ZMID,
+		PCI_ANY_ID, PCI_ANY_ID, },
+	{PCI_VENDOR_ID_EMULEX, PCI_DEVICE_ID_ZSMB,
 		PCI_ANY_ID, PCI_ANY_ID, },
 	{PCI_VENDOR_ID_EMULEX, PCI_DEVICE_ID_TFLY,
 		PCI_ANY_ID, PCI_ANY_ID, },
 	{PCI_VENDOR_ID_EMULEX, PCI_DEVICE_ID_LP101,
+		PCI_ANY_ID, PCI_ANY_ID, },
+	{PCI_VENDOR_ID_EMULEX, PCI_DEVICE_ID_LP10000S,
 		PCI_ANY_ID, PCI_ANY_ID, },
 	{ 0 }
 };
@@ -192,7 +226,13 @@ lpfc_detect(Scsi_Host_Template * tmpt)
 	int instance = 0;
 	int i;
 
+#if VARYIO == 21
+#ifdef SCSI_HOST_VARYIO
+	SCSI_HOST_VARYIO(tmpt) = 1;
+#endif
+#endif
 	printk(LPFC_MODULE_DESC "\n");
+	printk(LPFC_COPYRIGHT "\n");
 
 	/* Release the io_request_lock lock and reenable interrupts allowing
 	 * the driver to sleep if necessary.
@@ -513,7 +553,6 @@ lpfc_linux_attach(int instance, Scsi_Host_Template * tmpt, struct pci_dev *pdev)
 	LPFC_DRVR_UNLOCK(phba, iflag);
 	lpfc_tasklet((unsigned long)phba);
 	tasklet_kill(&phba->task_run);
-	free_irq(phba->pcidev->irq, phba);
 	lpfc_mem_free(phba);
 	lpfc_unmemmap(phba);
 	lpfcDRVR.num_devs--;
@@ -719,14 +758,14 @@ lpfc_info(struct Scsi_Host *host)
 {
 	lpfcHBA_t    *phba = (lpfcHBA_t *) host->hostdata[0];
 	int len;
-	static char  lpfcinfobuf[128];
+	static char  lpfcinfobuf[320];
 	
-        memset(lpfcinfobuf,0,128);
+        memset(lpfcinfobuf,0,320);
 	if(phba && phba->pcidev){
-	        lpfc_get_hba_model_desc(phba, 0, lpfcinfobuf);
+		strncpy(lpfcinfobuf, phba->ModelDesc, 320);
 		len = strlen(lpfcinfobuf);	
 		snprintf(lpfcinfobuf + len,
-			128-len,
+			320-len,
 	       		" on PCI bus %02x device %02x irq %d",
 			phba->pcidev->bus->number,
 		 	phba->pcidev->devfn,
@@ -866,12 +905,20 @@ lpfc_proc_info(char *buf,
 						"   Point-2-Point\n");
 		}
 
+		if (phba->fc_linkspeed == LA_4GHZ_LINK)
+			len += snprintf(buf + len, PAGE_SIZE-len,
+					"   Current speed 4G\n");
+		else
 		if (phba->fc_linkspeed == LA_2GHZ_LINK)
 			len += snprintf(buf + len, PAGE_SIZE-len,
 					"   Current speed 2G\n");
 		else
+		if (phba->fc_linkspeed == LA_1GHZ_LINK)
 			len += snprintf(buf + len, PAGE_SIZE-len,
 					"   Current speed 1G\n\n");
+		else
+			len += snprintf(buf + len, PAGE_SIZE-len,
+					"   Current speed unknown\n\n");
 
 		/* Loop through the list of mapped nodes and dump the known node
 		   information. */
@@ -1258,11 +1305,7 @@ lpfc_sli_setup(lpfcHBA_t * phba)
 			        totiocb, MAX_SLI2_IOCB);
 	}
 
-#ifdef USE_HGP_HOST_SLIM
-	psli->sliinit.sli_flag = LPFC_HGP_HOSTSLIM;
-#else
 	psli->sliinit.sli_flag = 0;
-#endif
 
 	return (0);
 }
@@ -1446,12 +1489,15 @@ lpfc_config_setup(lpfcHBA_t * phba)
 
 	switch (phba->pcidev->device) {
 	case PCI_DEVICE_ID_LP101:
+	case PCI_DEVICE_ID_BSMB:
+	case PCI_DEVICE_ID_ZSMB:
 		clp[LPFC_CFG_DFT_HBA_Q_DEPTH].a_current =
 			LPFC_LP101_HBA_Q_DEPTH;
 		break;
 	case PCI_DEVICE_ID_RFLY:
 	case PCI_DEVICE_ID_PFLY:
-	case PCI_DEVICE_ID_JFLY:
+	case PCI_DEVICE_ID_BMID:
+	case PCI_DEVICE_ID_ZMID:
 	case PCI_DEVICE_ID_TFLY:
 		clp[LPFC_CFG_DFT_HBA_Q_DEPTH].a_current = LPFC_LC_HBA_Q_DEPTH;
 		break;
@@ -2396,7 +2442,6 @@ EXPORT_SYMBOL(lpfc_findnode_wwnn);
 EXPORT_SYMBOL(lpfc_findnode_wwpn);
 EXPORT_SYMBOL(lpfc_free_scsi_buf);
 EXPORT_SYMBOL(lpfc_geportname);
-EXPORT_SYMBOL(lpfc_get_hba_model_desc);
 EXPORT_SYMBOL(lpfc_get_hba_sym_node_name);
 EXPORT_SYMBOL(lpfc_get_scsi_buf);
 EXPORT_SYMBOL(lpfc_init_link);

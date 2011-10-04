@@ -2146,7 +2146,7 @@ asmlinkage long sys32_ustat(dev_t dev, struct ustat32 *u32p)
 	return ret;
 } 
 
-static int nargs(u32 src, char **dst) 
+static int nargs(u32 src, char **dst, int max)
 { 
 	int cnt;
 	u32 val; 
@@ -2156,12 +2156,12 @@ static int nargs(u32 src, char **dst)
 		int ret = get_user(val, (__u32 *)(u64)src); 
 		if (ret)
 			return ret;
+		if (cnt > max)
+			return -E2BIG;
 		if (dst)
 			dst[cnt] = (char *)(u64)val; 
 		cnt++;
 		src += 4;
-		if (cnt >= (MAX_ARG_PAGES*PAGE_SIZE)/sizeof(void*))
-			return -E2BIG; 
 	} while(val); 
 	if (dst)
 		dst[cnt-1] = 0; 
@@ -2176,15 +2176,16 @@ asmlinkage long sys32_execve(char *name, u32 argv, u32 envp, struct pt_regs regs
 	int ret;
 	unsigned sz = 0; 
 	
+	/* can actually allocate up to 2*MAX_ARG_PAGES */
 	if (argv) {
-	na = nargs(argv, NULL); 
+	na = nargs(argv, NULL, (MAX_ARG_PAGES*PAGE_SIZE) / sizeof(char *) - 1);
 	if (na < 0) 
-		return -EFAULT; 
+		return na;
 	} 	
 	if (envp) { 
-	ne = nargs(envp, NULL); 
+	ne = nargs(envp, NULL, (MAX_ARG_PAGES*PAGE_SIZE) / sizeof(char *) - 1);
 	if (ne < 0) 
-		return -EFAULT; 
+		return ne;
 	}
 
 	if (argv || envp) { 
@@ -2198,13 +2199,13 @@ asmlinkage long sys32_execve(char *name, u32 argv, u32 envp, struct pt_regs regs
 	} 
 	
 	if (argv) { 
-	ret = nargs(argv, buf);
+	ret = nargs(argv, buf, na - 1);
 	if (ret < 0)
 		goto free;
 	}
 
 	if (envp) { 
-	ret = nargs(envp, buf + na); 
+	ret = nargs(envp, buf + na, ne - 1);
 	if (ret < 0)
 		goto free; 
 	}

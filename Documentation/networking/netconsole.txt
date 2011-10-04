@@ -1,0 +1,26 @@
+The netconsole module provides 3 pieces of functionality:
+
+    1) generation of syslog messages which are delivered to a remote syslog
+       server
+    2) generation of netconsole messages which are delivered to a remote
+       netdump server
+    3) a network kernel crash dump facility
+
+The configuration for the module is specified in the /etc/sysconfig/netdump
+file, which is self-documented.  Once the parameters are specified in that
+file, you can enable the module with a "service netdump start" command,
+provided you have installed the netdump rpm.
+
+Network drivers must implement a special hook in order to work with
+netconsole.  The following drivers implement this functionality, and thus
+can be used in conjunction with netconsole:
+
+    3c59x
+    b44
+    e100
+    e1000
+    eepro100
+    pcnet32
+    tg3
+    tlan
+    tulip

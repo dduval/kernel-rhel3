@@ -50,6 +50,8 @@
 
 /* Private (from user) interface flags (netdevice->priv_flags). */
 #define IFF_802_1Q_VLAN 0x1             /* 802.1Q VLAN device.          */
+/* this flag is put at 0x4 since upstream has at least used 0x2 already. */
+#define IFF_NETCONSOLE  0x4             /* called via netconsole */
 
 
 #define IF_GET_IFACE	0x0001		/* for querying only */

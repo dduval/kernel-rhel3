@@ -1,9 +1,9 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
- * Enterprise Fibre Channel Host Bus Adapters.                     *
+ * Fibre Channel Host Bus Adapters.                                *
  * Refer to the README file included with this package for         *
  * driver version and adapter support.                             *
- * Copyright (C) 2004 Emulex Corporation.                          *
+ * Copyright (C) 2003-2005 Emulex.  All rights reserved.           *
  * www.emulex.com                                                  *
  *                                                                 *
  * This program is free software; you can redistribute it and/or   *
@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_clock.c 1.23.1.5 2004/08/20 20:51:24EDT sf_support Exp  $
+ * $Id: lpfc_clock.c 1.3 2005/05/03 11:21:19EDT sf_support Exp  $
  */
 
 #include <linux/version.h>
@@ -60,6 +60,7 @@ lpfc_start_timer(lpfcHBA_t * phba,
 	clkData->phba = phba;
 	clkData->clData1 = data1;
 	clkData->clData2 = data2;
+	clkData->flags = 0;
 
 	init_timer(ptimer);
 	ptimer->function = func;
@@ -73,10 +74,13 @@ void
 lpfc_stop_timer(struct clk_data *clkData)
 {
 	struct timer_list *ptimer;
-
+	
 	ptimer = clkData->timeObj;
-	del_timer(ptimer);
+	clkData->flags |= TM_CANCELED;
 	ptimer->function = 0;
-	list_del((struct list_head *)clkData);
-	kfree(clkData);
+	if (del_timer(ptimer)) {
+		list_del((struct list_head *)clkData);
+		kfree(clkData);
+		}
+
 }

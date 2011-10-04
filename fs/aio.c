@@ -902,6 +902,8 @@ asmlinkage long sys_io_setup(unsigned nr_reqs, aio_context_t *ctxp)
 		ret = put_user(ioctx->user_id, ctxp);
 		if (!ret)
 			return 0;
+
+		get_ioctx(ioctx); /* io_destroy() expects us to hold a ref */
 		io_destroy(ioctx);
 	}
 
