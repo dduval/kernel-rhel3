@@ -561,7 +561,7 @@ int launder_page(zone_t * zone, int gfp_mask, struct page *page)
  * can suddenly come under VM pressure.
  */
 #define MAX_AGING_INTERVAL ((unsigned long)300*HZ)
-#define MIN_AGING_INTERVAL ((unsigned long)((HZ*kscand_work_percent)/200))
+#define MIN_AGING_INTERVAL ((unsigned long)HZ/2)
 static void speedup_aging(struct zone_struct * zone)
 {
 	zone->need_scan++;
@@ -1448,7 +1448,7 @@ int kscand(void *unused)
 				for (age = MAX_AGE-1; age >= 0; age--)  {
 					scan_active_list(zone, age,
 						&zone->active_cache_list[age],
-						zone->active_anon_count[age]);
+						zone->active_cache_count[age]);
 					if (current->need_resched)
 						schedule();
 				}

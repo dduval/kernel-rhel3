@@ -1716,6 +1716,13 @@ static int do_swap_page(struct mm_struct * mm,
 	}
 	lock_page(page);
 
+	if (!Page_Uptodate(page)) {
+		unlock_page(page);
+		page_cache_release(page);
+		pte_chain_free(pte_chain);
+		return 0;
+	}
+
 	/*
 	 * Back out if somebody else faulted in this pte while we
 	 * released the page table lock.

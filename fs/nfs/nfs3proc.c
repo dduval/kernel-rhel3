@@ -18,6 +18,11 @@
 
 #define NFSDBG_FACILITY		NFSDBG_PROC
 
+#ifdef CONFIG_NFS_ACL
+static int nfs3_proc_set_default_acl(struct inode *dir, struct inode *inode,
+					mode_t mode);
+#endif
+
 /* A wrapper to handle the EJUKEBOX error message */
 static int
 nfs3_rpc_wrapper(struct rpc_clnt *clnt, struct rpc_message *msg, int flags)
@@ -46,6 +51,7 @@ nfs3_rpc_call_wrapper(struct rpc_clnt *clnt, u32 proc, void *argp, void *resp, i
 
 #define rpc_call(clnt, proc, argp, resp, flags) \
 		nfs3_rpc_call_wrapper(clnt, proc, argp, resp, flags)
+#undef rpc_call_sync
 #define rpc_call_sync(clnt, msg, flags) \
 		nfs3_rpc_wrapper(clnt, msg, flags)
 
@@ -246,16 +252,20 @@ nfs3_proc_write(struct inode *inode, struct rpc_cred *cred,
  * For now, we don't implement O_EXCL.
  */
 static int
-nfs3_proc_create(struct inode *dir, struct qstr *name, struct iattr *sattr,
-		 int flags, struct nfs_fh *fhandle, struct nfs_fattr *fattr)
+nfs3_proc_create(struct inode *dir, struct dentry *dentry, struct iattr *sattr,
+		 int flags)
 {
+	struct nfs_fh		fhandle;
+	struct nfs_fattr	fattr;
 	struct nfs_fattr	dir_attr;
-	struct nfs3_createargs	arg = { NFS_FH(dir), name->name, name->len,
+	struct nfs3_createargs	arg = { NFS_FH(dir), dentry->d_name.name,
+					dentry->d_name.len,
 					sattr, 0, { 0, 0 } };
-	struct nfs3_diropres	res = { &dir_attr, fhandle, fattr };
+	struct nfs3_diropres	res = { &dir_attr, &fhandle, &fattr };
+	mode_t			mode = sattr->ia_mode;
 	int			status;
 
-	dprintk("NFS call  create %s\n", name->name);
+	dprintk("NFS call  create %s\n", dentry->d_name.name);
 	arg.createmode = NFS3_CREATE_UNCHECKED;
 	if (flags & O_EXCL) {
 		arg.createmode  = NFS3_CREATE_EXCLUSIVE;
@@ -265,7 +275,7 @@ nfs3_proc_create(struct inode *dir, struct qstr *name, struct iattr *sattr,
 
 again:
 	dir_attr.valid = 0;
-	fattr->valid = 0;
+	fattr.valid = 0;
 	status = rpc_call(NFS_CLIENT(dir), NFS3PROC_CREATE, &arg, &res, 0);
 	nfs_refresh_inode(dir, &dir_attr);
 
@@ -288,23 +298,31 @@ again:
 	}
 
 exit:
-	dprintk("NFS reply create: %d\n", status);
+	if (status == 0)
+		status = nfs_instantiate(dentry, &fhandle, &fattr);
+	if (status != 0)
+		goto out;
 
 	/* When we created the file with exclusive semantics, make
 	 * sure we set the attributes afterwards. */
 	if (status == 0 && arg.createmode == NFS3_CREATE_EXCLUSIVE) {
-		struct nfs3_sattrargs	arg = { fhandle, sattr, 0, 0 };
+		struct nfs3_sattrargs	arg = { &fhandle, sattr, 0, 0 };
 		dprintk("NFS call  setattr (post-create)\n");
 
 		/* Note: we could use a guarded setattr here, but I'm
 		 * not sure this buys us anything (and I'd have
 		 * to revamp the NFSv3 XDR code) */
-		fattr->valid = 0;
+		fattr.valid = 0;
 		status = rpc_call(NFS_CLIENT(dir), NFS3PROC_SETATTR,
-						&arg, fattr, 0);
+						&arg, &fattr, 0);
 		dprintk("NFS reply setattr (post-create): %d\n", status);
 	}
-
+#ifdef CONFIG_NFS_ACL
+	if (status == 0)
+		status = nfs3_proc_set_default_acl(dir, dentry->d_inode, mode);
+#endif
+out:
+	dprintk("NFS reply create: %d\n", status);
 	return status;
 }
 
@@ -508,7 +526,7 @@ nfs3_proc_mknod(struct inode *dir, struct qstr *name, struct iattr *sattr,
 	default:	return -EINVAL;
 	}
 
-	dprintk("NFS call  mknod %s %x\n", name->name, rdev);
+	dprintk("NFS call  mknod %s %lx\n", name->name, (unsigned long)rdev);
 	dir_attr.valid = 0;
 	fattr->valid = 0;
 	status = rpc_call(NFS_CLIENT(dir), NFS3PROC_MKNOD, &arg, &res, 0);
@@ -787,6 +805,36 @@ cleanup:
 	return status;
 }
 #endif  /* CONFIG_NFS_ACL */
+
+#ifdef CONFIG_NFS_ACL
+static int
+nfs3_proc_set_default_acl(struct inode *dir, struct inode *inode, mode_t mode)
+{
+	struct posix_acl *dfacl, *acl;
+	int error = 0;
+
+	dfacl = nfs3_proc_getacl(dir, ACL_TYPE_DEFAULT);
+	if (IS_ERR(dfacl)) {
+		error = PTR_ERR(dfacl);
+		return (error == -EOPNOTSUPP) ? 0 : error;
+	}
+	if (!dfacl)
+		return 0;
+	acl = posix_acl_clone(dfacl, GFP_KERNEL);
+	error = -ENOMEM;
+	if (!acl)
+		goto out_release_dfacl;
+	error = posix_acl_create_masq(acl, &mode);
+	if (error < 0)
+		goto out_release_acl;
+	error = nfs3_proc_setacl(inode, ACL_TYPE_ACCESS, acl);
+out_release_acl:
+	posix_acl_release(acl);
+out_release_dfacl:
+	posix_acl_release(dfacl);
+	return error;
+}
+#endif	/* CONFIG_NFS_ACL */
 
 extern u32 *nfs3_decode_dirent(u32 *, struct nfs_entry *, int);
 

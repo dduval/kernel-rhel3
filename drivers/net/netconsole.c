@@ -87,7 +87,11 @@ static unsigned long long mhz_cycles, jiffy_cycles;
 static spinlock_t netconsole_lock = SPIN_LOCK_UNLOCKED;
 static int nr_netconsole_skbs;
 static struct sk_buff *netconsole_skbs;
-
+/* the following tunes whether we should send printk's via netconsole.  The
+ * default is to on.  During a netdump, though, we don't want to send output
+ * to the network console, so we disable it for that time.
+ */
+static int emit_printks = 1;
 static asmlinkage void do_netdump(struct pt_regs *regs, void *arg);
 
 #define MAX_SKB_SIZE \
@@ -462,7 +466,7 @@ static void write_netconsole_msg(struct console *con, const char *msg0, unsigned
 	reply_t reply;
 
 	dev = netconsole_dev;
-	if (!dev || crashdump_mode())
+	if (!dev || !emit_printks)
 		return;
 
 	if (dev->poll_controller && netif_running(dev)) {
@@ -836,7 +840,7 @@ static void netdump_startup_handshake(struct net_device *dev)
 	int i;
 
 	netdump_mode = 1;
-
+	emit_printks = 0;
 repeat:
         sprintf(tmp,
             "task_struct:0x%lx page_offset:0x%llx netdump_magic:0x%llx\n",
@@ -1061,12 +1065,12 @@ static asmlinkage void do_netdump(struct pt_regs *regs, void *platform_arg)
 			reply.info = 0;
 			send_netdump_skb(dev, tmp, strlen(tmp), &reply);
 
-			netdump_mode = 0;
+			emit_printks = 1;
 			if (regs)
 				show_regs(regs);
 			show_state();
 			show_mem();
-			netdump_mode = 1;
+			emit_printks = 0;
 			break;
 
 		default:

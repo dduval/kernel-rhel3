@@ -46,7 +46,6 @@ log_erp_chain (ccw_req_t *cqr,
                 *end,
                 buffer[80];
         
-        
         /* dump sense data */
         if (device->discipline            && 
             device->discipline->dump_sense  ) {
@@ -58,7 +57,7 @@ log_erp_chain (ccw_req_t *cqr,
         /* log the channel program */
         while (loop_cqr != NULL) {
                 
-                DEV_MESSAGE (KERN_ERR, device, 
+                DEV_MESSAGE_LOG (KERN_ERR, device, 
                              "(%s) ERP chain report for req: %p",
                              caller == 0 ? "EXAMINE" : "ACTION",
                              loop_cqr);
@@ -76,19 +75,17 @@ log_erp_chain (ccw_req_t *cqr,
                                  nl,
                                  nl[0], nl[1], nl[2], nl[3],
                                  nl[4], nl[5], nl[6], nl[7],
-                                 nl[8], nl[9], nl[10], nl[11],
-                                 nl[12], nl[13], nl[14], nl[15]);
+                                 nl[8], nl[9], nl[10],nl[11],
+                                 nl[12],nl[13],nl[14],nl[15]);
         
-                        DEV_MESSAGE (KERN_ERR, device, "%s", 
+                        DEV_MESSAGE_LOG (KERN_ERR, device, "%s", 
                                      buffer);
-                        
                         nl +=16;
                 }        
                	
-		DEV_MESSAGE (KERN_ERR, device,
+		DEV_MESSAGE_LOG (KERN_ERR, device,
 				"DATA area is at: %p",
 				loop_cqr->data);
-
 		nl      = (char *) loop_cqr->data;
 		end_cqr = nl + loop_cqr->datasize;
 
@@ -102,12 +99,11 @@ log_erp_chain (ccw_req_t *cqr,
                                   nl,
                                   nl[0], nl[1], nl[2], nl[3],
                                   nl[4], nl[5], nl[6], nl[7],
-                                  nl[8], nl[9], nl[10], nl[11],
-                                 nl[12], nl[13], nl[14], nl[15]);
+                                 nl[8], nl[9], nl[10],nl[11],
+                                 nl[12],nl[13],nl[14],nl[15]);
 
-                        DEV_MESSAGE (KERN_ERR, device, "%s",
+                        DEV_MESSAGE_LOG (KERN_ERR, device, "%s",
                                      buffer);
-
                         nl +=16;
               }
 	       	
@@ -115,7 +111,7 @@ log_erp_chain (ccw_req_t *cqr,
                 
                 if (loop_cqr->cplength > 40) { /* log only parts of the CP */
 
-                        DEV_MESSAGE (KERN_ERR, device, "%s",
+                        DEV_MESSAGE_LOG (KERN_ERR, device, "%s",
                                       "Start of channel program:");
                         
                         for (i = 0; i < 20; i += 2) { 
@@ -131,13 +127,12 @@ log_erp_chain (ccw_req_t *cqr,
                                          nl[8], nl[9], nl[10], nl[11],
                                          nl[12], nl[13], nl[14], nl[15]);
                                 
-                                DEV_MESSAGE (KERN_ERR, device, "%s",
+                                DEV_MESSAGE_LOG (KERN_ERR, device, "%s",
                                              buffer);
-
                                 nl += 16;
                         }
                         
-                        DEV_MESSAGE (KERN_ERR, device, "%s",
+                        DEV_MESSAGE_LOG (KERN_ERR, device, "%s",
                                      "End of channel program:");
                         
                         nl  = (char *) loop_cqr->cpaddr;
@@ -156,15 +151,14 @@ log_erp_chain (ccw_req_t *cqr,
                                          nl[8], nl[9], nl[10], nl[11],
                                          nl[12], nl[13], nl[14], nl[15]);
                                 
-                                DEV_MESSAGE (KERN_ERR, device, "%s",
+                                DEV_MESSAGE_LOG (KERN_ERR, device, "%s",
                                              buffer);
-                                
                                 nl += 16;
                         }
                         
                 } else { /* log the whole CP */
                         
-                        DEV_MESSAGE (KERN_ERR, device, "%s",
+                        DEV_MESSAGE_LOG (KERN_ERR, device, "%s",
                                       "Channel program (complete):");
                         
                         for (i = 0; i < (loop_cqr->cplength + 4); i += 2) { 
@@ -177,12 +171,11 @@ log_erp_chain (ccw_req_t *cqr,
                                          nl,
                                          nl[0], nl[1], nl[2], nl[3],
                                          nl[4], nl[5], nl[6], nl[7],
-                                         nl[8], nl[9], nl[10], nl[11],
-                                         nl[12], nl[13], nl[14], nl[15]);
+                                         nl[8], nl[9], nl[10],nl[11],
+                                         nl[12],nl[13],nl[14],nl[15]);
                                 
-                                DEV_MESSAGE (KERN_ERR, device, "%s",
+                                DEV_MESSAGE_LOG (KERN_ERR, device, "%s",
                                              buffer);
-                                
                                 nl += 16;
                         }
                 }
@@ -201,7 +194,7 @@ log_erp_chain (ccw_req_t *cqr,
                         
                                 nl -= 10*8;     /* start some bytes before */
                                 
-                                DEV_MESSAGE (KERN_ERR, device, 
+                                DEV_MESSAGE_LOG (KERN_ERR, device, 
                                              "Failed CCW (%p) (area):",
                                              (void *)(long)cpa);
                                 
@@ -215,26 +208,22 @@ log_erp_chain (ccw_req_t *cqr,
                                                  nl,
                                                  nl[0], nl[1], nl[2], nl[3],
                                                  nl[4], nl[5], nl[6], nl[7],
-                                                 nl[8], nl[9], nl[10], nl[11],
-                                                 nl[12], nl[13], nl[14], nl[15]);
-
-                                        DEV_MESSAGE (KERN_ERR, device, "%s",
-                                                     buffer);
+                                                 nl[8], nl[9], nl[10],nl[11],
+                                                 nl[12],nl[13],nl[14],nl[15]);
                                         
+                                        DEV_MESSAGE_LOG (KERN_ERR, device, 
+                                                         "%s", buffer);
                                         nl += 16;
                                 }
-                                
                         } else {
-                                
-                                DEV_MESSAGE (KERN_ERR, device, 
-                                             "Failed CCW (%p) already logged",
+                                DEV_MESSAGE_LOG (KERN_ERR, device, 
+                                                 "Failed CCW (%p) already "
+                                                 "logged",
                                              (void *)(long)cpa);
                         }
                 }
-                
                 loop_cqr = loop_cqr->refers;
         }
-        
 } /* end log_erp_chain */
 
 /*

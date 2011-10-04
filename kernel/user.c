@@ -66,16 +66,28 @@ static inline struct user_struct *uid_hash_find(uid_t uid, struct list_head *has
 
 struct user_struct *find_user(uid_t uid)
 {
-	return uid_hash_find(uid, uidhashentry(uid));
+	struct user_struct *ret;
+
+	spin_lock_irq(&uidhash_lock);
+	ret = uid_hash_find(uid, uidhashentry(uid));
+	spin_unlock_irq(&uidhash_lock);
+	return ret;
 }
 
 void free_uid(struct user_struct *up)
 {
-	if (up && atomic_dec_and_lock(&up->__count, &uidhash_lock)) {
+	unsigned long flags;
+
+	if (!up)
+		return;
+
+	local_irq_save(flags);
+	if (atomic_dec_and_lock(&up->__count, &uidhash_lock)) {
 		uid_hash_remove(up);
 		kmem_cache_free(uid_cachep, up);
 		spin_unlock(&uidhash_lock);
 	}
+	local_irq_restore(flags);
 }
 
 struct user_struct * alloc_uid(uid_t uid)
@@ -83,9 +95,9 @@ struct user_struct * alloc_uid(uid_t uid)
 	struct list_head *hashent = uidhashentry(uid);
 	struct user_struct *up;
 
-	spin_lock(&uidhash_lock);
+	spin_lock_irq(&uidhash_lock);
 	up = uid_hash_find(uid, hashent);
-	spin_unlock(&uidhash_lock);
+	spin_unlock_irq(&uidhash_lock);
 
 	if (!up) {
 		struct user_struct *new;
@@ -102,7 +114,7 @@ struct user_struct * alloc_uid(uid_t uid)
 		 * Before adding this, check whether we raced
 		 * on adding the same user already..
 		 */
-		spin_lock(&uidhash_lock);
+		spin_lock_irq(&uidhash_lock);
 		up = uid_hash_find(uid, hashent);
 		if (up) {
 			kmem_cache_free(uid_cachep, new);
@@ -110,7 +122,7 @@ struct user_struct * alloc_uid(uid_t uid)
 			uid_hash_insert(new, hashent);
 			up = new;
 		}
-		spin_unlock(&uidhash_lock);
+		spin_unlock_irq(&uidhash_lock);
 
 	}
 	return up;

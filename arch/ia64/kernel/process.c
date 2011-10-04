@@ -34,6 +34,19 @@
 #include <asm/sn/idle.h>
 #endif
 
+#ifdef CONFIG_IA64_PAL_IDLE
+static int use_pal_halt;
+
+static int __init
+pal_halt (char *str)
+{
+	use_pal_halt = 1;
+	return 1;
+}
+
+__setup("palhalt", pal_halt);
+#endif
+
 void
 ia64_do_show_stack (struct unw_frame_info *info, void *arg)
 {
@@ -136,7 +149,7 @@ void
 default_idle (void)
 {
 #ifdef CONFIG_IA64_PAL_IDLE
-	if (!current->need_resched)
+	if (use_pal_halt && !current->need_resched)
 		safe_halt();
 	else
 		cpu_relax();

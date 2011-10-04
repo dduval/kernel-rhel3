@@ -359,8 +359,8 @@ struct nfs_rpc_ops {
 			    struct page *, struct nfs_writeverf *verfp);
 	int	(*commit)  (struct inode *, struct nfs_fattr *,
 			    unsigned long, unsigned int);
-	int	(*create)  (struct inode *, struct qstr *, struct iattr *,
-			    int, struct nfs_fh *, struct nfs_fattr *);
+	int	(*create)  (struct inode *, struct dentry *, struct iattr *,
+			    int);
 	int	(*remove)  (struct inode *, struct qstr *);
 	int	(*unlink_setup)  (struct rpc_message *,
 			    struct dentry *, struct qstr *);

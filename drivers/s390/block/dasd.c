@@ -5189,8 +5189,8 @@ dasd_statistics_write (struct file *file, const char *user_buf,
 
 	buffer[user_len] = 0;
         
-	MESSAGE (KERN_INFO,
-                 "/proc/dasd/statictics: '%s'",
+	MESSAGE_LOG (KERN_INFO,
+                     "/proc/dasd/statistics: '%s'",
                  buffer);
 
 #ifdef DASD_PROFILE
@@ -5213,7 +5213,7 @@ dasd_statistics_write (struct file *file, const char *user_buf,
                         sizeof (dasd_profile_info_t));
                 
                 MESSAGE (KERN_INFO, "%s",
-                         "Statictics reset");
+                         "Statistics reset");
 
 	} else {
 
@@ -5229,7 +5229,7 @@ dasd_statistics_write (struct file *file, const char *user_buf,
                         dasd_profile_level = DASD_PROFILE_ON;
                         
                         MESSAGE (KERN_INFO, "%s",
-                                 "Statictics switched on");
+                                 "Statistics switched on");
                         
                 } else if (!strncmp (buffer + offset, "off", 3)) {
                         
@@ -5241,7 +5241,7 @@ dasd_statistics_write (struct file *file, const char *user_buf,
                         dasd_profile_level = DASD_PROFILE_OFF;
                         
                         MESSAGE (KERN_INFO, "%s",
-                                 "Statictics switched off");
+                                 "Statistics switched off");
 
                 } else {
 

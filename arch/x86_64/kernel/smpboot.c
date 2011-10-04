@@ -174,9 +174,6 @@ void __init smp_store_cpu_info(int id)
 	identify_cpu(c);
 }
 
-#undef Dprintk
-#define Dprintk	printk
-
 /*
  * Architecture specific routine called by the kernel just before init is
  * fired off. This allows the BP to have everything in order [we hope].

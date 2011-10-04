@@ -8,6 +8,7 @@
  */
 
 #include <linux/module.h>
+#include <linux/personality.h>
 #include <asm/current.h>
 #include <linux/sched.h>		/* remove ASAP */
 #include <linux/fs.h>
@@ -22,6 +23,10 @@
 #include <linux/dnotify.h>
 
 #include <asm/uaccess.h>
+
+#ifndef HUGE_TASK_SIZE
+#define HUGE_TASK_SIZE TASK_SIZE
+#endif
 
 extern struct list_head inode_unused;
 
@@ -171,13 +176,13 @@ hugetlb_get_unmapped_area(struct file *file, unsigned long addr,
 
 	if (len & ~HPAGE_MASK)
 		return -EINVAL;
-	if (len > TASK_SIZE)
+	if (len > HUGE_TASK_SIZE)
 		return -ENOMEM;
 
 	if (addr) {
 		addr = ALIGN(addr, HPAGE_SIZE);
 		vma = find_vma(mm, addr);
-		if (TASK_SIZE - len >= addr &&
+		if (HUGE_TASK_SIZE - len >= addr &&
 		    (!vma || addr + len <= vma->vm_start))
 			return addr;
 	}
@@ -187,7 +192,7 @@ hugetlb_get_unmapped_area(struct file *file, unsigned long addr,
 repeat_loop:
 	for (vma = find_vma(mm, addr); ; vma = vma->vm_next) {
 		/* At this point:  (!vma || addr < vma->vm_end). */
-		if (TASK_SIZE - len < addr) {
+		if (HUGE_TASK_SIZE - len < addr) {
 			if (full_search) {
 				full_search = 0;
 				addr = 0;

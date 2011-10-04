@@ -1779,7 +1779,7 @@ dasd_eckd_init (void)
 {
 	int rc = 0;
 
-	MESSAGE (KERN_INFO,
+	MESSAGE_LOG (KERN_INFO,
 		"%s discipline initializing", 
                  dasd_eckd_discipline.name);
 
@@ -1808,7 +1808,7 @@ void
 dasd_eckd_cleanup (void)
 {
 
-	MESSAGE (KERN_INFO,
+	MESSAGE_LOG (KERN_INFO,
 		"%s discipline cleaning up", 
                  dasd_eckd_discipline.name);
 

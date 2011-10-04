@@ -1024,7 +1024,7 @@ static void bluetooth_softint(void *private)
 		return;
 	}
 
-	tty_wakeup(&bluetooth->tty);
+	tty_wakeup(bluetooth->tty);
 }
 
 

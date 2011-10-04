@@ -167,6 +167,11 @@ extern int nfs_check_stale(struct inode *);
 extern int nfs_notify_change(struct dentry *, struct iattr *);
 
 /*
+ * linux/fs/nfs/dir.c
+ */
+extern int nfs_instantiate(struct dentry *, struct nfs_fh *, struct nfs_fattr *);
+
+/*
  * linux/fs/nfs/file.c
  */
 extern struct inode_operations nfs_file_inode_operations;

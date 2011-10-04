@@ -789,6 +789,16 @@ static void kcs_irq_handler(int irq, void *data, struct pt_regs *regs)
 
 static int smi_start_processing(void *send_info, ipmi_smi_t intf)
 {
+	struct kcs_info *new_kcs = send_info;
+	new_kcs->intf = intf;
+
+	init_timer(&(new_kcs->kcs_timer));
+	new_kcs->kcs_timer.data = (long) new_kcs;
+	new_kcs->kcs_timer.function = kcs_timeout;
+	new_kcs->last_timeout_jiffies = jiffies;
+	new_kcs->kcs_timer.expires = jiffies + KCS_TIMEOUT_JIFFIES;
+	add_timer(&(new_kcs->kcs_timer));
+
 	return 0;
 }
 
@@ -1073,13 +1083,6 @@ static int init_one_kcs(int kcs_port,
 	new_kcs->interrupt_disabled = 0;
 	new_kcs->timer_stopped = 0;
 	new_kcs->stop_operation = 0;
-
-	init_timer(&(new_kcs->kcs_timer));
-	new_kcs->kcs_timer.data = (long) new_kcs;
-	new_kcs->kcs_timer.function = kcs_timeout;
-	new_kcs->last_timeout_jiffies = jiffies;
-	new_kcs->kcs_timer.expires = jiffies + KCS_TIMEOUT_JIFFIES;
-	add_timer(&(new_kcs->kcs_timer));
 
 	*kcs = new_kcs;
 

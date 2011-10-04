@@ -453,6 +453,7 @@ extern int change_page_attr(struct page *page, int numpages, pgprot_t prot);
  */
 extern void __map_kernel_range(void *, int, pgprot_t);
 #define map_kernel_range(adr,size) __map_kernel_range(adr,size,PAGE_KERNEL_LARGE)
+extern void clear_kernel_mapping(unsigned long addr, unsigned long size);
 
 #endif /* !__ASSEMBLY__ */
 

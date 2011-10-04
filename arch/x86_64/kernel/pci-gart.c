@@ -567,6 +567,16 @@ void __init pci_iommu_init(void)
 	bad_dma_address = iommu_bus_base;
 
 	/*
+	 * Unmap the IOMMU part of the GART. The alias of the page is always mapped
+	 * with cache enabled and there is no full cache coherency across the GART
+	 * remapping. The unmapping avoids automatic prefetches from the CPU
+	 * allocating cache lines in there. All CPU accesses are done via the
+	 * direct mapping to the backing memory. The GART address is only used by PCI
+	 * devices.
+	 */
+	clear_kernel_mapping((unsigned long)__va(iommu_bus_base), iommu_size);
+
+	/*
 	 * Map all other entries to the guard page
 	 */
 	scratch = get_zeroed_page(GFP_KERNEL);

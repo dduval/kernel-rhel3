@@ -1,6 +1,8 @@
 #ifndef __E1000_COMPAT_H__
 #define __E1000_COMPAT_H__
 
+#define PMSG_SUSPEND 3
+
 #define skb_header_cloned(skb) 0
 
 #define __iomem

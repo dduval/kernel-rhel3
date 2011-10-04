@@ -292,6 +292,7 @@ return_fib:
 		kfree(fib);
 		status = 0;
 	} else {
+		spin_unlock_irqrestore(&dev->fib_lock, flags);
 		/* If someone killed the AIF aacraid thread, restart it */
 		status = !dev->aif_thread;
 		if (status && dev->queues && dev->fsa_dev) {
@@ -303,7 +304,6 @@ return_fib:
 			  (int (*)(void *))aac_command_thread, dev, 0);
 			ssleep(1);
 		}
-		spin_unlock_irqrestore(&dev->fib_lock, flags);
 		if (f.wait) {
 			if(down_interruptible(&fibctx->wait_sem) < 0) {
 				status = -EINTR;

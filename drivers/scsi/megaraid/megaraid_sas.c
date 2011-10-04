@@ -10,7 +10,7 @@
  *	   2 of the License, or (at your option) any later version.
  *
  * FILE		: megaraid_sas.c
- * Version	: v00.00.02.00
+ * Version	: v00.00.02.00-rh1
  *
  * Authors:
  * 	Sreenivas Bagalkote	<Sreenivas.Bagalkote@lsil.com>
@@ -65,6 +65,7 @@ static void megasas_deplete_reply_queue(struct megasas_instance *instance, u8 al
 static irqreturn_t megasas_isr(int irq, void *devp, struct pt_regs *regs);
 static void megasas_flush_cache(struct megasas_instance *instance);
 static int megasas_issue_polled(struct megasas_instance *instance, struct megasas_cmd *cmd);
+static int megasas_reboot_notify(struct notifier_block *, unsigned long, void *);
 
 /*
  * PCI ID table for all supported controllers
@@ -99,6 +100,10 @@ static struct proc_dir_entry *megasas_proc_hba_map;
 static struct proc_dir_entry *megasas_proc_version;
 static struct proc_dir_entry *megasas_proc_release_date;
 #endif
+
+static struct notifier_block megasas_notifier = {
+	.notifier_call = megasas_reboot_notify
+};
 
 static const char *megasas_info(struct Scsi_Host *host)
 {
@@ -971,6 +976,57 @@ megasas_service_aen(struct megasas_instance *instance, struct megasas_cmd *cmd)
 
 	instance->aen_cmd = NULL;
 	megasas_return_cmd(instance, cmd);
+}
+
+static int
+megasas_reboot_notify(struct notifier_block *this, unsigned long code,
+		       void *unused)
+{
+	struct megasas_instance *instance;
+	static const int msecs = MFI_POLL_TIMEOUT_SECS * 1000;
+	int i, j;
+
+	for (i = 0; i < megasas_mgmt_info.max_index; i++) {
+		struct megasas_cmd *cmd;
+		struct megasas_dcmd_frame *dcmd;
+		struct megasas_header *frame_hdr;
+
+		if ((instance = megasas_mgmt_info.instance[i]) == NULL)
+			continue;
+			
+		if ((cmd = megasas_get_cmd(instance)) == NULL)
+			continue; /* best effort ... */
+
+		dcmd = &cmd->frame->dcmd;
+		
+		memset(dcmd->mbox.b, 0, MFI_MBOX_SIZE);
+		
+		dcmd->cmd = MFI_CMD_DCMD;
+		dcmd->cmd_status = 0x0;
+		dcmd->sge_count = 0;
+		dcmd->flags = MFI_FRAME_DIR_NONE;
+		dcmd->timeout = 0;
+		dcmd->data_xfer_len = 0;
+		dcmd->opcode = MR_DCMD_CTRL_CACHE_FLUSH;
+		dcmd->mbox.b[0] = MR_FLUSH_CTRL_CACHE | MR_FLUSH_DISK_CACHE;
+
+		frame_hdr = &cmd->frame->hdr;
+		frame_hdr->cmd_status = 0xFF;
+		frame_hdr->flags |= MFI_FRAME_DONT_POST_IN_REPLY_QUEUE;
+
+		/* Issue the frame using inbound queue port */
+		writel(cmd->frame_phys_addr >> 3,
+		       &instance->reg_set->inbound_queue_port);
+
+		/* Wait for cmd_status to change */
+		for (j = 0; j < msecs && frame_hdr->cmd_status == 0xff; j++) {
+			rmb();
+			mdelay(1);
+		}
+		
+		megasas_return_cmd(instance, cmd);
+	}
+	return NOTIFY_DONE;
 }
 
 #if defined(CONFIG_DISKDUMP) || defined(CONFIG_DISKDUMP_MODULE)
@@ -3025,6 +3081,8 @@ static int __init megasas_init(void)
 	register_ioctl32_conversion(MEGASAS_IOC_GET_AEN,
 				    megasas_mgmt_compat_ioctl);
 #endif
+	if (register_reboot_notifier(&megasas_notifier))
+		printk("MegaSAS Shutdown routine not registered!!\n");
 
 	return rval;
 }
@@ -3050,6 +3108,7 @@ static void __exit megasas_exit(void)
 #endif
 
 	unregister_chrdev(megasas_mgmt_majorno, "megaraid_sas_ioctl");
+	unregister_reboot_notifier(&megasas_notifier);
 }
 
 module_init(megasas_init);

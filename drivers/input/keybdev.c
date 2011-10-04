@@ -42,7 +42,7 @@
     defined(CONFIG_PPC) || defined(__mc68000__) || defined(__hppa__) || \
     defined(__arm__)
 
-static int x86_sysrq_alt = 0;
+static int x86_sysrq_alt, x86_sysrq_alt_pending;
 #ifdef CONFIG_SPARC64
 static int sparc_l1_a_state = 0;
 extern void batten_down_hatches(void);
@@ -117,9 +117,9 @@ static int emulate_raw(unsigned int keycode, int down)
 		return 0;
 	} 
 
-	if (keycode == KEY_SYSRQ && x86_sysrq_alt) {
+	if (keycode == KEY_SYSRQ && (x86_sysrq_alt || x86_sysrq_alt_pending)) {
 		handle_scancode(0x54, down);
-
+		x86_sysrq_alt_pending = down;
 		return 0;
 	}
 

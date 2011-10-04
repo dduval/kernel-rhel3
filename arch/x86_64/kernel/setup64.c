@@ -223,7 +223,7 @@ void __init cpu_init (void)
 	memset(t->io_bitmap, 0xff, sizeof(t->io_bitmap));
 
 	/* Flags to clear on syscall */
-	wrmsrl(MSR_SYSCALL_MASK, EF_TF|EF_DF|EF_IE); 
+	wrmsrl(MSR_SYSCALL_MASK, EF_TF|EF_DF|EF_IE|EF_NT);
 
 	wrmsrl(MSR_FS_BASE, 0);
 	wrmsrl(MSR_KERNEL_GS_BASE, 0);

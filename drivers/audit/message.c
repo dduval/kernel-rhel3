@@ -361,6 +361,28 @@ audit_msg_exit(struct aud_process *pinfo, const char *evname, long code)
 }
 
 /*
+ * Send an audit control event to user land
+ */
+int
+audit_msg_control(struct aud_process *pinfo, int ioctl, int result)
+{
+	struct aud_msg_head	*msgh;
+	struct aud_msg_control	*control_msg;
+
+	msgh = audit_msg_new(pinfo, AUDIT_MSG_CONTROL,
+		       		"AUDIT_control", sizeof(*control_msg));
+	if (IS_ERR(msgh))
+		return PTR_ERR(msgh);
+
+	control_msg = (struct aud_msg_control *) &msgh->body.msg_data;
+	control_msg->ioctl = ioctl;
+	control_msg->result = result;
+
+	audit_msg_insert(msgh);
+	return 0;
+}
+
+/*
  * Log a system call, along with all arguments
  */
 int

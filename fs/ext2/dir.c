@@ -328,6 +328,12 @@ struct ext2_dir_entry_2 * ext2_find_entry (struct inode * dir,
 			de = (ext2_dirent *) kaddr;
 			kaddr += PAGE_CACHE_SIZE - reclen;
 			while ((char *) de <= kaddr) {
+				if (de->rec_len == 0) {
+					ext2_error(dir->i_sb, __FUNCTION__,
+						"zero-length directory entry");
+					ext2_put_page(page);
+					goto out;
+				}
 				if (ext2_match (namelen, name, de))
 					goto found;
 				de = ext2_next_entry(de);
@@ -336,7 +342,16 @@ struct ext2_dir_entry_2 * ext2_find_entry (struct inode * dir,
 		}
 		if (++n >= npages)
 			n = 0;
+		/* next page is past the blocks we've got */
+		if (unlikely(n > (dir->i_blocks >> (PAGE_CACHE_SHIFT - 9)))) {
+			ext2_error(dir->i_sb, __FUNCTION__,
+				"dir %lu size %lld exceeds block count %llu",
+				dir->i_ino, dir->i_size,
+				(unsigned long long)dir->i_blocks);
+			goto out;
+		}
 	} while (n != start);
+out:
 	return NULL;
 
 found:

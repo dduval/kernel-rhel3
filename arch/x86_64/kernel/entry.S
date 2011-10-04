@@ -351,7 +351,7 @@ iret_label:
 	.section .fixup,"ax"
 	/* force a signal here? this matches i386 behaviour */
 bad_iret:
-	movq $-9999,%rdi	/* better code? */
+	movq $9,%rdi		# SIGKILL
 	jmp do_exit			
 	.previous	
 

@@ -94,8 +94,15 @@ BROADCAST=192.168.1.255
 ONBOOT=yes
 BOOTPROTO=none
 USERCTL=no
+HOTPLUG=no
 
 (use appropriate values for your network above)
+
+It may be necessary to add the HOTPLUG=no option to your ifcfg-bond0 file
+to avoid problems and hangs that can occur when trying to manually configure
+bonding interfaces.  Without HOTPLUG=no in this file, hotplug will spring
+into action whenever the interface is detected and may cause unexpected and
+undesired results.
 
 All interfaces that are part of a bond should have SLAVE and MASTER
 definitions. For example, in the case of Red Hat, if you wish to make eth0 and

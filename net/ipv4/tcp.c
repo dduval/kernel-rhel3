@@ -1633,11 +1633,11 @@ void cleanup_rbuf(struct sock *sk, int copied)
 		     * in queue.
 		     */
 		    || (copied > 0 &&
-			(tp->ack.pending&TCP_ACK_PUSHED) &&
-			!tp->ack.pingpong &&
-			atomic_read(&sk->rmem_alloc) == 0)) {
-			time_to_ack = 1;
-		}
+			((tp->ack.pending & TCP_ACK_PUSHED2) ||
+			 ((tp->ack.pending & TCP_ACK_PUSHED) &&
+			  !tp->ack.pingpong)) &&
+			atomic_read(&sk->rmem_alloc) == 0))
+				time_to_ack = 1;
 	}
 
   	/* We send an ACK if we can now advertise a non-zero window

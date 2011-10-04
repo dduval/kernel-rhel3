@@ -79,6 +79,7 @@
  *	0.30: 25 Sep 2004: rx checksum support for nf 250 Gb. Add rx reset
  *			   into nv_close, otherwise reenabling for wol can
  *			   cause DMA to kfree'd memory.
+ *	0.47: 26 Oct 2005: Add phyaddr 0 in phy scan.
  *
  * Known bugs:
  * We suspect that on some hardware no TX done interrupts are generated.
@@ -2085,16 +2086,17 @@ static int __devinit nv_probe(struct pci_dev *pci_dev, const struct pci_device_i
 	}
 
 	/* find a suitable phy */
-	for (i = 1; i < 32; i++) {
+	for (i = 1; i <= 32; i++) {
 		int id1, id2;
+		int phyaddr = i & 0x1F;
 
 		spin_lock_irq(&np->lock);
-		id1 = mii_rw(dev, i, MII_PHYSID1, MII_READ);
+		id1 = mii_rw(dev, phyaddr, MII_PHYSID1, MII_READ);
 		spin_unlock_irq(&np->lock);
 		if (id1 < 0 || id1 == 0xffff)
 			continue;
 		spin_lock_irq(&np->lock);
-		id2 = mii_rw(dev, i, MII_PHYSID2, MII_READ);
+		id2 = mii_rw(dev, phyaddr, MII_PHYSID2, MII_READ);
 		spin_unlock_irq(&np->lock);
 		if (id2 < 0 || id2 == 0xffff)
 			continue;
@@ -2102,23 +2104,19 @@ static int __devinit nv_probe(struct pci_dev *pci_dev, const struct pci_device_i
 		id1 = (id1 & PHYID1_OUI_MASK) << PHYID1_OUI_SHFT;
 		id2 = (id2 & PHYID2_OUI_MASK) >> PHYID2_OUI_SHFT;
 		dprintk(KERN_DEBUG "%s: open: Found PHY %04x:%04x at address %d.\n",
-				pci_name(pci_dev), id1, id2, i);
-		np->phyaddr = i;
+			pci_name(pci_dev), id1, id2, phyaddr);
+		np->phyaddr = phyaddr;
 		np->phy_oui = id1 | id2;
 		break;
 	}
-	if (i == 32) {
-		/* PHY in isolate mode? No phy attached and user wants to
-		 * test loopback? Very odd, but can be correct.
-		 */
+	if (i == 33) {
 		printk(KERN_INFO "%s: open: Could not find a valid PHY.\n",
-				pci_name(pci_dev));
+		       pci_name(pci_dev));
+		goto out_freering;
 	}
 
-	if (i != 32) {
-		/* reset it */
-		phy_init(dev);
-	}
+	/* reset it */
+	phy_init(dev);
 
 	np->linkspeed = NVREG_LINKSPEED_FORCE|NVREG_LINKSPEED_10;
 	np->duplex = 0;

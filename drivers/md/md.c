@@ -1156,20 +1156,18 @@ repeat:
 		dprintk(KERN_INFO "md: ");
 		if (rdev->faulty)
 			dprintk("(skipping faulty ");
-		if (rdev->alias_device)
+		else if (rdev->alias_device)
 			dprintk("(skipping alias ");
-		if (!rdev->faulty && disk_faulty(&rdev->sb->this_disk)) {
-			dprintk("(skipping new-faulty %s )\n",
-			       partition_name(rdev->dev));
-			continue;
-		}
-		dprintk("%s ", partition_name(rdev->dev));
-		if (!rdev->faulty && !rdev->alias_device) {
-			dprintk("[events: %08lx]",
+		else if (disk_faulty(&rdev->sb->this_disk))
+			dprintk("(skipping new-faulty ");
+		else {
+			dprintk("%s [events: %08lx]\n",
+				partition_name(rdev->dev),
 				(unsigned long)rdev->sb->events_lo);
 			err += write_disk_sb(rdev);
-		} else
-			dprintk(")\n");
+			continue;
+		}
+		dprintk("%s)\n", partition_name(rdev->dev));
 	}
 	if (err) {
 		if (--count) {

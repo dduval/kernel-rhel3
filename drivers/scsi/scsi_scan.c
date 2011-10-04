@@ -276,6 +276,7 @@ static struct dev_info device_list[] =
 	{"EMC", "iSCSI", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
 	{"FALCON", "IPSTOR DISK", "*", BLIST_SPARSELUN},
 	{"Decru", "<Controller>", "*", BLIST_SPARSELUN},
+	{"STK", "OPENstorage 9176", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
 
 	/*
 	 * Must be at end of list...

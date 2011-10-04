@@ -558,3 +558,32 @@ int kern_addr_valid(unsigned long addr)
 		return 0;
 	return pfn_valid(pte_pfn(*pte));
 }
+
+/* Unmap a kernel mapping if it exists. This is useful to avoid prefetches
+   from the CPU leading to inconsistent cache lines. address and size
+   must be aligned to 2MB boundaries.
+   Does nothing when the mapping doesn't exist. */
+void __init clear_kernel_mapping(unsigned long address, unsigned long size)
+{
+	unsigned long end = address + size;
+
+	BUG_ON(address & ~LARGE_PAGE_MASK);
+	BUG_ON(size & ~LARGE_PAGE_MASK);
+
+	for (; address < end; address += LARGE_PAGE_SIZE) {
+		pgd_t *pgd = pgd_offset_k(address);
+		if (!pgd || pgd_none(*pgd))
+			continue;
+		pmd_t *pmd = pmd_offset(pgd, address);
+		if (!pmd || pmd_none(*pmd))
+			continue;
+		if (0 == (pmd_val(*pmd) & _PAGE_PSE)) {
+			/* Could handle this, but it should not happen currently. */
+			printk(KERN_ERR
+		"clear_kernel_mapping: mapping has been split. will leak memory\n");
+			pmd_ERROR(*pmd);
+		}
+		set_pmd(pmd, __pmd(0));
+	}
+	__flush_tlb_all();
+}

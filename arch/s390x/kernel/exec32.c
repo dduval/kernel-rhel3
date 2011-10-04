@@ -54,6 +54,12 @@ int setup_arg_pages32(struct linux_binprm *bprm)
 	if (!mpnt) 
 		return -ENOMEM; 
 	
+	if (!vm_enough_memory((STACK_TOP -
+			(PAGE_MASK & (unsigned long)bprm->p)) >> PAGE_SHIFT)) {
+		kmem_cache_free(vm_area_cachep, mpnt);
+		return -ENOMEM;
+	}
+
 	down_write(&current->mm->mmap_sem);
 	{
 		mpnt->vm_mm = current->mm;

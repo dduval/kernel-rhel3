@@ -259,6 +259,7 @@ int			audit_msg_login(struct aud_process *, const char *,
 	       				struct audit_login *);
 int			audit_msg_netlink(struct aud_process *, const char *,
 					struct sk_buff *, int);
+int			audit_msg_control(struct aud_process *pinfo, int ioctl, int error);
 
 int			audit_attach(int);
 int			audit_detach(void);

@@ -220,6 +220,13 @@ static int e1000_suspend(struct pci_dev *pdev, pm_message_t state);
 static int e1000_resume(struct pci_dev *pdev);
 #endif
 
+static int e1000_notify_reboot(struct notifier_block *, unsigned long event, void *ptr);
+static struct notifier_block e1000_notifier_reboot = {
+	.notifier_call  = e1000_notify_reboot,
+	.next           = NULL,
+	.priority       = 0
+};
+
 #ifdef HAVE_POLL_CONTROLLER
 /* for netdump / net console */
 static void e1000_netpoll (struct net_device *netdev);
@@ -264,6 +271,10 @@ e1000_init_module(void)
 
 	ret = pci_module_init(&e1000_driver);
 
+	if (ret >= 0) {
+		register_reboot_notifier(&e1000_notifier_reboot);
+	}
+
 	return ret;
 }
 
@@ -279,6 +290,8 @@ module_init(e1000_init_module);
 static void __exit
 e1000_exit_module(void)
 {
+	unregister_reboot_notifier(&e1000_notifier_reboot);
+
 	pci_unregister_driver(&e1000_driver);
 }
 
@@ -458,6 +471,7 @@ e1000_up(struct e1000_adapter *adapter)
 
 	mod_timer(&adapter->watchdog_timer, jiffies);
 
+	netif_wake_queue(netdev);
 #ifdef CONFIG_E1000_NAPI
 	netif_poll_enable(netdev);
 #endif
@@ -4458,6 +4472,23 @@ e1000_pci_restore_state(struct e1000_adapter *adapter)
 	return;
 }
 #endif /* CONFIG_PM */
+
+static int
+e1000_notify_reboot(struct notifier_block *nb, unsigned long event, void *p)
+{
+	struct pci_dev *pdev = NULL;
+
+	switch (event) {
+	case SYS_DOWN:
+	case SYS_HALT:
+	case SYS_POWER_OFF:
+		while ((pdev = pci_find_device(PCI_ANY_ID, PCI_ANY_ID, pdev))) {
+			if (pci_dev_driver(pdev) == &e1000_driver)
+				e1000_suspend(pdev, PMSG_SUSPEND);
+		}
+	}
+	return NOTIFY_DONE;
+}
 
 static int
 e1000_suspend(struct pci_dev *pdev, pm_message_t state)

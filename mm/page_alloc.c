@@ -710,6 +710,21 @@ try_again:
 			if (page)
 				return page;
 		}
+		if (order > 0 && vm_defragment) {
+			int try_harder = vm_defragment * 64;
+			while (z->inactive_clean_pages && try_harder-- > 0) {
+				struct page *page;
+				/* Move one page to the free list. */
+				page = reclaim_page(z);
+				if (!page)
+					break;
+				__free_page(page);
+				/* Try if the allocation succeeds. */
+				page = rmqueue(z, order);
+				if (page)
+					return page;
+			}
+		}
 	}
 	goto out_failed;
 

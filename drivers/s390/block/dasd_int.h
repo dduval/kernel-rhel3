@@ -303,6 +303,35 @@ do { \
                   d_args); \
 } while(0)
 
+/* messages to be written via klogd only */
+#define DEV_MESSAGE_LOG(d_loglevel,d_device,d_string,d_args...)\
+do { \
+        int d_devno = d_device->devinfo.devno; \
+        int d_irq = d_device->devinfo.irq; \
+        char *d_name = d_device->name; \
+        int d_major = MAJOR(d_device->kdev); \
+        int d_minor = MINOR(d_device->kdev); \
+\
+        printk(d_loglevel PRINTK_HEADER \
+               " /dev/%-7s(%3d:%3d),%04x@%02x: " \
+               d_string "\n", \
+               d_name, \
+               d_major, \
+               d_minor, \
+               d_devno, \
+               d_irq, \
+               d_args); \
+} while(0)
+
+/* general messages to be written via klogd only */
+#define MESSAGE_LOG(d_loglevel,d_string,d_args...)\
+do { \
+        printk(d_loglevel PRINTK_HEADER \
+               " " d_string "\n", \
+               d_args); \
+} while(0)
+
+
 struct dasd_device_t;
 struct request;
 

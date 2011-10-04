@@ -1207,12 +1207,10 @@ static int writenote(struct memelfnote *men, struct file *file)
 #undef DUMP_WRITE
 #undef DUMP_SEEK
 
-#define DUMP_WRITE(addr, nr)	\
-	if ((size += (nr)) > limit || !dump_write(file, (addr), (nr))) \
-		goto end_coredump;
-#define DUMP_SEEK(off)	\
-	if (!dump_seek(file, (off))) \
-		goto end_coredump;
+#define DUMP_WRITE(addr, nr) \
+	((size += (nr)) > limit || !dump_write(file, (addr), (nr)))
+#define DUMP_SEEK(off) \
+	(!dump_seek(file, (off)))
 
 static inline void fill_elf_header(struct elfhdr *elf, int segs)
 {
@@ -1343,13 +1341,11 @@ static int elf_dump_thread_status(long signr, struct task_struct * p, struct lis
 	sz += notesize(&t->notes[n]);
 	n++;
 
-#ifndef __x86_64__
 	if ((t->prstatus.pr_fpvalid = elf_core_copy_task_fpregs(p, &t->fpu))) {
 		fill_note(&t->notes[n], "CORE", NT_PRFPREG, sizeof(t->fpu), &(t->fpu));
 		sz += notesize(&t->notes[n]);
 		n++;
 	}
-#endif	
 
 #ifdef ELF_CORE_COPY_XFPREGS
 	if (elf_core_copy_task_xfpregs(p, &t->xfpu)) {
@@ -1516,12 +1512,10 @@ static int elf_core_dump(long signr, struct pt_regs * regs, struct file * file)
 	
 	fill_note(&notes[numnote++], "CORE", NT_TASKSTRUCT, sizeof(*current), current);
   
-#ifndef __x86_64__
   	/* Try to dump the FPU. */
 	if ((prstatus.pr_fpvalid = elf_core_copy_task_fpregs(current, &fpu))) {
 		fill_note(&notes[numnote++], "CORE", NT_PRFPREG, sizeof(fpu), &fpu);
 	}
-#endif 	
 
 #ifdef ELF_CORE_COPY_XFPREGS
 	if (elf_core_copy_task_xfpregs(current, &xfpu)) {
@@ -1532,7 +1526,8 @@ static int elf_core_dump(long signr, struct pt_regs * regs, struct file * file)
 	fs = get_fs();
 	set_fs(KERNEL_DS);
 
-	DUMP_WRITE(&elf, sizeof(elf));
+	if (DUMP_WRITE(&elf, sizeof(elf)))
+		goto end_coredump;
 	offset += sizeof(elf);				/* Elf header */
 	offset += (segs+1) * sizeof(struct elf_phdr);	/* Program headers */
 
@@ -1548,7 +1543,8 @@ static int elf_core_dump(long signr, struct pt_regs * regs, struct file * file)
 
 		fill_elf_note_phdr(&phdr, sz, core_header_offset(offset));
 		offset += sz;
-		DUMP_WRITE(&phdr, sizeof(phdr));
+		if (DUMP_WRITE(&phdr, sizeof(phdr)))
+			goto end_coredump;
 	}
 
 	/* Page-align dumped data */
@@ -1573,7 +1569,8 @@ static int elf_core_dump(long signr, struct pt_regs * regs, struct file * file)
 		if (vma->vm_flags & VM_EXEC) phdr.p_flags |= PF_X;
 		phdr.p_align = ELF_EXEC_PAGESIZE;
 
-		DUMP_WRITE(&phdr, sizeof(phdr));
+		if (DUMP_WRITE(&phdr, sizeof(phdr)))
+			goto end_coredump;
 	}
 
 #ifdef ELF_CORE_WRITE_EXTRA_PHDRS
@@ -1593,7 +1590,8 @@ static int elf_core_dump(long signr, struct pt_regs * regs, struct file * file)
 				goto end_coredump;
 	}
  
-	DUMP_SEEK(dataoff);
+	if (DUMP_SEEK(dataoff))
+		goto end_coredump;
 
 	for(vma = current->mm->mmap; vma != NULL; vma = vma->vm_next) {
 		unsigned long addr;
@@ -1613,19 +1611,26 @@ static int elf_core_dump(long signr, struct pt_regs * regs, struct file * file)
 
 			if (get_user_pages(current, current->mm, addr, 1, 0, 1,
 						&page, &vma) <= 0) {
-				DUMP_SEEK (file->f_pos + PAGE_SIZE);
+				if (DUMP_SEEK(file->f_pos + PAGE_SIZE))
+					goto end_coredump;
 			} else {
+				int abort_dump = 0;
 				if (page == ZERO_PAGE(addr)) {
-					DUMP_SEEK (file->f_pos + PAGE_SIZE);
+					if (DUMP_SEEK(file->f_pos + PAGE_SIZE))
+						abort_dump = 1;
 				} else {
 					void *kaddr;
 					flush_cache_page(vma, addr);
 					kaddr = kmap(page);
-					DUMP_WRITE(kaddr, PAGE_SIZE);
-					flush_page_to_ram(page);
+					if (DUMP_WRITE(kaddr, PAGE_SIZE))
+						abort_dump = 1;
+					else
+						flush_page_to_ram(page);
 					kunmap(page);
 				}
 				put_page(page);
+				if (abort_dump)
+					goto end_coredump;
 			}
 		}
 	}

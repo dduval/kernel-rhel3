@@ -785,7 +785,7 @@ static void igmp_heard_query(struct in_device *in_dev, struct igmphdr *ih,
 		}
 		/* cancel the interface change timer */
 		in_dev->mr_ifc_count = 0;
-		if (del_timer(&in_dev->mr_ifc_timer))
+		if (del_timer_sync(&in_dev->mr_ifc_timer))
 			__in_dev_put(in_dev);
 		/* clear deleted report items */
 		igmpv3_clear_delrec(in_dev);
@@ -1167,6 +1167,28 @@ out:
 }
 
 /*
+ *	Resend IGMP JOIN report; used for bonding.
+ */
+void ip_mc_rejoin_group(struct ip_mc_list *im)
+{
+	struct in_device *in_dev = im->interface;
+
+#ifdef CONFIG_IP_MULTICAST
+	if (im->multiaddr == IGMP_ALL_HOSTS)
+		return;
+
+	if (IGMP_V1_SEEN(in_dev) || IGMP_V2_SEEN(in_dev)) {
+		igmp_mod_timer(im, IGMP_Initial_Report_Delay);
+		return;
+	}
+	/* else, v3 */
+	im->crcount = in_dev->mr_qrv ? in_dev->mr_qrv :
+		IGMP_Unsolicited_Report_Count;
+	igmp_ifc_event(in_dev);
+#endif
+}
+
+/*
  *	A socket has left a multicast group on device dev
  */
 
@@ -1205,10 +1227,10 @@ void ip_mc_down(struct in_device *in_dev)
 
 #ifdef CONFIG_IP_MULTICAST
 	in_dev->mr_ifc_count = 0;
-	if (del_timer(&in_dev->mr_ifc_timer))
+	if (del_timer_sync(&in_dev->mr_ifc_timer))
 		__in_dev_put(in_dev);
 	in_dev->mr_gq_running = 0;
-	if (del_timer(&in_dev->mr_gq_timer))
+	if (del_timer_sync(&in_dev->mr_gq_timer))
 		__in_dev_put(in_dev);
 #endif
 

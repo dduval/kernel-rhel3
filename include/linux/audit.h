@@ -62,6 +62,7 @@ enum {
 	AUD_POLICY_NETLINK,
 	AUD_POLICY_LOGIN,
 	AUD_POLICY_USERMSG,
+	AUD_POLICY_CONTROL,
 
 	__AUD_MAX_POLICY
 };
@@ -198,6 +199,14 @@ struct audit_message {
 #define AUDIT_TRACE_ALL		1
 
 /*
+ * This message is generated whenever there is an ioctl on the audit device
+ */
+struct aud_msg_control {
+	int			ioctl;
+	int			result;
+};
+
+/*
  * This message is generated when a process forks
  * or exits, to help auditd with book-keeping.
  */
@@ -270,6 +279,7 @@ struct aud_msg_netlink {
 #define AUDIT_MSG_SYSCALL	2
 #define AUDIT_MSG_EXIT		3
 #define AUDIT_MSG_NETLINK	4
+#define AUDIT_MSG_CONTROL     	5
 #define AUDIT_MSG_USERBASE	256	/* user land messages start here */
 
 /* Values for msg_arch */

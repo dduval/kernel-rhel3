@@ -90,9 +90,14 @@ extern wait_queue_head_t	acpi_bus_event_queue;
 static void
 acpi_power_off (void)
 {
+
+	/* Some SMP machines can only power off on the boot CPU. */
+	set_cpus_allowed(current, 1UL << cpu_logical_map(0));
 	acpi_enter_sleep_state_prep(ACPI_STATE_S5);
 	ACPI_DISABLE_IRQS();
 	acpi_enter_sleep_state(ACPI_STATE_S5);
+
+	printk(KERN_EMERG "ACPI: cannot power off machine\n");
 }
 
 #endif /*CONFIG_PM*/

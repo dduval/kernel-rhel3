@@ -450,7 +450,7 @@ dasd_fba_init (void)
 {
 	int rc = 0;
 
-	MESSAGE (KERN_INFO,
+	MESSAGE_LOG (KERN_INFO,
                  "%s discipline initializing", 
                  dasd_fba_discipline.name);
 
@@ -481,7 +481,7 @@ dasd_fba_init (void)
 void
 dasd_fba_cleanup( void ) {
 
-        MESSAGE (KERN_INFO,
+        MESSAGE_LOG (KERN_INFO,
                  "%s discipline cleaning up", 
                  dasd_fba_discipline.name);
 

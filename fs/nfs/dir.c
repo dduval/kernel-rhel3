@@ -542,7 +542,7 @@ static int nfs_lookup_revalidate(struct dentry * dentry, int flags)
 	struct inode *inode;
 	int error;
 	struct nfs_fh fhandle;
-	struct nfs_fattr fattr;
+	struct nfs_fattr *fattr = NULL;
 
 	lock_kernel();
 	dir = dentry->d_parent->d_inode;
@@ -567,7 +567,11 @@ static int nfs_lookup_revalidate(struct dentry * dentry, int flags)
 		goto out_valid;
 	}
 
-	error = nfs_cached_lookup(dir, dentry, &fhandle, &fattr);
+	fattr = kmalloc(sizeof(*fattr), GFP_KERNEL);
+	if (fattr == NULL)
+		goto out_bad;
+
+	error = nfs_cached_lookup(dir, dentry, &fhandle, fattr);
 	if (!error) {
 		if (memcmp(NFS_FH(inode), &fhandle, sizeof(struct nfs_fh))!= 0)
 			goto out_bad;
@@ -579,18 +583,20 @@ static int nfs_lookup_revalidate(struct dentry * dentry, int flags)
 	if (NFS_STALE(inode))
 		goto out_bad;
 
-	error = NFS_PROTO(dir)->lookup(dir, &dentry->d_name, &fhandle, &fattr);
+	error = NFS_PROTO(dir)->lookup(dir, &dentry->d_name, &fhandle, fattr);
 	if (error)
 		goto out_bad;
 	if (memcmp(NFS_FH(inode), &fhandle, sizeof(struct nfs_fh))!= 0)
 		goto out_bad;
-	if ((error = nfs_refresh_inode(inode, &fattr)) != 0)
+	if ((error = nfs_refresh_inode(inode, fattr)) != 0)
 		goto out_bad;
 
  out_valid_renew:
 	nfs_renew_times(dentry);
  out_valid:
 	unlock_kernel();
+	if (fattr)
+		kfree(fattr);
 	return 1;
  out_bad:
 	NFS_CACHEINV(dir);
@@ -604,6 +610,8 @@ static int nfs_lookup_revalidate(struct dentry * dentry, int flags)
 	}
 	d_drop(dentry);
 	unlock_kernel();
+	if (fattr)
+		kfree(fattr);
 	return 0;
 }
 
@@ -774,7 +782,7 @@ int nfs_cached_lookup(struct inode *dir, struct dentry *dentry,
 /*
  * Code common to create, mkdir, and mknod.
  */
-static int nfs_instantiate(struct dentry *dentry, struct nfs_fh *fhandle,
+int nfs_instantiate(struct dentry *dentry, struct nfs_fh *fhandle,
 				struct nfs_fattr *fattr)
 {
 	struct inode *inode;
@@ -784,20 +792,14 @@ static int nfs_instantiate(struct dentry *dentry, struct nfs_fh *fhandle,
 		struct inode *dir = dentry->d_parent->d_inode;
 		error = NFS_PROTO(dir)->lookup(dir, &dentry->d_name, fhandle, fattr);
 		if (error)
-			goto out_err;
+			return error;
 	}
 	inode = nfs_fhget(dentry, fhandle, fattr);
 	if (inode) {
 		d_instantiate(dentry, inode);
 		nfs_renew_times(dentry);
-	} else {
+	} else
 		error = -ENOMEM;
-		goto out_err;
-	}
-	return error;
-
-out_err:
-	d_drop(dentry);
 	return error;
 }
 
@@ -810,8 +812,6 @@ out_err:
 static int nfs_create(struct inode *dir, struct dentry *dentry, int mode)
 {
 	struct iattr attr;
-	struct nfs_fattr fattr;
-	struct nfs_fh fhandle;
 	int error;
 
 	dfprintk(VFS, "NFS: create(%x/%ld, %s\n",
@@ -827,11 +827,8 @@ static int nfs_create(struct inode *dir, struct dentry *dentry, int mode)
 	 * does not pass the create flags.
 	 */
 	nfs_zap_caches(dir);
-	error = NFS_PROTO(dir)->create(dir, &dentry->d_name,
-					 &attr, 0, &fhandle, &fattr);
-	if (!error)
-		error = nfs_instantiate(dentry, &fhandle, &fattr);
-	else
+	error = NFS_PROTO(dir)->create(dir, dentry, &attr, 0);
+	if (error)
 		d_drop(dentry);
 	return error;
 }
@@ -857,7 +854,7 @@ static int nfs_mknod(struct inode *dir, struct dentry *dentry, int mode, int rde
 					&fhandle, &fattr);
 	if (!error)
 		error = nfs_instantiate(dentry, &fhandle, &fattr);
-	else
+	if (error)
 		d_drop(dentry);
 	return error;
 }
@@ -892,7 +889,7 @@ static int nfs_mkdir(struct inode *dir, struct dentry *dentry, int mode)
 					&fattr);
 	if (!error)
 		error = nfs_instantiate(dentry, &fhandle, &fattr);
-	else
+	if (error)
 		d_drop(dentry);
 	return error;
 }
@@ -1023,7 +1020,10 @@ static int nfs_safe_remove(struct dentry *dentry)
 	if (inode)
 		NFS_CACHEINV(inode);
 	error = NFS_PROTO(dir)->remove(dir, &dentry->d_name);
-	if (error < 0)
+
+	/* if server returned ENOENT, assume that the dentry is already gone
+	 * and update the cache accordingly */
+	if (error < 0 && error != -ENOENT)
 		goto out;
 	if (inode)
 		inode->i_nlink--;
@@ -1103,8 +1103,9 @@ dentry->d_parent->d_name.name, dentry->d_name.name);
 		if (error == -EEXIST)
 			printk("nfs_proc_symlink: %s/%s already exists??\n",
 			       dentry->d_parent->d_name.name, dentry->d_name.name);
-		d_drop(dentry);
 	}
+	if (error)
+		d_drop(dentry);
 
 out:
 	return error;

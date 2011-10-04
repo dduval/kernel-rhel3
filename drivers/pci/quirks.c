@@ -933,6 +933,10 @@ static void __init quirk_nforce_network_class(struct pci_dev *pdev)
 		pci_read_config_byte(pdev, 0xf8, &c);
 		c &= 0xbf;
 		pci_write_config_byte(pdev, 0xf8, c);
+
+		/* sysfs needs pdev->class to be set correctly */
+		pdev->class &= 0x0000ff;
+		pdev->class |= (PCI_CLASS_NETWORK_ETHERNET << 8);
 	}
 }
 
@@ -1037,6 +1041,8 @@ static struct pci_fixup pci_fixups[] __initdata = {
 	{ PCI_FIXUP_HEADER,	PCI_VENDOR_ID_NVIDIA,	PCI_DEVICE_ID_NVIDIA_NVENET_10,
 	  quirk_nforce_network_class },
 	{ PCI_FIXUP_HEADER,	PCI_VENDOR_ID_NVIDIA,	PCI_DEVICE_ID_NVIDIA_NVENET_11,
+	  quirk_nforce_network_class },
+	{ PCI_FIXUP_HEADER,	PCI_VENDOR_ID_NVIDIA,	PCI_DEVICE_ID_NVIDIA_NVENET_15,
 	  quirk_nforce_network_class },
 
 	{ 0 }

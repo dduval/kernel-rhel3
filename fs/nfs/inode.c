@@ -1141,7 +1141,7 @@ int
 __nfs_revalidate_inode(struct nfs_server *server, struct inode *inode)
 {
 	int		 status = -ESTALE;
-	struct nfs_fattr fattr;
+	struct nfs_fattr *fattr = NULL;
 
 	dfprintk(PAGECACHE, "NFS: revalidating (%x/%Ld)\n",
 		inode->i_dev, (long long)NFS_FILEID(inode));
@@ -1163,7 +1163,11 @@ __nfs_revalidate_inode(struct nfs_server *server, struct inode *inode)
 	}
 	NFS_FLAGS(inode) |= NFS_INO_REVALIDATING;
 
-	status = NFS_PROTO(inode)->getattr(inode, &fattr);
+	fattr = kmalloc(sizeof(*fattr), GFP_KERNEL);
+	if (fattr == NULL)
+		goto out;
+
+	status = NFS_PROTO(inode)->getattr(inode, fattr);
 	if (status) {
 		dfprintk(PAGECACHE, "nfs_revalidate_inode: (%x/%Ld) getattr failed, error=%d\n",
 			 inode->i_dev, (long long)NFS_FILEID(inode), status);
@@ -1172,7 +1176,7 @@ __nfs_revalidate_inode(struct nfs_server *server, struct inode *inode)
 		goto out;
 	}
 
-	status = nfs_refresh_inode(inode, &fattr);
+	status = nfs_refresh_inode(inode, fattr);
 	if (status) {
 		dfprintk(PAGECACHE, "nfs_revalidate_inode: (%x/%Ld) refresh failed, error=%d\n",
 			 inode->i_dev, (long long)NFS_FILEID(inode), status);
@@ -1183,6 +1187,8 @@ __nfs_revalidate_inode(struct nfs_server *server, struct inode *inode)
 
 	NFS_FLAGS(inode) &= ~NFS_INO_STALE;
 out:
+	if (fattr)
+		kfree(fattr);
 	NFS_FLAGS(inode) &= ~NFS_INO_REVALIDATING;
 	wake_up(&inode->i_wait);
  out_nowait:

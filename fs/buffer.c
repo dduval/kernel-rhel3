@@ -891,8 +891,11 @@ void end_buffer_io_async(struct buffer_head * bh, int uptodate)
 	/* This is a temporary buffer used for page I/O. */
 	page = bh->b_page;
 
-	if (!uptodate)
+	if (!uptodate) {
 		SetPageError(page);
+		if (PageSwapCache(page))
+			SetPageDirty(page);
+	}
 
 	/*
 	 * Be _very_ careful from here on. Bad things can happen if

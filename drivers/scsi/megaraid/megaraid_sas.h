@@ -18,9 +18,9 @@
 /**
  * MegaRAID SAS Driver meta data
  */
-#define MEGASAS_VERSION				"00.00.02.00"
-#define MEGASAS_RELDATE				"Oct 15, 2005"
-#define MEGASAS_EXT_VERSION			"Sat Oct 15 19:03:34 EDT 2005"
+#define MEGASAS_VERSION				"00.00.02.00-rh1"
+#define MEGASAS_RELDATE				"Mar 07, 2007"
+#define MEGASAS_EXT_VERSION			"Wed Mar 07 16:12:23 PST 2007"
 
 #define __user
 #define __iomem

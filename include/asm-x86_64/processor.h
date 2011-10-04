@@ -264,13 +264,17 @@ static inline void clear_in_cr4 (unsigned long mask)
 /*
  * User space process size: 512GB - 1GB (default).
  */
-#define TASK_SIZE	(0x0000007fc0000000)
+#define TASK_SIZE_64	(0x0000007fc0000000)
+#define TASK_SIZE	TASK_SIZE_64
 
 /*
  *  32 bit user space process size - determined by personality
  */
 #define IA32_PAGE_OFFSET ((current->personality & ADDR_LIMIT_3GB) ? 0xc0000000 : 0xFFFFe000)
 #define TASK_SIZE_32	IA32_PAGE_OFFSET
+
+#define HUGE_TASK_SIZE	\
+	((current->thread.flags & THREAD_IA32) ? TASK_SIZE_32 : TASK_SIZE_64)
 
 /* This decides where the kernel will search for a free chunk of vm
  * space during mmap's.

@@ -827,14 +827,14 @@ static int power_on_slot (struct acpiphp_slot *slot)
 		func = list_entry(l, struct acpiphp_func, sibling);
 
 		if (func->flags & FUNC_HAS_PS0) {
-			dbg("%s: executing _PS0 on %s\n", __FUNCTION__,
-			    func->pci_dev->slot_name);
+			dbg("%s: executing _PS0\n", __FUNCTION__);
 			status = acpi_evaluate_object(func->handle, "_PS0", NULL, NULL);
 			if (ACPI_FAILURE(status)) {
 				warn("%s: _PS0 failed\n", __FUNCTION__);
 				retval = -1;
 				goto err_exit;
-			}
+			} else
+				break;
 		}
 	}
 
@@ -870,7 +870,8 @@ static int power_off_slot (struct acpiphp_slot *slot)
 				warn("%s: _PS3 failed\n", __FUNCTION__);
 				retval = -1;
 				goto err_exit;
-			}
+			} else
+				break;
 		}
 	}
 
@@ -891,6 +892,8 @@ static int power_off_slot (struct acpiphp_slot *slot)
 				retval = -1;
 				goto err_exit;
 			}
+			else
+				break;
 			func->flags &= (~FUNC_EXISTS);
 		}
 	}
@@ -1391,7 +1394,7 @@ int acpiphp_check_bridge (struct acpiphp_bridge *bridge)
 					up(&slot->crit_sect);
 					goto err_exit;
 				}
-				enabled++;
+				disabled++;
 			}
 		} else {
 			/* if disabled but present, enable */
@@ -1402,7 +1405,7 @@ int acpiphp_check_bridge (struct acpiphp_bridge *bridge)
 					up(&slot->crit_sect);
 					goto err_exit;
 				}
-				disabled++;
+				enabled++;
 			}
 		}
 	}

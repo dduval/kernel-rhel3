@@ -224,7 +224,7 @@ int d_invalidate(struct dentry * dentry)
 static inline struct dentry * __dget_locked(struct dentry *dentry)
 {
 	atomic_inc(&dentry->d_count);
-	if (atomic_read(&dentry->d_count) == 1) {
+	if (!list_empty(&dentry->d_lru)) {
 		dentry_stat.nr_unused--;
 		list_del_init(&dentry->d_lru);
 	}
@@ -328,7 +328,7 @@ static inline void prune_one_dentry(struct dentry * dentry)
  * all the dentries are in use.
  */
  
-void prune_dcache(int count)
+void __prune_dcache(int count, struct super_block *sb)
 {
 	spin_lock(&dcache_lock);
 	for (;;) {
@@ -336,7 +336,19 @@ void prune_dcache(int count)
 		struct list_head *tmp;
 
 		tmp = dentry_unused.prev;
-
+		if (unlikely(sb != NULL)) {
+			/* Try to find a dentry for this sb, but don't try
+			 * too hard, if they aren't near the tail they will
+			 * be moved down again soon.
+			 */
+			int skip = count;
+			while (skip > 0 &&
+			    tmp != &dentry_unused &&
+			    list_entry(tmp, struct dentry, d_lru)->d_sb != sb) {
+				skip--;
+				tmp = tmp->prev;
+			}
+		}
 		if (tmp == &dentry_unused)
 			break;
 		list_del_init(tmp);
@@ -359,6 +371,11 @@ void prune_dcache(int count)
 			break;
 	}
 	spin_unlock(&dcache_lock);
+}
+
+void prune_dcache(int count)
+{
+	__prune_dcache(count, NULL);
 }
 
 /*
@@ -477,15 +494,16 @@ positive:
 	return 1;
 }
 
-static int wait_on_prunes(struct super_block *sb)
+/*
+ * Wait until there are no pending prunes from prune_one_dentry
+ * Called with, and exits with, dcache_lock locked
+ */
+static void wait_on_prunes(struct super_block *sb)
 {
 	DECLARE_WAITQUEUE(wait, current);
 
-	spin_lock(&dcache_lock);
-	if (!sb->s_prunes) {
-		spin_unlock(&dcache_lock);
-		return 0;
-	}
+	if (!sb->s_prunes)
+		return;
 
 	add_wait_queue(&sb->s_wait_prunes, &wait);
 
@@ -495,17 +513,16 @@ static int wait_on_prunes(struct super_block *sb)
 		schedule();
 		spin_lock(&dcache_lock);
 	}
-	spin_unlock(&dcache_lock);
  
 	remove_wait_queue(&sb->s_wait_prunes, &wait);
 
-	return 1;
+	return;
 } 
 
 /*
  * Search the dentry child list for the specified parent,
  * and move any unused dentries to the end of the unused
- * list for prune_dcache(). We descend to the next level
+ * list for prune_dcache().  We descend to the next level
  * whenever the d_subdirs list is non-empty and continue
  * searching.
  */
@@ -516,6 +533,8 @@ static int select_parent(struct dentry * parent)
 	int found = 0;
 
 	spin_lock(&dcache_lock);
+	wait_on_prunes(parent->d_sb);
+
 repeat:
 	next = this_parent->d_subdirs.next;
 resume:
@@ -567,12 +586,8 @@ void shrink_dcache_parent(struct dentry * parent)
 {
 	int found;
 
-again:
 	while ((found = select_parent(parent)) != 0)
-		prune_dcache(found);
-
-	if (wait_on_prunes(parent->d_sb))
-		goto again;
+		__prune_dcache(found, parent->d_sb);
 }
 
 /*
@@ -613,7 +628,7 @@ int shrink_dcache_memory(int priority, unsigned int gfp_mask)
 		return 0;
 
 	count = dentry_stat.nr_unused / (priority + dcache_priority);
-	if (count)
+	if (count > 0)
 		prune_dcache(count);
 	if (RATE_LIMIT(HZ))
 		return kmem_cache_shrink(dentry_cache);

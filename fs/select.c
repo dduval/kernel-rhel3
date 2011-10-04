@@ -589,7 +589,7 @@ asmlinkage long sys_poll(struct pollfd *ufds, unsigned int nfds, int timeout_mse
 	int64_t lltimeout;
 
 	/* Do a sanity check on nfds ... */
-	if (nfds > current->files->max_fdset && nfds > OPEN_MAX)
+	if (nfds > current->rlim[RLIMIT_NOFILE].rlim_cur)
 		return -EINVAL;
 
 	if (timeout_msecs) {

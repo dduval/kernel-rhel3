@@ -98,12 +98,15 @@ static void	__audit_result(struct pt_regs *);
 static void	__audit_fork(struct task_struct *, struct task_struct *);
 static void	__audit_exit(struct task_struct *, long code);
 static void	__audit_netlink_msg(struct sk_buff *, int);
+static int	__audit_control(const int ioctl, const int result);
 
 #define audit_intercept	__audit_intercept
 #define	audit_result	__audit_result
 #define audit_exit	__audit_exit
 #define audit_fork	__audit_fork
 #define audit_netlink_msg __audit_netlink_msg
+
+#define audit_control __audit_control
 
 static struct audit_hooks audit_hooks = {
 	__audit_intercept,
@@ -201,10 +204,18 @@ auditf_ioctl(struct inode *inode, struct file *file,
 {
 	struct aud_context *ctx = (struct aud_context *) file->private_data;
 	int error = 0;
+	int ctlerror = 0;
 
 	DPRINTF("ctx=%p, cmd=0x%x\n", ctx, cmd);
-	if (!capable(CAP_SYS_ADMIN))
-		return -EPERM;
+	if (!capable(CAP_SYS_ADMIN)) {
+		error=-EPERM;
+
+		down_read(&audit_lock);
+		ctlerror = audit_control(cmd, error);
+		up_read(&audit_lock);
+
+		goto err;
+	}
 
 	switch (cmd) {
 	case AUIOCIAMAUDITD:
@@ -219,71 +230,88 @@ auditf_ioctl(struct inode *inode, struct file *file,
 				((struct aud_process *) current->audit)->suspended++;
 			ctx->reader = 1;
 		}
+		ctlerror = audit_control(cmd, error);
 		if (audit_all_processes)
 			audit_attach_all();
 		up_write(&audit_lock);
 		break;
 	case AUIOCATTACH:
 		down_write(&audit_lock);
-		/* Attach process. If we're rhe audit daemon,
+		/* Attach process. If we're the audit daemon,
 		 * suspend auditing for us. */
 		error = audit_attach(ctx->reader);
+		ctlerror = audit_control(cmd, error);
 		up_write(&audit_lock);
 		break;
 	case AUIOCDETACH:
 		down_write(&audit_lock);
 		error = audit_detach();
+		ctlerror = audit_control(cmd, error);
 		up_write(&audit_lock);
 		break;
 	case AUIOCSUSPEND:
 		down_write(&audit_lock);
 		error = audit_suspend();
+		ctlerror = audit_control(cmd, error);
 		up_write(&audit_lock);
 		break;
 	case AUIOCRESUME:
 		down_write(&audit_lock);
 		error = audit_resume();
+		ctlerror = audit_control(cmd, error);
 		up_write(&audit_lock);
 		break;
 	case AUIOCCLRPOLICY:
 		down_write(&audit_lock);
 		error = audit_policy_clear();
+		ctlerror = audit_control(cmd, error);
 		up_write(&audit_lock);
 		break;
 	case AUIOCCLRFILTER:
 		down_write(&audit_lock);
 		error = audit_filter_clear();
+		ctlerror = audit_control(cmd, error);
 		up_write(&audit_lock);
 		break;
 	case AUIOCSETFILTER:
 		down_write(&audit_lock);
 		error = audit_filter_add((void *) arg);
+		ctlerror = audit_control(cmd, error);
 		up_write(&audit_lock);
 		break;
 	case AUIOCSETPOLICY:
 		down_write(&audit_lock);
 		error = audit_policy_set((void *) arg);
+		ctlerror = audit_control(cmd, error);
 		up_write(&audit_lock);
 		break;
 	case AUIOCSETAUDITID:
 		down_write(&audit_lock);
 		error = audit_setauditid();
+		ctlerror = audit_control(cmd, error);
 		up_write(&audit_lock);
 		break;
 	case AUIOCLOGIN:
 		down_read(&audit_lock);
 		error = audit_login((void *) arg);
+		ctlerror = audit_control(cmd, error);
 		up_read(&audit_lock);
 		break;
 	case AUIOCUSERMESSAGE:
 		down_read(&audit_lock);
 		error = audit_user_message((void *) arg);
+		ctlerror = audit_control(cmd, error);
 		up_read(&audit_lock);
 		break;
 
 	default:
 		error = -EINVAL;
 		break;
+	}
+
+err:
+	if (ctlerror < 0) {
+		printk("Error auditing control event %d: %d\n", cmd, ctlerror);
 	}
 
 	DPRINTF("done, result=%d\n", error);
@@ -917,7 +945,8 @@ audit_attach_all(void)
 		if (p->audit == NULL
 		 && p != current
 		 && p->mm != NULL
-		 && p->pid != 1)
+		 /* If audit_all_processes > 1, also attach init */
+		 && (p->pid != 1 || audit_all_processes > 1))
 			__audit_attach(p, 0, NULL);
 	}
 	read_unlock(&tasklist_lock);
@@ -1079,6 +1108,24 @@ audit_user_message(void *arg)
 
 	audit_msg_insert(msgh);
 	return 0;
+}
+
+/*
+ * Process an audit control event
+ */
+static int
+__audit_control(const int ioctl, const int result)
+{
+	struct aud_event_data	ev;
+	int			action;
+
+	memset(&ev, 0, sizeof(ev));
+
+	action = __audit_policy_check(AUD_POLICY_CONTROL, &ev);
+	if (action & AUDIT_LOG)
+		return audit_msg_control(current->audit, ioctl, result);
+	else
+		return 0;
 }
 
 /*

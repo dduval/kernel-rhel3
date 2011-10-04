@@ -994,7 +994,8 @@ repeat:
  
 struct inode * new_inode(struct super_block *sb)
 {
-	static unsigned long last_ino;
+	/* limit inums to 32 bits to avoid problems with legacy 32-bit apps */
+	static unsigned int last_ino;
 	struct inode * inode;
 
 	spin_lock_prefetch(&inode_lock);
@@ -1097,7 +1098,8 @@ static inline unsigned long hash(struct super_block *sb, unsigned long i_ino)
  
 ino_t iunique(struct super_block *sb, ino_t max_reserved)
 {
-	static ino_t counter = 0;
+	/* limit inums to 32 bits to avoid problems with legacy 32-bit apps */
+	static unsigned int counter;
 	struct inode *inode;
 	struct list_head * head;
 	ino_t res;

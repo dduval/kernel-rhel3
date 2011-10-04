@@ -77,6 +77,7 @@
 #endif
 
 #define XPRT_MAX_BACKOFF	(8)
+#define XPRT_BINDRESVPORT_START 800
 
 /*
  * Local functions
@@ -1447,12 +1448,20 @@ xprt_bindresvport(struct socket *sock)
 
 	memset(&myaddr, 0, sizeof(myaddr));
 	myaddr.sin_family = AF_INET;
-	port = 1023;
+
+	/* Since glibc limits bindresvport to ports >= 512, we don't want the
+	 * kernel to exhaust all the high reserved ports too early. Start at
+	 * XPRT_BINDRESVPORT_START and proceed downward from there. Wrap
+	 * around at 0, and continue until you get back to the starting point.
+	 */
+	port = XPRT_BINDRESVPORT_START;
 	do {
+		if (port == 0)
+			port = 1023;
 		myaddr.sin_port = htons(port);
 		err = sock->ops->bind(sock, (struct sockaddr *) &myaddr,
 						sizeof(myaddr));
-	} while (err == -EADDRINUSE && --port > 0);
+	} while (err == -EADDRINUSE && --port != XPRT_BINDRESVPORT_START);
 	current->cap_effective = saved_cap;
 
 	if (err < 0)

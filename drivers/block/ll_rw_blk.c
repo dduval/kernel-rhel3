@@ -1319,12 +1319,14 @@ void submit_bh_rsector(int rw, struct buffer_head * bh)
 	 */
 	bh->b_rdev = bh->b_dev;
 
+	get_bh(bh);
 	generic_make_request(rw, bh);
 
 	/* fix race condition with wait_on_buffer() */
 	smp_mb(); /* spin_unlock may have inclusive semantics */
 	if (waitqueue_active(&bh->b_wait))
 		wake_up(&bh->b_wait);
+	put_bh(bh);
 
 	switch (rw) {
 		case WRITE:

@@ -545,7 +545,7 @@ dasd_diag_init (void)
 
 	if (MACHINE_IS_VM) {
 
-		MESSAGE (KERN_INFO,
+		MESSAGE_LOG (KERN_INFO,
                          "%s discipline initializing",
                          dasd_diag_discipline.name);
 
@@ -555,8 +555,9 @@ dasd_diag_init (void)
 		dasd_discipline_add (&dasd_diag_discipline);
 	} else {
 
-		MESSAGE (KERN_INFO,
-			"Machine is not VM: %s discipline not initializing",
+		MESSAGE_LOG (KERN_INFO,
+                             "Machine is not VM: %s discipline not "
+                             "initializing",
                          dasd_diag_discipline.name);
 
 		rc = -EINVAL;
@@ -569,7 +570,7 @@ dasd_diag_cleanup (void)
 {
 	if (MACHINE_IS_VM) {
 
-		MESSAGE (KERN_INFO,
+		MESSAGE_LOG (KERN_INFO,
                          "%s discipline cleaning up",
                          dasd_diag_discipline.name);
 
@@ -578,8 +579,9 @@ dasd_diag_cleanup (void)
 		ctl_clear_bit (0, 9);
 	} else {
 
-		MESSAGE (KERN_INFO,
-                         "Machine is not VM: %s discipline not initializing",
+		MESSAGE_LOG (KERN_INFO,
+                             "Machine is not VM: %s discipline not "
+                             "initializing",
                          dasd_diag_discipline.name);
 	}
 }

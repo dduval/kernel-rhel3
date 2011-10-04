@@ -2,6 +2,8 @@ VERSION = 2
 PATCHLEVEL = 4
 SUBLEVEL = 21
 EXTRAVERSION = -prep
+RHEL_VERSION = 3
+RHEL_UPDATE = 9
 
 KERNELRELEASE=$(VERSION).$(PATCHLEVEL).$(SUBLEVEL)$(EXTRAVERSION)
 
@@ -398,6 +400,10 @@ include/linux/version.h: ./Makefile
 	@echo \#define UTS_RELEASE \"$(KERNELRELEASE)\" > .ver
 	@echo \#define LINUX_VERSION_CODE `expr $(VERSION) \\* 65536 + $(PATCHLEVEL) \\* 256 + $(SUBLEVEL)` >> .ver
 	@echo '#define KERNEL_VERSION(a,b,c) (((a) << 16) + ((b) << 8) + (c))' >>.ver
+	@echo \#define RHEL_VERSION $(RHEL_VERSION) >> .ver
+	@echo \#define RHEL_UPDATE $(RHEL_UPDATE) >> .ver
+	@echo \#define RHEL_RELEASE_CODE `expr $(RHEL_VERSION) \\* 256 + $(RHEL_UPDATE)` >> .ver
+	@echo '#define RHEL_RELEASE_VERSION(a,b) (((a) << 8) + (b))' >>.ver
 	@mv -f .ver $@
 
 comma	:= ,

@@ -984,7 +984,7 @@ static void hvsi_write_worker(unsigned long arg)
 #endif /* DEBUG */
 
 		wake_up_all(&hp->emptyq);
-		tty_wakeup(&hp->tty);
+		tty_wakeup(hp->tty);
 	}
 
 	spin_unlock_irqrestore(&hp->lock, flags);

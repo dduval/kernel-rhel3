@@ -1008,6 +1008,11 @@ struct sk_buff * skb_checksum_help(struct sk_buff *skb)
 	int offset;
 	unsigned int csum;
 
+	if (skb_cloned(skb)) {
+		if (pskb_expand_head(skb, 0, 0, GFP_ATOMIC))
+			return skb;
+	}
+
 	offset = skb->h.raw - skb->data;
 	if (offset > (int)skb->len)
 		BUG();

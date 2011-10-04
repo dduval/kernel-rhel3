@@ -122,7 +122,13 @@ typedef struct user_fxsr_struct elf_fpxregset_t;
 #ifdef __KERNEL__
 extern void set_personality_64bit(void);
 #define SET_PERSONALITY(ex, ibcs2) set_personality_64bit()
-	
+
+extern int dump_task_regs(struct task_struct *, elf_gregset_t *);
+extern int dump_task_fpu(struct task_struct *, elf_fpregset_t *);
+
+#define ELF_CORE_COPY_TASK_REGS(tsk, elf_regs) dump_task_regs(tsk, elf_regs)
+#define ELF_CORE_COPY_FPREGS(tsk, elf_fpregs) dump_task_fpu(tsk, elf_fpregs)
+
 #endif
 
 #endif
