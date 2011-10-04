@@ -447,7 +447,7 @@ void __init smp_callin(void)
 	/*
 	 *      Synchronize the TSC with the BP
 	 */
-	if (cpu_has_tsc > 1)
+	if (cpu_has_tsc && (boot_cpu_data.x86_vendor == X86_VENDOR_AMD))
 		synchronize_tsc_ap();
 }
 
@@ -1209,7 +1209,8 @@ void __init smp_boot_cpus(void)
 	/*
 	 * Synchronize the TSC with the AP
 	 */
-	if (cpu_has_tsc > 1 && cpucount && cpu_khz)
+	if (cpu_has_tsc && cpucount && cpu_khz &&
+	    (boot_cpu_data.x86_vendor == X86_VENDOR_AMD))
 		synchronize_tsc_bp();
 
 	/*

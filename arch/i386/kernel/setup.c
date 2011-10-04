@@ -122,6 +122,9 @@
 #include <asm/mmu_context.h>
 #include <asm/edd.h>
 #include <asm/desc.h>
+#ifdef CONFIG_SMP
+#include <asm/pci-direct.h>
+#endif
 /*
  * Machine setup..
  */
@@ -1423,6 +1426,18 @@ static void __init display_cacheinfo(struct cpuinfo_x86 *c)
 extern void vide(void);
 __asm__(".align 4\nvide: ret");
 
+#ifdef CONFIG_SMP
+/* Defines for disabling C1 clock ramping */
+#define NB_PCI_ADDR    0x18
+#define NB_PM_DEV      3
+#define NB_C1_REG      0x84
+#define NB_C1_MASK     0xfcffffff
+
+/* processor's cpuid instruction support */
+#define CPUID_PROCESSOR_SIGNATURE	1
+#define CPUID_XMOD 			0x000f0000
+#define CPUID_XMOD_REV_E 		0x00020000
+#endif
 static int __init init_amd(struct cpuinfo_x86 *c)
 {
 	u32 l, h;
@@ -1431,6 +1446,8 @@ static int __init init_amd(struct cpuinfo_x86 *c)
 #ifdef CONFIG_SMP
 	int tmp, cpu;
 	unsigned int coreshift = 0;
+	u32 reg;
+	u32 eax;
 
 	/* Figure out what physical package we're on. */
 	if (cpuid_ebx(1) & 0xff0000) {
@@ -1589,6 +1606,24 @@ static int __init init_amd(struct cpuinfo_x86 *c)
 				}
 			}
 			break;
+#ifdef CONFIG_SMP
+		case 0x0f:
+			eax = cpuid_eax(CPUID_PROCESSOR_SIGNATURE);
+			if ((eax & CPUID_XMOD) >= CPUID_XMOD_REV_E) {
+				/* Disable C1 clock ramping to avoid TSC
+				   jitter */
+				printk(KERN_INFO
+				       "Disabled C1 clock ramping...\n");
+				reg = read_pci_config(0, NB_PCI_ADDR +
+						      phys_proc_id[cpu],
+						      NB_PM_DEV, NB_C1_REG);
+				write_pci_config(0, NB_PCI_ADDR +
+						 phys_proc_id[cpu],
+						 NB_PM_DEV, NB_C1_REG,
+						 reg & NB_C1_MASK);
+			}
+			break;
+#endif
 	}
 
 	display_cacheinfo(c);

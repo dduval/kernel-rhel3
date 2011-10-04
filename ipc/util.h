@@ -71,6 +71,16 @@ extern inline struct kern_ipc_perm* ipc_lock(struct ipc_ids* ids, int id)
 		return NULL;
 	}
 	spin_lock(&out->lock);
+	/*
+	 * ipc_rmid() may have already freed the ID while ipc_lock()
+	 * was spinning, so verify that the structure is still valid.
+	 */
+	if (lid >= ids->size || !ids->entries[lid].p) {
+		spin_unlock(&out->lock);
+		br_read_unlock(BR_SEMAPHORE_LOCK);
+		return NULL;
+	}
+
 	return out;
 }
 
@@ -85,6 +95,18 @@ extern inline void ipc_unlock(struct ipc_ids* ids, int id)
 	if (out)
 		spin_unlock(&out->lock);
 	br_read_unlock(BR_SEMAPHORE_LOCK);
+}
+
+extern inline void ipc_unlock_deleted(struct kern_ipc_perm* perm)
+{
+	spin_unlock(&perm->lock);
+	br_read_unlock(BR_SEMAPHORE_LOCK);
+	/*
+	 * Wait for other readers waiting on spinlock and
+	 * holding read locks to disappear.
+	 */
+	br_write_lock(BR_SEMAPHORE_LOCK);
+	br_write_unlock(BR_SEMAPHORE_LOCK);
 }
 
 extern inline struct kern_ipc_perm* ipc_write_lock(struct ipc_ids* ids, int id)

@@ -52,6 +52,7 @@ static struct ipc_ids shm_ids;
 
 #define shm_lock(id)	((struct shmid_kernel*)ipc_lock(&shm_ids,id))
 #define shm_unlock(id)	ipc_unlock(&shm_ids,id)
+#define shm_unlock_deleted(shp)	ipc_unlock_deleted(&(shp)->shm_perm)
 #define shm_get(id)	((struct shmid_kernel*)ipc_get(&shm_ids,id))
 #define shm_buildid(id, seq) \
 	ipc_buildid(&shm_ids, id, seq)
@@ -125,7 +126,7 @@ static void shm_destroy (struct shmid_kernel *shp)
 {
 	shm_tot -= (shp->shm_segsz + PAGE_SIZE - 1) >> PAGE_SHIFT;
 	shm_rmid (shp->id);
-	shm_unlock(shp->id);
+	shm_unlock_deleted(shp);
 	if (!is_file_hugepages(shp->shm_file))
 		shmem_lock(shp->shm_file, 0,
 			&shp->shm_locker_mm,
@@ -165,6 +166,8 @@ static int shm_mmap(struct file * file, struct vm_area_struct * vma)
 {
 	UPDATE_ATIME(file->f_dentry->d_inode);
 	vma->vm_ops = &shm_vm_ops;
+	if (!(vma->vm_flags & VM_WRITE))
+		vma->vm_flags &= ~VM_MAYWRITE;
 	shm_inc(file->f_dentry->d_inode->i_ino);
 	return 0;
 }
