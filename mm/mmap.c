@@ -1428,6 +1428,19 @@ out:
 	return addr;
 }
 
+/* locking version of do_brk. */
+unsigned long do_brk_locked(unsigned long addr, unsigned long len)
+{
+	unsigned long ret;
+
+	down_write(&current->mm->mmap_sem);
+	ret = do_brk(addr, len);
+	up_write(&current->mm->mmap_sem);
+
+	return ret;
+}
+
+
 /* Release all mmaps. */
 void exit_mmap(struct mm_struct * mm)
 {
@@ -1497,14 +1510,15 @@ void __insert_vm_struct(struct mm_struct * mm, struct vm_area_struct * vma)
 	validate_mm(mm);
 }
 
-void insert_vm_struct(struct mm_struct * mm, struct vm_area_struct * vma)
+int insert_vm_struct(struct mm_struct * mm, struct vm_area_struct * vma)
 {
 	struct vm_area_struct * __vma, * prev;
 	rb_node_t ** rb_link, * rb_parent;
 
 	__vma = find_vma_prepare(mm, vma->vm_start, &prev, &rb_link, &rb_parent);
 	if (__vma && __vma->vm_start < vma->vm_end)
-		BUG();
+		return -ENOMEM;
 	vma_link(mm, vma, prev, rb_link, rb_parent);
 	validate_mm(mm);
+	return 0;
 }

@@ -85,7 +85,7 @@ static int set_brk(unsigned long start, unsigned long end)
 	start = ELF_PAGEALIGN(start);
 	end = ELF_PAGEALIGN(end);
 	if (end > start) {
-		unsigned long addr = do_brk(start, end - start);
+		unsigned long addr = do_brk_locked(start, end - start);
 		if (BAD_ADDR(addr))
 			return addr;
 	}
@@ -410,7 +410,7 @@ elf_type, total_size);
 
 	/* Map the last of the bss segment */
 	if (last_bss > elf_bss) {
-		error = do_brk(elf_bss, last_bss - elf_bss);
+		error = do_brk_locked(elf_bss, last_bss - elf_bss);
 		if (BAD_ADDR(error))
 			goto out_close;
 	}
@@ -450,7 +450,7 @@ static unsigned long load_aout_interp(struct exec * interp_ex,
 		goto out;
 	}
 
-	do_brk(0, text_data);
+	do_brk_locked(0, text_data);
 	if (!interpreter->f_op || !interpreter->f_op->read)
 		goto out;
 	if (interpreter->f_op->read(interpreter, addr, text_data, &offset) < 0)
@@ -458,7 +458,7 @@ static unsigned long load_aout_interp(struct exec * interp_ex,
 	flush_icache_range((unsigned long)addr,
 	                   (unsigned long)addr + text_data);
 
-	do_brk(ELF_PAGESTART(text_data + ELF_MIN_ALIGN - 1),
+	do_brk_locked(ELF_PAGESTART(text_data + ELF_MIN_ALIGN - 1),
 		interp_ex->a_bss);
 	elf_entry = interp_ex->a_entry;
 
@@ -1047,7 +1047,7 @@ static int load_elf_library(struct file *file)
 	len = ELF_PAGESTART(elf_phdata->p_filesz + elf_phdata->p_vaddr + ELF_MIN_ALIGN - 1);
 	bss = elf_phdata->p_memsz + elf_phdata->p_vaddr;
 	if (bss > len)
-		do_brk(len, bss - len);
+		do_brk_locked(len, bss - len);
 	error = 0;
 
 out_free_ph:

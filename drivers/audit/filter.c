@@ -437,6 +437,10 @@ __audit_get_target(unsigned int n,
 			return ERR_PTR(-ENOENT);
 
 		dentry = parent_target->at_path.dentry;
+
+		if (dentry == NULL)
+			return ERR_PTR(-ENOENT);
+
 		while (!(inode = dentry->d_inode)) {
 			up = dentry->d_parent;
 			if (dentry == up)

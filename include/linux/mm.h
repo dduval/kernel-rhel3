@@ -732,7 +732,7 @@ extern void FASTCALL(__free_pte(pte_t pte));
 /* mmap.c */
 extern void lock_vma_mappings(struct vm_area_struct *);
 extern void unlock_vma_mappings(struct vm_area_struct *);
-extern void insert_vm_struct(struct mm_struct *, struct vm_area_struct *);
+extern int insert_vm_struct(struct mm_struct *, struct vm_area_struct *);
 extern void __insert_vm_struct(struct mm_struct *, struct vm_area_struct *);
 extern void __vma_link_rb(struct mm_struct *, struct vm_area_struct *,
 	rb_node_t **, rb_node_t *);
@@ -760,6 +760,7 @@ out:
 extern int do_munmap(struct mm_struct *, unsigned long, size_t, int acct);
 
 extern unsigned long do_brk(unsigned long, unsigned long);
+extern unsigned long do_brk_locked(unsigned long, unsigned long);
 
 #ifdef __i386__
 extern void arch_remove_exec_range(struct mm_struct *mm, unsigned long limit);

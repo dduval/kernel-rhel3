@@ -107,6 +107,7 @@ EXPORT_SYMBOL(__stop___kallsyms);
 EXPORT_SYMBOL(do_mmap_pgoff);
 EXPORT_SYMBOL(do_munmap);
 EXPORT_SYMBOL(do_brk);
+EXPORT_SYMBOL(do_brk_locked);
 EXPORT_SYMBOL(exit_mm);
 EXPORT_SYMBOL(exit_files);
 EXPORT_SYMBOL(exit_fs);

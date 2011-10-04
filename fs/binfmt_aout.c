@@ -45,7 +45,7 @@ static void set_brk(unsigned long start, unsigned long end)
 	end = PAGE_ALIGN(end);
 	if (end <= start)
 		return;
-	do_brk(start, end - start);
+	do_brk_locked(start, end - start);
 }
 
 /*
@@ -338,7 +338,7 @@ static int load_aout_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 		map_size = ex.a_text+ex.a_data;
 #endif
 
-		error = do_brk(text_addr & PAGE_MASK, map_size);
+		error = do_brk_locked(text_addr & PAGE_MASK, map_size);
 		if (error != (text_addr & PAGE_MASK)) {
 			send_sig(SIGKILL, current, 0);
 			return error;
@@ -372,7 +372,7 @@ static int load_aout_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 
 		if (!bprm->file->f_op->mmap||((fd_offset & ~PAGE_MASK) != 0)) {
 			loff_t pos = fd_offset;
-			do_brk(N_TXTADDR(ex), ex.a_text+ex.a_data);
+			do_brk_locked(N_TXTADDR(ex), ex.a_text+ex.a_data);
 			bprm->file->f_op->read(bprm->file,(char *)N_TXTADDR(ex),
 					ex.a_text+ex.a_data, &pos);
 			flush_icache_range((unsigned long) N_TXTADDR(ex),
@@ -469,7 +469,7 @@ static int load_aout_library(struct file *file)
 			error_time = jiffies;
 		}
 
-		do_brk(start_addr, ex.a_text + ex.a_data + ex.a_bss);
+		do_brk_locked(start_addr, ex.a_text + ex.a_data + ex.a_bss);
 		
 		file->f_op->read(file, (char *)start_addr,
 			ex.a_text + ex.a_data, &pos);
@@ -493,7 +493,7 @@ static int load_aout_library(struct file *file)
 	len = PAGE_ALIGN(ex.a_text + ex.a_data);
 	bss = ex.a_text + ex.a_data + ex.a_bss;
 	if (bss > len) {
-		error = do_brk(start_addr + len, bss - len);
+		error = do_brk_locked(start_addr + len, bss - len);
 		retval = error;
 		if (error != start_addr + len)
 			goto out;
