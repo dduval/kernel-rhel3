@@ -161,9 +161,6 @@ static int meminfo_read_proc(char *page, char **start, off_t off,
 	int pg_size ;
 	int committed;
 
-	/* FIXME: needs to be in headers */
-	extern atomic_t vm_committed_space;
-	
 /*
  * display in kilobytes.
  */
@@ -205,7 +202,8 @@ static int meminfo_read_proc(char *page, char **start, off_t off,
 		"LowTotal:     %8lu kB\n"
 		"LowFree:      %8lu kB\n"
 		"SwapTotal:    %8lu kB\n"
-		"SwapFree:     %8lu kB\n",
+		"SwapFree:     %8lu kB\n"
+		"Committed_AS: %8u kB\n",
 		K(i.totalram),
 		K(i.freeram),
 		K(i.sharedram),
@@ -224,7 +222,8 @@ static int meminfo_read_proc(char *page, char **start, off_t off,
 		K(i.totalram-i.totalhigh),
 		K(i.freeram-i.freehigh),
 		K(i.totalswap),
-		K(i.freeswap));
+		K(i.freeswap),
+		K(committed));
 
 	len += hugetlb_report_meminfo(page + len);
 

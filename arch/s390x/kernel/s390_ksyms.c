@@ -24,6 +24,7 @@
 EXPORT_SYMBOL_NOVERS(_oi_bitmap);
 EXPORT_SYMBOL_NOVERS(_ni_bitmap);
 EXPORT_SYMBOL_NOVERS(_zb_findmap);
+EXPORT_SYMBOL_NOVERS(_sb_findmap);
 EXPORT_SYMBOL_NOVERS(__copy_from_user_asm);
 EXPORT_SYMBOL_NOVERS(__copy_to_user_asm);
 EXPORT_SYMBOL_NOVERS(__clear_user_asm);
@@ -91,6 +92,7 @@ EXPORT_SYMBOL(console_device);
 EXPORT_SYMBOL_NOVERS(do_call_softirq);
 EXPORT_SYMBOL(ctrlchar_init);
 EXPORT_SYMBOL(ctrlchar_handle);
+EXPORT_SYMBOL(show_trace);
 
 /*
  * More

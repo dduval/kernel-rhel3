@@ -23,7 +23,6 @@
 #define  LOOP_ID_FROM_ONE              0   /* loop ID start from 1 when P2P */
 #define  MEMORY_MAPPED_IO              1
 #define  DEBUG_QLA2100_INTR            0
-#define  USE_NVRAM_DEFAULTS	       0
 #define  DEBUG_PRINT_NVRAM             0
 #define  LOADING_RISC_ACTIVITY         0
 #define  AUTO_ESCALATE_RESET           0   /* Automatically escalate resets */

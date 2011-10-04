@@ -163,6 +163,8 @@ int scsi_delete_timer(Scsi_Cmnd * SCset)
  */
 void scsi_times_out(Scsi_Cmnd * SCpnt)
 {
+	unsigned long flags;
+
 	/* 
 	 * Notify the low-level code that this operation failed and we are
 	 * reposessing the command.  
@@ -215,7 +217,9 @@ void scsi_times_out(Scsi_Cmnd * SCpnt)
 		return;
 	}
 
+	spin_lock_irqsave(SCpnt->host->host_lock, flags);
 	SCpnt->host->in_recovery = 1;
+	spin_unlock_irqrestore(SCpnt->host->host_lock, flags);
 	SCpnt->host->host_failed++;
 
 	SCSI_LOG_TIMEOUT(3, printk("Command timed out active=%d busy=%d failed=%d\n",
@@ -1279,8 +1283,10 @@ STATIC void scsi_restart_operations(struct Scsi_Host *host)
 	 * We just completed error handling, we can't be blocked now or else
 	 * we hang forever.
 	 */
+	spin_lock_irqsave(host->host_lock, flags);
 	host->host_blocked = 0;
 	host->host_self_blocked = 0;
+	spin_unlock_irqrestore(host->host_lock, flags);
 
 	/*
 	 * Next free up anything directly waiting upon the host.  This will be
@@ -1350,6 +1356,7 @@ STATIC int scsi_unjam_host(struct Scsi_Host *host)
 	LIST_HEAD(SCdone);
 	struct list_head *item, *tmp_item;
 	int timed_out;
+	unsigned long flags;
 
 	ASSERT_LOCK(host->host_lock, 0);
 
@@ -1833,7 +1840,9 @@ STATIC int scsi_unjam_host(struct Scsi_Host *host)
 	 *
 	 * Start by marking that the host is no longer in error recovery.
 	 */
+	spin_lock_irqsave(host->host_lock, flags);
 	host->in_recovery = 0;
+	spin_unlock_irqrestore(host->host_lock, flags);
 
 	/*
 	 * Take the list of commands, and stick them in the bottom half queue.

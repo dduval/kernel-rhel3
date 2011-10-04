@@ -80,15 +80,18 @@ void scsi_timeout_block(Scsi_Cmnd * cmd)
 	struct scsi_device *device = cmd->device;
 	struct request_queue *q = &device->request_queue;
 	struct request *req;
+	unsigned long flags;
 
 	device->device_blocked = 0;
 	device->unblock_timer_active = 0;
+	spin_lock_irqsave(cmd->host->host_lock, flags);
 	cmd->host->host_blocked = 0;
 	for (device = cmd->host->host_queue; device; device = device->next)
 		if (device->unblock_timer_active)
 			break;
 	if (!device)
 		cmd->host->unblock_timer_active = 0;
+	spin_unlock_irqrestore(cmd->host->host_lock, flags);
 
 	if (cmd->host->eh_wait != NULL && cmd->host->in_recovery) {
 		/*
@@ -208,9 +211,12 @@ int scsi_mlqueue_insert(Scsi_Cmnd * cmd, int reason)
 		if (atomic_read(&device->device_busy) == 0) {
 			scsi_add_timer(cmd, HZ/5, scsi_timeout_block);
 			device->unblock_timer_active = 1;
+			spin_unlock(q->queue_lock);
+			spin_lock(host->host_lock);
 			host->unblock_timer_active = 1;
-		}
-		spin_unlock_irqrestore(q->queue_lock, flags);
+			spin_unlock_irqrestore(host->host_lock, flags);
+		} else
+			spin_unlock_irqrestore(q->queue_lock, flags);
 	}
 
 	return 0;

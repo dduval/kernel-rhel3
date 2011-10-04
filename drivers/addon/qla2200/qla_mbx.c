@@ -197,7 +197,9 @@ qla2x00_get_mbx_access(scsi_qla_host_t *ha, uint32_t tov)
 	    ha->host_no);)
 
 	while (1) {
-		if (test_bit(MBX_CMD_WANT, &ha->mbx_cmd_flags) == 0) {
+		if (test_bit(MBX_CMD_WANT, &ha->mbx_cmd_flags) == 0 &&
+		    test_bit(MBX_UPDATE_FLASH_ACTIVE, 
+			    &ha->mbx_cmd_flags) == 0 ) {
 
 			DEBUG11(printk("qla2x00_get_mbx_access(%ld): going "
 			    " to test access flags.\n", ha->host_no);)
@@ -205,7 +207,7 @@ qla2x00_get_mbx_access(scsi_qla_host_t *ha, uint32_t tov)
 			/* No one else is waiting. Go ahead and try to
 			 * get access.
 			 */
-			if ((prev_val = test_and_set_bit(MBX_CMD_ACTIVE,
+			if ((prev_val =  test_and_set_bit(MBX_CMD_ACTIVE,
 			    &ha->mbx_cmd_flags)) == 0) {
 				break;
 			}
@@ -539,6 +541,7 @@ qla2x00_mailbox_command(scsi_qla_host_t *ha, mbx_cmd_t *mcp)
 #endif
 		if (mboxes & BIT_0) {
 			WRT_REG_WORD(optr, *iptr);
+			PCI_POSTING(optr);
 		}
 
 		mboxes >>= 1;
@@ -594,6 +597,7 @@ qla2x00_mailbox_command(scsi_qla_host_t *ha, mbx_cmd_t *mcp)
 		set_bit(MBX_INTR_WAIT, &ha->mbx_cmd_flags);
 
 		WRT_REG_WORD(&reg->host_cmd, HC_SET_HOST_INT);
+		PCI_POSTING(&reg->host_cmd);
 		spin_unlock_irqrestore(&ha->hardware_lock, flags);
 
 		if (!abort_active)
@@ -629,6 +633,7 @@ qla2x00_mailbox_command(scsi_qla_host_t *ha, mbx_cmd_t *mcp)
 			"POLLING MODE.\n", ha->host_no, command);)
 
 		WRT_REG_WORD(&reg->host_cmd, HC_SET_HOST_INT);
+		PCI_POSTING(&reg->host_cmd);
 		spin_unlock_irqrestore(&ha->hardware_lock, flags);
 		if (!abort_active)
 			QLA_MBX_REG_UNLOCK(ha);
@@ -1810,6 +1815,7 @@ qla2x00_get_port_database(scsi_qla_host_t *ha, fc_port_t *fcport, uint8_t opt)
 		DEBUG2_3_11(printk("qla2x00_get_port_database(%ld): **** "
 		    "Mem Alloc Failed ****",
 		    ha->host_no);)
+		ha->mem_err++;		
 		return QL_STATUS_RESOURCE_ERROR;
 	}
 
@@ -1840,32 +1846,34 @@ qla2x00_get_port_database(scsi_qla_host_t *ha, fc_port_t *fcport, uint8_t opt)
 	/* mcp->tov =  ha->login_timeout * 2; */
 	mcp->tov =  (ha->login_timeout * 2) + (ha->login_timeout/2);
 	rval = (int)qla2x00_mailbox_command(ha, mcp);
+	if (rval != QL_STATUS_SUCCESS)
+		goto gpd_error_out;
 
-	if (rval == QL_STATUS_SUCCESS) {
-		/* Save some data */
-		/* Names are big endian. */
-		memcpy(fcport->node_name, pd->node_name, WWN_SIZE);
-		memcpy(fcport->port_name, pd->port_name, WWN_SIZE);
-
-		/* Get port_id of device. */
-		fcport->d_id.b.al_pa = pd->port_id[2];
-		fcport->d_id.b.area = pd->port_id[3];
-		fcport->d_id.b.domain = pd->port_id[0];
-		fcport->d_id.b.rsvd_1 = 0;
-
-		/* If not target must be initiator or unknown type. */
-		if ((pd->prli_svc_param_word_3[0] & BIT_4) == 0) {
-			fcport->port_type = FCT_INITIATOR;
-		} else {
-			fcport->port_type = FCT_TARGET;
-
-			/* Check for logged in. */
-			if (pd->master_state != PD_STATE_PORT_LOGGED_IN &&
-			    pd->slave_state != PD_STATE_PORT_LOGGED_IN)
-				rval = QL_STATUS_ERROR;
-		}
+	/* Check for logged in. */
+	if (pd->master_state != PD_STATE_PORT_LOGGED_IN &&
+	    pd->slave_state != PD_STATE_PORT_LOGGED_IN) {
+		rval = QL_STATUS_ERROR;
+		goto gpd_error_out;
 	}
 
+	/* Save some data */
+	/* Names are big endian. */
+	memcpy(fcport->node_name, pd->node_name, WWN_SIZE);
+	memcpy(fcport->port_name, pd->port_name, WWN_SIZE);
+
+	/* Get port_id of device. */
+	fcport->d_id.b.al_pa = pd->port_id[2];
+	fcport->d_id.b.area = pd->port_id[3];
+	fcport->d_id.b.domain = pd->port_id[0];
+	fcport->d_id.b.rsvd_1 = 0;
+
+	/* If not target must be initiator or unknown type. */
+	if ((pd->prli_svc_param_word_3[0] & BIT_4) == 0)
+		fcport->port_type = FCT_INITIATOR;
+	else
+		fcport->port_type = FCT_TARGET;
+
+gpd_error_out:
 	pci_free_consistent(ha->pdev, PORT_DATABASE_SIZE, pd, phys_address);
 
 	if (rval != QL_STATUS_SUCCESS) {

@@ -57,7 +57,7 @@ void volatile qdio_eyecatcher(void)
 
 #include <asm/qdio.h>
 
-#define VERSION_QDIO_C "$Revision: 1.145 $"
+#define VERSION_QDIO_C "$Revision: 1.145.4.1 $"
 
 /****************** MODULE PARAMETER VARIABLES ********************/
 MODULE_AUTHOR("Utz Bacher <utz.bacher@de.ibm.com>");
@@ -710,7 +710,7 @@ static inline void qdio_translate_buffer_back(qdio_q_t *q,int bufno)
 		       (void*)q->sbal[bufno],SBAL_SIZE);
 }
 
-inline static int qdio_get_outbound_buffer_frontier(qdio_q_t *q)
+static inline int qdio_get_outbound_buffer_frontier(qdio_q_t *q)
 {
 	int f,f_mod_no;
 	volatile char *slsb;
@@ -797,7 +797,7 @@ out:
 }
 
 /* all buffers are processed */
-inline static int qdio_is_outbound_q_done(qdio_q_t *q)
+static inline int qdio_is_outbound_q_done(qdio_q_t *q)
 {
 	int no_used;
 #ifdef QDIO_DBF_LIKE_HELL
@@ -818,7 +818,7 @@ inline static int qdio_is_outbound_q_done(qdio_q_t *q)
 	return (no_used==0);
 }
 
-inline static int qdio_has_outbound_q_moved(qdio_q_t *q)
+static inline int qdio_has_outbound_q_moved(qdio_q_t *q)
 {
 	int i;
 
@@ -842,7 +842,7 @@ inline static int qdio_has_outbound_q_moved(qdio_q_t *q)
 	}
 }
 
-inline static void qdio_kick_outbound_q(qdio_q_t *q)
+static inline void qdio_kick_outbound_q(qdio_q_t *q)
 {
 	int result;
 #ifdef QDIO_DBF_LIKE_HELL
@@ -864,7 +864,7 @@ inline static void qdio_kick_outbound_q(qdio_q_t *q)
 	}
 }
 
-inline static void qdio_kick_outbound_handler(qdio_q_t *q)
+static inline void qdio_kick_outbound_handler(qdio_q_t *q)
 {
 #ifdef QDIO_DBF_LIKE_HELL
 	char dbf_text[15];
@@ -901,7 +901,7 @@ inline static void qdio_kick_outbound_handler(qdio_q_t *q)
 	q->error_status_flags=0;
 }
 
-static void qdio_outbound_processing(qdio_q_t *q)
+static inline void __qdio_outbound_processing(qdio_q_t *q)
 {
 #ifdef QDIO_DBF_LIKE_HELL
 	QDIO_DBF_TEXT4(0,trace,"qoutproc");
@@ -950,10 +950,15 @@ static void qdio_outbound_processing(qdio_q_t *q)
 	qdio_release_q(q);
 }
 
+static void qdio_outbound_processing(qdio_q_t *q)
+{
+	__qdio_outbound_processing(q);
+}
+
 /************************* INBOUND ROUTINES *******************************/
 
 
-inline static int qdio_get_inbound_buffer_frontier(qdio_q_t *q)
+static inline int qdio_get_inbound_buffer_frontier(qdio_q_t *q)
 {
 	int f,f_mod_no;
 	volatile char *slsb;
@@ -1058,7 +1063,7 @@ out:
 	return q->first_to_check;
 }
 
-inline static int qdio_has_inbound_q_moved(qdio_q_t *q)
+static inline int qdio_has_inbound_q_moved(qdio_q_t *q)
 {
 	int i;
 
@@ -1095,7 +1100,7 @@ inline static int qdio_has_inbound_q_moved(qdio_q_t *q)
 }
 
 /* means, no more buffers to be filled */
-inline static int iqdio_is_inbound_q_done(qdio_q_t *q)
+static inline int iqdio_is_inbound_q_done(qdio_q_t *q)
 {
 	int no_used;
 #ifdef QDIO_DBF_LIKE_HELL
@@ -1148,7 +1153,7 @@ inline static int iqdio_is_inbound_q_done(qdio_q_t *q)
 	return 0;
 }
 
-inline static int qdio_is_inbound_q_done(qdio_q_t *q)
+static inline int qdio_is_inbound_q_done(qdio_q_t *q)
 {
 	int no_used;
 #ifdef QDIO_DBF_LIKE_HELL
@@ -1204,7 +1209,7 @@ inline static int qdio_is_inbound_q_done(qdio_q_t *q)
 	}
 }
 
-inline static void qdio_kick_inbound_handler(qdio_q_t *q)
+static inline void qdio_kick_inbound_handler(qdio_q_t *q)
 {
 	int count=0;
 	int start,end,real_end,i;
@@ -1250,7 +1255,7 @@ inline static void qdio_kick_inbound_handler(qdio_q_t *q)
 #endif /* QDIO_PERFORMANCE_STATS */
 }
 
-static inline void tiqdio_inbound_processing(qdio_q_t *q)
+static inline void __tiqdio_inbound_processing(qdio_q_t *q)
 {
 	qdio_irq_t *irq_ptr;
 	qdio_q_t *oq;
@@ -1307,7 +1312,7 @@ static inline void tiqdio_inbound_processing(qdio_q_t *q)
 				perf_stats.tl_runs--;
 #endif /* QDIO_PERFORMANCE_STATS */
 				if (!qdio_is_outbound_q_done(oq)) {
-					qdio_outbound_processing(oq);
+					__qdio_outbound_processing(oq);
 				}
 			}
 		}
@@ -1330,7 +1335,12 @@ out:
 	qdio_release_q(q);
 }
 
-static void qdio_inbound_processing(qdio_q_t *q)
+static void tiqdio_inbound_processing(qdio_q_t *q)
+{
+	__tiqdio_inbound_processing(q);
+}
+
+static inline void __qdio_inbound_processing(qdio_q_t *q)
 {
 	int q_laps=0;
 
@@ -1375,6 +1385,11 @@ again:
 	qdio_release_q(q);
 }
 
+static void qdio_inbound_processing(qdio_q_t *q)
+{
+	__qdio_inbound_processing(q);
+}
+
 /************************* MAIN ROUTINES *******************************/
 
 static inline void tiqdio_inbound_checks(void)
@@ -1402,7 +1417,7 @@ again:
 	/* switch all active queues to processing state */
 	do {
 		if (!q) break;
-		tiqdio_inbound_processing(q);
+		__tiqdio_inbound_processing(q);
 		q=(qdio_q_t*)q->list_next;
 	} while (q!=(qdio_q_t*)tiq_list);
 
@@ -2014,7 +2029,7 @@ static void qdio_handler(int irq,devstat_t *devstat,struct pt_regs *p)
 #ifdef QDIO_PERFORMANCE_STATS
 				perf_stats.tl_runs--;
 #endif /* QDIO_PERFORMANCE_STATS */
-				qdio_inbound_processing(q);
+				__qdio_inbound_processing(q);
 			}
 		}
 		if (irq_ptr->hydra_gives_outbound_pcis) {
@@ -2027,7 +2042,7 @@ static void qdio_handler(int irq,devstat_t *devstat,struct pt_regs *p)
 					if (!irq_ptr->sync_done_on_outb_pcis) {
 						SYNC_MEMORY;
 					}
-					qdio_outbound_processing(q);
+					__qdio_outbound_processing(q);
 				}
 			}
 		}
@@ -3147,8 +3162,9 @@ int qdio_activate(int irq,int flags)
 }
 
 /* buffers filled forwards again to make Rick happy */
-static void qdio_do_qdio_fill_input(qdio_q_t *q,unsigned int qidx,
-				    unsigned int count,qdio_buffer_t *buffers)
+static inline void qdio_do_qdio_fill_input(qdio_q_t *q,unsigned int qidx,
+	       				   unsigned int count,
+					   qdio_buffer_t *buffers)
 {
 	for (;;) {
 		if (!q->is_0copy_sbals_q) {
@@ -3281,7 +3297,7 @@ int do_QDIO(int irq,unsigned int callflags,unsigned int queue_number,
 					qdio_kick_outbound_q(q);
 				}
 
-				qdio_outbound_processing(q);
+				__qdio_outbound_processing(q);
 			} else {
 				/* under VM, we do a SIGA sync
 				 * unconditionally */
@@ -3309,7 +3325,7 @@ int do_QDIO(int irq,unsigned int callflags,unsigned int queue_number,
 				 * too long, the upper layer
 				 * module could do a lot of
 				 * traffic in that time */
-				qdio_outbound_processing(q);
+				__qdio_outbound_processing(q);
 			}
 		}
 

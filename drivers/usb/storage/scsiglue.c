@@ -254,6 +254,18 @@ static int bus_reset( Scsi_Cmnd *srb )
 		return SUCCESS;
 	}
 
+	/* The USB subsystem doesn't handle synchronisation between
+	 * a device's several drivers. Therefore we reset only devices
+	 * with just one interface, which we of course own. */
+	if (us->pusb_dev->actconfig->bNumInterfaces != 1) {
+		printk(KERN_NOTICE "usb-storage: "
+		    "Refusing to reset a multi-interface device\n");
+		up(&(us->dev_semaphore));
+		spin_lock_irq(&io_request_lock);
+		/* XXX Don't just return success, make sure current cmd fails */
+		return SUCCESS;
+	}
+
 	/* release the IRQ, if we have one */
 	if (us->irq_urb) {
 		US_DEBUGP("-- releasing irq URB\n");

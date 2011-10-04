@@ -32,6 +32,7 @@
 #include <linux/sched.h>
 #include <linux/pm.h>
 #include <linux/proc_fs.h>
+#include <linux/reboot.h>
 #ifdef CONFIG_X86
 #include <asm/mpspec.h>
 #endif
@@ -1843,6 +1844,36 @@ acpi_bus_init_irq (void)
 	return_VALUE(0);
 }
 
+#ifdef CONFIG_X86_64
+void
+acpi_machine_reset(void)
+{
+	acpi_status status;
+	FADT_DESCRIPTOR *f = &acpi_fadt;
+
+	if (f->reset_register.register_bit_width != 8) {
+		printk(KERN_WARNING PREFIX "invalid reset register bit width: 0x%x\n", f->reset_register.register_bit_width);
+		return_VOID;
+	}
+
+	if (f->reset_register.register_bit_offset != 0) {
+		printk(KERN_WARNING PREFIX "invalid reset register bit offset: 0x%x\n", f->reset_register.register_bit_offset);
+		return_VOID;
+	}
+
+	if ((f->reset_register.address_space_id != ACPI_ADR_SPACE_SYSTEM_IO) &&
+	    (f->reset_register.address_space_id != ACPI_ADR_SPACE_SYSTEM_MEMORY) &&
+	    (f->reset_register.address_space_id != ACPI_ADR_SPACE_PCI_CONFIG)) {
+		printk(KERN_WARNING PREFIX "invalid reset register address space id: 0x%x\n", f->reset_register.address_space_id);
+		return_VOID;
+	}
+
+	status = acpi_hw_low_level_write(f->reset_register.register_bit_width, f->reset_value, &f->reset_register);
+
+	if (status != AE_OK)
+		printk(KERN_WARNING "ACPI system reset failed 0x%x\n", status);
+}
+#endif
 
 static int __init
 acpi_bus_init (void)
@@ -1885,6 +1916,20 @@ acpi_bus_init (void)
 		acpi_fadt.sci_int = acpi_sci_override_gsi;
 	} else
                 eisa_set_level_irq(acpi_fadt.sci_int);
+#endif
+
+	/*
+	 * Set up system reset via ACPI, if defined correctly in FADT and
+         * the hardware doesn't include an 8042 KBD controller.
+	 */
+#ifdef CONFIG_X86_64
+	if (acpi_fadt.header.revision >= 2) {
+		if (acpi_fadt.reset_reg_sup) {
+			printk(KERN_INFO PREFIX "System reset via FADT Reset Register supported.\n");
+			if (!(acpi_fadt.iapc_boot_arch & BAF_8042_KEYBOARD_CONTROLLER))
+				machine_reset = acpi_machine_reset;
+		}
+	}
 #endif
 
 	status = acpi_enable_subsystem(ACPI_FULL_INITIALIZATION);

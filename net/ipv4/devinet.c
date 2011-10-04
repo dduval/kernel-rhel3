@@ -1116,7 +1116,7 @@ int ipv4_doint_and_flush_strategy(ctl_table *table, int *name, int nlen,
 static struct devinet_sysctl_table
 {
 	struct ctl_table_header *sysctl_header;
-	ctl_table devinet_vars[17];
+	ctl_table devinet_vars[18];
 	ctl_table devinet_dev[2];
 	ctl_table devinet_conf_dir[2];
 	ctl_table devinet_proto_dir[2];
@@ -1170,6 +1170,9 @@ static struct devinet_sysctl_table
 	 &ipv4_doint_and_flush, &ipv4_doint_and_flush_strategy,},
 	{NET_IPV4_CONF_NOPOLICY, "disable_policy",
 	 &ipv4_devconf.no_policy, sizeof(int), 0644, NULL,
+	 &ipv4_doint_and_flush, &ipv4_doint_and_flush_strategy},
+	{NET_IPV4_CONF_FORCE_IGMP_VERSION, "force_igmp_version",
+	 &ipv4_devconf.force_igmp_version, sizeof(int), 0644, NULL,
 	 &ipv4_doint_and_flush, &ipv4_doint_and_flush_strategy},
 	 {0}},
 

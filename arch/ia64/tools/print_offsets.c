@@ -203,7 +203,7 @@ main (int argc, char **argv)
   printf ("#define PT_PTRACED_BIT\t\t\t%u\n", ffs (PT_PTRACED) - 1);
   printf ("#define PT_TRACESYS_BIT\t\t\t%u\n", ffs (PT_TRACESYS) - 1);
   printf ("#define PT_AUDITED_BIT\t\t\t%u\n", ffs (PT_AUDITED) - 1);
-  printf ("#define PT_TRACEAUDITMASK\t\t0x%x\n\n", PT_TRACESYS|PT_AUDITED);
+  printf ("#define PT_TRACEAUDITMASK\t\t0x%x\n\n", PT_TRACESYS|PT_AUDITED|PT_SINGLESTEP);
 
   for (i = 0; i < sizeof (tab) / sizeof (tab[0]); ++i)
     {

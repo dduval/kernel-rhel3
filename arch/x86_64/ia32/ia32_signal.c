@@ -307,6 +307,7 @@ ia32_setup_sigcontext(struct sigcontext_ia32 *sc, struct _fpstate_ia32 *fpstate,
 		 struct pt_regs *regs, unsigned int mask)
 {
 	int tmp, err = 0;
+	unsigned long eflags;
 
 	tmp = 0;
 	__asm__("movl %%gs,%0" : "=r"(tmp): "0"(tmp));
@@ -331,7 +332,11 @@ ia32_setup_sigcontext(struct sigcontext_ia32 *sc, struct _fpstate_ia32 *fpstate,
 	err |= __put_user(current->thread.trap_no, &sc->trapno);
 	err |= __put_user(current->thread.error_code, &sc->err);
 	err |= __put_user((u32)regs->rip, &sc->eip);
-	err |= __put_user((u32)regs->eflags, &sc->eflags);
+	eflags = regs->eflags;
+	if (current->ptrace & PT_PTRACED) {
+		eflags &= ~TF_MASK;
+	}
+	err |= __put_user(regs->eflags, &sc->eflags);
 	err |= __put_user((u32)regs->rsp, &sc->esp_at_signal);
 
 	tmp = save_i387_ia32(current, fpstate, regs, 0);
@@ -435,7 +440,13 @@ void ia32_setup_frame(int sig, struct k_sigaction *ka,
 	regs->ss = __USER32_DS; 
 
 	set_fs(USER_DS);
-	regs->eflags &= ~TF_MASK;
+	if (regs->eflags & TF_MASK) {
+		if (current->ptrace & PT_PTRACED) {
+			ptrace_notify(SIGTRAP);
+		} else {
+			regs->eflags &= ~TF_MASK;
+		}
+	}
 
 #if DEBUG_SIG
 	printk("SIG deliver (%s:%d): sp=%p pc=%p ra=%p\n",
@@ -512,7 +523,13 @@ void ia32_setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
 	regs->ss = __USER32_DS; 
 
 	set_fs(USER_DS);
-	regs->eflags &= ~TF_MASK;
+	if (regs->eflags & TF_MASK) {
+		if (current->ptrace & PT_PTRACED) {
+			ptrace_notify(SIGTRAP);
+		} else {
+			regs->eflags &= ~TF_MASK;
+		}
+	}
 
 #if DEBUG_SIG
 	printk("SIG deliver (%s:%d): sp=%p pc=%p ra=%p\n",

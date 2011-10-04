@@ -68,6 +68,7 @@ if [ "$CONFIG_NO_IDLE_HZ" = "y" ] ; then
   bool '  Idle HZ timer on by default' CONFIG_NO_IDLE_HZ_INIT
 fi
 tristate 'System call auditing' CONFIG_AUDIT
+bool 'Support for epoll' CONFIG_EPOLL
 endmenu
 
 

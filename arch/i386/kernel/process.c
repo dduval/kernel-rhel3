@@ -385,12 +385,13 @@ void machine_restart(char * __unused)
 
 		/* check to see if reboot_cpu is valid 
 		   if its not, default to the BSP */
-		if ((reboot_cpu == -1) ||  
-		      (reboot_cpu > (NR_CPUS -1))  || 
-		      !(phys_cpu_present_map & (1<<cpuid))) 
+		if ((reboot_cpu < 0) ||
+		    (reboot_cpu > (NR_CPUS - 1)) ||
+		    !(phys_cpu_present_map & (1 << reboot_cpu)))
 			reboot_cpu = boot_cpu_physical_apicid;
 
 		reboot_smp = 0;  /* use this as a flag to only go through this once*/
+		wmb();
 		/* re-run this function on the other CPUs
 		   it will fall though this section since we have 
 		   cleared reboot_smp, and do the reboot if it is the
@@ -399,9 +400,11 @@ void machine_restart(char * __unused)
 			smp_call_function((void *)machine_restart , NULL, 1, 0);
 	}
 
-	/* if reboot_cpu is still -1, then we want a tradional reboot, 
-	   and if we are not running on the reboot_cpu,, halt */
-	if ((reboot_cpu != -1) && (cpuid != reboot_cpu)) {
+	/* if we don't pass reboot=s<number> to the kernel command line, then
+	   reboot_cpu will be -1, in which case we run on whatever CPU we
+	   happen to be on.  If we do pass reboot=s<number> though, then we
+	   need to make sure we are the right CPU before continuing. */
+	if ((reboot_cpu != -1) && (reboot_cpu != cpuid)) {
 		for (;;)
 		__asm__ __volatile__ ("hlt");
 	}

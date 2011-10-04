@@ -348,6 +348,10 @@ struct wacom_features wacom_features[] = {
 		BIT(EV_REL), 0, BIT(REL_WHEEL), 0 },
 	{ "Wacom Graphire2 5x7",     8, 10206,  7422,  511, 32, wacom_graphire_irq,
 		BIT(EV_REL), 0, BIT(REL_WHEEL), 0 },
+	{ "Wacom Graphire3",         8, 10206,  7422,  511, 32, wacom_graphire_irq,
+		BIT(EV_REL), 0, BIT(REL_WHEEL), 0 },
+	{ "Wacom Graphire3 6x8",     8, 16704, 12064,  511, 32, wacom_graphire_irq,
+		BIT(EV_REL), 0, BIT(REL_WHEEL), 0 },
 	{ "Wacom Intuos 4x5",   10, 12700, 10360, 1023, 15, wacom_intuos_irq,
 		0, WACOM_INTUOS_ABS, 0, WACOM_INTUOS_BUTTONS, WACOM_INTUOS_TOOLS },
 	{ "Wacom Intuos 6x8",   10, 20320, 15040, 1023, 15, wacom_intuos_irq,
@@ -380,30 +384,35 @@ struct wacom_features wacom_features[] = {
 		0, WACOM_INTUOS_ABS, 0, WACOM_INTUOS_BUTTONS, WACOM_INTUOS_TOOLS },
 	{ "Wacom Intuos2 12x18", 10, 47720, 30480, 1023, 15, wacom_intuos_irq,
 		0, WACOM_INTUOS_ABS, 0, WACOM_INTUOS_BUTTONS, WACOM_INTUOS_TOOLS },
+	{ "Wacom Intuos2 6x8",   10, 20320, 15040, 1023, 15, wacom_intuos_irq,
+		0, WACOM_INTUOS_ABS, 0, WACOM_INTUOS_BUTTONS, WACOM_INTUOS_TOOLS },
 	{ NULL , 0 }
 };
 
 struct usb_device_id wacom_ids[] = {
-	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x00), driver_info: 0 },
-	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x10), driver_info: 1 },
-	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x11), driver_info: 2 },
-	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x12), driver_info: 3 },
-	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x20), driver_info: 4 },
-	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x21), driver_info: 5 },
-	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x22), driver_info: 6 },
-	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x23), driver_info: 7 },
-	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x24), driver_info: 8 },
-	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x30), driver_info: 9 },
-	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x31), driver_info: 10 },
-	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x32), driver_info: 11 },
-	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x33), driver_info: 12 },
-	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x34), driver_info: 13 },
-	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x35), driver_info: 14 },
-	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x41), driver_info: 15 },
-	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x42), driver_info: 16 },
-	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x43), driver_info: 17 },
-	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x44), driver_info: 18 },
-	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x45), driver_info: 19 },
+	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x00) },
+	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x10) },
+	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x11) },
+	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x12) },
+	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x13) },
+	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x14) },
+	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x20) },
+	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x21) },
+	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x22) },
+	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x23) },
+	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x24) },
+	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x30) },
+	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x31) },
+	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x32) },
+	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x33) },
+	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x34) },
+	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x35) },
+	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x41) },
+	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x42) },
+	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x43) },
+	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x44) },
+	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x45) },
+	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0x47) },
 	{ }
 };
 
@@ -440,7 +449,7 @@ static void *wacom_probe(struct usb_device *dev, unsigned int ifnum, const struc
 	if (!(wacom = kmalloc(sizeof(struct wacom), GFP_KERNEL))) return NULL;
 	memset(wacom, 0, sizeof(struct wacom));
 
-	wacom->features = wacom_features + id->driver_info;
+	wacom->features = wacom_features + (id - wacom_ids);
 
 	wacom->dev.evbit[0] |= BIT(EV_KEY) | BIT(EV_ABS) | BIT(EV_MSC) | wacom->features->evbit;
 	wacom->dev.absbit[0] |= BIT(ABS_X) | BIT(ABS_Y) | BIT(ABS_PRESSURE) | BIT(ABS_DISTANCE) | BIT(ABS_WHEEL) | wacom->features->absbit;

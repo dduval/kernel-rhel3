@@ -429,7 +429,6 @@ enum vortex_chips {
 	CH_3C905B_2,
 	CH_3C905B_FX,
 	CH_3C905C,
-	CH_3C905C2,
 	CH_3C980,
 	CH_3C9805,
 
@@ -450,6 +449,9 @@ enum vortex_chips {
 	CH_3C920,
 	CH_3C982A,
 	CH_3C982B,
+
+	CH_905BT4,
+	CH_920B_EMB_WNM,
 };
 
 
@@ -503,8 +505,6 @@ static struct vortex_chip_info {
 	 PCI_USES_IO|PCI_USES_MASTER, IS_CYCLONE|HAS_HWCKSM, 128, },
 	{"3c905C Tornado",
 	 PCI_USES_IO|PCI_USES_MASTER, IS_TORNADO|HAS_NWAY|HAS_HWCKSM, 128, },
-	{"3c905C Tornado 2",
-	 PCI_USES_IO|PCI_USES_MASTER, IS_TORNADO|HAS_NWAY|HAS_HWCKSM, 128, },
 	{"3c980 Cyclone",
 	 PCI_USES_IO|PCI_USES_MASTER, IS_CYCLONE|HAS_HWCKSM, 128, },
 	{"3c980C Python-T",
@@ -550,6 +550,11 @@ static struct vortex_chip_info {
 	{"3c982 Hydra Dual Port B",
 	 PCI_USES_IO|PCI_USES_MASTER, IS_TORNADO|HAS_HWCKSM|HAS_NWAY, 128, },
 
+	{"3c905B-T4",
+	 PCI_USES_IO|PCI_USES_MASTER, IS_CYCLONE|HAS_NWAY|HAS_HWCKSM, 128, },
+	{"3c920B-EMB-WNM Tornado",
+	 PCI_USES_IO|PCI_USES_MASTER, IS_TORNADO|HAS_NWAY|HAS_HWCKSM, 128, },
+
 	{0,}, /* 0 terminated list. */
 };
 
@@ -576,7 +581,6 @@ static struct pci_device_id vortex_pci_tbl[] __devinitdata = {
 	{ 0x10B7, 0x9058, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C905B_2 },
 	{ 0x10B7, 0x905A, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C905B_FX },
 	{ 0x10B7, 0x9200, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C905C },
-	{ 0x10B7, 0x9201, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C905C2 },
 	{ 0x10B7, 0x9800, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C980 },
 	{ 0x10B7, 0x9805, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C9805 },
 
@@ -597,6 +601,10 @@ static struct pci_device_id vortex_pci_tbl[] __devinitdata = {
 	{ 0x10B7, 0x9201, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C920 },
 	{ 0x10B7, 0x1201, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C982A },
 	{ 0x10B7, 0x1202, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C982B },
+
+	{ 0x10B7, 0x9056, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_905BT4 },
+	{ 0x10B7, 0x9210, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_920B_EMB_WNM },
+
 	{0,}						/* 0 terminated list. */
 };
 MODULE_DEVICE_TABLE(pci, vortex_pci_tbl);
@@ -867,6 +875,7 @@ static int vortex_ioctl(struct net_device *dev, struct ifreq *rq, int cmd);
 static void vortex_tx_timeout(struct net_device *dev);
 static void acpi_set_WOL(struct net_device *dev);
 static void vorboom_poll(struct net_device *dev);
+static struct ethtool_ops vortex_ethtool_ops;
 
 /* This driver uses 'options' to pass the media type, full-duplex flag, etc. */
 /* Option count limit only -- unlimited interfaces are supported. */
@@ -1257,11 +1266,13 @@ static int __devinit vortex_probe1(struct pci_dev *pdev,
 	} else
 		dev->if_port = vp->default_media;
 
-	if (dev->if_port == XCVR_MII || dev->if_port == XCVR_NWAY) {
+	if ((vp->available_media & 0x40) || (vci->drv_flags & HAS_NWAY) ||
+		dev->if_port == XCVR_MII || dev->if_port == XCVR_NWAY) {
 		int phy, phy_idx = 0;
 		EL3WINDOW(4);
 		mii_preamble_required++;
 		mii_preamble_required++;
+		mdio_sync(ioaddr, 32);
 		mdio_read(dev, 24, 1);
 		for (phy = 0; phy < 32 && phy_idx < 1; phy++) {
 			int mii_status, phyx;
@@ -1331,6 +1342,7 @@ static int __devinit vortex_probe1(struct pci_dev *pdev,
 	dev->stop = vortex_close;
 	dev->get_stats = vortex_get_stats;
 	dev->do_ioctl = vortex_ioctl;
+	dev->ethtool_ops = &vortex_ethtool_ops;
 	dev->set_multicast_list = set_rx_mode;
 	dev->tx_timeout = vortex_tx_timeout;
 	dev->watchdog_timeo = (watchdog * HZ) / 1000;
@@ -1459,6 +1471,7 @@ vortex_up(struct net_device *dev)
 		if (mii_reg5 == 0xffff  ||  mii_reg5 == 0x0000) {
 			netif_carrier_off(dev); /* No MII device or no link partner report */
 		} else {
+			mii_reg5 &= vp->advertising;
 			if ((mii_reg5 & 0x0100) != 0	/* 100baseTx-FD */
 				 || (mii_reg5 & 0x00C0) == 0x0040) /* 10T-FD, but not 100-HD */
 				vp->full_duplex = 1;
@@ -1689,8 +1702,10 @@ vortex_timer(unsigned long data)
 			if (mii_status & BMSR_LSTATUS) {
 				int mii_reg5 = mdio_read(dev, vp->phys[0], 5);
 				if (! vp->force_fd  &&  mii_reg5 != 0xffff) {
-					int duplex = (mii_reg5&0x0100) ||
-						(mii_reg5 & 0x01C0) == 0x0040;
+					int duplex;
+
+					mii_reg5 &= vp->advertising;
+					duplex = (mii_reg5&0x0100) || (mii_reg5 & 0x01C0) == 0x0040;
 					if (vp->full_duplex != duplex) {
 						vp->full_duplex = duplex;
 						printk(KERN_INFO "%s: Setting %s-duplex based on MII "
@@ -2717,36 +2732,25 @@ static void update_stats(long ioaddr, struct net_device *dev)
 	return;
 }
 
-
-static int netdev_ethtool_ioctl(struct net_device *dev, void *useraddr)
+static void vortex_get_drvinfo(struct net_device *dev,
+				struct ethtool_drvinfo *info)
 {
 	struct vortex_private *vp = dev->priv;
-	u32 ethcmd;
-		
-	if (copy_from_user(&ethcmd, useraddr, sizeof(ethcmd)))
-		return -EFAULT;
 
-        switch (ethcmd) {
-        case ETHTOOL_GDRVINFO: {
-		struct ethtool_drvinfo info = {ETHTOOL_GDRVINFO};
-		strcpy(info.driver, DRV_NAME);
-		strcpy(info.version, DRV_VERSION);
-		if (vp->pdev)
-			strcpy(info.bus_info, vp->pdev->slot_name);
-		else
-			sprintf(info.bus_info, "EISA 0x%lx %d",
-				dev->base_addr, dev->irq);
-		if (copy_to_user(useraddr, &info, sizeof(info)))
-			return -EFAULT;
-		return 0;
-	}
-
-        }
-	
-	return -EOPNOTSUPP;
+	strcpy(info->driver, DRV_NAME);
+	strcpy(info->version, DRV_VERSION);
+	if (vp->pdev)
+		strcpy(info->bus_info, pci_name(vp->pdev));
+	else
+		sprintf(info->bus_info, "EISA 0x%lx %d",
+			dev->base_addr, dev->irq);
 }
 
-static int vortex_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
+static struct ethtool_ops vortex_ethtool_ops = {
+	.get_drvinfo		= vortex_get_drvinfo,
+};
+
+static int vortex_do_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 {
 	struct vortex_private *vp = (struct vortex_private *)dev->priv;
 	long ioaddr = dev->base_addr;
@@ -2755,9 +2759,6 @@ static int vortex_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 	int retval;
 
 	switch(cmd) {
-	case SIOCETHTOOL:
-		return netdev_ethtool_ioctl(dev, (void *) rq->ifr_data);
-
 	case SIOCGMIIPHY:		/* Get address of MII PHY in use. */
 	case SIOCDEVPRIVATE:		/* for binary compat, remove in 2.5 */
 		data->phy_id = phy;
@@ -2786,6 +2787,30 @@ static int vortex_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 
 	return retval;
 }
+
+/*
+ *	Must power the device up to do MDIO operations
+ */
+static int vortex_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
+{
+	int err;
+	struct vortex_private *vp = dev->priv;
+	int state = 0;
+
+	if (vp && vp->pdev)
+		state = vp->pdev->current_state;
+
+	/* The kernel core really should have pci_get_power_state() */
+
+	if (state != 0)
+		pci_set_power_state(vp->pdev, 0);
+	err = vortex_do_ioctl(dev, rq, cmd);
+	if (state != 0)
+		pci_set_power_state(vp->pdev, state);
+
+	return err;
+}
+
 
 /* Pre-Cyclone chips have no documented multicast filter, so the only
    multicast setting is to receive all multicast frames.  At least

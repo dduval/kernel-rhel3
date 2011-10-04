@@ -232,6 +232,9 @@ audit_get_args(struct pt_regs *regs, struct aud_syscall_data *sc)
 		return -EPERM;
 
 	if (psr & IA64_PSR_IS) {
+		if (audit_disable_32bit)
+			audit_kill_process(-ENOSYS);
+
 		code = regs->r1;
 		sc->arch = AUDIT_ARCH_I386;
 		nr_syscalls = NR_syscalls;
@@ -326,9 +329,21 @@ audit_update_arg(struct aud_syscall_data *sc, unsigned int n, unsigned long newv
 
 /*
  * Get the return value of a system call
+ *
+ * The ia64 calling convention is different than other platforms: 
+ *
+ *     r10 contains an error indicator (0:success, -1:error).
+ *
+ *     r8 contains either the return value, or (if r10 indicates error)
+ *     the errno value as a POSITIVE integer.
+ *
+ * Audit expects that (-errno) is returned in fail cases.
  */
 long
 audit_get_result(struct pt_regs *regs)
 {
-	return regs->r8;
+	if (regs->r10 == 0)
+		return regs->r8;
+	else
+		return -regs->r8;
 }

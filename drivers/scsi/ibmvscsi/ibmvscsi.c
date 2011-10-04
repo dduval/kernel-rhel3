@@ -83,7 +83,7 @@ static int max_channel = 3;
 static int init_timeout = 5;
 static int max_requests = 50;
 
-#define IBMVSCSI_VERSION "1.3"
+#define IBMVSCSI_VERSION "1.31"
 
 MODULE_DESCRIPTION("IBM Virtual SCSI");
 MODULE_AUTHOR("Dave Boutcher");
@@ -486,18 +486,12 @@ static int ibmvscsi_send_srp_event(struct srp_event_struct *evt_struct,
 	if ((evt_struct->crq.format == VIOSRP_SRP_FORMAT) &&
 	    (atomic_dec_if_positive(&hostdata->request_limit) < 0)) {
 		/* See if the adapter is disabled */
-		if (atomic_read(&hostdata->request_limit) < 0) {
-			cmnd->result = DID_ERROR << 16;
-			evt_struct->cmnd_done(cmnd);
-			unmap_cmd_data(&evt_struct->evt->srp.cmd, hostdata->dev);
-			ibmvscsi_free_event_struct(&hostdata->pool, evt_struct);
-			return 0;
-		} else {
-			printk("ibmvscsi: Warning, request_limit exceeded\n");
-			unmap_cmd_data(&evt_struct->evt->srp.cmd, hostdata->dev);
-			ibmvscsi_free_event_struct(&hostdata->pool, evt_struct);
-			return SCSI_MLQUEUE_HOST_BUSY;
-		}
+		if (atomic_read(&hostdata->request_limit) < 0)
+			goto send_error;
+		printk("ibmvscsi: Warning, request_limit exceeded\n");
+		unmap_cmd_data(&evt_struct->evt->srp.cmd, hostdata->dev);
+		ibmvscsi_free_event_struct(&hostdata->pool, evt_struct);
+		return SCSI_MLQUEUE_HOST_BUSY;
 	}
 
 	/* Add this to the sent list.  We need to do this 
@@ -509,14 +503,20 @@ static int ibmvscsi_send_srp_event(struct srp_event_struct *evt_struct,
 	if (ibmvscsi_send_crq(hostdata, crq_as_u64[0], crq_as_u64[1]) != 0) {
 		list_del(&evt_struct->list);
 
-		cmnd = evt_struct->cmnd;
 		printk(KERN_ERR "ibmvscsi: failed to send event struct\n");
-		unmap_cmd_data(&evt_struct->evt->srp.cmd, hostdata->dev);
-		ibmvscsi_free_event_struct(&hostdata->pool, evt_struct);
-		cmnd->result = DID_ERROR << 16;
-		evt_struct->cmnd_done(cmnd);
+		goto send_error;
 	}
 
+	return 0;
+
+send_error:
+	unmap_cmd_data(&evt_struct->evt->srp.cmd, hostdata->dev);
+	if ((cmnd = evt_struct->cmnd) != NULL) {
+		cmnd->result = DID_ERROR << 16;
+		evt_struct->cmnd_done(cmnd);
+	} else
+		evt_struct->done(evt_struct);
+	ibmvscsi_free_event_struct(&hostdata->pool, evt_struct);
 	return 0;
 }
 
@@ -1102,6 +1102,7 @@ static int ibmvscsi_do_host_config(struct ibmvscsi_host_data *hostdata,
 	struct srp_event_struct *evt_struct;
 	int rc;
 
+	buffer[0] = 0x00;
 	memset(&host_config, 0x00, sizeof(host_config));
 	host_config.common.type = VIOSRP_HOST_CONFIG_TYPE;
 	host_config.common.length = length;
@@ -1149,6 +1150,8 @@ static int ibmvscsi_proc_info(char *buffer, char **start, off_t offset,
     int len = 0;
     unsigned long flags;
     struct ibmvscsi_host_data *hostdata;
+    if (offset)
+	    return 0;
 
     list_for_each_entry(hostdata, &ibmvscsi_hosts, hostlist) {
 	    if (hostdata->host->host_no == hostno) {
@@ -1219,14 +1222,15 @@ struct ibmvscsi_host_data *ibmvscsi_probe(struct device *dev)
 	hostdata->dev = dev;
 	atomic_set(&hostdata->request_limit, -1);
 
-	printk("top of probe, host lock %d\n",
-	       hostdata->host->host_lock->lock);
-	
+	spin_unlock_irq(&io_request_lock);
 	if (ibmvscsi_init_crq_queue(&hostdata->queue, hostdata,
 				    max_requests) != 0) {
 		printk(KERN_ERR "ibmvscsi: couldn't initialize crq\n");
+		spin_lock_irq(&io_request_lock);
 		goto init_crq_failed;
 	}
+	spin_lock_irq(&io_request_lock);
+
 	if (initialize_event_pool(&hostdata->pool,
 				  max_requests, hostdata) != 0) {
 		printk(KERN_ERR "ibmvscsi: couldn't initialize event pool\n");
@@ -1250,7 +1254,7 @@ struct ibmvscsi_host_data *ibmvscsi_probe(struct device *dev)
 		 * valid request_limit.  We don't want Linux scanning before
 		 * we are ready.
 		 */
-		spin_unlock(hostdata->host->host_lock);
+		spin_unlock_irq(&io_request_lock);
 		for (wait_switch = jiffies + (init_timeout * HZ);
 		     time_before(jiffies, wait_switch) &&
 		     atomic_read(&hostdata->request_limit) < 0;) {
@@ -1258,7 +1262,7 @@ struct ibmvscsi_host_data *ibmvscsi_probe(struct device *dev)
 			set_current_state(TASK_UNINTERRUPTIBLE);
 			schedule_timeout(HZ/100);
 		}
-		spin_lock(hostdata->host->host_lock);
+		spin_lock_irq(&io_request_lock);
 	}
 
 	return hostdata;

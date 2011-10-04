@@ -1,3 +1,256 @@
+Changes from 20041026 to 20041102
+
+	* Changed version to 7.1.13.
+	* Removed RPI hash table and functions.
+	* Converted lpfc_findnode_rpi to an rpi->node lookup.
+	* Moved cleanup of txcmplq to lpfc_sli_brdreset after
+	  resetting board.
+	* Changed lpfc_cmpl_ct_cmd_gid_ft to not retry the nameserver
+	  command if the iocb is aborted by the driver.
+	* Moved clean up of ELS unsolicited event buffers to
+	  lpfc_sli_brdreset after reset of the board.
+	* If the NPortID of a previous device exists after FLOGI
+	  completion, removed the associated ndlp.
+	* Fixed discovery bug that occurs when the HBA NPortID changes
+	  during a link transition and ndlps are queued up for ADISC.
+	* No longer wait for interrupted I/Os to time out.
+	* Improved discovery transition for systems low on resources.
+	* Target reset now has sixty seconds to complete like the
+	  abort and reset handlers.
+	* Bus reset no longer fails if a target reset fails.
+	* Added write memory barrier before writing chip attention
+	  register and after writing to command iocb ring.
+	* Added read memory barrier in the ring event handler.
+
+Changes from 20041013 to 20041026
+
+	* Changed version to 7.1.12.
+	* Allow for ELS commands with IOERR_ABORT_REQUESTED to be
+          retried.
+	* Fixed CTPassthru to work for undiscovered nodes.
+	* No longer check for device existence before validating a
+          standard inquiry page response in the buffer.
+	* Fixed handling of error attention from firmware.
+	* Increase wait time in lpfc_config_port_prep() so it is
+          longer than the new FLOGI timeout period.
+	* Fixed rediscovery problem when PLOGI is received in NPort to
+          NPort point-to-point topology.
+	* Bug fixes in discovery state machine.
+	* Modified lpfc_sli_hba_down() to not free mbox->context1 if
+	  it does not poing to an mbuf structure.
+
+Changes from 20041007 to 20041013
+
+	* Changed version to 7.1.11.
+	* Added lpfc_dequenode() routine to deque ndlp even if did
+          equals zero.
+	* Fixed lpfc_linkdown() recursively calling itself.
+	* Errors from lpfc_sched_submit_command() are now propagated
+	  to the return value of lpfc_queuecommand().
+	* lpfc_queuecommand() now retries and returns DID_BUS_BUSY
+	  instead of returning 1.
+	* Fixed handling of in_retry in lpfc_queuecommand().
+	* Added list_del() discovery fixes.
+	* Fixed scheduler action when pcontext is zero and
+	  FC_NPR_ACTIVE is set.
+	* Fixed PCI IDs for Helios, JFly, Zephyr, and ZFly, and added
+	  the PCI ID for the LP111.
+	* Fixed system panics when MBX_READ_LA64 and MBX_READ_SPARM64
+	  mailbox commands timeout.
+
+Changes from 20041001 to 20041007
+
+	* Changed version to 7.1.10.
+	* Removed lpfc_nodev_timeout.
+	* Bug fixes in the discovery state machine.
+	* Fixed release of memory for a mailbox command before
+	  completion of the mailbox command.
+	* Scheduler host queue depth now reflects host->can_queue.
+	* Removed IRQ lock before calling lpfc_unmemmap().
+	* Converted spin_lock and spin_unlock to their irq
+	  equivalents.
+
+Changes from 20040928 to 20041001
+
+	* Changed version to 7.1.9.
+	* Fixed FLOGI completion handling when HBA is not in FLOGI
+          state.
+	* Fixed report LUN handling error paths.
+	* Fixed qcmdcnt to reflect qfull retries.
+	* Fixed scheduler bug in processing commandlist for a LUN
+        * Improved qfull handling logic.
+	* Fixed bug in pci_unmap_sg() by storing the seg_cnt returned
+          by pci_map_sg() and not calling lpfc_os_return_scsi_cmd() in
+          an error path when prep_io has not been called.
+	* Removed unused qfull-related code.
+	* Removed unused lpfc_qfull_retry() routine.
+	* Excessive qfull errors on a specific device are now passed
+          to the SCSI layer.
+	* Allow abort and close iocbs to not search txcmplq.
+
+Changes from 20040922 to 20040928
+
+	* Changed version to 7.1.8.
+	* Fixed equalities in comparison statements.
+	* Fixed premature FLOGI timeout.
+	* Fixed errors when calling lpfc_printf_log().
+
+Changes from 20040914 to 20040922
+
+	* Changed version to 7.1.7.
+	* Added lpfc_inq_pqb_filter parameter to lpfc.conf.
+	* All unsolicited ELS events in the tasklet queue are now
+	  flushed before the HBA is brought down.
+	* Retry logic in lpfc_cmpl_ct_cmd_gid_ft() is not executed if
+	  an iocb is aborted from lpfc_hba_down().
+	* lpfc_ns_rsp() no longer calls lpfc_disc_state_machine() if
+	  NLP_LOGO_ACC is set.
+	* Removed attempts to assign IOSTAT_DRIVER_REJECT to
+	  icmd->ulpStatus.
+	* Removed retries of any ELS commands that are rejected by
+	  lpfc_hba_down().
+	* Added call to lpfc_els_flush_rscn() before bringing down the
+	  HBA.
+	* lpfc_cmpl_els_plogi(), lpfc_cmpl_els_prli(),
+	  lpfc_cmpl_els_adisc(), and lpfc_cmpl_els_logo() routines
+	  call lpfc_disc_state_machine() only if IOSTAT_LOCAL_REJECT
+	  is not set and IOERR_SLI_ABORTED is set.
+	* Modfied lpfc_detect() to use the MODULE_DEVICE_TABLE as
+          opposed to a local array.
+	* Bug fixes in the discovery state machine.
+	* Fixed handling of FLOGI in point to point topology.
+	* Added support for Zephyr and ZFly HBAs.
+	* lpfc_rcv_logo_plogi_issue() cancels nlp_tmofunc before
+          calling elx_clk_set() to delay issuing a PLOGI.
+	* Fixed RJT Reason/Explanation codes in LPFC_FLOGI state.
+	* Added check to make sure request_buffer is allocated in
+          lpfc_os_return_scsi_cmd().
+	* Improved handling of reservation conflicts.
+	* Fix return path from lpfc_abort_handler() where the
+          io_request_lock is freed but the driver lock is not.
+
+Changes from 20040903 to 20040914
+
+	* Change version to 7.1.6.
+	* Fixed race condition in which a discovery event in
+	  lpfc_tasklet could access a freed node list pointer, iocb,
+	  or mb.
+	* Modified lpfc_sched_queue_command to queue to the tail of
+	  the commandList instead of the head.
+	* Removed pci_unmap_sg in the middle of sg_list in
+	  lpfc_os_prep_io.
+	* If lun is not present and target sets the peripheral
+	  quantifier bits, driver no longer returns DID_NOCONNECT.
+	* Removed driver unlocking/locking from lpfc_sli_hba_down.
+	* Increase timeout in lpfc_sli_issue_iocb_wait_high_priority
+          to allow sufficient time for iocbs to complete before
+          returning error.
+
+Changes from 20040824 to 20040903
+
+	* Change version to 7.1.5.
+	* Added a readl() call after each writel() call.
+
+Changes from 20040804 to 20040824
+
+	* Change version to 7.1.4.
+	* Fixed timer issues during detach.
+	* Removed flushing of QUE_RING_BUF commands from
+          lpfc_els_flush_cmd().
+	* Free buffers associated with a mailbox command that cannot
+          be sent to an adapter.
+	* Fixed memory leak in lpfc_els_unsol_event().
+	* Added changes to log message indicating the bus, device, or
+          IRQ of an adapter when attach fails.
+	* Modified lpfc_parse_binding_entry() to check if a persistent
+          binding entry matches the lpfc number being initialized.
+	* Restored the round-robin scheduling across LUNs in
+          lpfc_sched.c.
+	* Added rescheduling of any command that fails due to
+          SCSI_Q_FULL if it is the only outstanding command on the
+          LUN.
+	* Removed checking of zero value for ndlp in
+          elx_scsi_cmd_start().
+	* Added immediate return of a command if a fatal error occurs
+          and nodev_holdio is zero.
+	* Inquiry to a LUN now fails with host error status
+          DID_NOT_CONNECT if the LUN is not present or is offline.
+	* Delay on iodone when a check condition error with asc/ascq
+          indicates the LUN is becoming ready.
+
+Changes from 20040723 to 20040804
+
+	* Change version to 7.1.3.
+	* Added support for LP11000 and LP1150 HBAs.
+	* Added tracking for IOs whose completion is delayed with the
+          delay_iodone_timer so they can be cleaned up during an
+          offline transition.
+	* Added changes to handle kmalloc failure in
+          lpfc_start_timer() function.
+	* Added unregister from SCSI midlayer on HBA init failure.
+	* Added setting of HBA queue depth based on max_xri returned
+          by the firmware, as opposed to the PCI ID.
+	* Added removal of timerList cleanup after HBA shutdown.
+	* Added handling of outstanding IO completions during rmmod.
+	* Added setting max_lun to 0 and removed simulation of
+          processor device when report lun with zero lun is received.
+	* PRLO state machine now tries to relogin to FCP device.
+	* Fixed potential memory leaks.
+	* Modified device_reset_handle function to issue LUN reset.
+	* Moved initialization and cleanup of scsi_tmofunc in
+          lpfc_linux_attach(), lpfc_online(), and lpfc_offline()
+          functions to avoid double insertion of timer when
+          lpfc_handler_eratt() is processed.
+	* Added logic to lpfc_scsi_timeout_handler() to not requeue
+          itself after it is canceled in lpfc_offline().
+
+Changes from 20040707 to 20040723
+
+	* Change version to 7.1.2.
+	* Removed IPFC data structures.
+	* Reduced lpfc_no_device_delay from ten seconds back to one
+	  second.
+	* Added logging messages for nodev timer events.
+	* Added support for commands retried by the midlayer while the
+	  device is in the recovery state.
+
+Changes from 20040702 to 20040707
+
+	* Change version to 7.1.1.
+	* Properly clean up the head list_head entry that is added to
+          the beginning of the piocbq list in lpfc_ct_unsol_event().
+	* Fixed potential dereference of null p_mbuf.
+	* Fixed use of list macros on DMABUF_t list without the list
+          having a valid head.
+
+Changes from 20040621 to 20040702
+
+	* Change version to 7.1.0.
+	* Fixed Makefile to rebuild driver when lpfc.conf is modified.
+	* Removed references to lpfc_num_iocbs and lpfc_num_bufs.
+	* Increased lpfc_no_device_delay from one to ten seconds.
+	* Node port recovery timer is started if lpfc_nodev_holdio is
+          zero when a target is forced into NPR_ACTIVE state.
+	* Fixed lpfc_reset_bus_handler() return value.
+	* Fixed NULL pointer dereference in lpfc_tasklet() in lpfc_fcp.c.
+	* Remove check for max_lun when lun_skip is not specified.
+	* Use cmnd->request_bufferlen field to set fcp_cmnd->fcpDI.
+	* Fix failure in lun_reset/bus_reset path.
+	* Properly clean up after allocation of a linked BDE fails in
+          the SCSI queuecommand path.
+
+Changes from 20040610 to 20040621
+
+	* Change version to 7.0.4.
+	* Fixed make install target and MODLIB definition.
+	* Fixed counter decrement typo in lpfc_els.c
+	* Hardened the driver against bad HBAs.
+	* Fixed I/O errors generated by LIPs under heavy traffic.
+	* Protected target and lun scheduler list entries from double
+	  removal.
+	* Fix panic in LUN reset path.
+	* Fix firmware download problem.
+
 Changes from 20040526 to 20040610
 
 	* Change version to 7.0.3.

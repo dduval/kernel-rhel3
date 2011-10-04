@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc.h 1.55.1.5 2004/06/04 15:03:46EDT jselx Exp  $
+ * $Id: lpfc.h 1.55.1.9 2004/09/08 17:53:46EDT sf_support Exp  $
  */
 
 #ifndef _H_LPFC
@@ -214,6 +214,7 @@ typedef struct lpfc_stats LPFC_STAT_t;
 
 typedef struct lpfcHBA {
 	uint8_t intr_inited;		/* flag for interrupt registration */
+	uint8_t no_timer;
 	struct list_head hba_list;	/* List of hbas/ports */      
 	uint32_t hba_flag;		/* device flags */
 #define FC_SCHED_CFG_INIT   0x2		/* schedule a call to fc_cfg_init() */
@@ -401,7 +402,6 @@ typedef struct lpfcHBA {
 	struct pci_dev *pcidev;
 	spinlock_t drvrlock;
 	spinlock_t hiprilock;
-	spinlock_t            task_lock;
 	struct tasklet_struct task_run;
 	struct list_head      task_disc;
 	uint16_t              task_discq_cnt;
@@ -445,6 +445,9 @@ typedef struct lpfcHBA {
 	struct timer_list ip_tmofunc;
 	struct timer_list scsi_tmofunc;
 	struct timer_list buf_tmo;
+
+	struct list_head delay_list;
+	struct list_head free_buf_list;
 
 	/*
 	 * HBA API 2.0 specific counters

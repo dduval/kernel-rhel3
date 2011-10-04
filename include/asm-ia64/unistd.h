@@ -109,7 +109,7 @@
 #define __NR_syslog			1117
 #define __NR_setitimer			1118
 #define __NR_getitimer			1119
-#define __NR_old_stat			1120
+#define __NR_tux			1120 /* was __NR_old_stat */
 #define __NR_old_lstat			1121
 #define __NR_old_fstat			1122
 #define __NR_vhangup			1123

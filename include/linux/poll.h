@@ -12,9 +12,17 @@
 #include <linux/worktodo.h>
 
 struct poll_table_page;
+
+/* 
+ * structures and helpers for f_op->poll implementations
+ */
+typedef void (*poll_queue_proc)(struct file *, wait_queue_head_t *, struct poll_table_struct *);
 struct kiocb;
 
 typedef struct poll_table_struct {
+#ifdef CONFIG_EPOLL
+	poll_queue_proc		qproc;		/* must be first field */
+#endif
 	int			error;
 	struct poll_table_page	*table;
 	struct kiocb		*iocb;		/* iocb for async poll */
@@ -30,14 +38,22 @@ static inline void poll_wait(struct file * filp, wait_queue_head_t * wait_addres
 
 static inline void poll_initwait(poll_table* pt)
 {
+#ifdef CONFIG_EPOLL
+	pt->qproc = NULL;
+#endif
 	pt->error = 0;
 	pt->table = NULL;
 	pt->iocb = NULL;
 }
 
-extern void poll_freewait(poll_table* pt);
-extern int async_poll(struct kiocb *iocb, int events);
+#ifdef CONFIG_EPOLL
+static inline void init_poll_funcptr(poll_table *pt, poll_queue_proc qproc)
+{
+	pt->qproc = qproc;
+}
+#endif
 
+extern void poll_freewait(poll_table* pt);
 
 /*
  * Scaleable version of the fd_set.

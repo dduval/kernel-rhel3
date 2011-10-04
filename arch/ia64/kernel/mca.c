@@ -429,11 +429,30 @@ fetch_min_state (pal_min_state_area_t *ms, struct pt_regs *pt, struct switch_sta
 	PUT_NAT_BIT(sw->caller_unat, &pt->r30);	PUT_NAT_BIT(sw->caller_unat, &pt->r31);
 }
 
+int init_dump = 0;
+static spinlock_t init_dump_lock = SPIN_LOCK_UNLOCKED;
+static spinlock_t show_regs_lock = SPIN_LOCK_UNLOCKED;
+
 static void
 init_handler_platform (pal_min_state_area_t *ms,
 		       struct pt_regs *pt, struct switch_stack *sw)
 {
 	struct unw_frame_info info;
+
+	if (netdump_func || diskdump_func) {
+		init_dump = 1;
+		local_irq_disable();
+		spin_lock(&show_regs_lock);
+		show_regs(pt);
+		spin_unlock(&show_regs_lock);
+
+		if (spin_trylock(&init_dump_lock))
+			try_crashdump(pt);
+		else
+			current->thread.ksp = (__u64)sw - 16;
+
+		for (;;) local_irq_disable();
+	}
 
 	/* if a kernel debugger is available call it here else just dump the registers */
 
@@ -1068,6 +1087,7 @@ ia64_init_handler (struct pt_regs *pt, struct switch_stack *sw)
 	pal_min_state_area_t *ms;
 
 	oops_in_progress = 1;	/* avoid deadlock in printk, but it makes recovery dodgy */
+	bust_spinlocks(1);
 
 	printk(KERN_INFO "Entered OS INIT handler. PSP=%lx\n",
 		ia64_sal_to_os_handoff_state.proc_state_param);
@@ -1080,6 +1100,7 @@ ia64_init_handler (struct pt_regs *pt, struct switch_stack *sw)
 	ms = (pal_min_state_area_t *)(ia64_sal_to_os_handoff_state.pal_min_state | (6ul<<61));
 
 	init_handler_platform(ms, pt, sw);	/* call platform specific routines */
+	bust_spinlocks(0);
 }
 
 static int __init

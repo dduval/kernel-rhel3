@@ -1960,6 +1960,8 @@ dir_next:
 
 		if (partial)
 			curr += sprintf(curr, "%Ld", req->output_len);
+		else if (req->content_gzipped)
+			curr += sprintf(curr, "%Ld", req->total_file_len);
 		else {
 			// "%d" req->total_file_len
 			memcpy(curr, &req->etag, req->lendigits);

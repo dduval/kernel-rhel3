@@ -1,0 +1,609 @@
+Changes from 20040526 to 20040610
+
+	* Change version to 7.0.3.
+	* Fix for high targt count handling.  Fix corrected storage
+          for target pointers to number of targets supported and loop
+          clauses to strict inequalities.
+	* Fixed discovery state machine to handle lip events with
+          heavy traffic loads to 256 luns.
+	* Decreased FLOGI discovery timeout to 20 seconds to eliminate
+          race condition between initial discovery time allotment and
+          FLOGI timeout occuring on GX-type switch ports.
+
+
+Changes from 20040515 to 20040526
+
+	* Change version to 7.0.2.
+	* Change del_timer_sync() to del_timer() in lpfc_stop_timer() as
+	  it is called from interrupt context.
+	* Add readls after writels to PCI space to flush the writes.
+	* Fix for read/write after free memory corruption when there is a
+	  link event.  Fix is to flush all els iocbs in the tasklet queue
+	  when there is a link down event.
+	* Fixed tasklet queue corruption.
+	* Fix compiler warnings for unused variables
+	* Change lpfc_proc_info handler to get the Nodename from
+	  fc_nodename instead of fc_portname.
+	* LP9802 qdepth is twice the LP9802DC qdepth.  Delay
+	  elx_sched_init after READ_CONFIG to get max_xri from the
+	  firmware.  Reset ELX_CFG_DFT_HBA_Q_DEPTH to max_xri after
+	  READ_CONFIG
+	* Fix bug in the safety pool implementation which can return a
+	  bogus address when allocating objects. The list_entry macro used
+	  in the alloc routine will return an invalid memory address.
+	* Moving ndlp node from unmap list to map list if ADISC completed
+	  successfully.  lpfc_assign_scsid(), lpfc_cmpl_prli_prli_issue(),
+	  lpfc_cmpl_adisc_prli_issue(), lpfc_cmpl_adisc_prli_compl(),
+	  lpfc_cmpl_adisc_mapped_node() and lpfc_add_bind() had been
+	  changed.
+	* Fix for IBM PPC64 cross compile issue - doubly prefixing
+	  CROSS_COMPILE prefix. This fix just always reduces the number of
+	  prefixes to one.
+
+
+Changes from 20040507 to 20040515
+
+	* Changing version to 7.0.1.
+	* Fixed bug in lpfc_tasklet.  lpfc_tasklet was recursively called
+	  when the tasklet has a linkdown event from lpfc_mbx_cmpl_read_la
+	  in linkdown.
+	* Fixed crash on driver unload when link event or target errors
+	  were present during traffic.
+	* Move some #defines from lpfc_diag.h to lpfc_dfc.h
+
+Changes from 20040429 to 20040507
+
+	* Change version to 7.0.0
+	* Fix the number of cmd / rsp ring entries in lpfc_fcp.c to match
+	  the divisions setup in lpfc_hw.h.
+	* Make lpfc_info() use lpfc_get_hba_model_desc() instead of
+	  rewriting almost identical code.
+	* Fix 1 overly long line in each of lpfc_cfgparm.h, lpfc_ftp.c and
+	  lpfc_sli.c.
+	* Change elx_sli_issue_mbox_wait to return correct error code to
+	  the caller.
+	* In some of the els completion routines, after calling
+	  lpfc_elx_chk_latt, driver ignores the return code of the
+	  lpfc_elx_chk_latt. This will prevent the discovery state machine
+	  restarting correctly when there are link events in the middle of
+	  discovery state machine running. Fix this by exiting discovery
+	  state machine if lpfc_els_chk_latt returns a non zero value.
+	* Removed MAX_LPFC_BRDS from lpfc_diag.h
+	* Removed unused first_check.
+	* Remove some unused fields and defines.
+	* Change lpfc-param names to lpfc_param.
+	* Shorten length of some of the comment lines to make them more
+	  readable.
+	* Move FCP_* definitions to their own header file, lpfc_fcp.h.
+	* Remove unused prototypes from lpfc_crtn.h: fcptst, iptst,
+	  lpfc_DELAYMS.
+	* Remove duplicated prototypes from lpfc_crtn.h:
+	  lpfc_config_port_prep, lpfc_config_port_post,
+	  lpfc_hba_down_prep.
+	* Removed some unused export_symbols.
+	* Install driver files into */drivers/scsi/lpfc instead of
+	  */drivers/scsi.
+
+Changes from 20040426 to 20040429
+
+	* Declared export symbol lpfc_page_alloc and lpfc_page_free
+	* Changed lpfc version number to 6.98.3
+	* Move the definition of MAX_LPFC_BRDS to the only header file
+	  that uses it (lpfc_diag.h).
+	* Change lpfc_sli_wake_iocb_wait to do a regular wake_up since
+	  lpfc_sli_issue_iocb_wait now sleeps uninterruptible.
+	* Replace list_for_each() with list_for_each_safe() when a list
+	  element could be deleted.
+	* Fix IOCB memory leak
+
+Changes from 20040416 to 20040426
+
+	* Change lpfc_config_port_prep() to interpret word 4 of the DUMP
+	  mbox response as a byte-count
+	* Add info attribute to sysfs
+	* Minor formatting (spaces to tabs) cleanup in lpfc_sched.h
+	* Remove unused log message number 732
+	* Completing MODULE_PARM -> module_param changes
+	* Removed unused targetenable module parameter
+	* Removed locks from lpfc_sli_issue_mbox_wait routine
+	* Removed code that retry 29,00 check condition
+	* Removed code that manipulates rspSnsLen.
+	* Fix use of lun-q-depth config param
+	* Fix severity inconsistency with log message 249
+	* Removed lpfc_max_target from lpfc_linux_attach
+	* Replace references to lpfcDRVR.pHba[] with lpfc_get_phba_by_inst()
+	* Change lpfc_param to lpfc-param
+	* Partially removed 32 HBA restriction within driver.  Incorported
+	  lpfc_instcnt, lpfc_instance[], and pHba[] into lpfcDRVR
+	  structure Added routines lpfc_get_phba_by_inst()
+	  lpfc_get_inst_by_phba() lpfc_check_valid_phba()
+	* Turn on attributes "set" & "params" by default.
+	* Further formatting/whitespace/line length cleanup on: lpfc_ct.c
+	  lpfc_els.c lpfc_fcp.c lpfc_hbadisc.c lpfc_init.c lpfc_ipport.c
+	  lpfc_mbox.c lpfc_nportdisc.c lpfc_sched.c lpfc_sched.h
+	  lpfc_scsi.h lpfc_scsiport.c lpfc_sli.c and lpfc_sli.h
+	* Add log message 249 to log any unsupported device addressing
+	  modes encountered.
+	* Add support for 256 targets and 256 LUNs
+	* Fixed panic in lpfc_linkdown.
+	* Removed (struct list_head*) casting in several calls to list_del
+	* Free irq reservation and kill running timers when insmod or
+	  modprobe are killed via ctrl-c
+	* Remove drivers/scsi from include path
+	* Wrap use of log message 311 in macro
+	* Detect failure return from pci_map_sg call in lpfc_os_prep_io
+	* Fix use-after-free of IOCB in lpfc_sli_process_sol_iocb which
+	  was causing an Oops on 2.6.5 kernel.
+	* Cleanup use of several gotos not used for error exit.
+	* Replace memcpy_toio() and memcpy_toio() with endian-dependent
+	  lpfc_memcpy_to_slim() and lpfc_memcpy_from_slim() so that for
+	  big endian hosts like PPC64, the SLIM is accessed 4 bytes at a
+	  time instead of as a byte-stream.
+
+Changes from 20040409 to 20040416
+
+	* The scsi_register and scsi_alloc_host OS calls can fail and
+	  return a zero-valued host pointer.  A ctrl-C on 2.6 kernels
+	  during driver load will cause this and the driver to panic.
+	  Fixed this bug.  Also found a bug in the error_x handling with
+	  lpfc_sli_hba_down - it was in the wrong place and the driver
+	  lock was not held, but needed to be (in lpfc_linux_attach) Fixed
+	  both.  Did some minor comment clean up.
+	* Removed unwanted (void *) castings.
+	* Replace define of INVALID_PHYS, with kernel 2.6.5's
+	  dma_mapping_error() and add a inline function for earlier
+	  kernels.  Remove lpfc_bad_scatterlist().
+	* Clean up formatting in hbaapi.h, lpfc.h, lpfc_cfgparm.h,
+	  lpfc_crtn.h, lpfc_ct.c, lpfc_diag.h, lpfc_disc.h, lpfc_els.c,
+	  lpfc_fcp.c, lpfc_hbadisc.c, lpfc_hw.h, lpfc_init.c,
+	  lpfc_ipport.c, lpfc_logmsg.c, lpfc_logmsg.h and lpfc_scsiport.c
+	  - mostly replacing groups of 8 spaces with hard tabs and keeping
+	  lines to 80 column max..
+	* Removed LPFC_DRVR_LOCK call from lpfc_unblock_requests for 2.4
+	  kernels.  The lpfc_scsi_done routine already unlocks the driver
+	  lock since it expects this lock to be held.
+	* Removed global lock capabilities from driver lock routines
+	* Remove SA_INTERRUPT flag from request_irq
+	* Move dma_addr_t cast inside of getPaddr macro as everywhere
+	  getPaddr is used, the return is cast to dma_addr_t.
+	* Clean up formatting in lpfc_sli.c and lpfc_sysfs.c - mostly
+	   replacing groups of 8 spaces with hard tabs and keeping lines
+	   to 80 column max.
+	* Fix build for RHEL 2.1 BOOT kernels by always #including
+	  interrupt.h in lpfc.h.
+	* Fix RHEL 3 build by #defining EXPORT_SYMTAB.
+	* Replace sprintf with snprintf in lpfc_proc_info.
+	* Fix build warnings on 2.6 kernels - remove no longer used calls
+	  to  character device initialization.
+	* Initial support code for discovery in tasklet conversion.
+	* Removing char interface and ioctl code.
+	* Change all elx prefixes to lpfc
+	* Replace lpfc_write_slim() & lpfc_read_slim() with memcpy_toio(),
+	  memcpy_fromio(), writel() & readl().
+
+Changes from 20040402 to 20040409
+
+	* Replaced lpfc_read_hbaregs_plus_offset and
+	  lpfc_write_hbaregs_plus_offset functions with readl and writel.
+	* Get rid of long mdelay's in insmod path
+	* Changed the way our pci_device_id structures are initialized
+	* Replace lpfc_read/write_CA/HA/HC/HS with calls to readl() &
+	  writel() directly.
+	* Increase SLI2_SLIM to 16K Increase cmd / rsp IOCBs accordingly
+	* Removed lpfc_els_chk_latt from the lpfc_config_post function.
+	  lpfc_els_chk_latt will enable the link event interrupts when
+	  flogi is pending which causes two discovery state machines
+	  running parallely.
+	* Add pci_disable_device to unload path.
+	* Move lpfc_sleep_event from lpfc_fcp.c to lpfc_util_ioctl.c
+	* Call dma_map_single() & pci_map_single() directly instead of via
+	  macro lpfc_pci_map().  Allow address 0 for PPC64.
+	* Change sleep to uninterruptible in lpfc_sli_issue_icob_wait
+	  because this function doesn't handle signals.
+	* Move lpfc_wakeup_event from lpfc_fcp.c to lpfc_ioctl.c
+	* Remove unneeded #include <linux/netdevice.h>
+	* Remove unused clock variables lpfc_clkCnt and lpfc_sec_clk.
+	* Get rid of capitalization of function names.
+	* Removed lpfc_addr_sprintf.
+	* Implemented gotos in lpfc_linux_attach for error cases.
+	* Replace mlist->dma.list = dmp->dma.list; to mlist = dmp.
+	* Remove functions lpfc_get_OsNameVersion and elx_wakeup. Change
+	  elx_wakeup to wake_up_interruptible
+	* Add function lpfc_get_os_nameversion and change
+	  lpfc_get_OsNameVersion to lpfc_get_os_nameversion.
+	* Remove lpfc_get_OsNameVersion
+	* Change driver name to a consistent lpfc in every visible place.
+	* Fix build warning: removed unused variable ret in lpfc_fdmi_tmo.
+	* Remove lpfc_utsname_nodename_check function
+	* Remove functions lpfc_register_intr and lpfc_unregister_intr
+	* Fill in owner field in lpfc_ops file_operations struct and
+	  remove now unnecessary open and close entry points.
+	* Change function name prefixes from elx_ to lpfc_
+	* Remove special case check for TUR in elx_os_prep_io()
+	* Renamed elx_scsi.h to lpfc_scsi.h
+	* Renamed elx_sched.h to lpfc_sched.h
+	* Renamed elx_mem.h to lpfc_mem.h
+	* Renamed elx_sli.h to lpfc_sli.h
+	* Renamed elx_logmsg.h to lpfc_logmsg.h
+	* Renamed elx.h to lpfc.h
+	* Renamed elx_sli.c to lpfc_sli.c
+	* Renamed elx_sched.c to lpfc_sched.c
+	* Renamed elx_mem.c to lpfc_mem.c
+	* Renamed elx_logmsg.c to lpfc_logmsg.c
+	* Renamed lpfcLINUXfcp.c lpfc_fcp.c
+	* Renamed elx_clock.c to lpfc_clock.c
+	* Reduce stack usage in lpfc_info().
+	* Move lpip_stats structure from lpfc_hba.h to lpfc_ip.h.
+	* Move lpfc_stats and HBAEVT_t structures from lpfc_hba.h to
+	  lpfc.h
+	* Remove lpfc_hba.h
+	* Remove duplicate rc definitions from 
+	* Removed code which used next pointer to store mbox structure.
+	* Cleaned up list iterations.
+	* Removed non list manipulation of the next pointers.
+	* Change list_del()/INIT_LIST_HEAD sequences to list_del_init()
+	* In ELX_IOCBQ_t: Moved hipri_trigger field to iocb_flag. Combined
+	  hipri_wait_queue and rsp_iocb in union
+	* Replaced casting from list_head with list_entry macro.
+	* Added ct_ndlp_context field to the ELX_IOCBQ_t.
+	* Do not use DMABUf_t list to store ndlp context
+	* Return 0 from lpfc_process_iotcl_util() when ELX_INITBRDS
+	  succeeds.
+	* remove elx_os_scsiport.h
+	* Do not use DMABUf_t list to hold rpi context
+	* Replace elx_cfg_* names with lpfc_cfg-*
+	* Moved FCP activity to ring 0.  Moved ELS/CT activity to ring 2.
+	* Clean up formatting of elx_sli.h (tabs for indents, 80 column
+	  lines).
+	* Remove unused elxclock declaration in elx_sli.h.
+	* Since everywhere IOCB_ENTRY is used, the return value is cast,
+	  move the cast into the macro.
+	* Split ioctls out into seperate files
+
+Changes from 20040326 to 20040402
+
+	* Updated ChangeLog for 20040402 SourceForge drop.
+	* Use safe list iterator for ndlp list
+	* Added code to return NLP_STE_FREED_NODE from the discovery
+	  state machine functions if the node is freed from the
+	  function.
+	* Fixes to DMABUF_t handling
+	* Fix for load error in discovery
+	* Remove loop_cnt variable from lpfc_rcv_plogi_unused_node.
+	* Remove nle. reference.
+        * Remove support for building 2.4 drivers
+	* Remove elx_util.h and replace elx_disc.h with lpfc_disc.h
+	* Implemented the Linux list macros in the discovery code.
+	  Also moved elx_disc.h contents into lpfc_disc.h
+	* Unused variable cleanup
+	* Use Linux list macros for DMABUF_t
+	* Break up ioctls into 3 sections, dfc, util, hbaapi
+	  rearranged code so this could be easily seperated into a
+	  differnet module later All 3 are currently turned on by
+	  defines in lpfc_ioctl.c LPFC_DFC_IOCTL, LPFC_UTIL_IOCTL,
+	  LPFC_HBAAPI_IOCTL
+	* Misc cleanup: some goto's; add comments; clarify function
+	  args
+	* Added code to use list macro for ELXSCSITARGET_t.
+	* New list implementation for ELX_MBOXQ_t
+	* Cleaned up some list_head casting.
+	* Put IPFC ifdef around two members of struct lpfc_nodelist.
+	* Cleaned up iocb list using list macros and list_head data
+	  structure.
+	* lpfc_online() was missing some timer routines that were
+	  started by lpfc_linux_attach().  These routines are now also
+	  started by lpfc_online().  lpfc_offline() only stopped
+	  els_timeout routine.  It now stops all timeout routines
+	  associated with that hba.
+	* Replace seperate next and prev pointers in struct
+	  lpfc_bindlist with list_head type.  In elxHBA_t, replace
+	  fc_nlpbind_start and _end with fc_nlpbind_list and use
+	  list_head macros to access it.
+	* Fix ulpStatus for aborting I/Os overlaps with newer firmware
+	  ulpStatus values
+	* Rework params_show/store to be consistent as the other
+	  routines.  Remove generic'ness and rely on set attribute.
+	* Remove unused log message.
+	* Collapse elx_crtn.h and prod_crtn.h into lpfc_crtn.h
+	* Ifdef Scheduler specific routines
+	* Removed following ununsed ioclt's: ELX_READ_IOCB
+	  ELX_READ_MEMSEG ELX_READ_BINFO ELX_READ_EINVAL ELX_READ_LHBA
+	  ELX_READ_LXHBA ELX_SET ELX_DBG LPFC_TRACE 
+	* Removed variable fc_dbg_flg
+	* Fixed a bug where HBA_Q_DEPTH was set incorrectly for
+	  3-digit HBAs.  Also changed can_queue so midlayer will only
+	  send (HBA_Q_DEPTH - 10) cmds.
+	* Clean up code in the error path, check condition.  Remove
+	  ununsed sense-related fields in lun structure.
+	* Added code for safety pools for following objects: mbuf/bpl,
+	  mbox, iocb, ndlp, bind
+	* Wrapped '#include <elx_sched.h>' in '#ifdef USE_SCHEDULER'.
+	* Fixed 'make clean' target.
+        * Build now ignores elx_sched.o, and includes lpfc_sysfs.o.
+	* Wrapped lpfndd.o target in BUILD_IPFC ifdef.
+	* Removed elx_os.h inclusion in implementation files.
+	* Removed ELX_OS_IO_t data structure and put data direction
+	  and non scatter/gather physical address into the scsi buffer
+	  structure directly.  Moved DRVR_LOCK, putPaddr, getPaddr
+	  macros and some defines into elx.h since they are required
+	  by the whole driver.
+	* Migrated following ioctls (debug) ELX_DISPLAY_PCI_ALL
+	  ELX_DEVP ELX_READ_BPLIST ELX_RESET_QDEPTH ELX_STAT.
+	* Step 1 of attempt to move all Debug ioctls to sysfs.
+	  Implemented the following IOCTLs in sysfs: ELX_WRITE_HC
+	  ELX_WRITE_HS ELX_WRITE_HA ELX_WRITE_CA ELX_READ_HC
+	  ELX_READ_HS ELX_READ_HA ELX_READ_CA ELX_READ_MB ELX_RESET
+	  ELX_READ_HBA ELX_INSTANCE ELX_LIP.  Also introduced
+	  attribute "set" to be used in conjuction with the above
+	  attributes.
+	* Removed DLINK, enque and deque declarations now that clock
+	  doesn't use them anymore
+	* Separated install rule so that BUILD_IPFC has to be set when
+	  make is called in order for the install rule to attempt to
+	  copy the lpfndd.o driver.  This change fixes a bug that
+	  occurs because the install rule by default attempted to
+	  install lpfndd.o, whereas the default make rule did not by
+	  default build lpfndd.o.
+	* Keep track if hbaapi index numbers need to be refreshed.
+	* Removed prod_os.h from include list.
+	* Removed LPFC_LOCK and LPFC_UNLOCK macros.  Added OS calls
+	  into elx_os_scsiport.c.  This file is now empty.
+	* Added spin_lock_irqsave and spin_unlock_irqrestore calls
+	  into code directly and removed LPFC_LOCK_ and _UNLOCK_
+	  macros
+	* Remove references to "elx_clock.h"
+	* Added utsname.h to include list.  The previous checkin to
+	  elx_os.h removed its inclusion of utsname.h since there is
+	  precious little in the file.  However, lpfcLINUXfcp.c needs
+	  it and now has it.
+	* Removed some commented-out code
+	* Removed elx_lck_t data structure, stray elxDRVR_t type, and
+	  include from file.  No longer used.
+	* Removed two PCI Sync defines.  Removed includes - not
+	  needed.  Cleaned up macro lines.
+	* Added two functions from elxLINUXfcp.c.  These functions
+	  were IPFC specific.
+	* Removed hipri lock abstractions and added OS call into code.
+	  Removed elx_lck_t and added spinlock_t directly. Moved two
+	  IPFC functions into lpfc_ipport.c
+	* Moved IP specific structures to lpfc_ip.h file.
+	* lpfc_ipfarp_timeout() uses system timer.  Remove all usages
+	  of old internal clock support.
+	* Made changes to compile without IPFC support for the default
+	  build.  Added ifdef IPFC for all lpfc_ip.h includes.
+	* Patched elx_free_scsi_buf
+  	* Removed elx_sched.o from 2.6 dependencies
+	* Reworked lpfc_pcimap.
+	* Use Linux swap macros to replace ELX swapping macros
+	  (SWAP_SHORT, SWAP_LONG, SWAP_DATA, SWAP_DATA16,
+	  PCIMEM_SHORT, PCIMEM_LONG, PCIMEM_DATA).
+	* move in_interrupt() check inside of elx_sleep_ms()
+	* Moved location of pci.h include.
+	* Restored elx_lck_t types in elxHBA_t.
+	* Removed elx_pci_dma_sync call.  Also removed some PCI
+	  defines from elx_hw.h and removed the spinlock_t locks that
+	  are no longer used in elx.h
+	* elx_iodone() now uses system timer.
+  	* elx_qfull_retry() now uses system timer.
+	* lpfc_put_buf(), lpfc_ip_xri_timeout() and
+	  lpfc_ip_timeout_handler() now use system timer.
+	* lpfc_fdmi_tmo() and lpfc_qthrottle_up() now use system
+          timer.
+	* Removed num_bufs and num_iocbs configuration parameters.
+	* Fixed a memory corruption bug. This was caused by a memory
+	  write to ndlp structure from lpfc_cmpl_els_acc function.
+	  This ndlp structure was freed from lpfc_els_unsol_event.
+	* lpfc_disc_timeout() and lpfc_establish_link_tmo() now use
+	  system timer.  Also update lpfc_els_retry_delay() to do a
+	  single lock release at the end.
+	* Remove use of PAN (pseudo adapter number).
+	* Reintroduced usage of the cross compiler for building on
+	  ppc64 to remove build errors that were cropping up when
+	  using the standard gcc compiler.
+	* Fix no-unlock-before return in lpfc_els_retry_delay which was
+	  causing  a deadlock on insmod in some environments.
+	* Minor format changes fix up comments
+	* Create utility clock function elx_start_timer() and
+	  elx_stop_timer().  All timeout routines now use these common
+	  routines.
+	* Minor formating changes fix up comments
+	* Minor formatting changes get rid of failover defines for
+	  syntax checking
+	* Minor formatting changes remove ISCSI defines.
+	* Fix typo in install target for 2.4 kernels.
+	* Removed unused elx_scsi_add_timer extern function
+	  declaration.
+	* Cleanup casting around DMA masks.
+	* Comment out lpfndd.o modules_install section as lpfndd.o is
+	  not generated if CONFIG_NET_LPFC is not set. Also refer to
+	  BASEINCLUDE only in out of kernel source module builds as it
+	  will not exist otherwise.
+	* Removed unused malloc counters from lpfcLINUXfcp.c.
+	* Remove some unnecessary #includes in lpfcLINUXfcp.c
+	* Remove unncessary #includes in elxLINUXfcp.c
+	* Minor formatting cleanups in Makefile to avoid some
+          linewrapping.
+	* Removed unused elx_mem_pool data structure.
+	* Remove several unnecessary #includes.
+	* Moving fix for memory leak in ioctl lip area to sysfs's lip.
+	* Removed unused elx_dma_handle_t elx_acc_handle_t
+	  FC_MAX_SEGSZ and FC_MAX_POOL.
+	* Rewrite of Makefile. Fixes breakages with make -j4 during
+	  kernel compile. Does not recompile all files on every
+	  build. Uses the kernel build's definitions of CFLAGS,
+	  MODFLAGS etc. Removed "make rpm" option.
+	* Removed unused #defines CLOSED, DEAD, OPENED, NORMAL_OPEN
+	  and unneeded #include of elx_sched.h in elx.h.
+	* Several log message updates
+	* Add PCI_DEVICE_ID_FIREFLY for LP6000
+	* Fixed known issues in 20040326: driver crashes on rmmod in
+	  both 2.4 and 2.6 kernels
+	
+
+Changes from 20040319 to 20040326
+
+	* Updated ChangeLog for 20040326 SourceForge drop.
+	* remove lpfc_isr / lpfc_tmr logic fixed up 8 spaces from
+	  previous checkins with tabs
+	* replace elx_in_intr() with in_interrupt()
+	* Remove unused messages 1602 and 1603.
+	* Fix the following issues with log messages: Remove unused
+	  messages 406, 407, 409, 927, 928, 1201, 1202, 1204, 1205, 1206
+	  and 1207.  Create a new message 738 to fix duplicate instances
+	  of 736.
+	* Removed remaining pci interface abstractions from elxLINUXfcp.c.
+	  Implemented OS calls directly in all remaining files and cleaned
+	  up modules.  Removed prototypes as well.
+	* Removed following functions/structures elx_mem_dmapool
+	  elx_idx_dmapool elx_size_dmapool elx_kmem_lock dfc_data_alloc
+	  dfc_data_free dfc_mem struct mbuf_info elx_acc_handle_t
+	  data_handle elx_dma_handle_t dma_handle struct elx_memseg
+	  MEMSEG_t
+	* lpfc_els_timeout_handler() now uses system timer.
+	* Further cleanup of #ifdef powerpc
+	* lpfc_scsi_timeout_handler() now uses system timer.
+	* Replace common driver's own defines for endianess w/ Linux's
+	  __BIG_ENDIAN etc.
+	* Added #ifdef IPFC for all IPFC specific code.
+	* lpfc_disc_retry_rptlun() now uses system timer.
+	* lpfc_npr_timeout() now uses system timer.
+	* Modified detect code, on insmod, to only wait a max of 2 secs if
+	  link comes up and there are no devices.
+	* Move remaining message logging functions into
+	  elx_logmsg.c/elx_logmsg.h.
+	* Added code to clear link attention bit when there is a pending
+	  link event and the memory allocation for read_la mail box
+	  command fails.
+	* Removed function calls for mapping bar registers and allocating
+	  kernel virtual memory mappings to the mapped bars Removed
+	  prototypes, lpfc_driver_cache_line, and pci_bar1_map rename to
+	  pci_bar2_map.
+	* Allocate mbox only if the hba_state is in ready state.
+	* Complete lip support via sysfs. To lip, echo brdnum >
+	  /sys/bus/pci/drivers/lpfc/lip.
+	* moving sysfs show/store implementations to lpfc_sysfs.c. Also add
+	  support for lip.
+	* Add files: lpfc_sysfs.c, lpfc_sysfs.h
+	* move LPFC_DRIVER_NAME and LPFC_MODULE_DESC out of lpfcLINUXfcp.c
+	  to lpfc_version.h, since it is now needed in lpfc_sysfs.c
+	* elx_mbox_timeout now uses system timer
+	* Changed lpfc_nodev_timeout, lpfc_els_retry_delay and
+	  lpfc_linkdown_timeout to use the system timer instead of
+	  internal clock support.
+	* Move remaining message logging functions in elx_util.c to
+	  elx_logmsg.c.
+	* Remove some unnecessary typecasting.
+	* Remove log message that is no longer used (was used by
+	  elx_str_atox).
+	* Replaced DLINK_t and SLINK_t by standard Linux list_head
+	* Removed deque macro
+	* Replaced ELX_DLINK_t ans ELX_SLINK_t by Linux struct list_head
+	  (except for clock)
+	* Removed following functions from code: linux_kmalloc linux_kfree
+	  elx_alloc_bigbuf elx_free_bigbuf
+	* Removed following abstract functions from the code.  elx_malloc
+	  elx_free elx_ip_get_rcv_buf elx_ip_free_rcv_buf
+	  elx_mem_alloc_dmabuf elx_mem_alloc_dmabufext elx_mem_alloc_dma
+	  elx_mem_alloc_buf lpfc_bufmap
+	* Removed custom PCI configuration #defines and replaced with
+	  OS-provided #defines. Also added linux/pci.h to *.c files.
+	* Remove elx_str_ctox.	Replace elx_str_atox with sscanf.
+	* Many indentation/whitespace fixes.
+	* Replace elx_str_ctox with isxdigit where it was only used to
+	  check the value of a character.
+	* Removed following functions from the code.  elx_kmem_free
+	  elx_kmem_alloc elx_kmem_zalloc
+	* Change use of 2.4 SCSI typedef Scsi_Host_Template to	struct
+	  scsi_host_template for 2.6 kernels.
+	* Change use of 2.4 SCSI typedefs (Scsi_Device, Scsi_Cmnd,
+	  Scsi_Request) the their real struct names.
+	* Move 2.6 compatibility irqreturn definitions to lpfc_compat.h.
+	  Protect these definitions from conflicting with similar ones in
+	  later 2.4 kernels.
+	* Remove unused definitions: LINUX_TGT_t, LINUX_LUN_t,
+	  LINUX_BUF_t, elx_lun_t, SET_ADAPTER_STATUS.
+	* Convert pci_ calls to linux 2.6 dma_ equivalents.
+	* Removed unused types: struct buf, struct sc_buf, T_SCSIBUF
+	  typedef.
+	* Fix Makefile so that 2.4 drivers don't always rebuild all files.
+	* Remove unused _static_ and fc_lun_t definitions.
+	* Cleaned up some memory pool implementation code.
+	* Fix panic with char dev changes. Turns out that 2.6.4 code does
+	  the same in kernel space with the 2.4 interface style
+	  definitions. So remove the new char dev code altogether.
+	* Remove typecasting from fc_get_cfg_param and consolidate
+	  multiple instances of the parameter switch into a single
+	  instance.
+	* Use lpfc_is_LC_HBA() macro that tests pcidev->device directly
+	  instead of saving a private copy that undergoes varied shifting
+	  & casting.
+	* Removed usage of all memory pools.
+
+Changes from 20040312 to 20040319
+	
+	* Use dev_warn instead of printk for 2.6 kernels
+	* Correct Iocbq completion routine for 2.6 kernel case
+	* Change void *pOSCmd to Scsi_Smnd *pCmd
+	* Change void *pOScmd to struct sk_buff *pCmd
+	* Remove data directon code.
+	* Removed memory pool for buf/bpl buffers and use kmalloc/kfree
+	  pci_pool_alloc/free directly.
+	* Move PPC check for DMA address 0 in scatter-gather list, into
+	  lpfc_compat.h
+	* Always use pci_unmap_single() instead of pci_unmap_page()
+	* Clean up the 2.6 vs 2.4 #if blocks.
+	* Conditionalize Scheduler
+	* Add a comment to explain a little what the first Makefile
+	  section does.
+	* Removed lpfc_intr_post
+	* Sysfs new display format. Also added write functionality. You
+	  can [ echo "0 log_verbose 3" >
+	  /sys/bus/pci/drivers/lpfc/params]. Hex support yet to be added.
+	* Removed several #ifdef powerpc, including for a discovery issue
+	  in lpfc_ValidLun()
+	* Change elx_printf_log to use vsprintf.
+	* Added lpfc_compat.h provides macros to aid compilation in the
+	  Linux 2.4 kernel over various platform architectures.  Initially
+	  support mapping to a DMA address.
+	* Removed memory pool for nlp/bind buffers and use kmalloc/kfree
+	  directly.
+	* Removed memory pool for iocb buffers and use kmalloc/kfree
+	  directly.
+	* Removed memory pool for mailbox buffers and use kmalloc/kfree
+	  directly.
+	* Cleaned up back and forth casts
+	* Initial support for sysfs for 2.6 kernel.
+	* Changed elx_dma_addr_t to dma_addr_t
+	* Fix a 2.6 kernel check to be >= 2.6.0 instead of > (was missing
+	  2.6.0).
+	* Remove elx_printf and elx_str_sprintf. Replace elx_print with
+	  printk.
+	* Replace elx_printf with printk.
+	* Replace elx_str_sprintf with sprintf.
+	* Removed the mem_lock, its prototype, function, macro, and
+	  iflags.
+	* Use kmalloc/kfree for ELX_SCSI_BUF_t
+	* Use linux pci_pools for SCSI_DMA_EXT
+	* Use linux pci_pools for BPLs.
+	* Minor cleanup of DFC args for PPC64.
+	* Several small indentation cleanups.
+	* New Linux 2.6 style of char device registration.
+	* Migrated members of LPFCHBA_t and LINUX_HBA_t into elxHBA_t
+	* Use strcpy, strncmp, isdigit, strlen instead of abstractions
+	* Cleanup of driver_template.
+	* Facilitate compile time turn on/off of lpfc_network_on.
+	* Split large source files into smaller, better named ones.
+
+Changes from 2.10a to 20040312
+
+	* Fix build for 2.4 kernels
+	* Move driver version macros into lpfc_version.h file.
+	* Fixed data miscompare with LIP.
+	* Removed elx_sli, elx_ioc, elx_disc, elx_sch routines,
+	  prototypes, and reference points.
+	* Correct the space insertions with hardtabs
+	* Remove routine call pointers in ELX_SLI_INIT_t struct.
+	* Removed module locks except for drvr, mem, and clock.
+	* Removed unused module locks from sourcebase. Kept drvr_lock,
+	  mem_lock, and clock_lock.
+	* Change NULL to 0

@@ -74,6 +74,12 @@ static ctl_table	audit_table[] = {
 	  &audit_debug,
 	  sizeof(audit_debug),
 	  0600, NULL,  &proc_dointvec, NULL, },
+#ifdef __ia64__
+	{ 6, "disable-32bit",
+	  &audit_disable_32bit,
+	  sizeof(audit_disable_32bit),
+	  0600, NULL,  &proc_dointvec, NULL, },
+#endif
 	{ 0 },
 };
 

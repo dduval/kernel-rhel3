@@ -792,6 +792,8 @@ static struct pci_device_id e100_id_table[] = {
 	{0x8086, 0x1053, PCI_ANY_ID, PCI_ANY_ID, 0, 0, },
 	{0x8086, 0x1054, PCI_ANY_ID, PCI_ANY_ID, 0, 0, },
 	{0x8086, 0x1055, PCI_ANY_ID, PCI_ANY_ID, 0, 0, },
+	{0x8086, 0x1056, PCI_ANY_ID, PCI_ANY_ID, 0, 0, },
+	{0x8086, 0x1057, PCI_ANY_ID, PCI_ANY_ID, 0, 0, },
 	{0x8086, 0x1064, PCI_ANY_ID, PCI_ANY_ID, 0, 0, },
 	{0x8086, 0x1065, PCI_ANY_ID, PCI_ANY_ID, 0, 0, },
 	{0x8086, 0x1066, PCI_ANY_ID, PCI_ANY_ID, 0, 0, },
@@ -1610,6 +1612,10 @@ e100_free_tcb_pool(struct e100_private *bdp)
 {
 	tcb_t *tcb;
 	int i;
+
+	if (bdp->tcb_pool.data == NULL)
+		return;
+
 	/* Return tx skbs */ 
 	for (i = 0; i < bdp->params.TxDescriptors; i++) {
 	  	tcb = bdp->tcb_pool.data;
@@ -3275,7 +3281,7 @@ e100_do_ethtool_ioctl(struct net_device *dev, struct ifreq *ifr)
 			bdp->params.RxDescriptors = ering.rx_pending;
 			bdp->params.TxDescriptors = ering.tx_pending;
 			e100_hw_init(bdp);
-			e100_open(dev);
+			return e100_open(dev);
 		}
 		else {
 			bdp->params.RxDescriptors = ering.rx_pending;
@@ -3321,7 +3327,7 @@ e100_do_ethtool_ioctl(struct net_device *dev, struct ifreq *ifr)
 			e100_close(dev);
 			spin_unlock_bh(&dev->xmit_lock);
 			e100_hw_init(bdp);
-			e100_open(dev);
+			return e100_open(dev);
 		}
 		return 0;
 	}
@@ -3374,7 +3380,7 @@ e100_do_ethtool_ioctl(struct net_device *dev, struct ifreq *ifr)
 			e100_close(dev);
 			spin_unlock_bh(&dev->xmit_lock);
 			e100_hw_init(bdp);
-			e100_open(dev);
+			return e100_open(dev);
 		}
 		return 0;
 	}
@@ -3448,7 +3454,7 @@ static int
 e100_ethtool_set_settings(struct net_device *dev, struct ifreq *ifr)
 {
 	struct e100_private *bdp;
-	int e100_new_speed_duplex;
+	int rc, e100_new_speed_duplex;
 	int ethtool_new_speed_duplex;
 	struct ethtool_cmd ecmd;
 
@@ -3465,7 +3471,10 @@ e100_ethtool_set_settings(struct net_device *dev, struct ifreq *ifr)
 			e100_close(dev);
 			spin_unlock_bh(&dev->xmit_lock);
 			e100_hw_init(bdp);
-			e100_open(dev);
+			rc = e100_open(dev);
+			if (rc) {
+				return rc;
+			}
 		}
 	} else {
 		if (ecmd.speed == SPEED_10) {
@@ -3502,7 +3511,10 @@ e100_ethtool_set_settings(struct net_device *dev, struct ifreq *ifr)
 				e100_close(dev);
 				spin_unlock_bh(&dev->xmit_lock);
 				e100_hw_init(bdp);
-				e100_open(dev);
+				rc = e100_open(dev);
+				if (rc) {
+					return rc;
+				}
 			}
 		} else {
 			return -EOPNOTSUPP;
@@ -3595,6 +3607,7 @@ static int
 e100_ethtool_nway_rst(struct net_device *dev, struct ifreq *ifr)
 {
 	struct e100_private *bdp;
+	int rc;
 
 	bdp = dev->priv;
 
@@ -3605,7 +3618,10 @@ e100_ethtool_nway_rst(struct net_device *dev, struct ifreq *ifr)
 			e100_close(dev);
 			spin_unlock_bh(&dev->xmit_lock);
 			e100_hw_init(bdp);
-			e100_open(dev);
+			rc = e100_open(dev);
+			if (rc) {
+				return rc;
+			}
 		}
 	} else {
 		return -EFAULT;
@@ -4018,6 +4034,7 @@ e100_mii_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 	struct e100_private *bdp;
 	struct mii_ioctl_data *data_ptr =
 		(struct mii_ioctl_data *) &(ifr->ifr_data);
+	int rc;
 
 	bdp = dev->priv;
 
@@ -4058,7 +4075,10 @@ e100_mii_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 					e100_close(dev);
 					spin_unlock_bh(&dev->xmit_lock);
 					e100_hw_init(bdp);
-					e100_open(dev);
+					rc = e100_open(dev);
+					if (rc) {
+						return rc;
+					}
 				}
 		}
 		else 

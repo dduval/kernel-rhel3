@@ -45,6 +45,9 @@ extern int unregister_reboot_notifier(struct notifier_block *);
 extern void machine_restart(char *cmd);
 extern void machine_halt(void);
 extern void machine_power_off(void);
+#ifdef CONFIG_X86_64
+extern void (*machine_reset)(void);
+#endif
 
 #endif
 

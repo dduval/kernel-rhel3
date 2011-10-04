@@ -138,7 +138,7 @@ static struct task_struct * select_bad_process(void)
  * CAP_SYS_RAW_IO set, send SIGTERM instead (but it's unlikely that
  * we select a process with CAP_SYS_RAW_IO set).
  */
-void oom_kill_task(struct task_struct *p)
+static void __oom_kill_task(struct task_struct *p)
 {
 	printk(KERN_ERR "Out of Memory: Killed process %d (%s).\n", p->pid, p->comm);
 
@@ -158,6 +158,21 @@ void oom_kill_task(struct task_struct *p)
 	}
 }
 
+static struct mm_struct *oom_kill_task(struct task_struct *p)
+{
+	struct mm_struct *mm = get_task_mm(p);
+
+	if (mm) {
+		if (mm != &init_mm)
+			__oom_kill_task(p);
+		else {
+			mmput(mm);	/* don't overflow init_mm.mm_users */
+			mm = NULL;
+		}
+	}
+	return mm;
+}
+
 /**
  * oom_kill - kill the "best" process when we run out of memory
  *
@@ -170,10 +185,11 @@ static void oom_kill(void)
 {
 	struct task_struct *g, *p, *q;
 	extern wait_queue_head_t kswapd_done;
+	struct mm_struct *mm;
 
 	/* print the memory stats whenever we OOM kill */
 	show_mem();
-
+retry:
 	read_lock(&tasklist_lock);
 	p = select_bad_process();
 
@@ -181,13 +197,20 @@ static void oom_kill(void)
 	if (p == NULL)
 		panic("Out of memory and no killable processes...\n");
 
+	mm = oom_kill_task(p);
+	if (!mm) {
+		read_unlock(&tasklist_lock);
+		goto retry;
+	}
 	/* kill all processes that share the ->mm (i.e. all threads) */
 	do_each_thread(g, q)
-		if (q->mm == p->mm && q->tgid == p->tgid)
-			oom_kill_task(q);
+		if (q->mm == mm)
+			__oom_kill_task(q);
 	while_each_thread(g, q);
-
+	if (!p->mm)
+		printk(KERN_INFO "Fixed up OOM kill of mm-less task\n");
 	read_unlock(&tasklist_lock);
+	mmput(mm);
 
 	/* Chances are by this time our victim is sleeping on kswapd. */
 	wake_up(&kswapd_done);
@@ -206,9 +229,15 @@ static void oom_kill(void)
  */
 void out_of_memory(void)
 {
+	/*
+	 * oom_lock protects out_of_memory()'s static variables.
+	 * It's a global lock; this is not performance-critical.
+	 */
+	static spinlock_t oom_lock = SPIN_LOCK_UNLOCKED;
 	static unsigned long first, last, count, lastkill;
 	unsigned long now, since;
 
+	spin_lock(&oom_lock);
 	now = jiffies;
 	since = now - last;
 	last = now;
@@ -227,14 +256,14 @@ void out_of_memory(void)
 	 */
 	since = now - first;
 	if (since < HZ)
-		return;
+		goto out_unlock;
 
 	/*
 	 * If we have gotten only a few failures,
 	 * we're not really oom. 
 	 */
 	if (++count < 10)
-		return;
+		goto out_unlock;
 
 	/*
 	 * If we just killed a process, wait a while
@@ -243,15 +272,23 @@ void out_of_memory(void)
 	 */
 	since = now - lastkill;
 	if (since < HZ*5)
-		return;
+		goto out_unlock;
 
 	/*
 	 * Ok, really out of memory. Kill something.
 	 */
 	lastkill = now;
+
+	/* oom_kill() can sleep */
+	spin_unlock(&oom_lock);
 	oom_kill();
+	spin_lock(&oom_lock);
 
 reset:
-	first = now;
+	if (time_after(now, first))
+		first = now;
 	count = 0;
+
+out_unlock:
+	spin_unlock(&oom_lock);
 }

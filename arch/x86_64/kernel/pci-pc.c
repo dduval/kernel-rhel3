@@ -35,6 +35,8 @@ struct pci_ops *pci_root_ops;
 int (*pci_config_read)(int seg, int bus, int dev, int fn, int reg, int len, u32 *value) = NULL;
 int (*pci_config_write)(int seg, int bus, int dev, int fn, int reg, int len, u32 value) = NULL;
 
+static int pci_using_acpi_prt = 0;
+
 static spinlock_t pci_config_lock = SPIN_LOCK_UNLOCKED;
 
 static unsigned int acpi_root_bridges;
@@ -636,9 +638,10 @@ void __devinit pcibios_init(void)
 	/* Only probe blindly if ACPI didn't tell us about root bridges */
 	if (!acpi_noirq && acpi_root_bridges) {
 #ifdef CONFIG_ACPI_PCI
-		if(!acpi_pci_irq_init()) 
+		if(!acpi_pci_irq_init()) {
+			pci_using_acpi_prt = 1;
 			printk(KERN_INFO "PCI: Using ACPI for IRQ routing\n");
-		else
+		} else
 			printk(KERN_WARNING, "PCI: Invalid ACPI-PCI IRQ routing table\n");
 #else
 		printk(KERN_WARNING, "PCI: acpi_root_bridges nonzero but ACPI not configured\n");
@@ -713,6 +716,12 @@ int pcibios_enable_device(struct pci_dev *dev, int mask)
 
 	if ((err = pcibios_enable_resources(dev, mask)) < 0)
 		return err;
+#ifdef CONFIG_ACPI_PCI
+	if (pci_using_acpi_prt) {
+		acpi_pci_irq_enable(dev);
+		return 0;
+	}
+#endif
 	pcibios_enable_irq(dev);
 	return 0;
 }

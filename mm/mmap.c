@@ -528,6 +528,16 @@ unsigned long do_mmap_pgoff(struct file * file, unsigned long addr, unsigned lon
 	if (mm->map_count > max_map_count)
 		return -ENOMEM;
 
+	/*
+	 * If the application expects PROT_READ to imply PROT_EXEC, and
+	 * the mapping isn't for a file whose underlying filesystem is
+	 * mounted w/noexec, then enable PROT_EXEC.
+	 */
+	if ((prot & (PROT_EXEC | PROT_READ)) == PROT_READ &&
+	    !(current->flags & PF_RELOCEXEC) &&
+	    !(file && (file->f_vfsmnt->mnt_flags & MNT_NOEXEC)))
+		prot |= PROT_EXEC;
+
 	/* Obtain the address to map to. we verify (or select) it and ensure
 	 * that it represents a valid section of the address space.
 	 */
@@ -964,6 +974,14 @@ int expand_stack(struct vm_area_struct * vma, unsigned long address)
 	 */
 	address &= PAGE_MASK;
  	spin_lock(&vma->vm_mm->page_table_lock);
+
+	/* check if another thread has already expanded the stack */
+	if (address >= vma->vm_start) {
+		spin_unlock(&vma->vm_mm->page_table_lock);
+		vm_validate_enough("exiting expand_stack - NOTHING TO DO");
+		return 0;
+	}
+
 	grow = (vma->vm_start - address) >> PAGE_SHIFT;
 
 	/* Overcommit.. */

@@ -839,7 +839,7 @@ _GLOBAL(sys_call_table32)
 	.llong .sys_ni_syscall		/* 225 */
 # endif
 #endif
- 	.llong .sys_ni_syscall
+ 	.llong .sys32_sendfile64
  	.llong .compat_sys_io_setup
  	.llong .sys_io_destroy
  	.llong .compat_sys_io_getevents

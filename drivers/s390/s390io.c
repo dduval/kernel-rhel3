@@ -3209,7 +3209,16 @@ s390_process_IRQ (unsigned int irq)
 		if (!ioinfo[irq]->ui.flags.ready)
 			return (ending_status);
 
-		memcpy (udp, &(ioinfo[irq]->devstat), sdevstat);
+		/*
+		 * Special case: We got a deferred cc 3 on a basic sense.
+		 * We have to notify the device driver of the former unit
+		 * check, but must not confuse it by calling it with the status
+		 * for the failed basic sense.
+		 */
+		if (ioinfo[irq]->ui.flags.w4sense)
+			ioinfo[irq]->ui.flags.w4sense = 0;
+		else
+			memcpy (udp, &(ioinfo[irq]->devstat), sdevstat);
 
 		ioinfo[irq]->devstat.intparm = 0;
 

@@ -88,7 +88,7 @@ start_ap:
 	/*
 	 * Switch into virtual mode:
 	 */
-	movl r16=(IA64_PSR_IT|IA64_PSR_IC|IA64_PSR_DT|IA64_PSR_RT|IA64_PSR_DFH|IA64_PSR_BN \
+	movl r16=(IA64_PSR_IT|IA64_PSR_DT|IA64_PSR_RT|IA64_PSR_DFH|IA64_PSR_BN \
 		  |IA64_PSR_DI)
 	;;
 	mov cr.ipsr=r16
@@ -147,9 +147,31 @@ start_ap:
 	cmp4.ne isAP,isBP=r3,r0
 	;;			// RAW on r2
 	extr r3=r2,0,61		// r3 == phys addr of task struct
-	mov r16=(KERNEL_START - PAGE_OFFSET) / IA64_GRANULE_SIZE
 	;;
 
+	shr.u r17=r3,KERNEL_TR_PAGE_SHIFT
+	;;
+	cmp.eq p6,p7=KERNEL_TR_PAGE_NUM,r17
+(p6)	br.cond.dpnt	skip_stack_dtr
+	;;
+	movl r17=PAGE_KERNEL
+	movl r18=IA64_GRANULE_SHIFT<<2
+	;;
+	mov cr.itir=r18
+	mov cr.ifa=r2
+	dep r20=0,r3,0,12
+	;;
+	or r20=r17,r20
+	mov r19=IA64_TR_CURRENT_STACK
+	;;
+	itr.d dtr[r19]=r20
+	;;
+skip_stack_dtr:
+	ssm psr.ic
+	;;
+	srlz.d
+	shr.u r16=r3,IA64_GRANULE_SHIFT
+	;;
 	// load the "current" pointer (r13) and ar.k6 with the current task
 	mov r13=r2
 	mov IA64_KR(CURRENT)=r3		// Physical address

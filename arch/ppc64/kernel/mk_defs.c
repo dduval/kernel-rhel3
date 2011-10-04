@@ -129,6 +129,7 @@ main(void)
 	DEFINE(PT_REGS, offsetof(struct thread_struct, regs));
 	DEFINE(PT_TRACESYS, PT_TRACESYS);
 	DEFINE(PT_AUDITED, PT_AUDITED);
+	DEFINE(PT_SINGLESTEP, PT_SINGLESTEP);
 	DEFINE(TASK_PTRACE, offsetof(struct task_struct, ptrace));
 	DEFINE(NEED_RESCHED, offsetof(struct task_struct, need_resched));
 	DEFINE(THREAD_FPR0, offsetof(struct thread_struct, fpr[0]));

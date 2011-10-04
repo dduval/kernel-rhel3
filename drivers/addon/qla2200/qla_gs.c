@@ -552,7 +552,7 @@ qla2x00_fdmi_done(Scsi_Cmnd *pscsi_cmd)
 	DEBUG13(qla2x00_dump_buffer((uint8_t *)pct, sizeof(ct_iu_preamble_t));)
 
 	switch (cmd_code) {
-	case RHBA:
+	case FDMI_CC_RHBA:
 		if (pct->cmd_rsp_code !=
 		    __constant_cpu_to_be16(CT_ACCEPT_RESPONSE)) {
 			DEBUG2_13(printk("%s(%ld): RHBA failed, rejected "
@@ -590,7 +590,7 @@ qla2x00_fdmi_done(Scsi_Cmnd *pscsi_cmd)
 
 		break;
 
-	case RHAT:
+	case FDMI_CC_RHAT:
 		/* Just go ahead and issue next command */
 		DEBUG13(printk("%s(%ld): RHAT rspcode=%x. going to call RPA.\n",
 		    __func__, ha->host_no, be16_to_cpu(pct->cmd_rsp_code));)
@@ -599,7 +599,7 @@ qla2x00_fdmi_done(Scsi_Cmnd *pscsi_cmd)
 		free_mem = FALSE;
 		break;
 
-	case RPA:
+	case FDMI_CC_RPA:
 		DEBUG13(printk("%s(%ld): got RPA rspcode=%x.\n",
 		    __func__ ,ha->host_no, be16_to_cpu(pct->cmd_rsp_code));)
 
@@ -1007,7 +1007,7 @@ qla2x00_fdmi_rhba(scsi_qla_host_t *ha, uint8_t *pret_stat)
 
 	/* Setup CT-IU Basic preamble. */
 	QLA_INIT_FDMI_CTIU_HDR(ha, ct->hdr);
-	ct->hdr.cmd_rsp_code = __constant_cpu_to_be16(RHBA);
+	ct->hdr.cmd_rsp_code = __constant_cpu_to_be16(FDMI_CC_RHBA);
 
 	/* Setup register hba payload. */
 	qla2x00_fdmi_setup_rhbainfo(ha, ct);
@@ -1098,7 +1098,7 @@ qla2x00_fdmi_ghat(scsi_qla_host_t *ha, ct_iu_ghat_rsp_t *prsp_buf,
 
 	/* Setup CT-IU Basic preamble. */
 	QLA_INIT_FDMI_CTIU_HDR(ha, ct_req->hdr);
-	ct_req->hdr.cmd_rsp_code = __constant_cpu_to_be16(GHAT);
+	ct_req->hdr.cmd_rsp_code = __constant_cpu_to_be16(FDMI_CC_GHAT);
 
 	/* Setup get hba attrib payload. */
 	memcpy(ct_req->hba_identifier, ha->init_cb->port_name, WWN_SIZE);
@@ -1258,7 +1258,7 @@ qla2x00_fdmi_rpa(scsi_qla_host_t *ha, uint8_t *pret_stat)
 
 	/* Setup CT-IU Basic preamble. */
 	QLA_INIT_FDMI_CTIU_HDR(ha, ct->hdr);
-	ct->hdr.cmd_rsp_code = __constant_cpu_to_be16(RPA);
+	ct->hdr.cmd_rsp_code = __constant_cpu_to_be16(FDMI_CC_RPA);
 
 	/* Setup register port attribute payload. */
 	qla2x00_fdmi_setup_rpainfo(ha, ct);
@@ -1336,7 +1336,7 @@ qla2x00_fdmi_dhba(scsi_qla_host_t *ha, uint8_t *pret_stat)
 
 	/* Setup CT-IU Basic preamble. */
 	QLA_INIT_FDMI_CTIU_HDR(ha, ct->hdr);
-	ct->hdr.cmd_rsp_code = __constant_cpu_to_be16(DHBA);
+	ct->hdr.cmd_rsp_code = __constant_cpu_to_be16(FDMI_CC_DHBA);
 
 	/* Setup deregister hba payload. */
 	memcpy(ct->hba_portname, ha->init_cb->port_name, WWN_SIZE);
@@ -1405,7 +1405,8 @@ qla2x00_fdmi_rhba_intr(scsi_qla_host_t *ha)
 
 	DEBUG13(printk("%s(%ld): going to srb_init\n", __func__, ha->host_no);)
 
-	qla2x00_fdmi_srb_init(ha, sp, tov, __constant_cpu_to_be16(RHBA));
+	qla2x00_fdmi_srb_init(ha, sp, tov,
+	    __constant_cpu_to_be16(FDMI_CC_RHBA));
 
 	DEBUG13(printk("%s(%ld): done srb_init\n", __func__, ha->host_no);)
 
@@ -1502,7 +1503,8 @@ qla2x00_fdmi_rhat_intr(scsi_qla_host_t *ha, Scsi_Cmnd *pscsi_cmd, void *pct_buf,
 	sp->cmd = pscsi_cmd;
 
 	tov = ha->login_timeout*2;
-	qla2x00_fdmi_srb_init(ha, sp, tov, __constant_cpu_to_be16(RHAT));
+	qla2x00_fdmi_srb_init(ha, sp, tov,
+	    __constant_cpu_to_be16(FDMI_CC_RHAT));
 
 	DEBUG13(printk("%s(%ld): done srb_init\n", __func__, ha->host_no);)
 
@@ -1592,7 +1594,7 @@ qla2x00_fdmi_rpa_intr(scsi_qla_host_t *ha, Scsi_Cmnd *pscsi_cmd, void *pct_buf,
 	sp->cmd = pscsi_cmd;
 
 	tov = ha->login_timeout*2;
-	qla2x00_fdmi_srb_init(ha, sp, tov, __constant_cpu_to_be16(RPA));
+	qla2x00_fdmi_srb_init(ha, sp, tov, __constant_cpu_to_be16(FDMI_CC_RPA));
 
 	DEBUG13(printk("%s(%ld): done srb_init\n", __func__, ha->host_no);)
 

@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_hbadisc.c 1.64.1.6 2004/06/01 14:38:09EDT jselx Exp  $
+ * $Id: lpfc_hbadisc.c 1.4 2004/11/02 13:25:15EST sf_support Exp  $
  */
 
 #include <linux/version.h>
@@ -69,37 +69,6 @@ uint8_t lpfcAlpaArray[] = {
 	0x10, 0x0F, 0x08, 0x04, 0x02, 0x01
 };
 
-/* lpfc_nport_recov is only called by lpfc_linkdown below */
-static void
-lpfc_nport_recov(lpfcHBA_t *phba, LPFCSCSITARGET_t *targetp)
-{
-	lpfcCfgParam_t *clp;
-	unsigned long tmo;
-
-	clp = &phba->config[0];
-
-	if ((clp[LPFC_CFG_NODEV_TMO].a_current)
-	    && (clp[LPFC_CFG_HOLDIO].a_current == 0)) {
-		targetp->targetFlags |= FC_NPR_ACTIVE;
-		if (targetp->tmofunc.function) {
-			lpfc_stop_timer((struct clk_data *)
-					targetp->tmofunc.data);
-		}
-
-		if (clp[LPFC_CFG_NODEV_TMO].a_current >
-		    clp[LPFC_CFG_LINKDOWN_TMO].a_current) {
-			tmo = clp[LPFC_CFG_NODEV_TMO].a_current;
-		} else {
-			tmo = clp[LPFC_CFG_LINKDOWN_TMO].a_current;
-		}
-		lpfc_start_timer(phba, tmo, &targetp->tmofunc,
-				 lpfc_npr_timeout, (unsigned long)targetp, 0);
-	} else {
-		lpfc_sched_flush_target(phba, targetp, IOSTAT_LOCAL_REJECT,
-					IOERR_SLI_ABORTED);
-	}
-}
-
 int
 lpfc_linkdown(lpfcHBA_t * phba)
 {
@@ -108,8 +77,8 @@ lpfc_linkdown(lpfcHBA_t * phba)
 	LPFC_NODELIST_t *new_ndlp;
 	struct list_head *pos, *next, *listp;
 	struct list_head *node_list[4];
-	LPFC_MBOXQ_t *mb;
 	LPFCSCSITARGET_t *targetp;
+	LPFC_MBOXQ_t *mb;
 	lpfcCfgParam_t *clp;
 	int rc, i;
 
@@ -191,29 +160,12 @@ lpfc_linkdown(lpfcHBA_t * phba)
 						  LPFC_SET_BITMASK);
 			}
 
+			targetp = ndlp->nlp_Target;
+			if(targetp)
+				lpfc_set_npr_tmo(phba, targetp, ndlp);
+
 			rc = lpfc_disc_state_machine(phba, ndlp, 0,
 						     NLP_EVT_DEVICE_UNK);
-			if ((rc != NLP_STE_FREED_NODE)
-			    && (clp[LPFC_CFG_USE_ADISC].a_current == 0)) {
-				/* If we are not using ADISC when the link comes
-				 * back up, we might as well free all the nodes
-				 * right now.
-				 */
-				targetp = ndlp->nlp_Target;
-				/* If we were a FCP target, go into NPort
-				 * Recovery mode to give it a chance to come
-				 * back.
-				 */
-				if (targetp) {
-					lpfc_nport_recov(phba, targetp);
-				}
-
-				lpfc_findnode_did(phba,
-						  (NLP_SEARCH_ALL |
-						   NLP_SEARCH_DEQUE),
-						  ndlp->nlp_DID);
-				lpfc_nlp_remove(phba, ndlp);
-			}
 		}
 	}
 
@@ -277,8 +229,6 @@ lpfc_linkup(lpfcHBA_t * phba)
 		if (ndlp->nlp_type & NLP_FABRIC) {
 			ndlp->nlp_flag &= ~(NLP_UNMAPPED_LIST |
 					    NLP_TGT_NO_SCSIID);
-			phba->fc_unmap_cnt--;
-			list_del(&(ndlp->nlp_listp));
 			lpfc_nlp_remove(phba, ndlp);
 		}
 	}
@@ -301,6 +251,8 @@ lpfc_linkup(lpfcHBA_t * phba)
 					  LPFC_CLR_BITMASK);
 		}
 	}
+	/* Setup for first FLOGI */
+	phba->fc_ratov = LPFC_DISC_FLOGI_TMO;
 
 	return (0);
 }
@@ -343,6 +295,9 @@ lpfc_mbx_cmpl_read_la(lpfcHBA_t * phba, LPFC_MBOXQ_t * pmb)
 		control |= HC_LAINT_ENA;
 		writel(control, phba->HCregaddr);
 		readl(phba->HCregaddr); /* flush */
+		mp = (DMABUF_t *) (pmb->context1);
+		lpfc_mbuf_free(phba, mp->virt, mp->phys);
+		kfree(mp);
 		return;
 	}
 	la = (READ_LA_VAR *) & pmb->mb.un.varReadLA;
@@ -583,7 +538,28 @@ lpfc_mbx_cmpl_read_sparam(lpfcHBA_t * phba, LPFC_MBOXQ_t * pmb)
 
 		lpfc_linkdown(phba);
 		phba->hba_state = LPFC_HBA_ERROR;
-		goto out;
+		mp = (DMABUF_t *) pmb->context1;
+		lpfc_mbuf_free(phba, mp->virt, mp->phys);
+		kfree(mp);
+		if (phba->hba_state != LPFC_CLEAR_LA) {
+			lpfc_clear_la(phba, pmb);
+			pmb->mbox_cmpl = lpfc_mbx_cmpl_clear_la;
+			if (lpfc_sli_issue_mbox(phba, pmb, (MBX_NOWAIT | MBX_STOP_IOCB))
+				== MBX_NOT_FINISHED) {
+				lpfc_mbox_free(phba, pmb);
+				lpfc_disc_flush_list(phba);
+				psli->ring[(psli->ip_ring)].flag &=
+					~LPFC_STOP_IOCB_EVENT;
+				psli->ring[(psli->fcp_ring)].flag &=
+					~LPFC_STOP_IOCB_EVENT;
+				psli->ring[(psli->next_ring)].flag &=
+					~LPFC_STOP_IOCB_EVENT;
+				phba->hba_state = LPFC_HBA_READY;
+			}
+		} else {
+			lpfc_mbox_free(phba, pmb);
+		}
+		return;
 	}
 
 	mp = (DMABUF_t *) pmb->context1;
@@ -605,27 +581,6 @@ lpfc_mbx_cmpl_read_sparam(lpfcHBA_t * phba, LPFC_MBOXQ_t * pmb)
 	lpfc_mbuf_free(phba, mp->virt, mp->phys);
 	kfree(mp);
 	lpfc_mbox_free(phba, pmb);
-	return;
-
-      out:
-	if (phba->hba_state != LPFC_CLEAR_LA) {
-		lpfc_clear_la(phba, pmb);
-		pmb->mbox_cmpl = lpfc_mbx_cmpl_clear_la;
-		if (lpfc_sli_issue_mbox(phba, pmb, (MBX_NOWAIT | MBX_STOP_IOCB))
-		    == MBX_NOT_FINISHED) {
-			lpfc_mbox_free(phba, pmb);
-			lpfc_disc_flush_list(phba);
-			psli->ring[(psli->ip_ring)].flag &=
-			    ~LPFC_STOP_IOCB_EVENT;
-			psli->ring[(psli->fcp_ring)].flag &=
-			    ~LPFC_STOP_IOCB_EVENT;
-			psli->ring[(psli->next_ring)].flag &=
-			    ~LPFC_STOP_IOCB_EVENT;
-			phba->hba_state = LPFC_HBA_READY;
-		}
-	} else {
-		lpfc_mbox_free(phba, pmb);
-	}
 	return;
 }
 
@@ -792,10 +747,7 @@ lpfc_mbx_cmpl_fabric_reg_login(lpfcHBA_t * phba, LPFC_MBOXQ_t * pmb)
 
 	pmb->context1 = 0;
 
-	if (ndlp->nlp_rpi != 0)
-		lpfc_findnode_remove_rpi(phba, ndlp->nlp_rpi);
 	ndlp->nlp_rpi = mb->un.varWords[0];
-	lpfc_addnode_rpi(phba, ndlp, ndlp->nlp_rpi);
 	ndlp->nlp_type |= NLP_FABRIC;
 	lpfc_nlp_unmapped(phba, ndlp);
 	ndlp->nlp_state = NLP_STE_PRLI_COMPL;
@@ -872,11 +824,7 @@ lpfc_mbx_cmpl_ns_reg_login(lpfcHBA_t * phba, LPFC_MBOXQ_t * pmb)
 			    PCI_DMA_FROMDEVICE);
 
 	pmb->context1 = 0;
-
-	if (ndlp->nlp_rpi != 0)
-		lpfc_findnode_remove_rpi(phba, ndlp->nlp_rpi);
 	ndlp->nlp_rpi = mb->un.varWords[0];
-	lpfc_addnode_rpi(phba, ndlp, ndlp->nlp_rpi);
 	ndlp->nlp_type |= NLP_FABRIC;
 	lpfc_nlp_unmapped(phba, ndlp);
 	ndlp->nlp_state = NLP_STE_PRLI_COMPL;
@@ -902,25 +850,77 @@ lpfc_mbx_cmpl_ns_reg_login(lpfcHBA_t * phba, LPFC_MBOXQ_t * pmb)
 	return;
 }
 
+/*
+ * Start / ReStart npr timer for Discovery / RSCN handling
+ */
+void
+lpfc_set_npr_tmo(lpfcHBA_t * phba, LPFCSCSITARGET_t *targetp,
+		LPFC_NODELIST_t * nlp)
+{
+	uint32_t tmo;
+	lpfcCfgParam_t *clp;
+
+	if(targetp->targetFlags & FC_NPR_ACTIVE)
+		return;
+
+	clp = &phba->config[0];
+	targetp->targetFlags |= FC_NPR_ACTIVE;
+	if(clp[LPFC_CFG_HOLDIO].a_current == 0){
+		tmo = clp[LPFC_CFG_NODEV_TMO].a_current;
+
+		if (( phba->fc_flag & FC_LNK_DOWN) &&
+		   (clp[LPFC_CFG_NODEV_TMO].a_current <
+		    clp[LPFC_CFG_LINKDOWN_TMO].a_current)) {
+			tmo = clp[LPFC_CFG_LINKDOWN_TMO].a_current;
+		}
+		lpfc_start_timer(phba, tmo, &targetp->tmofunc,
+			 lpfc_npr_timeout, (unsigned long)targetp, 0);
+
+ 		/* Start nodev timer */
+		lpfc_printf_log(phba->brd_no, &lpfc_msgBlk0256,
+				lpfc_mes0256,
+				lpfc_msgBlk0256.msgPreambleStr,
+				nlp->nlp_DID, nlp->nlp_flag, nlp->nlp_state,
+				nlp->nlp_sid);
+	}
+	return;
+}
+
+/*
+ * Cancel npr timer for Discovery / RSCN handling
+ */
+int
+lpfc_can_npr_tmo(lpfcHBA_t * phba, LPFCSCSITARGET_t *targetp,
+		LPFC_NODELIST_t * nlp)
+{
+	int rc;
+
+	rc = 0;
+
+	targetp->targetFlags &= ~FC_NPR_ACTIVE;
+	if(targetp->tmofunc.function) {
+		lpfc_stop_timer((struct clk_data *) targetp->tmofunc.data);
+		rc = 1;
+	}
+
+	lpfc_printf_log(phba->brd_no, &lpfc_msgBlk0260,
+			lpfc_mes0260,
+			lpfc_msgBlk0260.msgPreambleStr,
+			nlp->nlp_DID, nlp->nlp_flag, nlp->nlp_state,
+			nlp->nlp_sid);
+	return (rc);
+}
+
 /* Put blp on the bind list */
 int
 lpfc_nlp_bind(lpfcHBA_t * phba, LPFC_BINDLIST_t * blp)
 {
 	LPFCSCSITARGET_t *targetp;
-	LPFCSCSILUN_t *lunp;
-	struct list_head *curr, *next;
 
 	/* Put it at the end of the bind list */
 	list_add_tail(&blp->nlp_listp, &phba->fc_nlpbind_list);
 	phba->fc_bind_cnt++;
 	targetp = phba->device_queue_hash[blp->nlp_sid];
-	if (targetp) {
-		targetp->pcontext = 0;
-		list_for_each_safe(curr, next, &targetp->lunlist) {
-			lunp = list_entry(curr, LPFCSCSILUN_t, list);
-			lunp->pnode = 0;
-		}
-	}
 
 	/* Add scsiid <sid> to BIND list */
 	lpfc_printf_log(phba->brd_no, &lpfc_msgBlk0903,
@@ -957,15 +957,12 @@ lpfc_nlp_plogi(lpfcHBA_t * phba, LPFC_NODELIST_t * nlp)
 			blp = nlp->nlp_listp_bind;
 			if (blp) {
 				blp->nlp_Target = nlp->nlp_Target;
+				nlp->nlp_listp_bind = 0;
+				nlp->nlp_sid = 0;
+				nlp->nlp_flag &= ~NLP_SEED_MASK;
 			}
-			lpfc_sched_flush_target(phba, nlp->nlp_Target,
-						IOSTAT_LOCAL_REJECT,
-						IOERR_SLI_ABORTED);
-
-			nlp->nlp_listp_bind = 0;
-			nlp->nlp_sid = 0;
-			nlp->nlp_Target = 0;
-			nlp->nlp_flag &= ~NLP_SEED_MASK;
+			if(nlp->nlp_Target)
+				lpfc_set_npr_tmo(phba, nlp->nlp_Target, nlp);
 
 		} else if (nlp->nlp_flag & NLP_UNMAPPED_LIST) {
 			nlp->nlp_flag &=
@@ -1006,9 +1003,13 @@ lpfc_nlp_adisc(lpfcHBA_t * phba, LPFC_NODELIST_t * nlp)
 {
 	LPFC_BINDLIST_t *blp;
 	LPFC_SLI_t *psli;
+	LPFCSCSITARGET_t *targetp;
+	lpfcCfgParam_t *clp;
 
 	blp = 0;
 	psli = &phba->sli;
+	clp = &phba->config[0];
+	targetp = nlp->nlp_Target;
 
 	/* Check to see if this node exist on any other list */
 	if (nlp->nlp_flag & NLP_LIST_MASK) {
@@ -1025,20 +1026,11 @@ lpfc_nlp_adisc(lpfcHBA_t * phba, LPFC_NODELIST_t * nlp)
 			blp = nlp->nlp_listp_bind;
 			if (blp) {
 				blp->nlp_Target = nlp->nlp_Target;
+				nlp->nlp_listp_bind = 0;
+				nlp->nlp_flag &= ~NLP_SEED_MASK;
 			}
-			if (nlp->nlp_Target) {
-				lpfc_sched_flush_target(phba, nlp->nlp_Target,
-							IOSTAT_LOCAL_REJECT,
-							IOERR_SLI_ABORTED);
-			}
-
-			nlp->nlp_listp_bind = 0;
-			nlp->nlp_Target = 0;
-
-			/* Keep sid since LPFC_DEV_DISAPPEARED
-			 * is a non-fatal error
-			 */
-			nlp->nlp_flag &= ~NLP_SEED_MASK;
+			if(nlp->nlp_Target)
+				lpfc_set_npr_tmo(phba, nlp->nlp_Target, nlp);
 
 		} else if (nlp->nlp_flag & NLP_UNMAPPED_LIST) {
 			nlp->nlp_flag &=
@@ -1100,16 +1092,13 @@ lpfc_nlp_unmapped(lpfcHBA_t * phba, LPFC_NODELIST_t * nlp)
 			blp = nlp->nlp_listp_bind;
 			if (blp) {
 				blp->nlp_Target = nlp->nlp_Target;
+				nlp->nlp_listp_bind = 0;
+				nlp->nlp_sid = 0;
+				nlp->nlp_flag &= ~NLP_SEED_MASK;
 			}
-			lpfc_sched_flush_target(phba, nlp->nlp_Target,
-						IOSTAT_LOCAL_REJECT,
-						IOERR_SLI_ABORTED);
-			nlp->nlp_listp_bind = 0;
-			nlp->nlp_Target = 0;
-			/* Keep sid since LPFC_DEV_DISAPPEARED
-			 * is a non-fatal error
-			 */
-			nlp->nlp_flag &= ~NLP_SEED_MASK;
+			if(nlp->nlp_Target)
+				lpfc_set_npr_tmo(phba, nlp->nlp_Target, nlp);
+
 		} else if (nlp->nlp_flag & NLP_UNMAPPED_LIST) {
 			return (0);	/* Already on unmapped list */
 		} else if (nlp->nlp_flag & NLP_PLOGI_LIST) {
@@ -1181,7 +1170,6 @@ lpfc_nlp_mapped(lpfcHBA_t * phba, LPFC_NODELIST_t * nlp, LPFC_BINDLIST_t * blp)
 	nlp->nlp_flag |= NLP_MAPPED_LIST;
 	nlp->nlp_type |= NLP_FCP_TARGET;
 	nlp->nlp_sid = blp->nlp_sid;
-	nlp->nlp_Target = blp->nlp_Target;
 	nlp->nlp_listp_bind = blp;
 	targetp = phba->device_queue_hash[nlp->nlp_sid];
 
@@ -1192,9 +1180,17 @@ lpfc_nlp_mapped(lpfcHBA_t * phba, LPFC_NODELIST_t * nlp, LPFC_BINDLIST_t * blp)
 			nlp->nlp_DID, nlp->nlp_sid, phba->fc_map_cnt,
 			(unsigned long)blp);
 
+	if(nlp->nlp_tmofunc.function) {
+		nlp->nlp_flag &= ~NLP_DELAY_TMO;
+		lpfc_stop_timer((struct clk_data *)nlp->nlp_tmofunc.data);
+	}
 	if (targetp) {
+		lpfc_can_npr_tmo(phba, targetp, nlp);
+		blp->nlp_Target = targetp;
 		nlp->nlp_Target = targetp;
 		targetp->pcontext = nlp;
+		lpfc_scsi_assign_rpi(phba, targetp, nlp->nlp_rpi);
+		targetp->un.dev_did = nlp->nlp_DID;
 		list_for_each_safe(curr, next, &targetp->lunlist) {
 			lunp = list_entry(curr, LPFCSCSILUN_t, list);
 			lunp->pnode = (LPFC_NODELIST_t *) nlp;
@@ -1212,7 +1208,8 @@ lpfc_set_disctmo(lpfcHBA_t * phba)
 {
 	uint32_t tmo;
 
-	tmo = ((phba->fc_ratov * 2) + 1);
+	/* lpfc_prep_els_iocb adds LPFC_DRVR_TIMEOUT, so we must here as well */
+	tmo = (phba->fc_ratov << 1) + LPFC_DRVR_TIMEOUT + 1;
 
 	/* Turn off discovery timer if its running */
 	if (phba->fc_disctmo.function) {
@@ -1355,6 +1352,49 @@ lpfc_no_rpi(lpfcHBA_t * phba, LPFC_NODELIST_t * ndlp)
 
 /*
  * Free resources / clean up outstanding I/Os
+ * associated with a brand new rpi.
+ */
+int
+lpfc_new_rpi(lpfcHBA_t * phba, uint16_t rpi)
+{
+	LPFC_SLI_t *psli;
+	LPFC_SLI_RING_t *pring;
+	LPFC_IOCBQ_t *iocb, *next_iocb;
+	IOCB_t *icmd;
+	struct list_head *curr, *next;
+
+	if (rpi) {
+		psli = &phba->sli;
+		pring = &psli->ring[psli->fcp_ring];
+
+		list_for_each_safe(curr, next, &pring->txq) {
+			next_iocb = list_entry(curr, LPFC_IOCBQ_t,
+						       list);
+			iocb = next_iocb;
+			icmd = &iocb->iocb;
+			if (icmd->ulpContext == (volatile ushort)rpi) {
+				/* It matches, so deque and call compl
+				   with an error */
+				list_del(&iocb->list);
+				pring->txq_cnt--;
+				if (iocb->iocb_cmpl) {
+					icmd->ulpStatus =
+					    IOSTAT_LOCAL_REJECT;
+					icmd->un.ulpWord[4] =
+					    IOERR_SLI_ABORTED;
+					(iocb->iocb_cmpl) (phba,
+							   iocb, iocb);
+				} else {
+					lpfc_iocb_free(phba, iocb);
+				}
+			}
+		}
+	}
+	return (0);
+}
+
+/*
+ * Free resources / clean up outstanding I/Os
  * associated with a LPFC_NODELIST entry. This
  * routine effectively results in a "software abort".
  */
@@ -1450,11 +1490,10 @@ lpfc_driver_abort(lpfcHBA_t * phba, LPFC_NODELIST_t * ndlp)
 
 	/* If we are delaying issuing an ELS command, cancel it */
 	if ((ndlp->nlp_tmofunc.function) && (ndlp->nlp_flag & NLP_DELAY_TMO)) {
-		ndlp->nlp_flag &= ~(NLP_NODEV_TMO | NLP_DELAY_TMO);
+		ndlp->nlp_flag &= ~NLP_DELAY_TMO;
 		clkData = (struct clk_data *)(ndlp->nlp_tmofunc.data);
 		cmd = (uint32_t) (unsigned long)clkData->clData2;
 		lpfc_stop_timer((struct clk_data *)ndlp->nlp_tmofunc.data);
-		ndlp->nlp_rflag &= ~NLP_NPR_ACTIVE;
 
 		/* Allocate an IOCB and indicate an error completion */
 		/* Allocate a buffer for the command iocb */
@@ -1492,6 +1531,42 @@ lpfc_driver_abort(lpfcHBA_t * phba, LPFC_NODELIST_t * ndlp)
 	return (0);
 }
 
+void
+lpfc_dequenode(lpfcHBA_t * phba, LPFC_NODELIST_t * ndlp)
+{
+	LPFC_BINDLIST_t *blp;
+
+	if (ndlp->nlp_flag & NLP_LIST_MASK) {
+		if (ndlp->nlp_flag & NLP_MAPPED_LIST) {
+			ndlp->nlp_flag &= ~NLP_MAPPED_LIST;
+			phba->fc_map_cnt--;
+			list_del(&ndlp->nlp_listp);
+			phba->nport_event_cnt++;
+			blp = ndlp->nlp_listp_bind;
+			ndlp->nlp_listp_bind = 0;
+			if (blp) {
+				blp->nlp_Target = ndlp->nlp_Target;
+				lpfc_nlp_bind(phba, blp);
+			}
+			ndlp->nlp_flag &= ~NLP_SEED_MASK;
+		} else if (ndlp->nlp_flag & NLP_UNMAPPED_LIST) {
+			ndlp->nlp_flag &= ~NLP_UNMAPPED_LIST;
+			phba->fc_unmap_cnt--;
+			list_del(&ndlp->nlp_listp);
+			phba->nport_event_cnt++;
+		} else if (ndlp->nlp_flag & NLP_PLOGI_LIST) {
+			ndlp->nlp_flag &= ~NLP_PLOGI_LIST;
+			phba->fc_plogi_cnt--;
+			list_del(&ndlp->nlp_listp);
+		} else if (ndlp->nlp_flag & NLP_ADISC_LIST) {
+			ndlp->nlp_flag &= ~NLP_ADISC_LIST;
+			phba->fc_adisc_cnt--;
+			list_del(&ndlp->nlp_listp);
+		}
+	}
+	return;
+}
+
 /*
  * Free resources associated with LPFC_NODELIST entry
  * so it can be freed.
@@ -1512,23 +1587,11 @@ lpfc_freenode(lpfcHBA_t * phba, LPFC_NODELIST_t * ndlp)
 			ndlp->nlp_DID, ndlp->nlp_flag, ndlp->nlp_state,
 			ndlp->nlp_rpi);
 
-	/* NLP_FREED_NODE flag is to protect the node from being freed
-	 * more then once. For driver_abort and other cases where the DSM 
-	 * calls itself recursively, its possible to free the node twice.
-	 */
-	if (ndlp->nlp_rflag & NLP_FREED_NODE) {
-		return (0);
-	}
-
-	if (ndlp->nlp_flag & NLP_LIST_MASK) {
-		lpfc_findnode_did(phba, (NLP_SEARCH_ALL | NLP_SEARCH_DEQUE),
-				  ndlp->nlp_DID);
-	}
+	lpfc_dequenode(phba, ndlp);
 
 	if (ndlp->nlp_tmofunc.function) {
 		lpfc_stop_timer((struct clk_data *)ndlp->nlp_tmofunc.data);
-		ndlp->nlp_flag &= ~(NLP_NODEV_TMO | NLP_DELAY_TMO);
-		ndlp->nlp_rflag &= ~NLP_NPR_ACTIVE;
+		ndlp->nlp_flag &= ~NLP_DELAY_TMO;
 	}
 
 	if (ndlp->nlp_rpi) {
@@ -1540,7 +1603,6 @@ lpfc_freenode(lpfcHBA_t * phba, LPFC_NODELIST_t * ndlp)
 				lpfc_mbox_free(phba, mbox);
 			}
 		}
-		lpfc_findnode_remove_rpi(phba, ndlp->nlp_rpi);
 		lpfc_no_rpi(phba, ndlp);
 		ndlp->nlp_rpi = 0;
 		lpfc_set_failmask(phba, ndlp, LPFC_DEV_DISCONNECTED,
@@ -1557,10 +1619,28 @@ lpfc_freenode(lpfcHBA_t * phba, LPFC_NODELIST_t * ndlp)
 int
 lpfc_nlp_remove(lpfcHBA_t * phba, LPFC_NODELIST_t * ndlp)
 {
+	LPFCSCSITARGET_t *targetp;
+	LPFCSCSILUN_t    *lunp;
+	struct list_head *curr, *next;
+
 	if(ndlp->nlp_disc_refcnt) {
 		ndlp->nlp_rflag |= NLP_DELAY_REMOVE;
 	}
 	else {
+		/* Since the ndlp is being freed, disassociate it
+		 * from the target / lun structures.
+		 */
+		targetp = ndlp->nlp_Target;
+		if(targetp) {
+			lpfc_sched_flush_target(phba, targetp, IOSTAT_LOCAL_REJECT,
+				IOERR_SLI_ABORTED);
+
+			targetp->pcontext = 0;
+			list_for_each_safe(curr, next, &targetp->lunlist) {
+				lunp = list_entry(curr, LPFCSCSILUN_t, list);
+				lunp->pnode = 0;
+			}
+		}
 		lpfc_freenode(phba, ndlp);
 		lpfc_nlp_free(phba, ndlp);
 	}
@@ -2128,25 +2208,6 @@ lpfc_disc_start(lpfcHBA_t * phba)
 			phba->hba_state, phba->fc_flag, phba->fc_plogi_cnt,
 			phba->fc_adisc_cnt);
 
-	/* At this point, nothing should be on the mapped list, without
-	 * NODEV_TMO timer running on it, link up discovery only.
-	 */
-	if (!(phba->fc_flag & FC_RSCN_MODE)) {
-		list_for_each_safe(pos, next, &phba->fc_nlpmap_list) {
-			new_ndlp = list_entry(pos, LPFC_NODELIST_t, nlp_listp);
-			ndlp = new_ndlp;
-
-			/* If nodev timer is not running, get rid of it */
-			if (!(ndlp->nlp_flag & NLP_NODEV_TMO)) {
-				lpfc_set_failmask(phba, ndlp,
-						  LPFC_DEV_DISCONNECTED,
-						  LPFC_SET_BITMASK);
-				list_del(&ndlp->nlp_listp);
-				lpfc_nlp_remove(phba, ndlp);
-			}
-		}
-	}
-
 	/* First do ADISC for authentication */
 	if (phba->fc_adisc_cnt) {
 		if (did_changed == 0) {
@@ -2168,13 +2229,14 @@ lpfc_disc_start(lpfcHBA_t * phba)
 			}
 			return;
 		}
-		/* Move these to PLOGI list instead */
+		/* If the did changed, force PLOGI discovery on all NPorts scheduled for ADISC */
 		if (!list_empty(&phba->fc_adisc_list)) {
 			list_for_each_safe(pos, next, &phba->fc_adisc_list) {
 				new_ndlp = list_entry(pos, LPFC_NODELIST_t,
 						      nlp_listp);
 				ndlp = new_ndlp;
-				list_del(&ndlp->nlp_listp);
+				lpfc_freenode(phba, ndlp);
+				ndlp->nlp_state = NLP_STE_UNUSED_NODE;
 				lpfc_nlp_plogi(phba, ndlp);
 			}
 		}
@@ -2253,7 +2315,6 @@ lpfc_disc_flush_list(lpfcHBA_t * phba)
 			lpfc_set_failmask(phba, ndlp, LPFC_DEV_DISCONNECTED,
 					  LPFC_SET_BITMASK);
 			lpfc_free_tx(phba, ndlp);
-			list_del(&ndlp->nlp_listp);
 			lpfc_nlp_remove(phba, ndlp);
 		}
 	}
@@ -2264,7 +2325,6 @@ lpfc_disc_flush_list(lpfcHBA_t * phba)
 			lpfc_set_failmask(phba, ndlp, LPFC_DEV_DISCONNECTED,
 					  LPFC_SET_BITMASK);
 			lpfc_free_tx(phba, ndlp);
-			list_del(&ndlp->nlp_listp);
 			lpfc_nlp_remove(phba, ndlp);
 		}
 	}
@@ -2300,6 +2360,7 @@ lpfc_disc_timeout(unsigned long ptr)
 	clkData = (struct clk_data *)ptr;
 	phba = clkData->phba;
 	if (!phba) {
+		kfree(clkData);
 		return;
 	}
 	LPFC_DRVR_LOCK(phba, iflag);
@@ -2309,6 +2370,7 @@ lpfc_disc_timeout(unsigned long ptr)
 
 	clp = &phba->config[0];
 	psli = &phba->sli;
+	phba->fc_disctmo.function = 0;	/* timer expired */
 
 	/* hba_state is identically LPFC_LOCAL_CFG_LINK while waiting for FAN */
 	if (phba->hba_state == LPFC_LOCAL_CFG_LINK) {
@@ -2494,19 +2556,13 @@ void
 lpfc_linkdown_timeout(unsigned long ptr)
 {
 	lpfcHBA_t *phba;
-	LPFC_NODELIST_t *ndlp;
-	struct list_head *listp, *pos;
-	struct list_head *node_list[4];
-	LPFCSCSITARGET_t *targetp;
-	lpfcCfgParam_t *clp;
-	uint32_t tgt;
 	struct clk_data *clkData;
 	unsigned long iflag;
-	int i;
 
 	clkData = (struct clk_data *)ptr;
 	phba = clkData->phba;
 	if (!phba) {
+		kfree(clkData);
 		return;
 	}
 
@@ -2514,8 +2570,6 @@ lpfc_linkdown_timeout(unsigned long ptr)
 	clkData->timeObj->function = 0;
 	list_del((struct list_head *)clkData);
 	kfree(clkData);
-
-	clp = &phba->config[0];
 
 	/* Link Down timeout */
 	lpfc_printf_log(phba->brd_no, &lpfc_msgBlk1306,
@@ -2527,97 +2581,6 @@ lpfc_linkdown_timeout(unsigned long ptr)
 	phba->fc_flag |= (FC_LD_TIMER | FC_LD_TIMEOUT);	/* indicate timeout */
 	phba->hba_flag &= ~FC_LFR_ACTIVE;
 
-	/* Issue a DEVICE REMOVE event to all nodes */
-	node_list[0] = &phba->fc_plogi_list;
-	node_list[1] = &phba->fc_adisc_list;
-	node_list[2] = &phba->fc_nlpunmap_list;
-	node_list[3] = &phba->fc_nlpmap_list;
-	for (i = 0; i < 4; i++) {
-		listp = node_list[i];
-		if (list_empty(listp))
-			continue;
-
-		list_for_each(pos, listp) {
-			ndlp = list_entry(pos, LPFC_NODELIST_t, nlp_listp);
-
-			/* Fabric nodes are not handled thru state machine for
-			   link down tmo */
-			if (!(ndlp->nlp_type & NLP_FABRIC)) {
-				lpfc_disc_state_machine(phba, ndlp, 0,
-							NLP_EVT_DEVICE_RM);
-			}
-		}
-	}
-
-	if ((clp[LPFC_CFG_NODEV_TMO].a_current == 0) &&
-	    (clp[LPFC_CFG_HOLDIO].a_current == 0)) {
-
-		for (tgt = 0; tgt < MAX_FCP_TARGET; tgt++) {
-			targetp = phba->device_queue_hash[tgt];
-			if ((targetp) && (targetp->targetFlags &
-					  FC_NPR_ACTIVE)) {
-				targetp->targetFlags &= ~FC_NPR_ACTIVE;
-
-				lpfc_sched_flush_target(phba, targetp,
-							IOSTAT_LOCAL_REJECT,
-							IOERR_SLI_ABORTED);
-
-				if (targetp->tmofunc.function) {
-					lpfc_stop_timer((struct clk_data *)
-							targetp->tmofunc.data);
-				}
-			}
-		}
-
-		/* Just to be sure */
-		lpfc_sched_flush_hba(phba, IOSTAT_LOCAL_REJECT,
-				     IOERR_SLI_ABORTED);
-	}
-	LPFC_DRVR_UNLOCK(phba, iflag);
-	return;
-}
-
-void
-lpfc_nodev_timeout(unsigned long ptr)
-{
-	lpfcHBA_t *phba;
-	LPFC_NODELIST_t *ndlp;
-	LPFCSCSITARGET_t *targetp;
-	struct clk_data *clkData;
-	unsigned long iflag;
-
-	clkData = (struct clk_data *)ptr;
-	phba = clkData->phba;
-	LPFC_DRVR_LOCK(phba, iflag);
-	ndlp = (LPFC_NODELIST_t *) clkData->clData1;
-	clkData->timeObj->function = 0;
-	list_del((struct list_head *)clkData);
-	kfree(clkData);
-
-	/* Nodev timeout on NPort <nlp_DID> */
-	lpfc_printf_log(phba->brd_no, &lpfc_msgBlk0203,
-			lpfc_mes0203,
-			lpfc_msgBlk0203.msgPreambleStr,
-			ndlp->nlp_DID, ndlp->nlp_flag, ndlp->nlp_state,
-			ndlp->nlp_rpi);
-
-	ndlp->nlp_flag &= ~(NLP_NODEV_TMO | NLP_DELAY_TMO);
-
-	ndlp->nlp_rflag &= ~NLP_NPR_ACTIVE;
-	targetp = ndlp->nlp_Target;
-	if (targetp) {
-		targetp->targetFlags &= ~FC_NPR_ACTIVE;
-		lpfc_sched_flush_target(phba, targetp, IOSTAT_LOCAL_REJECT,
-					IOERR_SLI_ABORTED);
-
-		if (targetp->tmofunc.function) {
-			lpfc_stop_timer((struct clk_data *)
-					targetp->tmofunc.data);
-		}
-	}
-	ndlp->nlp_flag &= ~(NLP_NODEV_TMO | NLP_DELAY_TMO);
-
-	lpfc_disc_state_machine(phba, ndlp, 0, NLP_EVT_DEVICE_RM);
 	LPFC_DRVR_UNLOCK(phba, iflag);
 	return;
 }
@@ -2665,12 +2628,9 @@ lpfc_find_lun(lpfcHBA_t * phba, uint32_t tgt, uint64_t lun, int create_flag)
 			if (lunp->lun_id == lun) {
 				return (lunp);
 			}
-			lunp = lunp->pnextLun;
 		}
 		if (create_flag) {
-			if (lun < targetp->max_lun) {
-				goto lun_create;
-			}
+			goto lun_create;
 		}
 	} else {
 		if (create_flag) {
@@ -2712,10 +2672,10 @@ lpfc_find_lun(lpfcHBA_t * phba, uint32_t tgt, uint64_t lun, int create_flag)
 			} else {
 				lpfc_sched_target_init(targetp, (uint16_t)
 						clp[LPFC_CFG_DFT_HBA_Q_DEPTH]
-						       .a_current);
+						       .a_current - 10);
 			}
 
-		      lun_create:
+lun_create:
 			lunp = kmalloc(sizeof (LPFCSCSILUN_t), GFP_ATOMIC);
 			if (lunp == 0) {
 				return (0);
@@ -2772,7 +2732,7 @@ lpfc_disc_cmpl_rptlun(lpfcHBA_t * phba,
 
 	if (ndlp == 0) {
 		targetp->rptLunState = REPORT_LUN_ERRORED;
-		targetp->targetFlags &= ~(FC_NPR_ACTIVE | FC_RETRY_RPTLUN);
+		targetp->targetFlags &= ~FC_RETRY_RPTLUN;
 		if (targetp->tmofunc.function) {
 			lpfc_stop_timer((struct clk_data *)
 					targetp->tmofunc.data);
@@ -2843,12 +2803,12 @@ lpfc_disc_cmpl_rptlun(lpfcHBA_t * phba,
 			}
 			if (i) {
 				targetp->max_lun = max + 1;
+			} else {
+				targetp->max_lun = 0;
 			}
 
 			targetp->rptLunState = REPORT_LUN_COMPLETE;
-			ndlp->nlp_rflag &= ~NLP_NPR_ACTIVE;
-			targetp->targetFlags &=
-			    ~(FC_NPR_ACTIVE | FC_RETRY_RPTLUN);
+			targetp->targetFlags &= ~FC_RETRY_RPTLUN;
 			if (targetp->tmofunc.function) {
 				lpfc_stop_timer((struct clk_data *)
 						targetp->tmofunc.data);
@@ -2891,9 +2851,7 @@ lpfc_disc_cmpl_rptlun(lpfcHBA_t * phba,
 				 */
 				targetp->max_lun = 1;
 
-				ndlp->nlp_rflag &= ~NLP_NPR_ACTIVE;
-				targetp->targetFlags &=
-				    ~(FC_NPR_ACTIVE | FC_RETRY_RPTLUN);
+				targetp->targetFlags &= ~FC_RETRY_RPTLUN;
 				if (targetp->tmofunc.function) {
 					lpfc_stop_timer((struct clk_data *)
 							targetp->tmofunc.data);
@@ -3075,11 +3033,6 @@ lpfc_set_failmask(lpfcHBA_t * phba,
 			}
 		}
 	}
-
-	/* Since its fatal, now we can clear sid */
-	if ((flag == LPFC_SET_BITMASK) && (bitmask & LPFC_DEV_FATAL_ERROR)) {
-		ndlp->nlp_sid = 0;
-	}
 	return;
 }
 
@@ -3095,6 +3048,7 @@ lpfc_free_tx(lpfcHBA_t * phba, LPFC_NODELIST_t * ndlp)
 	IOCB_t *icmd;
 	LPFC_SLI_RING_t *pring;
 	struct list_head *curr, *next;
+	struct lpfc_dmabuf *pCmd, *pRsp;
 
 	psli = &phba->sli;
 	pring = &psli->ring[LPFC_ELS_RING];
@@ -3132,32 +3086,27 @@ lpfc_free_tx(lpfcHBA_t * phba, LPFC_NODELIST_t * ndlp)
 			iocb->iocb_cmpl = 0;
 			/* context2 = cmd, context2->next = rsp, context3 =
 			   bpl */
-			if (iocb->context2) {
+			pCmd = (struct lpfc_dmabuf *)iocb->context2;
+			if (pCmd) {
 				/* Free the response IOCB before handling the
 				   command. */
-
-				if (((DMABUF_t *) (iocb->context2))
-				    ->list.next) {
-
+				pRsp = list_entry(pCmd->list.next, DMABUF_t, list); 
+				if (pRsp) {
 					/* Delay before releasing rsp buffer to
 					 * give UNREG mbox a chance to take
 					 * effect.
 					 */
+					list_add(&pRsp->list, &phba->free_buf_list);
 					lpfc_start_timer(phba, 1,
 							 &phba->buf_tmo,
 							 lpfc_put_buf,
 							 (unsigned
-							  long)(((DMABUF_t *)
-								 (iocb->
-								  context2))->
-								list.next), 0);
+							  long)pRsp, 0);
 				}
 				lpfc_mbuf_free(phba,
-					       ((DMABUF_t *) iocb->context2)->
-					       virt,
-					       ((DMABUF_t *) iocb->context2)->
-					       phys);
-				kfree(iocb->context2);
+					       pCmd->virt, 
+					       pCmd->phys);
+				kfree(pCmd);
 			}
 
 			if (iocb->context3) {
@@ -3195,17 +3144,20 @@ lpfc_put_buf(unsigned long ptr)
 	lpfcHBA_t *phba;
 	struct clk_data *clkData;
 	unsigned long iflag;
+	struct lpfc_dmabuf *some_buf;
 
 	clkData = (struct clk_data *)ptr;
 	phba = clkData->phba;
 	LPFC_DRVR_LOCK(phba, iflag);
 	clkData->timeObj->function = 0;
 	list_del((struct list_head *)clkData);
-	kfree(clkData);
 
-	lpfc_mbuf_free(phba, ((DMABUF_t *) (clkData->clData1))->virt,
-		       ((DMABUF_t *) (clkData->clData1))->phys);
-	kfree((void *)clkData->clData1);
+	some_buf = (struct lpfc_dmabuf *)clkData->clData1;
+	list_del(&some_buf->list);
+	lpfc_mbuf_free(phba, some_buf->virt,
+		       some_buf->phys);
+	kfree((void *)some_buf);
+	kfree(clkData);
 	LPFC_DRVR_UNLOCK(phba, iflag);
 	return;
 }
@@ -3240,11 +3192,7 @@ lpfc_mbx_cmpl_fdmi_reg_login(lpfcHBA_t * phba, LPFC_MBOXQ_t * pmb)
 			    PCI_DMA_FROMDEVICE);
 
 	pmb->context1 = 0;
-
-	if (ndlp->nlp_rpi != 0)
-		lpfc_findnode_remove_rpi(phba, ndlp->nlp_rpi);
 	ndlp->nlp_rpi = mb->un.varWords[0];
-	lpfc_addnode_rpi(phba, ndlp, ndlp->nlp_rpi);
 	ndlp->nlp_type |= NLP_FABRIC;
 	lpfc_nlp_unmapped(phba, ndlp);
 	ndlp->nlp_state = NLP_STE_PRLI_COMPL;
@@ -3271,108 +3219,45 @@ lpfc_mbx_cmpl_fdmi_reg_login(lpfcHBA_t * phba, LPFC_MBOXQ_t * pmb)
 }
 
 /*
- * This routine looks up the ndlp hash 
- * table for the given RPI. If rpi found
- * it return the node list pointer
- * else return 0.
+ * This routine finds a node by sequentially searching each of the node lists
+ * maintained in the hba structure for that node that contains the caller's
+ * rpi.  If found, the node list pointer is returned.  Otherwise NULL is
+ * returned.
  */
 LPFC_NODELIST_t *
 lpfc_findnode_rpi(lpfcHBA_t * phba, uint16_t rpi)
 {
-	LPFC_NODELIST_t *ret;
+	LPFC_NODELIST_t *ndlp;
+	struct list_head *pos, *next;
 
-	ret = phba->fc_nlplookup[LPFC_RPI_HASH_FUNC(rpi)];
-	while ((ret != 0) && (ret->nlp_rpi != rpi)) {
-		ret = ret->nlp_rpi_hash_next;
-	}
-	return ret;
-}
-
-/*
- * This routine looks up the ndlp hash table for the
- * given RPI. If rpi found it return the node list 
- * pointer else return 0 after deleting the entry 
- * from hash table. 
- */
-LPFC_NODELIST_t *
-lpfc_findnode_remove_rpi(lpfcHBA_t * phba, uint16_t rpi)
-{
-	LPFC_NODELIST_t *ret, *temp;;
-
-	ret = phba->fc_nlplookup[LPFC_RPI_HASH_FUNC(rpi)];
-
-	if (ret == 0) {
-		return 0;
-	}
-
-	if (ret->nlp_rpi == rpi) {
-		phba->fc_nlplookup[LPFC_RPI_HASH_FUNC(rpi)] =
-		    ret->nlp_rpi_hash_next;
-		ret->nlp_rpi_hash_next = 0;
-		return ret;
-	}
-
-	while ((ret->nlp_rpi_hash_next != 0) &&
-	       (ret->nlp_rpi_hash_next->nlp_rpi != rpi)) {
-		ret = ret->nlp_rpi_hash_next;
-	}
-
-	if (ret->nlp_rpi_hash_next != 0) {
-		temp = ret->nlp_rpi_hash_next;
-		ret->nlp_rpi_hash_next = temp->nlp_rpi_hash_next;
-		temp->nlp_rpi_hash_next = 0;
-		return temp;
-	} else {
-		return 0;
-	}
-}
-
-/*
- * This routine adds the node list entry to the
- * ndlp hash table.
- */
-void
-lpfc_addnode_rpi(lpfcHBA_t * phba, LPFC_NODELIST_t * ndlp, uint16_t rpi)
-{
-
-	uint32_t index;
-
-	index = LPFC_RPI_HASH_FUNC(rpi);
-	ndlp->nlp_rpi_hash_next = phba->fc_nlplookup[index];
-	phba->fc_nlplookup[index] = ndlp;
-	return;
-}
-
-/*
- * This routine deletes the node list entry from the
- * ndlp hash table.
- */
-LPFC_NODELIST_t *
-lpfc_removenode_rpihash(lpfcHBA_t * phba, LPFC_NODELIST_t * ndlp)
-{
-	LPFC_NODELIST_t *node_list;
-	uint32_t index;
-
-	for (index = 0; index < LPFC_RPI_HASH_SIZE; index++) {
-		node_list = phba->fc_nlplookup[index];
-
-		if (!node_list)
-			continue;
-		if (node_list == ndlp) {
-			phba->fc_nlplookup[index] =
-			    node_list->nlp_rpi_hash_next;
-			node_list->nlp_rpi_hash_next = 0;
-			return node_list;
-		}
-		while ((node_list->nlp_rpi_hash_next != 0) &&
-		       (node_list->nlp_rpi_hash_next != ndlp)) {
-			node_list = node_list->nlp_rpi_hash_next;
-		}
-		if (node_list->nlp_rpi_hash_next) {
-			node_list->nlp_rpi_hash_next = ndlp->nlp_rpi_hash_next;
-			ndlp->nlp_rpi_hash_next = 0;
+	/*
+	 * The lpfc_els module calls this routine for GEN_REQUEST iocbs. 
+	 * Start the sequential search with the plogi list. 
+	 */
+	list_for_each_safe(pos, next, &phba->fc_plogi_list) {
+		ndlp = list_entry(pos, LPFC_NODELIST_t, nlp_listp);
+		if (ndlp->nlp_rpi == rpi)
 			return ndlp;
-		}
 	}
-	return 0;
+
+	list_for_each_safe(pos, next, &phba->fc_adisc_list) {
+		ndlp = list_entry(pos, LPFC_NODELIST_t, nlp_listp);
+		if (ndlp->nlp_rpi == rpi)
+			return ndlp;
+	}
+
+	list_for_each_safe(pos, next, &phba->fc_nlpunmap_list) {
+		ndlp = list_entry(pos, LPFC_NODELIST_t, nlp_listp);
+		if (ndlp->nlp_rpi == rpi)
+			return ndlp;
+	}
+
+	list_for_each_safe(pos, next, &phba->fc_nlpmap_list) {
+		ndlp = list_entry(pos, LPFC_NODELIST_t, nlp_listp);
+		if (ndlp->nlp_rpi == rpi)
+			return ndlp;
+	}
+
+	/* No match found */
+	return ((LPFC_NODELIST_t *) 0);
 }

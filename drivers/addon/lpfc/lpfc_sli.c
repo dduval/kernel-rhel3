@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_sli.c 1.74.1.3 2004/05/24 17:30:47EDT jselx Exp  $
+ * $Id: lpfc_sli.c 1.4 2004/11/02 11:28:55EST sf_support Exp  $
  */
 
 #include <linux/version.h>
@@ -39,7 +39,7 @@
 #include "lpfc_scsi.h"
 #include "lpfc_crtn.h"
 
-int lpfc_sli_reset_on_init = 0;
+int lpfc_sli_reset_on_init = 1;
 
 int lpfc_sli_handle_mb_event(lpfcHBA_t *);
 int lpfc_sli_handle_ring_event(lpfcHBA_t *, LPFC_SLI_RING_t *, uint32_t);
@@ -98,7 +98,7 @@ uint8_t lpfc_sli_iocb_cmd_type[CMD_MAX_IOCB_CMD] = {
 	LPFC_UNSOL_IOCB,	/* CMD_RCV_ELS_REQ_CX      0x0D */
 	LPFC_ABORT_IOCB,	/* CMD_ABORT_XRI_CN        0x0E */
 	LPFC_ABORT_IOCB,	/* CMD_ABORT_XRI_CX        0x0F */
-	LPFC_ABORT_IOCB,	/* CMD_CLOSE_XRI_CR        0x10 */
+	LPFC_ABORT_IOCB,	/* CMD_CLOSE_XRI_CN        0x10 */
 	LPFC_ABORT_IOCB,	/* CMD_CLOSE_XRI_CX        0x11 */
 	LPFC_SOL_IOCB,		/* CMD_CREATE_XRI_CR       0x12 */
 	LPFC_SOL_IOCB,		/* CMD_CREATE_XRI_CX       0x13 */
@@ -642,6 +642,7 @@ lpfc_sli_handle_mb_event(lpfcHBA_t * phba)
 	MAILBOX_t *mbox;
 	MAILBOX_t *pmbox;
 	LPFC_MBOXQ_t *pmb;
+	DMABUF_t   *mp;
 	LPFC_SLI_t *psli;
 	int i;
 	uint32_t process_next;
@@ -763,6 +764,11 @@ lpfc_sli_handle_mb_event(lpfcHBA_t * phba)
 			lpfc_discq_post_event(phba, (void *)pmb, 0,
 				LPFC_EVT_MBOX);
 		} else {
+			mp = (DMABUF_t *) (pmb->context1);
+			if(mp) {
+				lpfc_mbuf_free(phba, mp->virt, mp->phys);
+				kfree(mp);
+			}
 			lpfc_mbox_free(phba, pmb);
 		}
 	}
@@ -776,6 +782,12 @@ lpfc_sli_handle_mb_event(lpfcHBA_t * phba)
 		if ((pmb = lpfc_mbox_get(phba))) {
 			if (lpfc_sli_issue_mbox(phba, pmb, MBX_NOWAIT) ==
 			    MBX_NOT_FINISHED) {
+				mp = (DMABUF_t *) (pmb->context1);
+				if(mp) {
+					lpfc_mbuf_free(phba, mp->virt,
+						mp->phys);
+					kfree(mp);
+				}
 				lpfc_mbox_free(phba, pmb);
 				process_next = 1;
 				continue;	/* loop back */
@@ -857,6 +869,8 @@ lpfc_sli_handle_ring_event(lpfcHBA_t * phba,
 		lpfc_handle_eratt(phba, HS_FFER3);
 		return (1);
 	}
+	
+	rmb();
 
 	/* Get the next available response iocb.
 	 * rspidx is the IOCB index of the next IOCB that the driver
@@ -871,6 +885,7 @@ lpfc_sli_handle_ring_event(lpfcHBA_t * phba,
 		lpfc_sli_pcimem_bcopy((uint32_t *) entry,
 				      (uint32_t *) & rspiocbp->iocb,
 				      sizeof (IOCB_t));
+		wmb();
 		irsp = &rspiocbp->iocb;
 
 		/* bump iocb available response index */
@@ -901,6 +916,7 @@ lpfc_sli_handle_ring_event(lpfcHBA_t * phba,
 			to_slim = (uint8_t *) phba->MBslimaddr +
 			    (SLIMOFF + (ringno * 2) + 1) * 4;
 			writel(status, to_slim);
+			readl(to_slim); /* flush */
 		}
 
 		/* chain all iocb entries until LE is set */
@@ -950,7 +966,7 @@ lpfc_sli_handle_ring_event(lpfcHBA_t * phba,
 				/* Solicited ABORT Responses */
 				/* Based on the iotag field, get the cmd IOCB
 				   from the txcmplq */
-				if ((irsp->ulpCommand != CMD_XRI_ABORTED_CX) &&
+				if ((irsp->ulpCommand == CMD_ABORT_MXRI64_CN) &&
 				    ((cmdiocbp =
 				      lpfc_sli_ringtxcmpl_get(phba, pring,
 							      saveq, 0)))) {
@@ -1026,7 +1042,9 @@ lpfc_sli_handle_ring_event(lpfcHBA_t * phba,
 		psli->slistat.iocbRspFull[ringno]++;
 		/* SET RxRE_RSP in Chip Att register */
 		status = ((CA_R0ATT | CA_R0RE_RSP) << (ringno * 4));
+		wmb();
 		writel(status, phba->CAregaddr);
+		readl(phba->CAregaddr); /* flush */
 	}
 	if ((mask & HA_R0CE_RSP) && (pring->flag & LPFC_CALL_RING_AVAILABLE)) {
 		pring->flag &= ~LPFC_CALL_RING_AVAILABLE;
@@ -1211,6 +1229,7 @@ lpfc_mbox_timeout(unsigned long ptr)
 	LPFC_SLI_t *psli;
 	LPFC_MBOXQ_t *pmbox;
 	MAILBOX_t *mb;
+	DMABUF_t * mp;
 	struct clk_data *clkData;
 	unsigned long iflag;
 
@@ -1241,6 +1260,11 @@ lpfc_mbox_timeout(unsigned long ptr)
 			mb->mbxStatus = MBX_NOT_FINISHED;
 			(pmbox->mbox_cmpl) (phba, pmbox);
 		} else {
+			mp = (DMABUF_t *) (pmbox->context1);
+			if(mp) {
+				lpfc_mbuf_free(phba, mp->virt, mp->phys);
+				kfree(mp);
+			}
 			lpfc_mbox_free(phba, pmbox);
 		}
 		psli->sliinit.sli_flag &= ~LPFC_SLI_MBOX_ACTIVE;
@@ -1256,6 +1280,7 @@ lpfc_mbox_abort(lpfcHBA_t * phba)
 {
 	LPFC_SLI_t *psli;
 	LPFC_MBOXQ_t *pmbox;
+	DMABUF_t * mp;
 	MAILBOX_t *mb;
 
 	psli = &phba->sli;
@@ -1271,6 +1296,11 @@ lpfc_mbox_abort(lpfcHBA_t * phba)
 			mb->mbxStatus = MBX_NOT_FINISHED;
 			(pmbox->mbox_cmpl) (phba, pmbox);
 		} else {
+			mp = (DMABUF_t *) (pmbox->context1);
+			if(mp) {
+				lpfc_mbuf_free(phba, mp->virt, mp->phys);
+				kfree(mp);
+			}
 			lpfc_mbox_free(phba, pmbox);
 		}
 		psli->sliinit.sli_flag &= ~LPFC_SLI_MBOX_ACTIVE;
@@ -1284,6 +1314,11 @@ lpfc_mbox_abort(lpfcHBA_t * phba)
 			mb->mbxStatus = MBX_NOT_FINISHED;
 			(pmbox->mbox_cmpl) (phba, pmbox);
 		} else {
+			mp = (DMABUF_t *) (pmbox->context1);
+			if(mp) {
+				lpfc_mbuf_free(phba, mp->virt, mp->phys);
+				kfree(mp);
+			}
 			lpfc_mbox_free(phba, pmbox);
 		}
 		pmbox = lpfc_mbox_get(phba);
@@ -1463,6 +1498,7 @@ lpfc_sli_issue_mbox(lpfcHBA_t * phba, LPFC_MBOXQ_t * pmbox, uint32_t flag)
 		}
 	}
 
+	wmb();
 	/* interrupt board to doit right away */
 	writel(CA_MBATT, phba->CAregaddr);
 	readl(phba->CAregaddr); /* flush */
@@ -1565,6 +1601,7 @@ lpfc_sli_issue_mbox(lpfcHBA_t * phba, LPFC_MBOXQ_t * pmbox, uint32_t flag)
 				      sizeof (uint32_t) * (MAILBOX_CMD_WSIZE));
 		}
 
+		wmb();
 		writel(HA_MBATT, phba->HAregaddr);
 		readl(phba->HAregaddr); /* flush */
 
@@ -1761,7 +1798,9 @@ lpfc_sli_issue_iocb(lpfcHBA_t * phba,
 			 * in ring ringno.
 			 */
 			status = ((CA_R0ATT) << (ringno * 4));
+			wmb();
 			writel(status, phba->CAregaddr);
+			readl(phba->CAregaddr); /* flush */
 
 			/* If we are waiting for the IOCB to complete before
 			   returning */
@@ -1841,6 +1880,7 @@ afterloop:
 		/* issue iocb command to adapter */
 		lpfc_sli_pcimem_bcopy((uint32_t *) icmd, (uint32_t *) iocb,
 				      sizeof (IOCB_t));
+		wmb();
 		psli->slistat.iocbCmd[ringno]++;
 
 		/* If there is no completion routine to call, we can release the
@@ -1874,6 +1914,7 @@ afterloop:
 			to_slim = (uint8_t *) phba->MBslimaddr
 			    + (SLIMOFF + (ringno * 2)) * 4;
 			writel(status, to_slim);
+			readl(to_slim);
 		}
 
 		/* Get the next available command iocb.
@@ -1927,7 +1968,9 @@ afterloop:
 		 * in ring ringno.
 		 */
 		status = ((CA_R0ATT) << (ringno * 4));
+		wmb();
 		writel(status, phba->CAregaddr);
+		readl(phba->CAregaddr); /* flush */
 
 		return (IOCB_SUCCESS);
 	}
@@ -1960,7 +2003,9 @@ afterloop:
 	 * The HBA will tell us when an IOCB entry is available.
 	 */
 	status = ((CA_R0ATT | CA_R0CE_REQ) << (ringno * 4));
+	wmb();
 	writel(status, phba->CAregaddr);
+	readl(phba->CAregaddr); /* flush */
 
 	psli->slistat.iocbCmdFull[ringno]++;
 
@@ -2089,7 +2134,9 @@ lpfc_sli_resume_iocb(lpfcHBA_t * phba, LPFC_SLI_RING_t * pring)
 			 * in ring ringno.
 			 */
 			status = ((CA_R0ATT) << (ringno * 4));
+			wmb();
 			writel(status, phba->CAregaddr);
+			readl(phba->CAregaddr); /* flush */
 			return (portCmdGet);
 		}
 		icmd = &nextiocb->iocb;
@@ -2097,6 +2144,7 @@ lpfc_sli_resume_iocb(lpfcHBA_t * phba, LPFC_SLI_RING_t * pring)
 		/* issue iocb command to adapter */
 		lpfc_sli_pcimem_bcopy((uint32_t *) icmd, (uint32_t *) iocb,
 				      sizeof (IOCB_t));
+		wmb();
 		psli->slistat.iocbCmd[ringno]++;
 
 		/* If there is no completion routine to call, we can release the
@@ -2131,6 +2179,7 @@ lpfc_sli_resume_iocb(lpfcHBA_t * phba, LPFC_SLI_RING_t * pring)
 			    (uint8_t *) phba->MBslimaddr + (SLIMOFF +
 							    (ringno * 2)) * 4;
 			writel(status, to_slim);
+			readl(to_slim);
 		}
 
 		/* Get the next available command iocb.
@@ -2185,7 +2234,9 @@ lpfc_sli_resume_iocb(lpfcHBA_t * phba, LPFC_SLI_RING_t * pring)
 	 * The HBA will tell us when an IOCB entry is available.
 	 */
 	status = ((CA_R0ATT | CA_R0CE_REQ) << (ringno * 4));
+	wmb();
 	writel(status, phba->CAregaddr);
+	readl(phba->CAregaddr); /* flush */
 
 	psli->slistat.iocbCmdFull[ringno]++;;
 	return (portCmdGet);
@@ -2201,6 +2252,8 @@ lpfc_sli_brdreset(lpfcHBA_t * phba)
 	volatile uint32_t word0;
 	int i;
 	void *to_slim;
+	struct list_head *curr, *next;
+	DMABUF_t * mp;
 
 	psli = &phba->sli;
 
@@ -2220,12 +2273,13 @@ lpfc_sli_brdreset(lpfcHBA_t * phba)
 	if (phba->hba_state) {
 		skip_post = 1;
 		word0 = 1;	/* This is really setting up word1 */
-		to_slim = (uint8_t *) phba->MBslimaddr + sizeof (uint32_t);
-		writel(*(uint32_t *) swpmb, to_slim);
-		readl(to_slim); /* flush */
 	} else {
 		skip_post = 0;
+		word0 = 0;	/* This is really setting up word1 */
 	}
+	to_slim = (uint8_t *) phba->MBslimaddr + sizeof (uint32_t);
+	writel(*(uint32_t *) swpmb, to_slim);
+	readl(to_slim); /* flush */
 
 	/* Turn off SERR, PERR in PCI cmd register */
 	phba->hba_state = LPFC_INIT_START;
@@ -2234,11 +2288,6 @@ lpfc_sli_brdreset(lpfcHBA_t * phba)
 	phba->fc_eventTag = 0;
 	phba->fc_myDID = 0;
 	phba->fc_prevDID = 0;
-
-	for (i = 0; i < psli->sliinit.num_rings; i++) {
-		pring = &psli->ring[i];
-		lpfc_sli_abort_iocb_ring(phba, pring, LPFC_SLI_ABORT_IMED);
-	}
 
 	/* Turn off parity checking and serr during the physical reset */
 	pci_read_config_word(phba->pcidev, PCI_COMMAND, &cfg_value);
@@ -2272,6 +2321,22 @@ lpfc_sli_brdreset(lpfcHBA_t * phba)
 	} else {
 		mdelay(2000);
 	}
+
+	/* Now cleanup posted buffers on each ring */
+	pring = &psli->ring[LPFC_ELS_RING];
+	list_for_each_safe(curr, next, &pring->postbufq) {
+		mp = list_entry(curr, DMABUF_t, list);
+		list_del(&mp->list);
+		pring->postbufq_cnt--;
+		lpfc_mbuf_free(phba, mp->virt, mp->phys);
+		kfree(mp);
+	}
+
+	for (i = 0; i < psli->sliinit.num_rings; i++) {
+		pring = &psli->ring[i];
+		lpfc_sli_abort_iocb_ring(phba, pring, LPFC_SLI_ABORT_IMED);
+	}
+
 	return (0);
 }
 
@@ -2311,6 +2376,7 @@ lpfc_sli_hba_down(lpfcHBA_t * phba)
 	LPFC_SLI_t *psli;
 	LPFC_SLI_RING_t *pring;
 	LPFC_MBOXQ_t *pmb;
+	DMABUF_t * mp;
 	LPFC_IOCBQ_t *iocb, *next_iocb;
 	IOCB_t *icmd = 0;
 	int i, cnt;
@@ -2320,14 +2386,13 @@ lpfc_sli_hba_down(lpfcHBA_t * phba)
 	psli = &phba->sli;
 
 	iflag = phba->iflag;
-	LPFC_DRVR_UNLOCK(phba, iflag);
 
 	lpfc_hba_down_prep(phba);
 
 	for (i = 0; i < psli->sliinit.num_rings; i++) {
 		pring = &psli->ring[i];
 		pring->flag |= LPFC_DEFERRED_RING_EVENT;
-		/* Error everything on txq and txcmplq */
+		/* Error everything on txq  */
 		pring->txq_cnt = 0;
 
 		list_for_each_safe(curr, next, &pring->txq) {
@@ -2351,25 +2416,6 @@ lpfc_sli_hba_down(lpfcHBA_t * phba)
 			kfree(pring->fast_lookup);
 			pring->fast_lookup = 0;
 		}
-
-		list_for_each_safe(curr, next, &pring->txcmplq) {
-
-			next_iocb = list_entry(curr, LPFC_IOCBQ_t, list);;
-			list_del_init(curr);
-
-			if (next_iocb->iocb_cmpl) {
-				icmd = &next_iocb->iocb;
-				icmd->ulpStatus = IOSTAT_DRIVER_REJECT;
-				icmd->un.ulpWord[4] = IOERR_SLI_DOWN;
-				(next_iocb->iocb_cmpl) (phba, next_iocb,
-							next_iocb);
-			} else {
-				lpfc_iocb_free(phba, next_iocb);
-			}
-		}
-
-		INIT_LIST_HEAD(&(pring->txcmplq));
-		pring->txcmplq_cnt = 0;
 	}
 
 	/* Return any active mbox cmds */
@@ -2377,13 +2423,25 @@ lpfc_sli_hba_down(lpfcHBA_t * phba)
 		lpfc_stop_timer((struct clk_data *)psli->mbox_tmo.data);
 	}
 	if ((psli->mbox_active)) {
-		lpfc_mbox_free(phba, psli->mbox_active);
+		pmb = psli->mbox_active;
+		mp = (DMABUF_t *) (pmb->context1);
+		if((mp) && 
+			(pmb->mbox_cmpl != lpfc_sli_wake_mbox_wait)) {
+			lpfc_mbuf_free(phba, mp->virt, mp->phys);
+			kfree(mp);
+		}
+		lpfc_mbox_free(phba, pmb);
 	}
 	psli->sliinit.sli_flag &= ~LPFC_SLI_MBOX_ACTIVE;
 	psli->mbox_active = 0;
 
 	/* Return any pending mbox cmds */
 	while ((pmb = lpfc_mbox_get(phba))) {
+		mp = (DMABUF_t *) (pmb->context1);
+		if(mp) {
+			lpfc_mbuf_free(phba, mp->virt, mp->phys);
+			kfree(mp);
+		}
 		lpfc_mbox_free(phba, pmb);
 	}
 
@@ -2398,7 +2456,6 @@ lpfc_sli_hba_down(lpfcHBA_t * phba)
 		lpfc_sli_brdreset(phba);
 	}
 
-	LPFC_DRVR_LOCK(phba, iflag);
 	return (1);
 }
 
@@ -3562,7 +3619,7 @@ lpfc_sli_issue_iocb_wait_high_priority(lpfcHBA_t * phba,
 				       LPFC_IOCBQ_t * prspiocbq,
 				       uint32_t timeout)
 {
-	int retval, j;
+	int j, delay_time, retval = IOCB_ERROR;
 	unsigned long drvr_flag = phba->iflag;
 	unsigned long iflag;
 
@@ -3580,6 +3637,7 @@ lpfc_sli_issue_iocb_wait_high_priority(lpfcHBA_t * phba,
 		piocb->context2 = prspiocbq;
 	}
 
+	piocb->context3 = 0;
 	/* setup wake call as IOCB callback */
 	piocb->iocb_cmpl = lpfc_sli_wake_iocb_high_priority;
 
@@ -3588,22 +3646,44 @@ lpfc_sli_issue_iocb_wait_high_priority(lpfcHBA_t * phba,
 	    lpfc_sli_issue_iocb(phba, pring, piocb,
 				flag | SLI_IOCB_HIGH_PRIORITY);
 
-	/* 20 * 50ms is 1sec */
-	for (j = 0; j < 20; j++) {
+ 	if (retval != IOCB_SUCCESS) {
+		piocb->context2 = 0;
+		return IOCB_ERROR;
+	}
+
+
+	/*
+	 * This high-priority iocb was sent out-of-band.  Poll for its 
+	 * completion rather than wait for a signal.  Note that the host_lock
+	 * is held by the midlayer and must be released here to allow the 
+	 * interrupt handlers to complete the IO and signal this routine via 
+	 * the iocb_flag.
+	 * Also, the delay_time is computed to be one second longer than
+	 * the scsi command timeout to give the FW time to abort on 
+	 * timeout rather than the driver just giving up.  Typically,
+	 * the midlayer does not specify a time for this command so the
+	 * driver is free to enforce its own timeout.
+	 */
+
+	retval = IOCB_ERROR;
+	delay_time = ((timeout + 1) * 1000) >> 6; 
+	for (j = 0; j < 64; j++) {
 		LPFC_DRVR_UNLOCK(phba, drvr_flag);
-		mdelay(100);
+		mdelay(delay_time);
 		LPFC_DRVR_LOCK(phba, drvr_flag);
 
 		spin_lock_irqsave(&phba->hiprilock, iflag);
 		if (piocb->iocb_flag & LPFC_IO_HIPRI) {
 			piocb->iocb_flag &= ~LPFC_IO_HIPRI;
+			retval = IOCB_SUCCESS;
 			spin_unlock_irqrestore(&phba->hiprilock, iflag);
 			break;
 		}
 		spin_unlock_irqrestore(&phba->hiprilock, iflag);
 	}
 
-	retval = IOCB_SUCCESS;
+	piocb->context2 = 0;
+	piocb->context3 = 0;
 
 	return retval;
 }

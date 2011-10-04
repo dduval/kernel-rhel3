@@ -23,6 +23,7 @@
 #ifndef LINUX_VERSION_CODE
 #include <linux/version.h>
 #endif
+#include <linux/diskdumplib.h>
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,4,00)
 #define MAX_TO_IOP_MESSAGES   (210)
@@ -31,6 +32,18 @@
 #endif
 #define MAX_FROM_IOP_MESSAGES (255)
 
+/******************************** Disk dump ***********************************/
+#if defined(CONFIG_DISKDUMP) || defined(CONFIG_DISKDUMP_MODULE)
+#undef  schedule
+#define schedule			diskdump_schedule
+#undef  schedule_timeout
+#define schedule_timeout		diskdump_schedule_timeout
+#undef  __wake_up
+#define __wake_up			diskdump_wake_up
+#define dpti_crashdump_mode()		crashdump_mode()
+#else
+#define dpti_crashdump_mode()		(1)
+#endif
 
 /*
  * SCSI interface function Prototypes
@@ -58,7 +71,7 @@ static int adpt_device_reset(Scsi_Cmnd* cmd);
 #define DPT_DRIVER_NAME	"Adaptec I2O RAID"
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,3,00)
-#define DPT_I2O { \
+#define _DPT_I2O  \
 	proc_info: adpt_proc_info,					\
 	detect: adpt_detect,						\
 	release: adpt_release,						\
@@ -75,11 +88,10 @@ static int adpt_device_reset(Scsi_Cmnd* cmd);
 	cmd_per_lun: 256,		/* cmds per lun (linked cmds) */\
 	use_clustering: ENABLE_CLUSTERING,				\
 	use_new_eh_code: 1						\
-}
 
 #else				/* KERNEL_VERSION > 2.2.16 */
 
-#define DPT_I2O { \
+#define _DPT_I2O  \
 	proc_info: adpt_proc_info,					\
 	detect: adpt_detect,						\
 	release: adpt_release,						\
@@ -97,7 +109,19 @@ static int adpt_device_reset(Scsi_Cmnd* cmd);
 	use_clustering: ENABLE_CLUSTERING,				\
 	use_new_eh_code: 1,						\
 	proc_name: "dpt_i2o"	/* this is the name of our proc node*/	\
+
+#endif
+
+#if defined(CONFIG_DISKDUMP) || defined(CONFIG_DISKDUMP_MODULE)
+#define DPT_I2O { 							\
+	.hostt = {							\
+		_DPT_I2O,						\
+		.disk_dump		= 1				\
+	},								\
+	.dump_ops			= &dpt_i2o_dump_ops		\
 }
+#else
+#define DPT_I2O { _DPT_I2O }
 #endif
 
 #ifndef HOSTS_C

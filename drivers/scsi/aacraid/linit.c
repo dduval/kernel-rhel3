@@ -294,7 +294,17 @@ static int aac_queuecommand(struct scsi_cmnd *cmd, void (*done)(struct scsi_cmnd
 
 const char *aac_info(struct Scsi_Host *shost)
 {
+#if ((LINUX_VERSION_CODE <= KERNEL_VERSION(2,5,0)) && defined(MODULE))
+	struct aac_dev *dev;
+	if (shost == aac_dummy)
+		return AAC_DRIVER_NAME;
+	dev = (struct aac_dev *)shost->hostdata;
+	if (!dev
+	 || (dev->cardtype >= (sizeof(aac_drivers)/sizeof(aac_drivers[0]))))
+		return AAC_DRIVER_NAME;
+#else
 	struct aac_dev *dev = (struct aac_dev *)shost->hostdata;
+#endif
 	return aac_drivers[dev->cardtype].name;
 }
 

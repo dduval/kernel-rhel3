@@ -337,6 +337,9 @@ setup_sigcontext(struct sigcontext *__sc, struct _fpstate *fpstate,
 	sc.eip = regs->eip;
 	*(unsigned int *)&sc.cs = regs->xcs;
 	sc.eflags = regs->eflags;
+	if (current->ptrace & PT_PTRACED) {
+		sc.eflags &= ~TF_MASK;
+	}
 	sc.esp_at_signal = regs->esp;
 	*(unsigned int *)&sc.ss = regs->xss;
 
@@ -436,7 +439,13 @@ static void setup_frame(int sig, struct k_sigaction *ka,
 	regs->xes = __USER_DS;
 	regs->xss = __USER_DS;
 	regs->xcs = __USER_CS;
-	regs->eflags &= ~TF_MASK;
+	if (regs->eflags & TF_MASK) {
+		if (current->ptrace & PT_PTRACED) {
+			ptrace_notify(SIGTRAP);
+		} else {
+			regs->eflags &= ~TF_MASK;
+		}
+	}
 
 #if DEBUG_SIG
 	printk("SIG deliver (%s:%d): sp=%p pc=%p ra=%p\n",
@@ -511,7 +520,13 @@ static void setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
 	regs->xes = __USER_DS;
 	regs->xss = __USER_DS;
 	regs->xcs = __USER_CS;
-	regs->eflags &= ~TF_MASK;
+	if (regs->eflags & TF_MASK) {
+		if (current->ptrace & PT_PTRACED) {
+			ptrace_notify(SIGTRAP);
+		} else {
+			regs->eflags &= ~TF_MASK;
+		}
+	}
 
 #if DEBUG_SIG
 	printk("SIG deliver (%s:%d): sp=%p pc=%p ra=%p\n",

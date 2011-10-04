@@ -20,6 +20,7 @@
  *    smp safe async poll plus cancellation. -bcrl
  */
 
+#include <linux/config.h>
 #include <linux/slab.h>
 #include <linux/smp_lock.h>
 #include <linux/poll.h>
@@ -27,6 +28,7 @@
 #include <linux/file.h>
 #include <linux/aio.h>
 #include <linux/init.h>
+#include <linux/fs.h>
 
 #include <asm/uaccess.h>
 
@@ -77,6 +79,7 @@ static kmem_cache_t *async_poll_table_cache;
  * as all select/poll functions have to call it to add an entry to the
  * poll table.
  */
+void __pollwait(struct file *filp, wait_queue_head_t *wait_address, poll_table *p);
 
 void __poll_freewait(poll_table* pt, wait_queue_t *wait)
 {
@@ -222,8 +225,21 @@ int async_poll(struct kiocb *iocb, int events)
 
 void __pollwait(struct file * filp, wait_queue_head_t * wait_address, poll_table *p)
 {
-	struct poll_table_page *table = p->table;
+	struct poll_table_page *table;
 
+#ifdef CONFIG_EPOLL
+	/* If there is a qproc set (in this case, that implies it's an
+	 * eventpoll poll_table), we may be casting the poll_table from
+	 * something else so make sure we don't dereference any other
+	 * poll_table fields in this case. */
+	if (p->qproc) {
+		p->qproc(filp, wait_address, p);
+		return;
+	}
+#endif /* CONFIG_EPOLL */
+		
+	table = p->table;
+	
 	if (!table || POLL_TABLE_FULL(table)) {
 		struct poll_table_page *new_table;
 

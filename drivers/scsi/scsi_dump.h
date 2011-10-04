@@ -30,6 +30,7 @@ struct scsi_dump_ops {
 	int (*quiesce)(Scsi_Device *);
 	int (*shutdown)(Scsi_Device *);
 	void (*poll)(Scsi_Device *);
+	unsigned int no_write_cache_enable	: 1;
 };
 
 /*

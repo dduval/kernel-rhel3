@@ -40,6 +40,7 @@
 #define AMD_UDMA_33		0x01
 #define AMD_UDMA_66		0x02
 #define AMD_UDMA_100		0x03
+#define AMD_UDMA_133		0x04
 #define AMD_CHECK_SWDMA		0x08
 #define AMD_BAD_SWDMA		0x10
 #define AMD_BAD_FIFO		0x20
@@ -67,6 +68,8 @@ static struct amd_ide_chip {
         { PCI_DEVICE_ID_NVIDIA_NFORCE3S_IDE, 0x00, 0x50, AMD_UDMA_100 },                /* NVIDIA nForce3s */
         { PCI_DEVICE_ID_NVIDIA_NFORCE3S_SATA, 0x00, 0x50, AMD_UDMA_100 },               /* NVIDIA nForce3s SATA */
         { PCI_DEVICE_ID_NVIDIA_NFORCE3S_SATA2, 0x00, 0x50, AMD_UDMA_100 },              /* NVIDIA nForce3s SATA2 */
+	{ PCI_DEVICE_ID_NVIDIA_NFORCE_CK804_IDE, 0x00, 0x50, AMD_UDMA_133 },
+	/* NVIDIA CK804 */
 
 	{ 0 }
 };
@@ -78,7 +81,7 @@ static unsigned int amd_clock;
 
 static unsigned char amd_cyc2udma[] = { 6, 6, 5, 4, 0, 1, 1, 2, 2, 3, 3 };
 static unsigned char amd_udma2cyc[] = { 4, 6, 8, 10, 3, 2, 1, 1 };
-static char *amd_dma[] = { "MWDMA16", "UDMA33", "UDMA66", "UDMA100" };
+static char *amd_dma[] = { "MWDMA16", "UDMA33", "UDMA66", "UDMA100", "UDMA133" };
 
 /*
  * AMD /proc entry.
@@ -466,6 +469,7 @@ static struct pci_device_id amd74xx_pci_tbl[] __devinitdata = {
 	{ PCI_VENDOR_ID_NVIDIA, PCI_DEVICE_ID_NVIDIA_NFORCE3S_IDE, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 10},
 	{ PCI_VENDOR_ID_NVIDIA, PCI_DEVICE_ID_NVIDIA_NFORCE3S_SATA, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 11},
 	{ PCI_VENDOR_ID_NVIDIA, PCI_DEVICE_ID_NVIDIA_NFORCE3S_SATA2, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 12},
+	{ PCI_VENDOR_ID_NVIDIA, PCI_DEVICE_ID_NVIDIA_NFORCE_CK804_IDE, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 13},
 
 	{ 0, },
 };

@@ -4861,7 +4861,10 @@ mpt_toolbox(MPT_ADAPTER *ioc, CONFIGPARMS *pCfg)
 	pReq->NumAddressBytes = 0x01;
 	pReq->Reserved4 = 0;
 	pReq->DataLength = 0x04;
-	pReq->DeviceAddr = 0xB0;
+	if (ioc->pcidev->devfn & 1)
+		pReq->DeviceAddr = 0xB2;
+	else
+		pReq->DeviceAddr = 0xB0;
 	pReq->Addr1 = 0;
 	pReq->Addr2 = 0;
 	pReq->Addr3 = 0;

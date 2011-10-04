@@ -191,6 +191,7 @@ static ssize_t pipe_aio_read (struct file *file, struct kiocb *iocb, struct iocb
 {
 	struct inode *inode = file->f_dentry->d_inode;
 	int queued = 0, failed_sem = 0;
+	ssize_t size;
 
 	iocb->data = NULL;
 	iocb->cancel = pipe_aio_read_cancel;
@@ -247,6 +248,49 @@ static ssize_t pipe_aio_read (struct file *file, struct kiocb *iocb, struct iocb
 		return 0;
 	}
 
+	while (iocb->nr_transferred < iocb->this_size && (size = PIPE_LEN(*inode))) {
+		char *pipebuf = PIPE_BASE(*inode) + PIPE_START(*inode);
+		ssize_t chars = PIPE_MAX_RCHUNK(*inode);
+		ssize_t count = iocb->this_size - iocb->nr_transferred;
+		mm_segment_t fs = get_fs();
+		int not_copied;
+
+		if (chars > count)
+			chars = count;
+		if (chars > size)
+			chars = size;
+		pr_debug("copying %d\n", chars);
+		set_fs(KERNEL_DS);
+		not_copied = copy_user_to_kvec(iocb->data,iocb->nr_transferred,
+					       pipebuf, chars);
+		set_fs(fs);
+		if (unlikely(not_copied)) {
+			iocb->nr_transferred = iocb->nr_transferred ?: -EFAULT;
+			aio_complete(iocb, iocb->nr_transferred, 0);
+			goto out;
+		}
+		iocb->nr_transferred += chars;
+
+		PIPE_START(*inode) += chars;
+		PIPE_START(*inode) &= (PIPE_SIZE - 1);
+		PIPE_LEN(*inode) -= chars;
+	}
+	pr_debug("transferred: %d (%d), writers: %d\n", iocb->nr_transferred,
+		 iocb->this_size, PIPE_WRITERS(*inode));
+
+	/* Cache behaviour optimization */
+	if (!PIPE_LEN(*inode))
+		PIPE_START(*inode) = 0;
+
+ 	/* Signal writers asynchronously that there is more room.  */
+	wake_up_interruptible(PIPE_WAIT(*inode));
+
+	if (iocb->nr_transferred == iocb->this_size
+	    || (iocb->filp->f_flags & O_NONBLOCK)
+	    || !PIPE_WRITERS(*inode)) {
+		aio_complete(iocb, iocb->nr_transferred, 0);
+		goto out;
+	}
 	spin_lock(&inode->i_pipe->pipe_aio_lock);
 	list_add(&iocb->u.list, &inode->i_pipe->read_iocb_list);
 	spin_unlock(&inode->i_pipe->pipe_aio_lock);
@@ -257,11 +301,6 @@ static ssize_t pipe_aio_read (struct file *file, struct kiocb *iocb, struct iocb
 
 out:
 	up(PIPE_SEM(*inode));
-	/*
-	 * FIXME: writes may have been queued.  The current code
-	 * requires the caller to resubmit to get the event.
-	 */
-
 	unmap_kvec(iocb->data, 1);
 	free_kvec(iocb->data);
 	iocb->data = NULL;
@@ -330,7 +369,8 @@ pipe_write(struct file *filp, const char *buf, size_t count, loff_t *ppos)
 {
 	struct inode *inode = filp->f_dentry->d_inode;
 	struct list_head *iocb;
-	ssize_t free, written, ret;
+	ssize_t free, written, ret, chars;
+	int slept = 0;
 
 	/* Seeks are not allowed on pipes.  */
 	ret = -ESPIPE;
@@ -351,18 +391,20 @@ pipe_write(struct file *filp, const char *buf, size_t count, loff_t *ppos)
 	if (unlikely(!PIPE_READERS(*inode)))
 		goto sigpipe;
 
+again:
 	spin_lock(&inode->i_pipe->pipe_aio_lock);
 	iocb = list_first(&inode->i_pipe->read_iocb_list);
 	spin_unlock(&inode->i_pipe->pipe_aio_lock);
 
 	if (iocb) {
-		written = do_pipe_write_aio(inode->i_pipe, buf, count,
+		chars = do_pipe_write_aio(inode->i_pipe, buf, count,
 					list_entry(iocb, struct kiocb, u.list));
-		if (unlikely(written < 0))
+		if (unlikely(chars < 0))
 			goto out;
 
-		count -= written;
-		buf += written;
+		written += chars;
+		count -= chars;
+		buf += chars;
 
 		if (!count)
 			goto out;
@@ -378,6 +420,7 @@ pipe_write(struct file *filp, const char *buf, size_t count, loff_t *ppos)
 			goto out;
 	} else {
 		while (PIPE_FREE(*inode) < free) {
+			slept = 1;
 			PIPE_WAITING_WRITERS(*inode)++;
 			pipe_wait(inode);
 			PIPE_WAITING_WRITERS(*inode)--;
@@ -388,6 +431,11 @@ pipe_write(struct file *filp, const char *buf, size_t count, loff_t *ppos)
 			if (!PIPE_READERS(*inode))
 				goto sigpipe;
 		}
+
+		if (slept) {
+			slept = 0;
+			goto again;
+		}
 	}
 
 	/* Copy into available space.  */
@@ -395,8 +443,8 @@ pipe_write(struct file *filp, const char *buf, size_t count, loff_t *ppos)
 	while (count > 0) {
 		int space;
 		char *pipebuf = PIPE_BASE(*inode) + PIPE_END(*inode);
-		ssize_t chars = PIPE_MAX_WCHUNK(*inode);
 
+		chars = PIPE_MAX_WCHUNK(*inode);
 		if ((space = PIPE_FREE(*inode)) != 0) {
 			if (chars > count)
 				chars = count;
@@ -510,6 +558,31 @@ pipe_release(struct inode *inode, int decr, int decw)
 	down(PIPE_SEM(*inode));
 	PIPE_READERS(*inode) -= decr;
 	PIPE_WRITERS(*inode) -= decw;
+
+	/* Terminate aio readers if no more writers.  */
+	if (!PIPE_WRITERS(*inode)) {
+		struct pipe_inode_info *pipe = inode->i_pipe;
+		struct list_head *first;
+		struct kiocb *iocb;
+
+		spin_lock(&pipe->pipe_aio_lock);
+		first = list_first(&pipe->read_iocb_list);
+		spin_unlock(&pipe->pipe_aio_lock);
+
+		while (first) {
+			iocb = list_entry(first, struct kiocb, u.list);
+
+			unmap_kvec(iocb->data, 1);
+			free_kvec(iocb->data);
+
+			spin_lock(&pipe->pipe_aio_lock);
+			list_del(&iocb->u.list);
+			first = list_first(&pipe->read_iocb_list);
+			spin_unlock(&pipe->pipe_aio_lock);
+
+			aio_complete(iocb, iocb->nr_transferred, 0);
+		}
+	}
 	if (!PIPE_READERS(*inode) && !PIPE_WRITERS(*inode)) {
 		struct pipe_inode_info *info = inode->i_pipe;
 		inode->i_pipe = NULL;

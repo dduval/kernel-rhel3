@@ -695,10 +695,12 @@ nfs3_xdr_setaclargs(struct rpc_rqst *req, u32 *p,
 	p = xdr_encode_fhandle(p, NFS_FH(args->inode));
 	*p++ = htonl(args->mask);
 	acl = (args->mask & NFS3_ACL) ? args->acl_access : NULL;
-	if (!(p = nfs_acl_encode(p, end, args->inode, acl, 1, 0)))
+	if (!(p = nfs_acl_encode_limit(p, end, args->inode, acl,
+			1, 0, nfs3_acl_max_entries)))
 		return -ENOMEM;
 	acl = (args->mask & NFS3_DFACL) ? args->acl_default : NULL;
-	if (!(p = nfs_acl_encode(p, end, args->inode, acl, 1, NFS3_ACL_DEFAULT)))
+	if (!(p = nfs_acl_encode_limit(p, end, args->inode, acl,
+			1, NFS3_ACL_DEFAULT, nfs3_acl_max_entries)))
 		return -ENOMEM;
 	req->rq_slen = xdr_adjust_iovec(req->rq_svec, p);
 	
@@ -1082,12 +1084,12 @@ nfs3_xdr_getaclres(struct rpc_rqst *req, u32 *p,
 	/* res->acl_{access,default} are released in nfs3_proc_getacl. */
 	acl = (res->mask & NFS3_ACL) ? &res->acl_access : NULL;
 	aclcnt = (res->mask & NFS3_ACLCNT) ? &res->acl_access_count : NULL;
-	if (!(p = nfs_acl_decode(p, end, aclcnt, acl)))
+	if (!(p = nfs_acl_decode_limit(p, end, aclcnt, acl, nfs3_acl_max_entries)))
 		return -EINVAL;
 
 	acl = (res->mask & NFS3_DFACL) ? &res->acl_default : NULL;
 	aclcnt = (res->mask & NFS3_DFACLCNT) ? &res->acl_default_count : NULL;
-	if (!(p = nfs_acl_decode(p, end, aclcnt, acl)))
+	if (!(p = nfs_acl_decode_limit(p, end, aclcnt, acl, nfs3_acl_max_entries)))
 		return -EINVAL;
 	return 0;
 }
@@ -1164,4 +1166,12 @@ struct rpc_version		nfs_acl_version3 = {
 	sizeof(nfs3_acl_procedures)/sizeof(nfs3_acl_procedures[0]),
 	nfs3_acl_procedures
 };
+
+void nfs3_fixup_xdr_tables(unsigned int acl_max)
+{
+	nfs3_acl_procedures[1].p_bufsiz =
+		(((acl_max*3)+2)*2)+1+NFS3_post_op_attr_sz+1;
+	nfs3_acl_procedures[2].p_bufsiz =
+		(((acl_max*3)+2)*2)+1+NFS3_fh_sz;
+}
 #endif  /* CONFIG_NFS_ACL */

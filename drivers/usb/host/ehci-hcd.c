@@ -302,7 +302,8 @@ static int bios_handoff (struct ehci_hcd *ehci, int where, u32 cap)
 		if (cap & (1 << 16)) {
 			ehci_err (ehci, "BIOS handoff failed (%d, %04x)\n",
 				where, cap);
-			return 1;
+			pci_write_config_dword (ehci->hcd.pdev, where, 0);
+			return 0;
 		} 
 		ehci_dbg (ehci, "BIOS handoff succeeded\n");
 	}

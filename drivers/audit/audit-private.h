@@ -223,6 +223,7 @@ extern int		audit_allow_suspend;
 extern int		audit_message_enabled;
 extern int		audit_paranoia;
 extern int		audit_arch;
+extern int		audit_disable_32bit;
 
 /* VFS interface */
 int			auditf_ioctl(struct inode *, struct file *, unsigned int, unsigned long);

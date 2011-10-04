@@ -42,6 +42,7 @@
 #include <asm/io.h>
 #include <asm/processor.h>
 #include <asm/ppcdebug.h>
+#include <asm/rtas.h>
 #include <asm/machdep.h> /* for ppc_attention_msg */
 
 extern int fix_alignment(struct pt_regs *);
@@ -272,6 +273,7 @@ MachineCheckException(struct pt_regs *regs)
  	} else if (check_exception_flag) {
   		int status;
   		unsigned long long srr1 = regs->msr;
+		int rtas_bufflen = rtas_get_error_log_max();
   
   		memset(mce_data_buf, 0, RTAS_ERROR_LOG_MAX);
   		/* XXX
@@ -281,7 +283,7 @@ MachineCheckException(struct pt_regs *regs)
   		 */
   		status = rtas_call(rtas_token("check-exception"), 6, 1, NULL,
   				   0x200, (uint)srr1, INTERNAL_ERROR, 0,
-  				   __pa(mce_data_buf), RTAS_ERROR_LOG_MAX);
+  				   __pa(mce_data_buf), rtas_bufflen);
   		if (status == 0)
 			log_error((char *)mce_data_buf, ERR_TYPE_RTAS_LOG, 1);
   	}

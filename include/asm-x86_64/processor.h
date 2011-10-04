@@ -86,15 +86,17 @@ extern struct cpuinfo_x86 cpu_data[];
 #define current_cpu_data boot_cpu_data
 #endif
 
-#define cpu_has_pge 1
-#define cpu_has_pse 1
-#define cpu_has_pae 1
-#define cpu_has_tsc 1
-#define cpu_has_de 1
-#define cpu_has_vme 1
-#define cpu_has_fxsr 1
-#define cpu_has_xmm 1
-#define cpu_has_apic 1
+#define cpu_has_pge	(test_bit(X86_FEATURE_PGE,  boot_cpu_data.x86_capability))
+#define cpu_has_pse	(test_bit(X86_FEATURE_PSE,  boot_cpu_data.x86_capability))
+#define cpu_has_pae	(test_bit(X86_FEATURE_PAE,  boot_cpu_data.x86_capability))
+#define cpu_has_tsc	(test_bit(X86_FEATURE_TSC,  boot_cpu_data.x86_capability))
+#define cpu_has_de	(test_bit(X86_FEATURE_DE,   boot_cpu_data.x86_capability))
+#define cpu_has_vme	(test_bit(X86_FEATURE_VME,  boot_cpu_data.x86_capability))
+#define cpu_has_fxsr	(test_bit(X86_FEATURE_FXSR, boot_cpu_data.x86_capability))
+#define cpu_has_xmm	(test_bit(X86_FEATURE_XMM,  boot_cpu_data.x86_capability))
+#define cpu_has_fpu	(test_bit(X86_FEATURE_FPU,  boot_cpu_data.x86_capability))
+#define cpu_has_apic	(test_bit(X86_FEATURE_APIC, boot_cpu_data.x86_capability))
+#define cpu_has_nx	(test_bit(X86_FEATURE_NX, boot_cpu_data.x86_capability))
 
 extern char ignore_irq13;
 
@@ -478,8 +480,6 @@ extern inline void sync_core(void)
 	int tmp;
 	asm volatile("cpuid" : "=a" (tmp) : "0" (1) : "ebx","ecx","edx","memory");
 } 
-
-#define cpu_has_fpu 1
 
 #define USE_PREFETCH 0
 #if USE_PREFETCH

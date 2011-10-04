@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_mbox.c 1.32 2004/04/20 15:03:27EDT jselx Exp  $
+ * $Id: lpfc_mbox.c 1.32.1.2 2004/07/14 09:13:51EDT sf_support Exp  $
  */
 #include <linux/version.h>
 #include <linux/spinlock.h>
@@ -661,11 +661,20 @@ lpfc_config_port(lpfcHBA_t * phba, LPFC_MBOXQ_t * pmb)
 	} else {
 		HGP hgp;
 		void *to_slim;
+		uint32_t bar0_config_word, bar1_config_word;
+		pci_read_config_dword(phba->pcidev, PCI_BASE_ADDRESS_0, &bar0_config_word);
+		pci_read_config_dword(phba->pcidev, PCI_BASE_ADDRESS_1, &bar1_config_word);
+		if (bar0_config_word & PCI_BASE_ADDRESS_MEM_TYPE_64) {
+			((SLI2_SLIM_t *) phba->slim2p.virt)->
+				un.slim.pcb.hgpAddrHigh = bar1_config_word;
+		} else {
+			((SLI2_SLIM_t *) phba->slim2p.virt)->
+				un.slim.pcb.hgpAddrHigh = 0;
+		}
+		bar0_config_word &= PCI_BASE_ADDRESS_MEM_MASK;
 
-		((SLI2_SLIM_t *) phba->slim2p.virt)->un.slim.pcb.hgpAddrHigh
-			= 0;
 		((SLI2_SLIM_t *) phba->slim2p.virt)->un.slim.pcb.hgpAddrLow = 
-			(uint32_t) (phba->pci_bar0_map
+			(uint32_t) (bar0_config_word
 				    + (SLIMOFF * sizeof (uint32_t)));
 		memset(&hgp, 0, sizeof (HGP));
 

@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_nportdisc.c 1.55.1.4 2004/06/01 14:38:17EDT jselx Exp  $
+ * $Id: lpfc_nportdisc.c 1.2 2004/11/02 13:25:19EST sf_support Exp  $
  */
 
 #include <linux/version.h>
@@ -233,23 +233,83 @@ lpfc_disc_state_machine(lpfcHBA_t * phba,
 }
 
 uint32_t
-lpfc_rcv_plogi_unused_node(lpfcHBA_t * phba,
-			   LPFC_NODELIST_t * ndlp, void *arg, uint32_t evt)
+lpfc_rcv_plogi(lpfcHBA_t * phba,
+			   LPFC_NODELIST_t * ndlp, LPFC_IOCBQ_t *cmdiocb)
 {
-	LPFC_IOCBQ_t *cmdiocb;
 	DMABUF_t *pCmd;
 	uint32_t *lp;
 	IOCB_t *icmd;
 	SERV_PARM *sp;
 	LPFC_MBOXQ_t *mbox;
 	lpfcCfgParam_t *clp;
+
+	clp = &phba->config[0];
+	icmd = &cmdiocb->iocb;
+	pCmd = (DMABUF_t *) cmdiocb->context2;
+	lp = (uint32_t *) pCmd->virt;
+	sp = (SERV_PARM *) ((uint8_t *) lp + sizeof (uint32_t));
+
+	if ((clp[LPFC_CFG_FCP_CLASS].a_current == CLASS2) &&
+	    (sp->cls2.classValid)) {
+		ndlp->nlp_fcp_info |= CLASS2;
+	} else {
+		ndlp->nlp_fcp_info |= CLASS3;
+	}
+
+	if ((mbox = lpfc_mbox_alloc(phba, MEM_PRI)) == 0) {
+		return (ndlp->nlp_state);
+	}
+	if ((phba->fc_flag & FC_PT2PT)
+	    && !(phba->fc_flag & FC_PT2PT_PLOGI)) {
+		/* The rcv'ed PLOGI determines what our NPortId will
+		   be */
+		phba->fc_myDID = icmd->un.rcvels.parmRo;
+		lpfc_config_link(phba, mbox);
+		if (lpfc_sli_issue_mbox
+		    (phba, mbox, (MBX_NOWAIT | MBX_STOP_IOCB))
+		    == MBX_NOT_FINISHED) {
+			lpfc_mbox_free(phba, mbox);
+			return (ndlp->nlp_state);
+		}
+		if ((mbox = lpfc_mbox_alloc(phba, MEM_PRI)) == 0) {
+			return (ndlp->nlp_state);
+		}
+	}
+	if (lpfc_reg_login(phba, icmd->un.rcvels.remoteID,
+			   (uint8_t *) sp, mbox, 0) == 0) {
+		mbox->mbox_cmpl = lpfc_mbx_cmpl_reg_login;
+		mbox->context2 = ndlp;
+		ndlp->nlp_state = NLP_STE_REG_LOGIN_ISSUE;
+		if (lpfc_sli_issue_mbox
+		    (phba, mbox, (MBX_NOWAIT | MBX_STOP_IOCB))
+		    != MBX_NOT_FINISHED) {
+			lpfc_nlp_plogi(phba, ndlp);
+			lpfc_els_rsp_acc(phba, ELS_CMD_PLOGI, cmdiocb,
+					 ndlp, 0, 0);
+			return (ndlp->nlp_state);	/* HAPPY PATH */
+		}
+		/* NOTE: we should have messages for unsuccessful
+		   reglogin */
+		lpfc_mbox_free(phba, mbox);
+	} else {
+		lpfc_mbox_free(phba, mbox);
+	}
+	return (ndlp->nlp_state);
+}
+
+uint32_t
+lpfc_rcv_plogi_unused_node(lpfcHBA_t * phba,
+			   LPFC_NODELIST_t * ndlp, void *arg, uint32_t evt)
+{
+	LPFC_IOCBQ_t *cmdiocb;
+	DMABUF_t *pCmd;
+	uint32_t *lp;
+	SERV_PARM *sp;
+	lpfcCfgParam_t *clp;
 	LS_RJT stat;
-	LPFC_NODE_FARP_PEND_t *pndlpfarp;
-	FARP *pfarp;
 
 	clp = &phba->config[0];
 	cmdiocb = (LPFC_IOCBQ_t *) arg;
-	icmd = &cmdiocb->iocb;
 	pCmd = (DMABUF_t *) cmdiocb->context2;
 	lp = (uint32_t *) pCmd->virt;
 
@@ -260,17 +320,44 @@ lpfc_rcv_plogi_unused_node(lpfcHBA_t * phba,
 
 	if ((phba->hba_state <= LPFC_FLOGI) ||
 	    ((lpfc_check_sparm(phba, ndlp, sp, CLASS3) == 0))) {
+		/* Before responding to PLOGI, check for pt2pt mode.
+		 * If we are pt2pt, with an outstanding FLOGI, abort
+		 * the FLOGI and resend it first.
+		 */
+		if (phba->fc_flag & FC_PT2PT) {
+			lpfc_els_abort_flogi(phba);
+		        if(!(phba->fc_flag & FC_PT2PT_PLOGI)) {
+				/* If the other side is supposed to initiate
+				 * the PLOGI anyway, just ACC it now and
+				 * move on with discovery.
+				 */
+	    			lpfc_check_sparm(phba, ndlp, sp, CLASS3);
+				phba->fc_edtov = FF_DEF_EDTOV;
+				phba->fc_ratov = FF_DEF_RATOV;
+				phba->fcp_timeout_offset = 2 * phba->fc_ratov +
+				    clp[LPFC_CFG_EXTRA_IO_TMO].a_current;
+				/* Start discovery - this should just do
+				   CLEAR_LA */
+				lpfc_disc_start(phba);
+			}
+			else {
+				lpfc_initial_flogi(phba);
+			}
+			goto good_path;
+		}
 		/* Reject this request because invalid parameters */
 		stat.un.b.lsRjtRsvd0 = 0;
-		stat.un.b.lsRjtRsnCode = LSRJT_UNABLE_TPC;
 		if (phba->hba_state <= LPFC_FLOGI) {
-			stat.un.b.lsRjtRsnCodeExp = LSRJT_LOGICAL_BSY;
+			stat.un.b.lsRjtRsnCode = LSRJT_LOGICAL_BSY;
+			stat.un.b.lsRjtRsnCodeExp = LSEXP_NOTHING_MORE;
 		} else {
+			stat.un.b.lsRjtRsnCode = LSRJT_UNABLE_TPC;
 			stat.un.b.lsRjtRsnCodeExp = LSEXP_SPARM_OPTIONS;
 		}
 		stat.un.b.vendorUnique = 0;
 		lpfc_els_rsp_reject(phba, stat.un.lsRjtError, cmdiocb, ndlp);
 	} else {
+good_path:
 		/* PLOGI chkparm OK */
 		lpfc_printf_log(phba->brd_no, &lpfc_msgBlk0114,
 				lpfc_mes0114,
@@ -278,95 +365,10 @@ lpfc_rcv_plogi_unused_node(lpfcHBA_t * phba,
 				ndlp->nlp_DID, ndlp->nlp_state, ndlp->nlp_flag,
 				ndlp->nlp_rpi);
 
-		if ((clp[LPFC_CFG_FCP_CLASS].a_current == CLASS2) &&
-		    (sp->cls2.classValid)) {
-			ndlp->nlp_fcp_info |= CLASS2;
-		} else {
-			ndlp->nlp_fcp_info |= CLASS3;
-		}
-
-		if ((clp[LPFC_CFG_IP_CLASS].a_current == CLASS2) &&
-		    (sp->cls2.classValid)) {
-			ndlp->nlp_ip_info = CLASS2;
-		} else {
-			ndlp->nlp_ip_info = CLASS3;
-		}
-
-		if ((mbox = lpfc_mbox_alloc(phba, MEM_PRI)) == 0) {
-			goto out;
-		}
-		if ((phba->fc_flag & FC_PT2PT)
-		    && !(phba->fc_flag & FC_PT2PT_PLOGI)) {
-			/* The rcv'ed PLOGI determines what our NPortId will
-			   be */
-			phba->fc_myDID = icmd->un.rcvels.parmRo;
-			lpfc_config_link(phba, mbox);
-			if (lpfc_sli_issue_mbox
-			    (phba, mbox, (MBX_NOWAIT | MBX_STOP_IOCB))
-			    == MBX_NOT_FINISHED) {
-				lpfc_mbox_free(phba, mbox);
-				goto out;
-			}
-			if ((mbox = lpfc_mbox_alloc(phba, MEM_PRI)) == 0) {
-				goto out;
-			}
-		}
-		if (lpfc_reg_login(phba, icmd->un.rcvels.remoteID,
-				   (uint8_t *) sp, mbox, 0) == 0) {
-			/* set_slim mailbox command needs to execute first,
-			 * queue this command to be processed later.
-			 */
-			pfarp = (FARP *) pCmd;
-			if ((pfarp->Rflags == FARP_REQUEST_PLOGI)
-			    && (pfarp->Mflags == FARP_MATCH_PORT)) {
-				struct list_head *pos, *tpos, *head;
-
-				head = &phba->fc_node_farp_list;
-
-				list_for_each_safe(pos, tpos,
-						   &phba->fc_node_farp_list) {
-					pndlpfarp = list_entry(pos,
-							LPFC_NODE_FARP_PEND_t,
-							listentry);
-					list_del(pos);
-
-					if ((lpfc_geportname
-					     (&pndlpfarp->rnode_addr,
-					      &ndlp->nlp_portname) != 2)
-					    &&
-					    (lpfc_geportname
-					     (&pndlpfarp->rnode_addr,
-					      &ndlp->nlp_nodename) != 2)) {
-						list_add(&pndlpfarp->listentry,
-							 head);
-
-					}
-					else {
-						break;
-
-					}
-				}
-			}
-
-			mbox->mbox_cmpl = lpfc_mbx_cmpl_reg_login;
-			mbox->context2 = ndlp;
-			ndlp->nlp_state = NLP_STE_REG_LOGIN_ISSUE;
-			if (lpfc_sli_issue_mbox
-			    (phba, mbox, (MBX_NOWAIT | MBX_STOP_IOCB))
-			    != MBX_NOT_FINISHED) {
-				lpfc_nlp_plogi(phba, ndlp);
-				lpfc_els_rsp_acc(phba, ELS_CMD_PLOGI, cmdiocb,
-						 ndlp, 0, 0);
-				return (ndlp->nlp_state);	/* HAPPY PATH */
-			}
-			/* NOTE: we should have messages for unsuccessful
-			   reglogin */
-			lpfc_mbox_free(phba, mbox);
-		} else {
-			lpfc_mbox_free(phba, mbox);
-		}
+		ndlp->nlp_state = lpfc_rcv_plogi(phba, ndlp, cmdiocb);
+		if(ndlp->nlp_state == NLP_STE_REG_LOGIN_ISSUE)
+			return (ndlp->nlp_state);
 	}
-      out:
 	lpfc_nlp_remove(phba, ndlp);
 	return (NLP_STE_FREED_NODE);
 }
@@ -405,7 +407,7 @@ lpfc_cmpl_reglogin_unused_node(lpfcHBA_t * phba,
 {
 	/* dequeue, cancel timeout, unreg login */
 	lpfc_nlp_remove(phba, ndlp);
-	return (ndlp->nlp_state);
+	return (NLP_STE_FREED_NODE);
 }
 
 uint32_t
@@ -422,8 +424,7 @@ lpfc_device_add_unused_node(lpfcHBA_t * phba,
 			    LPFC_NODELIST_t * ndlp, void *arg, uint32_t evt)
 {
 	if (ndlp->nlp_tmofunc.function) {
-		ndlp->nlp_flag &= ~(NLP_NODEV_TMO | NLP_DELAY_TMO);
-		ndlp->nlp_rflag &= ~NLP_NPR_ACTIVE;
+		ndlp->nlp_flag &= ~NLP_DELAY_TMO;
 		lpfc_stop_timer((struct clk_data *)ndlp->nlp_tmofunc.data);
 	}
 	ndlp->nlp_state = NLP_STE_UNUSED_NODE;
@@ -501,13 +502,6 @@ lpfc_rcv_plogi_plogi_issue(lpfcHBA_t * phba,
 				ndlp->nlp_fcp_info |= CLASS3;
 			}
 
-			if ((clp[LPFC_CFG_IP_CLASS].a_current == CLASS2) &&
-			    (sp->cls2.classValid)) {
-				ndlp->nlp_ip_info = CLASS2;
-			} else {
-				ndlp->nlp_ip_info = CLASS3;
-			}
-
 			if ((mbox = lpfc_mbox_alloc(phba, MEM_PRI))) {
 				if (lpfc_reg_login
 				    (phba, icmd->un.rcvels.remoteID,
@@ -550,15 +544,28 @@ uint32_t
 lpfc_rcv_prli_plogi_issue(lpfcHBA_t * phba,
 			  LPFC_NODELIST_t * ndlp, void *arg, uint32_t evt)
 {
+	LPFC_IOCBQ_t *cmdiocb;
+	DMABUF_t *pCmd;
+
+	cmdiocb = (LPFC_IOCBQ_t *) arg;
+	pCmd = (DMABUF_t *) cmdiocb->context2;
+	pci_dma_sync_single(phba->pcidev, pCmd->phys, LPFC_BPL_SIZE,
+				PCI_DMA_FROMDEVICE);
+
 	/* software abort outstanding plogi, then send logout */
 	if (ndlp->nlp_tmofunc.function) {
-		ndlp->nlp_flag &= ~(NLP_NODEV_TMO | NLP_DELAY_TMO);
-		ndlp->nlp_rflag &= ~NLP_NPR_ACTIVE;
+		ndlp->nlp_flag &= ~NLP_DELAY_TMO;
 		lpfc_stop_timer((struct clk_data *)ndlp->nlp_tmofunc.data);
+		lpfc_issue_els_logo(phba, ndlp, 0);
 	} else {
+		if (ndlp->nlp_flag & NLP_ACC_REGLOGIN) {
+			lpfc_els_rsp_prli_acc(phba, cmdiocb, ndlp);
+			return(ndlp->nlp_state);
+		}
+
 		lpfc_driver_abort(phba, ndlp);
+		lpfc_issue_els_logo(phba, ndlp, 0);
 	}
-	lpfc_issue_els_logo(phba, ndlp, 0);
 
 	return (ndlp->nlp_state);
 }
@@ -569,9 +576,7 @@ lpfc_rcv_logo_plogi_issue(lpfcHBA_t * phba,
 {
 	LPFC_IOCBQ_t *cmdiocb;
 	DMABUF_t *pCmd;
-	LPFCSCSITARGET_t *targetp;
 	lpfcCfgParam_t *clp;
-	unsigned long tmo;
 	int           issue_abort;
 
 	clp = &phba->config[0];
@@ -583,38 +588,22 @@ lpfc_rcv_logo_plogi_issue(lpfcHBA_t * phba,
 
 	/* software abort outstanding plogi before sending acc */
 	issue_abort = 0;
-	if (ndlp->nlp_tmofunc.function) {
-		ndlp->nlp_flag &= ~(NLP_NODEV_TMO | NLP_DELAY_TMO);
-		ndlp->nlp_rflag &= ~NLP_NPR_ACTIVE;
-		lpfc_stop_timer((struct clk_data *)ndlp->nlp_tmofunc.data);
-	} else {
+	if (!ndlp->nlp_tmofunc.function) {
 		issue_abort = 1;
 	}
 	lpfc_els_rsp_acc(phba, ELS_CMD_ACC, cmdiocb, ndlp, 0, 0);
 
 	/* resend plogi after 1 sec delay */
-	targetp = ndlp->nlp_Target;
-	if (targetp) {
-		targetp->targetFlags |= FC_NPR_ACTIVE;
-		if (targetp->tmofunc.function) {
-			lpfc_stop_timer((struct clk_data *)
-					targetp->tmofunc.data);
-		}
-		if(clp[LPFC_CFG_NODEV_TMO].a_current >
-		   clp[LPFC_CFG_LINKDOWN_TMO].a_current) {
-			tmo = clp[LPFC_CFG_NODEV_TMO].a_current;
-		} else {     
-			tmo = clp[LPFC_CFG_LINKDOWN_TMO].a_current;
-		}
-		lpfc_start_timer(phba, tmo, &targetp->tmofunc, 
-			lpfc_npr_timeout, (unsigned long)targetp, 0);
-	}
-	ndlp->nlp_rflag |= NLP_NPR_ACTIVE;
+	if (ndlp->nlp_tmofunc.function) {
+		ndlp->nlp_flag &= ~NLP_DELAY_TMO;
+		lpfc_stop_timer((struct clk_data *)ndlp->nlp_tmofunc.data);
+	} 
 	ndlp->nlp_flag |= NLP_DELAY_TMO;
 	ndlp->nlp_retry = 0;
 
 	lpfc_start_timer(phba, 1, &ndlp->nlp_tmofunc, lpfc_els_retry_delay, 
 		(unsigned long)ndlp->nlp_DID, (unsigned long)ELS_CMD_PLOGI);
+	lpfc_nlp_plogi(phba, ndlp);
 
 	if(issue_abort) {
 		lpfc_driver_abort(phba, ndlp);
@@ -628,8 +617,7 @@ lpfc_rcv_els_plogi_issue(lpfcHBA_t * phba,
 {
 	/* software abort outstanding plogi, then send logout */
 	if (ndlp->nlp_tmofunc.function) {
-		ndlp->nlp_flag &= ~(NLP_NODEV_TMO | NLP_DELAY_TMO);
-		ndlp->nlp_rflag &= ~NLP_NPR_ACTIVE;
+		ndlp->nlp_flag &= ~NLP_DELAY_TMO;
 		lpfc_stop_timer((struct clk_data *)ndlp->nlp_tmofunc.data);
 	} else {
 		lpfc_driver_abort(phba, ndlp);
@@ -703,13 +691,6 @@ lpfc_cmpl_plogi_plogi_issue(lpfcHBA_t * phba,
 				ndlp->nlp_fcp_info |= CLASS3;
 			}
 
-			if ((clp[LPFC_CFG_IP_CLASS].a_current == CLASS2) &&
-			    (sp->cls2.classValid)) {
-				ndlp->nlp_ip_info = CLASS2;
-			} else {
-				ndlp->nlp_ip_info = CLASS3;
-			}
-
 			if ((mbox = lpfc_mbox_alloc(phba, MEM_PRI))) {
 				if (lpfc_reg_login
 				    (phba, irsp->un.elsreq64.remoteID,
@@ -775,10 +756,6 @@ lpfc_cmpl_prli_plogi_issue(lpfcHBA_t * phba,
 {
 
 	/* First ensure ndlp is on the plogi list */
-	if (ndlp->nlp_flag & NLP_LIST_MASK) {
-		lpfc_findnode_did(phba, (NLP_SEARCH_ALL | NLP_SEARCH_DEQUE),
-				  ndlp->nlp_DID);
-	}
 	lpfc_nlp_plogi(phba, ndlp);
 
 	/* If a PLOGI is not already pending, issue one */
@@ -796,7 +773,7 @@ lpfc_cmpl_logo_plogi_issue(lpfcHBA_t * phba,
 			   LPFC_NODELIST_t * ndlp, void *arg, uint32_t evt)
 {
 	if (!(ndlp->nlp_flag & NLP_PLOGI_SND)) {
-
+		lpfc_nlp_plogi(phba, ndlp);
 		ndlp->nlp_state = NLP_STE_PLOGI_ISSUE;
 		lpfc_issue_els_plogi(phba, ndlp, 0);
 	}
@@ -809,10 +786,6 @@ lpfc_cmpl_adisc_plogi_issue(lpfcHBA_t * phba,
 {
 
 	/* First ensure ndlp is on the plogi list */
-	if (ndlp->nlp_flag & NLP_LIST_MASK) {
-		lpfc_findnode_did(phba, (NLP_SEARCH_ALL | NLP_SEARCH_DEQUE),
-				  ndlp->nlp_DID);
-	}
 	lpfc_nlp_plogi(phba, ndlp);
 
 	/* If a PLOGI is not already pending, issue one */
@@ -856,6 +829,7 @@ lpfc_cmpl_reglogin_plogi_issue(lpfcHBA_t * phba,
 	/* software abort outstanding plogi */
 	lpfc_driver_abort(phba, ndlp);
 	/* send a new plogi */
+	lpfc_nlp_plogi(phba, ndlp);
 	ndlp->nlp_state = NLP_STE_PLOGI_ISSUE;
 	lpfc_issue_els_plogi(phba, ndlp, 0);
 
@@ -985,6 +959,7 @@ lpfc_rcv_logo_reglogin_issue(lpfcHBA_t * phba,
 	lpfc_els_rsp_acc(phba, ELS_CMD_ACC, cmdiocb, ndlp, 0, 0);
 
 	/* resend plogi */
+	lpfc_nlp_plogi(phba, ndlp);
 	ndlp->nlp_state = NLP_STE_PLOGI_ISSUE;
 	lpfc_issue_els_plogi(phba, ndlp, 0);
 
@@ -1059,10 +1034,6 @@ lpfc_cmpl_adisc_reglogin_issue(lpfcHBA_t * phba,
 {
 
 	/* First ensure ndlp is on the plogi list */
-	if (ndlp->nlp_flag & NLP_LIST_MASK) {
-		lpfc_findnode_did(phba, (NLP_SEARCH_ALL | NLP_SEARCH_DEQUE),
-				  ndlp->nlp_DID);
-	}
 	lpfc_nlp_plogi(phba, ndlp);
 
 	return (ndlp->nlp_state);
@@ -1114,21 +1085,18 @@ lpfc_cmpl_reglogin_reglogin_issue(lpfcHBA_t * phba,
 				lpfc_msgBlk0246.msgPreambleStr,
 				did, mb->mbxStatus, phba->hba_state);
 
-		if (ndlp->nlp_flag & NLP_LIST_MASK) {
-			lpfc_findnode_did(phba,
-					  (NLP_SEARCH_ALL | NLP_SEARCH_DEQUE),
-					  ndlp->nlp_DID);
-		}
+		lpfc_dequenode(phba, ndlp);
 		ndlp->nlp_state = NLP_STE_UNUSED_NODE;
 		lpfc_nlp_remove(phba, ndlp);
 		return (NLP_STE_FREED_NODE);
 	}
 
-	if (ndlp->nlp_rpi != 0)
-		lpfc_findnode_remove_rpi(phba, ndlp->nlp_rpi);
-
 	ndlp->nlp_rpi = mb->un.varWords[0];
-	lpfc_addnode_rpi(phba, ndlp, ndlp->nlp_rpi);
+
+	/* This is a brand new rpi, so there should be NO pending IOCBs queued to
+	 * the SLI layer using this rpi.
+	 */
+	lpfc_new_rpi(phba, ndlp->nlp_rpi);
 	lpfc_nlp_unmapped(phba, ndlp);
 
 	/* Only if we are not a fabric nport do we issue PRLI */
@@ -1175,7 +1143,7 @@ lpfc_device_rm_reglogin_issue(lpfcHBA_t * phba,
 				lpfc_mbox_free(phba, mbox);
 			}
 		}
-		lpfc_findnode_remove_rpi(phba, ndlp->nlp_rpi);
+
 		lpfc_no_rpi(phba, ndlp);
 		ndlp->nlp_rpi = 0;
 	}
@@ -1407,24 +1375,30 @@ lpfc_cmpl_prli_prli_issue(lpfcHBA_t * phba,
 	/* Can we assign a SCSI Id to this NPort */
 	if ((blp = lpfc_assign_scsid(phba, ndlp, 0))) {
 		lpfc_nlp_mapped(phba, ndlp, blp);
-		ndlp->nlp_failMask = 0;
 		targetp = ndlp->nlp_Target;
+		ndlp->nlp_failMask = 0;
 		if (targetp) {
 			list_for_each_safe(curr, next, &targetp->lunlist) {
-				lunp = list_entry(curr, LPFCSCSILUN_t , list);
+				lunp = list_entry(curr, LPFCSCSILUN_t, list);
 				lunp->failMask = 0;
 			}
-			if (targetp->tmofunc.function) {
-				lpfc_stop_timer((struct clk_data *)
-						targetp->tmofunc.data);
-			}
-		} else {
+		}
+		else {
 			/* new target to driver, allocate space to target <sid>
 			   lun 0 */
 			if (blp->nlp_Target == 0) {
 				lpfc_find_lun(phba, blp->nlp_sid, 0, 1);
 				blp->nlp_Target =
 				    phba->device_queue_hash[blp->nlp_sid];
+			}
+			targetp = blp->nlp_Target;
+			ndlp->nlp_Target = targetp;
+			targetp->pcontext = ndlp;
+			lpfc_scsi_assign_rpi(phba, targetp, ndlp->nlp_rpi);
+			targetp->un.dev_did = ndlp->nlp_DID;
+			list_for_each_safe(curr, next, &targetp->lunlist) {
+				lunp = list_entry(curr, LPFCSCSILUN_t, list);
+				lunp->pnode = (LPFC_NODELIST_t *) ndlp;
 			}
 		}
 		lpfc_set_failmask(phba, ndlp, LPFC_DEV_RPTLUN,
@@ -1459,16 +1433,10 @@ uint32_t
 lpfc_cmpl_adisc_prli_issue(lpfcHBA_t * phba,
 			   LPFC_NODELIST_t * ndlp, void *arg, uint32_t evt)
 {
-	LPFC_BINDLIST_t * blp;
-	LPFCSCSILUN_t    * lunp;
-	LPFCSCSITARGET_t * targetp;
-	struct list_head * curr;
-
-	/* First ensure ndlp is on the unmap list */
-	if (ndlp->nlp_flag & NLP_LIST_MASK) {
-		lpfc_findnode_did(phba, (NLP_SEARCH_ALL | NLP_SEARCH_DEQUE),
-				  ndlp->nlp_DID);
-	}
+	LPFC_BINDLIST_t  *blp;
+	LPFCSCSILUN_t    *lunp;
+	LPFCSCSITARGET_t *targetp;
+	struct list_head *curr, *next;
 
 	/* Can we reassign a SCSI Id to this NPort */
 	if ((blp = lpfc_assign_scsid(phba, ndlp, 1))) {
@@ -1476,23 +1444,20 @@ lpfc_cmpl_adisc_prli_issue(lpfcHBA_t * phba,
 		/* NOTE: can't we have this in lpfc_nlp_mapped */
 		ndlp->nlp_state = NLP_STE_MAPPED_NODE;
 		targetp = ndlp->nlp_Target;
-		if(targetp) {
-			targetp->targetFlags &= ~FC_NPR_ACTIVE;
-			if (targetp->tmofunc.function) {
-				lpfc_stop_timer((struct clk_data *)
-						targetp->tmofunc.data);
-			}
-
-			list_for_each(curr, &targetp->lunlist) {
-				lunp = list_entry(curr, LPFCSCSILUN_t, list);
-				lunp->pnode = (LPFC_NODELIST_t *)ndlp;
-			}
-		}
-		else {
-			/* new target to driver, allocate space to target <sid> lun 0 */
+		if(!targetp) {
+			/* new target to driver, allocate target <sid> lun 0 */
 			if(blp->nlp_Target == 0) {
 				lpfc_find_lun(phba, blp->nlp_sid, 0, 1);
 				blp->nlp_Target = phba->device_queue_hash[blp->nlp_sid];
+			}
+			targetp = blp->nlp_Target;
+			ndlp->nlp_Target = targetp;
+			targetp->pcontext = ndlp;
+			lpfc_scsi_assign_rpi(phba, targetp, ndlp->nlp_rpi);
+			targetp->un.dev_did = ndlp->nlp_DID;
+			list_for_each_safe(curr, next, &targetp->lunlist) {
+				lunp = list_entry(curr, LPFCSCSILUN_t, list);
+				lunp->pnode = (LPFC_NODELIST_t *) ndlp;
 			}
 		}
 		lpfc_set_failmask(phba, ndlp, LPFC_DEV_ALL_BITS, LPFC_CLR_BITMASK);
@@ -1533,7 +1498,7 @@ lpfc_cmpl_reglogin_prli_issue(lpfcHBA_t * phba,
 				lpfc_mbox_free(phba, mbox);
 			}
 		}
-		lpfc_findnode_remove_rpi(phba, ndlp->nlp_rpi);
+
 		lpfc_no_rpi(phba, ndlp);
 		ndlp->nlp_rpi = 0;
 
@@ -1594,8 +1559,7 @@ lpfc_device_add_prli_issue(lpfcHBA_t * phba,
 			   LPFC_NODELIST_t * ndlp, void *arg, uint32_t evt)
 {
 	if (ndlp->nlp_tmofunc.function) {
-		ndlp->nlp_flag &= ~(NLP_NODEV_TMO | NLP_DELAY_TMO);
-		ndlp->nlp_rflag &= ~NLP_NPR_ACTIVE;
+		ndlp->nlp_flag &= ~NLP_DELAY_TMO;
 		lpfc_stop_timer((struct clk_data *)ndlp->nlp_tmofunc.data);
 	}
 	/* software abort outstanding prli */
@@ -1662,8 +1626,10 @@ lpfc_rcv_plogi_prli_compl(lpfcHBA_t * phba,
 		stat.un.b.lsRjtRsvd0 = 0;
 		stat.un.b.lsRjtRsnCode = LSRJT_UNABLE_TPC;
 		if (phba->hba_state <= LPFC_FLOGI) {
-			stat.un.b.lsRjtRsnCodeExp = LSRJT_LOGICAL_BSY;
+			stat.un.b.lsRjtRsnCode = LSRJT_LOGICAL_BSY;
+			stat.un.b.lsRjtRsnCodeExp = LSEXP_NOTHING_MORE;
 		} else {
+			stat.un.b.lsRjtRsnCode = LSRJT_UNABLE_TPC;
 			stat.un.b.lsRjtRsnCodeExp = LSEXP_SPARM_OPTIONS;
 		}
 		stat.un.b.vendorUnique = 0;
@@ -1677,6 +1643,11 @@ lpfc_rcv_plogi_prli_compl(lpfcHBA_t * phba,
 				((LPFC_NODELIST_t*) ndlp)->nlp_rpi);
 
 		lpfc_els_rsp_acc(phba, ELS_CMD_PLOGI, cmdiocb, ndlp, 0, 0);
+
+		if ((phba->fc_flag & FC_PT2PT)
+		    && !(phba->fc_flag & FC_PT2PT_PLOGI)) {
+			ndlp->nlp_state = lpfc_rcv_plogi(phba, ndlp, cmdiocb);
+		}
 	}
 
 	return (ndlp->nlp_state);
@@ -1714,6 +1685,7 @@ lpfc_rcv_logo_prli_compl(lpfcHBA_t * phba,
 
 	/* software abort outstanding adisc before sending acc */
 	if (ndlp->nlp_flag & NLP_ADISC_SND) {
+		lpfc_nlp_plogi(phba, ndlp);
 		lpfc_driver_abort(phba, ndlp);
 	}
 	/* Only call LOGO ACC for first LOGO, this avoids sending unnecessary
@@ -1802,6 +1774,7 @@ lpfc_cmpl_logo_prli_compl(lpfcHBA_t * phba,
 	lpfc_freenode(phba, ndlp);
 
 	if (ndlp->nlp_flag & NLP_ADISC_SND) {
+		lpfc_nlp_plogi(phba, ndlp);
 		/* software abort outstanding adisc */
 		lpfc_driver_abort(phba, ndlp);
 	}
@@ -1823,17 +1796,14 @@ lpfc_cmpl_adisc_prli_compl(lpfcHBA_t * phba,
 	LPFCSCSILUN_t    * lunp;
 	LPFCSCSITARGET_t * targetp;
 	ADISC *ap;
-	struct list_head * curr;
+	struct list_head * curr, * next;
 
 	cmdiocb = (LPFC_IOCBQ_t *) arg;
 	rspiocb = cmdiocb->context_un.rsp_iocb;
 	irsp = &rspiocb->iocb;
 
 	/* First remove the ndlp from any list */
-	if (ndlp->nlp_flag & NLP_LIST_MASK) {
-		lpfc_findnode_did(phba, (NLP_SEARCH_ALL | NLP_SEARCH_DEQUE),
-				  ndlp->nlp_DID);
-	}
+	lpfc_dequenode(phba, ndlp);
 
 	if (irsp->ulpStatus) {
 		lpfc_freenode(phba, ndlp);
@@ -1864,24 +1834,20 @@ lpfc_cmpl_adisc_prli_compl(lpfcHBA_t * phba,
 		/* NOTE: can't we have this in lpfc_nlp_mapped */
 		ndlp->nlp_state = NLP_STE_MAPPED_NODE;
 		targetp = ndlp->nlp_Target;
-		if(targetp) {
-			targetp->targetFlags &= ~FC_NPR_ACTIVE;
-			if (targetp->tmofunc.function) {
-				lpfc_stop_timer((struct clk_data *)
-						targetp->tmofunc.data);
-			}
-
-			list_for_each(curr, &targetp->lunlist) {
-				lunp = list_entry(curr, LPFCSCSILUN_t, list);
-				lunp->pnode = (LPFC_NODELIST_t *)ndlp;
-			}
-
-		}
-		else {
+		if(!targetp) {
 			/* new target to driver, allocate space to target <sid> lun 0 */
 			if(blp->nlp_Target == 0) {
 				lpfc_find_lun(phba, blp->nlp_sid, 0, 1);
 				blp->nlp_Target = phba->device_queue_hash[blp->nlp_sid];
+			}
+			targetp = blp->nlp_Target;
+			ndlp->nlp_Target = targetp;
+			targetp->pcontext = ndlp;
+			lpfc_scsi_assign_rpi(phba, targetp, ndlp->nlp_rpi);
+			targetp->un.dev_did = ndlp->nlp_DID;
+			list_for_each_safe(curr, next, &targetp->lunlist) {
+				lunp = list_entry(curr, LPFCSCSILUN_t, list);
+				lunp->pnode = (LPFC_NODELIST_t *) ndlp;
 			}
 		}
 		lpfc_set_failmask(phba, ndlp, LPFC_DEV_ALL_BITS, LPFC_CLR_BITMASK);
@@ -1922,7 +1888,7 @@ lpfc_cmpl_reglogin_prli_compl(lpfcHBA_t * phba,
 				lpfc_mbox_free(phba, mbox);
 			}
 		}
-		lpfc_findnode_remove_rpi(phba, ndlp->nlp_rpi);
+
 		lpfc_no_rpi(phba, ndlp);
 		ndlp->nlp_rpi = 0;
 
@@ -1935,6 +1901,7 @@ lpfc_cmpl_reglogin_prli_compl(lpfcHBA_t * phba,
 		}
 
 		if (ndlp->nlp_flag & NLP_ADISC_SND) {
+			lpfc_nlp_plogi(phba, ndlp);
 			/* software abort outstanding adisc */
 			lpfc_driver_abort(phba, ndlp);
 		}
@@ -1971,27 +1938,22 @@ uint32_t
 lpfc_device_rm_prli_compl(lpfcHBA_t * phba,
 			  LPFC_NODELIST_t * ndlp, void *arg, uint32_t evt)
 {
-
-	/* if nodev timer is running, then we just exit */
-	if (!(ndlp->nlp_flag & NLP_NODEV_TMO)) {
-		lpfc_set_failmask(phba, ndlp, LPFC_DEV_DISCONNECTED,
-				  LPFC_SET_BITMASK);
-		if (ndlp->nlp_flag & NLP_ADISC_SND) {
-			/* software abort outstanding adisc */
-			lpfc_driver_abort(phba, ndlp);
-		}
-
-		/* If discovery processing causes us to remove a device, it is
-		 * important that nothing gets sent to the device (soft zoning
-		 * issues).
-		 */
-		ndlp->nlp_state = NLP_STE_UNUSED_NODE;
-		/* dequeue, cancel timeout, unreg login */
-		lpfc_nlp_remove(phba, ndlp);
-		return (NLP_STE_FREED_NODE);
+	lpfc_set_failmask(phba, ndlp, LPFC_DEV_DISCONNECTED,
+			  LPFC_SET_BITMASK);
+	if (ndlp->nlp_flag & NLP_ADISC_SND) {
+		lpfc_nlp_plogi(phba, ndlp);
+		/* software abort outstanding adisc */
+		lpfc_driver_abort(phba, ndlp);
 	}
-	lpfc_set_failmask(phba, ndlp, LPFC_DEV_DISAPPEARED, LPFC_SET_BITMASK);
-	return (ndlp->nlp_state);
+
+	/* If discovery processing causes us to remove a device, it is
+	 * important that nothing gets sent to the device (soft zoning
+	 * issues).
+	 */
+	ndlp->nlp_state = NLP_STE_UNUSED_NODE;
+	/* dequeue, cancel timeout, unreg login */
+	lpfc_nlp_remove(phba, ndlp);
+	return (NLP_STE_FREED_NODE);
 }
 
 uint32_t
@@ -1999,8 +1961,7 @@ lpfc_device_add_prli_compl(lpfcHBA_t * phba,
 			   LPFC_NODELIST_t * ndlp, void *arg, uint32_t evt)
 {
 	if (ndlp->nlp_tmofunc.function) {
-		ndlp->nlp_flag &= ~(NLP_NODEV_TMO | NLP_DELAY_TMO);
-		ndlp->nlp_rflag &= ~NLP_NPR_ACTIVE;
+		ndlp->nlp_flag &= ~NLP_DELAY_TMO;
 		lpfc_stop_timer((struct clk_data *)ndlp->nlp_tmofunc.data);
 	}
 	lpfc_nlp_adisc(phba, ndlp);
@@ -2011,57 +1972,9 @@ uint32_t
 lpfc_device_unk_prli_compl(lpfcHBA_t * phba,
 			   LPFC_NODELIST_t * ndlp, void *arg, uint32_t evt)
 {
-	lpfcCfgParam_t *clp;
-	unsigned long tmo;
-
-	clp = &phba->config[0];
-
-	/* If we are in pt2pt mode, free node */
-	if (phba->fc_flag & FC_PT2PT) {
-		/* dequeue, cancel timeout, unreg login */
-		lpfc_nlp_remove(phba, ndlp);
-		return (NLP_STE_FREED_NODE);
-	}
-
-	/* linkdown timer should be running at this time.  Check to 
-	 * see if the driver needs to start a nodev timer
-	 */
-	if ((clp[LPFC_CFG_NODEV_TMO].a_current) &&
-	    (clp[LPFC_CFG_HOLDIO].a_current == 0)) {
-		/* if some timer's running, cancel it whether it's nodev timer
-		 * or delay timer
-		 */
-		if (ndlp->nlp_tmofunc.function) {
-			ndlp->nlp_flag &= ~(NLP_NODEV_TMO | NLP_DELAY_TMO);
-			ndlp->nlp_rflag &= ~NLP_NPR_ACTIVE;
-			lpfc_stop_timer((struct clk_data *)
-					ndlp->nlp_tmofunc.data);
-		}
-
-		/* now start a nodev timer */
-		ndlp->nlp_flag |= NLP_NODEV_TMO;
-		ndlp->nlp_rflag |= NLP_NPR_ACTIVE;
-
-		if(clp[LPFC_CFG_NODEV_TMO].a_current >
-		   clp[LPFC_CFG_LINKDOWN_TMO].a_current) {
-			tmo = clp[LPFC_CFG_NODEV_TMO].a_current;
-		} else { 
-			tmo = clp[LPFC_CFG_LINKDOWN_TMO].a_current;
-		}
-
-		lpfc_start_timer(phba, tmo, &ndlp->nlp_tmofunc,
-				 lpfc_nodev_timeout, 
-				 (unsigned long)ndlp, 0);
-
-		/* Start nodev timer */
-		lpfc_printf_log(phba->brd_no, &lpfc_msgBlk0706,
-				lpfc_mes0706,
-				lpfc_msgBlk0706.msgPreambleStr,
-				ndlp->nlp_DID, ndlp->nlp_flag, ndlp->nlp_state,
-				ndlp);
-	}
-
-	return (ndlp->nlp_state);
+	/* dequeue, cancel timeout, unreg login */
+	lpfc_nlp_remove(phba, ndlp);
+	return (NLP_STE_FREED_NODE);
 }
 
 uint32_t
@@ -2093,8 +2006,10 @@ lpfc_rcv_plogi_mapped_node(lpfcHBA_t * phba,
 		stat.un.b.lsRjtRsvd0 = 0;
 		stat.un.b.lsRjtRsnCode = LSRJT_UNABLE_TPC;
 		if (phba->hba_state <= LPFC_FLOGI) {
-			stat.un.b.lsRjtRsnCodeExp = LSRJT_LOGICAL_BSY;
+			stat.un.b.lsRjtRsnCode = LSRJT_LOGICAL_BSY;
+			stat.un.b.lsRjtRsnCodeExp = LSEXP_NOTHING_MORE;
 		} else {
+			stat.un.b.lsRjtRsnCode = LSRJT_UNABLE_TPC;
 			stat.un.b.lsRjtRsnCodeExp = LSEXP_SPARM_OPTIONS;
 		}
 		stat.un.b.vendorUnique = 0;
@@ -2108,6 +2023,11 @@ lpfc_rcv_plogi_mapped_node(lpfcHBA_t * phba,
 				((LPFC_NODELIST_t*) ndlp)->nlp_rpi);
 
 		lpfc_els_rsp_acc(phba, ELS_CMD_PLOGI, cmdiocb, ndlp, 0, 0);
+
+		if ((phba->fc_flag & FC_PT2PT)
+		    && !(phba->fc_flag & FC_PT2PT_PLOGI)) {
+			ndlp->nlp_state = lpfc_rcv_plogi(phba, ndlp, cmdiocb);
+		}
 	}
 
 	return (ndlp->nlp_state);
@@ -2145,6 +2065,7 @@ lpfc_rcv_logo_mapped_node(lpfcHBA_t * phba,
 
 	/* software abort outstanding adisc before sending acc */
 	if (ndlp->nlp_flag & NLP_ADISC_SND) {
+		lpfc_nlp_plogi(phba, ndlp);
 		lpfc_driver_abort(phba, ndlp);
 	}
 	/* Only call LOGO ACC for first LOGO, this avoids sending unnecessary
@@ -2227,23 +2148,9 @@ lpfc_rcv_prlo_mapped_node(lpfcHBA_t * phba,
 	pci_dma_sync_single(phba->pcidev, pCmd->phys, LPFC_BPL_SIZE,
 				PCI_DMA_FROMDEVICE);
 
+	/* Force discovery to rePLOGI as well as PRLI */
+	ndlp->nlp_flag |= NLP_LOGO_ACC;
 	lpfc_els_rsp_acc(phba, ELS_CMD_ACC, cmdiocb, ndlp, 0, 0);
-
-	/* save binding on binding list */
-	if (ndlp->nlp_listp_bind) {
-		lpfc_nlp_bind(phba, ndlp->nlp_listp_bind);
-
-		lpfc_sched_flush_target(phba, ndlp->nlp_Target,
-				       IOSTAT_LOCAL_REJECT, IOERR_SLI_ABORTED);
-
-		ndlp->nlp_listp_bind = 0;
-		ndlp->nlp_sid = 0;
-		ndlp->nlp_Target = 0;
-		ndlp->nlp_flag &= ~NLP_SEED_MASK;
-	}
-
-	ndlp->nlp_state = NLP_STE_PRLI_COMPL;
-	lpfc_nlp_unmapped(phba, ndlp);
 
 	return (ndlp->nlp_state);
 }
@@ -2252,19 +2159,11 @@ uint32_t
 lpfc_cmpl_logo_mapped_node(lpfcHBA_t * phba,
 			   LPFC_NODELIST_t * ndlp, void *arg, uint32_t evt)
 {
-	LPFCSCSITARGET_t * targetp;
-
 	/* save binding on binding list */
 	if (ndlp->nlp_listp_bind) {
 		lpfc_nlp_bind(phba, ndlp->nlp_listp_bind);
-		if((targetp = ndlp->nlp_Target)) {
-			lpfc_sched_flush_target(phba, targetp,
-				       IOSTAT_LOCAL_REJECT, IOERR_SLI_ABORTED);
-		}
-
 		ndlp->nlp_listp_bind = 0;
 		ndlp->nlp_sid = 0;
-		ndlp->nlp_Target = 0;
 		ndlp->nlp_flag &= ~NLP_SEED_MASK;
 	}
 
@@ -2273,6 +2172,7 @@ lpfc_cmpl_logo_mapped_node(lpfcHBA_t * phba,
 
 	/* software abort outstanding adisc */
 	if (ndlp->nlp_flag & NLP_ADISC_SND) {
+		lpfc_nlp_plogi(phba, ndlp);
 		lpfc_driver_abort(phba, ndlp);
 	}
 	lpfc_nlp_remove(phba, ndlp);
@@ -2298,10 +2198,8 @@ lpfc_cmpl_adisc_mapped_node(lpfcHBA_t * phba,
 	irsp = &rspiocb->iocb;
 
 	/* First remove the ndlp from any list */
-	if (ndlp->nlp_flag & NLP_LIST_MASK) {
-		lpfc_findnode_did(phba, (NLP_SEARCH_ALL | NLP_SEARCH_DEQUE),
-				  ndlp->nlp_DID);
-	}
+	lpfc_dequenode(phba, ndlp);
+
 	if (irsp->ulpStatus) {
 		/* If this is not a driver aborted ADISC, handle the recovery
 		   here */
@@ -2340,23 +2238,22 @@ lpfc_cmpl_adisc_mapped_node(lpfcHBA_t * phba,
 
 		ndlp->nlp_state = NLP_STE_MAPPED_NODE;
 		targetp = ndlp->nlp_Target;
-		if (targetp) {
-			targetp->targetFlags &= ~FC_NPR_ACTIVE;
-			if (targetp->tmofunc.function) {
-				lpfc_stop_timer((struct clk_data *)
-						targetp->tmofunc.data);
-			}
-			list_for_each_safe(curr, next, &targetp->lunlist) {
-				lunp = list_entry(curr, LPFCSCSILUN_t , list);
-				lunp->pnode = (LPFC_NODELIST_t *) ndlp;
-			}
-		} else {
+		if (!targetp) {
 			/* new target to driver, allocate space to target <sid>
 			   lun 0 */
 			if (blp->nlp_Target == 0) {
 				lpfc_find_lun(phba, blp->nlp_sid, 0, 1);
 				blp->nlp_Target =
 				    phba->device_queue_hash[blp->nlp_sid];
+			}
+			targetp = blp->nlp_Target;
+			ndlp->nlp_Target = targetp;
+			targetp->pcontext = ndlp;
+			lpfc_scsi_assign_rpi(phba, targetp, ndlp->nlp_rpi);
+			targetp->un.dev_did = ndlp->nlp_DID;
+			list_for_each_safe(curr, next, &targetp->lunlist) {
+				lunp = list_entry(curr, LPFCSCSILUN_t, list);
+				lunp->pnode = (LPFC_NODELIST_t *) ndlp;
 			}
 		}
 		lpfc_set_failmask(phba, ndlp, LPFC_DEV_ALL_BITS,
@@ -2400,7 +2297,7 @@ lpfc_cmpl_reglogin_mapped_node(lpfcHBA_t * phba,
 				lpfc_mbox_free(phba, mbox);
 			}
 		}
-		lpfc_findnode_remove_rpi(phba, ndlp->nlp_rpi);
+
 		lpfc_no_rpi(phba, ndlp);
 		ndlp->nlp_rpi = 0;
 
@@ -2415,20 +2312,15 @@ lpfc_cmpl_reglogin_mapped_node(lpfcHBA_t * phba,
 		/* save binding on binding list */
 		if (ndlp->nlp_listp_bind) {
 			lpfc_nlp_bind(phba, ndlp->nlp_listp_bind);
-
-			lpfc_sched_flush_target(phba, ndlp->nlp_Target,
-					       IOSTAT_LOCAL_REJECT,
-					       IOERR_SLI_ABORTED);
-
 			ndlp->nlp_listp_bind = 0;
 			ndlp->nlp_sid = 0;
-			ndlp->nlp_Target = 0;
 			ndlp->nlp_flag &= ~NLP_SEED_MASK;
 		}
 
 
 		/* software abort outstanding adisc */
 		if (ndlp->nlp_flag & NLP_ADISC_SND) {
+			lpfc_nlp_plogi(phba, ndlp);
 			lpfc_driver_abort(phba, ndlp);
 		}
 
@@ -2465,72 +2357,32 @@ uint32_t
 lpfc_device_rm_mapped_node(lpfcHBA_t * phba,
 			   LPFC_NODELIST_t * ndlp, void *arg, uint32_t evt)
 {
-	LPFCSCSITARGET_t *targetp;
-	lpfcCfgParam_t *clp;
-	unsigned long tmo;
+	lpfc_set_failmask(phba, ndlp, LPFC_DEV_DISCONNECTED,
+			  LPFC_SET_BITMASK);
 
-	clp = &phba->config[0];
-	/* if nodev timer is running, then we just exit */
-	if (!(ndlp->nlp_flag & NLP_NODEV_TMO)) {
-		lpfc_set_failmask(phba, ndlp, LPFC_DEV_DISCONNECTED,
-				  LPFC_SET_BITMASK);
-
-		if (ndlp->nlp_flag & NLP_ADISC_SND) {
-			/* software abort outstanding adisc */
-			lpfc_driver_abort(phba, ndlp);
-		}
-
-		/* save binding info */
-		if (ndlp->nlp_listp_bind) {
-			targetp = ndlp->nlp_Target;
-			lpfc_nlp_bind(phba, ndlp->nlp_listp_bind);
-			if (targetp) {
-				targetp->targetFlags &= ~FC_NPR_ACTIVE;
-				if (targetp->tmofunc.function) {
-					lpfc_stop_timer((struct clk_data *)
-							targetp->tmofunc.data);
-				}
-				lpfc_sched_flush_target(phba, targetp,
-						       IOSTAT_LOCAL_REJECT,
-						       IOERR_SLI_ABORTED);
-
-			}
-
-			ndlp->nlp_listp_bind = 0;
-			ndlp->nlp_sid = 0;
-			ndlp->nlp_Target = 0;
-			ndlp->nlp_flag &= ~NLP_SEED_MASK;
-		}
-
-
-		/* If discovery processing causes us to remove a device, it is
-		 * important that nothing gets sent to the device (soft zoning
-		 * issues).
-		 */
-		ndlp->nlp_state = NLP_STE_UNUSED_NODE;
-		/* dequeue, cancel timeout, unreg login */
-		lpfc_nlp_remove(phba, ndlp);
-		return (NLP_STE_FREED_NODE);
+	if (ndlp->nlp_flag & NLP_ADISC_SND) {
+		lpfc_nlp_plogi(phba, ndlp);
+		/* software abort outstanding adisc */
+		lpfc_driver_abort(phba, ndlp);
 	}
-	targetp = ndlp->nlp_Target;
-	if (targetp) {
-		targetp->targetFlags |= FC_NPR_ACTIVE;
-		if (targetp->tmofunc.function) {
-			lpfc_stop_timer((struct clk_data *)
-					targetp->tmofunc.data);
-		}
-		if(clp[LPFC_CFG_NODEV_TMO].a_current >
-		   clp[LPFC_CFG_LINKDOWN_TMO].a_current) {
-			tmo = clp[LPFC_CFG_NODEV_TMO].a_current;
-		} else {     
-			tmo = clp[LPFC_CFG_LINKDOWN_TMO].a_current;
-		}
 
-		lpfc_start_timer(phba, tmo, &targetp->tmofunc, lpfc_npr_timeout,
-			(unsigned long)targetp, 0);
+	/* save binding info */
+	if (ndlp->nlp_listp_bind) {
+		lpfc_nlp_bind(phba, ndlp->nlp_listp_bind);
+		ndlp->nlp_listp_bind = 0;
+		ndlp->nlp_sid = 0;
+		ndlp->nlp_flag &= ~NLP_SEED_MASK;
 	}
-	lpfc_set_failmask(phba, ndlp, LPFC_DEV_DISAPPEARED, LPFC_SET_BITMASK);
-	return (ndlp->nlp_state);
+
+
+	/* If discovery processing causes us to remove a device, it is
+	 * important that nothing gets sent to the device (soft zoning
+	 * issues).
+	 */
+	ndlp->nlp_state = NLP_STE_UNUSED_NODE;
+	/* dequeue, cancel timeout, unreg login */
+	lpfc_nlp_remove(phba, ndlp);
+	return (NLP_STE_FREED_NODE);
 }
 
 uint32_t
@@ -2538,8 +2390,7 @@ lpfc_device_add_mapped_node(lpfcHBA_t * phba,
 			    LPFC_NODELIST_t * ndlp, void *arg, uint32_t evt)
 {
 	if (ndlp->nlp_tmofunc.function) {
-		ndlp->nlp_flag &= ~(NLP_NODEV_TMO | NLP_DELAY_TMO);
-		ndlp->nlp_rflag &= ~NLP_NPR_ACTIVE;
+		ndlp->nlp_flag &= ~NLP_DELAY_TMO;
 		lpfc_stop_timer((struct clk_data *)ndlp->nlp_tmofunc.data);
 	}
 	lpfc_nlp_adisc(phba, ndlp);
@@ -2550,73 +2401,9 @@ uint32_t
 lpfc_device_unk_mapped_node(lpfcHBA_t * phba,
 			    LPFC_NODELIST_t * ndlp, void *arg, uint32_t evt)
 {
-	LPFCSCSITARGET_t *targetp;
-	lpfcCfgParam_t *clp;
-	unsigned long tmo;
-
-	clp = &phba->config[0];
-
-	/* If we are in pt2pt mode, free node */
-	if (phba->fc_flag & FC_PT2PT) {
-		/* dequeue, cancel timeout, unreg login */
-		lpfc_nlp_remove(phba, ndlp);
-		return (NLP_STE_FREED_NODE);
-	}
-
-	targetp = ndlp->nlp_Target;
-	if (targetp) {
-		targetp->targetFlags |= FC_NPR_ACTIVE;
-		if (targetp->tmofunc.function) {
-			lpfc_stop_timer((struct clk_data *)
-					targetp->tmofunc.data);
-		}
-
-      if(clp[LPFC_CFG_NODEV_TMO].a_current >
-	 clp[LPFC_CFG_LINKDOWN_TMO].a_current) {
-			tmo = clp[LPFC_CFG_NODEV_TMO].a_current;
-		} else { 
-			tmo = clp[LPFC_CFG_LINKDOWN_TMO].a_current;
-		}
-		lpfc_start_timer(phba, tmo, &targetp->tmofunc, lpfc_npr_timeout,
-			(unsigned long)targetp, 0);
-	}
-
-	ndlp->nlp_rflag |= NLP_NPR_ACTIVE;
-	/* linkdown timer should be running at this time.  Check to 
-	 * see if the driver has to start a nodev timer
+	/* No need to do anything till the link comes back up or
+	 * npr timer expires.
 	 */
-	if ((clp[LPFC_CFG_NODEV_TMO].a_current) &&
-	    (clp[LPFC_CFG_HOLDIO].a_current == 0)) {
-		/* if some timer's running, cancel it whether it's nodev timer
-		 * or delay timer
-		 */
-		if (ndlp->nlp_tmofunc.function) {
-			ndlp->nlp_flag &= ~(NLP_NODEV_TMO | NLP_DELAY_TMO);
-			lpfc_stop_timer((struct clk_data *)
-					ndlp->nlp_tmofunc.data);
-		}
-
-		/* now start a nodev timer */
-		ndlp->nlp_flag |= NLP_NODEV_TMO;
-
-
-      if(clp[LPFC_CFG_NODEV_TMO].a_current >
-	 clp[LPFC_CFG_LINKDOWN_TMO].a_current) {
-			tmo = clp[LPFC_CFG_NODEV_TMO].a_current;
-		} else { 
-			tmo = clp[LPFC_CFG_LINKDOWN_TMO].a_current;
-		}
-		lpfc_start_timer(phba, tmo, &ndlp->nlp_tmofunc,
-				 lpfc_nodev_timeout, (unsigned long)ndlp, 0);
-
-		/* Start nodev timer */
-		lpfc_printf_log(phba->brd_no, &lpfc_msgBlk0700,
-				lpfc_mes0700,
-				lpfc_msgBlk0700.msgPreambleStr,
-				ndlp->nlp_DID, ndlp->nlp_flag, ndlp->nlp_state,
-				ndlp);
-	}
-
 	return (ndlp->nlp_state);
 }
 
@@ -2938,18 +2725,14 @@ lpfc_add_bind(lpfcHBA_t * phba, uint8_t bind_type,	/* NN/PN/DID */
 	if (ndlp) {
 		if ((blp = lpfc_assign_scsid(phba, ndlp, 0))) {
 			lpfc_nlp_mapped(phba, ndlp, blp);
-			ndlp->nlp_failMask = 0;
 			targetp = ndlp->nlp_Target;
+			ndlp->nlp_failMask = 0;
 			if (targetp) {
 				list_for_each_safe(curr, next,
 						   &targetp->lunlist) {
 					lunp = list_entry(curr, LPFCSCSILUN_t,
 							  list);
 					lunp->failMask = 0;
-				}
-				if (targetp->tmofunc.function) {
-					lpfc_stop_timer((struct clk_data *)
-							targetp->tmofunc.data);
 				}
 			} else {
 				/* new target to driver, allocate space to
@@ -2959,6 +2742,15 @@ lpfc_add_bind(lpfcHBA_t * phba, uint8_t bind_type,	/* NN/PN/DID */
 					blp->nlp_Target =
 					    phba->device_queue_hash[blp->
 								    nlp_sid];
+				}
+				targetp = blp->nlp_Target;
+				ndlp->nlp_Target = targetp;
+				targetp->pcontext = ndlp;
+				lpfc_scsi_assign_rpi(phba, targetp, ndlp->nlp_rpi);
+				targetp->un.dev_did = ndlp->nlp_DID;
+				list_for_each_safe(curr, next, &targetp->lunlist) {
+					lunp = list_entry(curr, LPFCSCSILUN_t, list);
+					lunp->pnode = (LPFC_NODELIST_t *) ndlp;
 				}
 			}
 			lpfc_set_failmask(phba, ndlp, LPFC_DEV_RPTLUN,

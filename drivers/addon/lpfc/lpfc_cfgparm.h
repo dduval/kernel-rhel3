@@ -19,15 +19,12 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_cfgparm.h 1.11 2004/05/04 11:35:10EDT jselx Exp  $
+ * $Id: lpfc_cfgparm.h 1.11.1.4 2004/07/16 15:51:23EDT sf_support Exp  $
  */
 
 #ifndef _H_LPFC_CFGPARAM
 #define _H_LPFC_CFGPARAM
 
-#define LPFC_DFT_POST_IP_BUF            128
-#define LPFC_MIN_POST_IP_BUF            64
-#define LPFC_MAX_POST_IP_BUF            1024
 #define LPFC_DFT_XMT_QUE_SIZE           256
 #define LPFC_MIN_XMT_QUE_SIZE           128
 #define LPFC_MAX_XMT_QUE_SIZE           10240
@@ -109,28 +106,25 @@
 #define LPFC_CFG_AUTOMAP                 15	/* automap */
 #define LPFC_CFG_FCP_CLASS               16	/* fcp-class */
 #define LPFC_CFG_USE_ADISC               17	/* use-adisc */
-#define LPFC_CFG_NETWORK_ON              18	/* network-on */
-#define LPFC_CFG_POST_IP_BUF             19	/* post-ip-buf */
-#define LPFC_CFG_XMT_Q_SIZE              20	/* xmt-que-size */
-#define LPFC_CFG_IP_CLASS                21	/* ip-class */
-#define LPFC_CFG_ACK0                    22	/* ack0 */
-#define LPFC_CFG_TOPOLOGY                23	/* topology */
-#define LPFC_CFG_SCAN_DOWN               24	/* scan-down */
-#define LPFC_CFG_LINK_SPEED              25	/* link-speed */
-#define LPFC_CFG_CR_DELAY                26	/* cr-delay */
-#define LPFC_CFG_CR_COUNT                27	/* cr-count */
-#define LPFC_CFG_FDMI_ON                 28	/* fdmi-on-count */
-#define LPFC_CFG_BINDMETHOD              29	/* fcp-bind-method */
-#define LPFC_CFG_DISC_THREADS            30	/* discovery-threads */
-#define LPFC_CFG_SCSI_REQ_TMO            31	/* timeout value for SCSI pass*/
-#define LPFC_CFG_MAX_TARGET              32	/* max-target */
+#define LPFC_CFG_XMT_Q_SIZE              18	/* xmt-que-size */
+#define LPFC_CFG_ACK0                    19	/* ack0 */
+#define LPFC_CFG_TOPOLOGY                20	/* topology */
+#define LPFC_CFG_SCAN_DOWN               21	/* scan-down */
+#define LPFC_CFG_LINK_SPEED              22	/* link-speed */
+#define LPFC_CFG_CR_DELAY                23	/* cr-delay */
+#define LPFC_CFG_CR_COUNT                24	/* cr-count */
+#define LPFC_CFG_FDMI_ON                 25	/* fdmi-on-count */
+#define LPFC_CFG_BINDMETHOD              26	/* fcp-bind-method */
+#define LPFC_CFG_DISC_THREADS            27	/* discovery-threads */
+#define LPFC_CFG_SCSI_REQ_TMO            28	/* timeout value for SCSI pass*/
+#define LPFC_CFG_MAX_TARGET              29	/* max-target */
 
 
 /* Note: The following define LPFC_TOTAL_NUM_OF_CFG_PARAM represents the total
 	 number of user configuration params. This define is used to specify the
 	 number of entries in the array lpfc_icfgparam[].
  */
-#define LPFC_TOTAL_NUM_OF_CFG_PARAM      33
+#define LPFC_TOTAL_NUM_OF_CFG_PARAM      30
 
 /* The order of the icfgparam[] entries must match that of LPFC_CORE_CFG defs */
 #ifdef LPFC_DEF_ICFG
@@ -250,29 +244,11 @@ iCfgParam lpfc_icfgparam[LPFC_TOTAL_NUM_OF_CFG_PARAM] = {
 	 "Use ADISC on rediscovery to authenticate FCP devices"},
 
 	/* IP specific parameters */
-	{"network_on",
-	 0, 1, FALSE, 0,
-	 (ushort) (CFG_EXPORT),
-	 (ushort) CFG_REBOOT,
-	 "Enable IP processing"},
-
-	{"post_ip_buf",
-	 LPFC_MIN_POST_IP_BUF, LPFC_MAX_POST_IP_BUF, LPFC_DFT_POST_IP_BUF, 0,
-	 (ushort) (CFG_EXPORT),
-	 (ushort) CFG_RESTART,
-	 "Number of IP buffers to post to adapter"},
-
 	{"xmt_que_size",
 	 LPFC_MIN_XMT_QUE_SIZE, LPFC_MAX_XMT_QUE_SIZE, LPFC_DFT_XMT_QUE_SIZE, 0,
 	 (ushort) (CFG_EXPORT),
 	 (ushort) CFG_RESTART,
 	 "Number of outstanding IP cmds for an adapter"},
-
-	{"ip_class",
-	 2, 3, LPFC_DFT_FC_CLASS, 0,
-	 (ushort) (CFG_EXPORT),
-	 (ushort) CFG_DYNAMIC,
-	 "Select Fibre Channel class of service for IP sequences"},
 
 	/* Fibre Channel specific parameters */
 	{"ack0",

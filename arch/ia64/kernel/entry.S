@@ -1126,7 +1126,15 @@ sys_call_table:
 	data8 sys_syslog
 	data8 sys_setitimer
 	data8 sys_getitimer
-	data8 ia64_oldstat			// 1120
+#ifdef CONFIG_TUX
+	data8 __sys_tux				// 1120		/* was: ia64_oldstat */
+#else
+# ifdef CONFIG_TUX_MODULE
+	data8 sys_tux				// 1120		/* was: ia64_oldstat */
+# else
+	data8 sys_ni_syscall			// 1120		/* was: ia64_oldstat */
+# endif
+#endif
 	data8 ia64_oldlstat
 	data8 ia64_oldfstat
 	data8 sys_vhangup

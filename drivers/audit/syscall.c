@@ -122,6 +122,9 @@ f(fork,		T_void),
 f(vfork,	T_void),
 #endif
 f(clone,	T_uint),
+#ifdef __NR_clone2
+f(clone2,	T_uint),
+#endif
 f(execve,	T_path, T_argv, T_any_ptr),
 f(exit,		T_int),
 f(ptrace,	T_uint, T_pid_t, T_any_ptr, T_any_ptr),
@@ -247,6 +250,8 @@ f(pciconfig_iobase, T_long, T_ulong, T_ulong),
 f(open,		T_path, T_int, T_mode_t),
 f(read,		T_filedesc, T_any_ptr, T_size_t),
 f(write,	T_filedesc, T_any_ptr, T_size_t),
+f(pread,	T_filedesc, T_any_ptr, T_size_t, T_size_t),
+f(pwrite,	T_filedesc, T_any_ptr, T_size_t, T_size_t),
 f(close,	T_filedesc),
 #ifdef __NR_readv
 f(readv,	T_filedesc, T_any_ptr, T_size_t),
@@ -264,12 +269,15 @@ f(creat,	T_path, T_mode_t),
 f(mkdir,	T_path_parent, T_mode_t),
 f(mknod,	T_path_parent, T_mode_t, T_dev_t),
 f(link,		T_path_parent, T_path_parent),
-f(symlink,	T_string, T_path_parent),
+f(symlink,	T_path_parent, T_path_parent),
 f(rename,	T_path_parent, T_path_parent),
 f(unlink,	T_path_parent),
 f(rmdir,	T_path_parent),
 #ifdef __NR_utime
 f(utime,	T_path, T_pointer(struct utimbuf)),
+#endif
+#ifdef __NR_utimes
+f(utimes,	T_path, T_timeval_t),
 #endif
 f(chmod,	T_path, T_mode_t),
 #ifdef __NR_chown32

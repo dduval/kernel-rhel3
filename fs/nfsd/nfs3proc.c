@@ -798,4 +798,10 @@ struct svc_procedure		nfsd_acl_procedures3[] = {
   PROC(getacl,	 getacl,	getacl,		getacl,  RC_NOCACHE, ST+1+2*(1+ACL)),
   PROC(setacl,	 setacl,	setacl,		fhandle, RC_NOCACHE, ST+pAT)
 };
+
+void nfs3_fixup_proc_tables(unsigned int acl_max)
+{
+	nfsd_acl_procedures3[1].pc_xdrressize = (((acl_max*3)+2)*2)+1+ST;
+}
+
 #endif  /* CONFIG_NFSD_ACL */

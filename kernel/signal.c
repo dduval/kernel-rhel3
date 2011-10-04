@@ -22,6 +22,9 @@
 #include <asm/uaccess.h>
 #include <asm/siginfo.h>
 
+static void print_maps(void);
+static void print_ulimits(void);
+
 /*
  * SLAB caches for signal bits.
  */
@@ -1207,8 +1210,17 @@ void do_notify_parent(struct task_struct *tsk, int sig)
 	if (sig == -1)
 		BUG();
 
-	BUG_ON(tsk->group_leader != tsk && tsk->group_leader->state != TASK_ZOMBIE && !tsk->ptrace);
-	BUG_ON(tsk->group_leader == tsk && !thread_group_empty(tsk) && !tsk->ptrace);
+	if (!tsk->ptrace &&
+	    (tsk->group_leader == tsk ? (!thread_group_empty(tsk)) :
+	     (tsk->group_leader->state != TASK_ZOMBIE)))
+		/*
+		 * These are circumstances where SIGCHLD is delayed.
+		 * We can only have been called if we were ptraced.
+		 * But now we are not, so our tracer must have suddenly
+		 * died and cleared tsk->ptrace.  Don't generate a spurious
+		 * SIGCHLD to our real parent now.
+		 */
+		return;
 
 	info.si_signo = sig;
 	info.si_errno = 0;
@@ -1471,6 +1483,10 @@ static void print_fatal_signal(struct pt_regs *regs, int signr)
 		printk("\n");
 	}
 	show_regs(regs);
+	if (print_fatal_signals >= 2) {
+		print_maps();
+		print_ulimits();
+	}
 }
 
 static int __init setup_print_fatal_signals(char *str)
@@ -2261,3 +2277,109 @@ void __init signals_init(void)
 		panic("signals_init(): cannot create sigqueue SLAB cache");
 }
 
+
+/* for systems with sizeof(void*) == 4: */
+#define MAPS_LINE_FORMAT4	  "%08lx-%08lx %s %08lx %s %lu"
+#define MAPS_LINE_MAX4	49 /* sum of 8  1  8  1 4 1 8 1 5 1 10 1 */
+
+/* for systems with sizeof(void*) == 8: */
+#define MAPS_LINE_FORMAT8	  "%016lx-%016lx %s %016lx %s %lu"
+#define MAPS_LINE_MAX8	73 /* sum of 16  1  16  1 4 1 16 1 5 1 10 1 */
+
+#define MAPS_LINE_FORMAT	(sizeof(void *) == 4 ? \
+					MAPS_LINE_FORMAT4 : MAPS_LINE_FORMAT8)
+#define MAPS_LINE_MAX		(sizeof(void *) == 4 ? \
+					MAPS_LINE_MAX4 : MAPS_LINE_MAX8)
+
+static DECLARE_MUTEX(maps_sem);
+
+static char line_buf[PAGE_SIZE+1];
+
+static void maps_print_line(struct vm_area_struct *map)
+{
+	/* produce the next line */
+	char *line, *buf = line_buf;
+	char str[5];
+	int flags;
+	kdev_t dev;
+	unsigned long ino;
+	int len;
+
+	flags = map->vm_flags;
+
+	str[0] = flags & VM_READ ? 'r' : '-';
+	str[1] = flags & VM_WRITE ? 'w' : '-';
+	str[2] = flags & VM_EXEC ? 'x' : '-';
+	str[3] = flags & VM_MAYSHARE ? 's' : 'p';
+	str[4] = 0;
+
+	dev = 0;
+	ino = 0;
+	if (map->vm_file != NULL) {
+		dev = map->vm_file->f_dentry->d_inode->i_dev;
+		ino = map->vm_file->f_dentry->d_inode->i_ino;
+		line = d_path(map->vm_file->f_dentry,
+			      map->vm_file->f_vfsmnt,
+			      buf, PAGE_SIZE);
+		if (IS_ERR(line))
+			return;
+		buf[PAGE_SIZE-1] = '\n';
+		line -= MAPS_LINE_MAX;
+		if (line < buf)
+			line = buf;
+	} else
+		line = buf;
+
+	len = sprintf(line,
+		      MAPS_LINE_FORMAT,
+		      map->vm_start, map->vm_end, str,
+		      map->vm_pgoff << PAGE_SHIFT, kdevname(dev), ino);
+
+	if (map->vm_file) {
+		int i;
+		for (i = len; i < MAPS_LINE_MAX; i++)
+			line[i] = ' ';
+		len = buf + PAGE_SIZE - line;
+		memmove(buf, line, len);
+	} else
+		line[len++] = '\n';
+
+	buf[len] = 0;
+
+	printk("%s", buf);
+}
+
+static void print_maps(void)
+{
+	struct mm_struct *mm = current->mm;
+	struct vm_area_struct *map;
+
+	if (!mm)
+		return;
+
+	printk("\nmemory maps:\n");
+	down(&maps_sem);
+	down_read(&mm->mmap_sem);
+	map = mm->mmap;
+	while (map) {
+		maps_print_line(map);
+		map = map->vm_next;
+	}
+	up_read(&mm->mmap_sem);
+	up(&maps_sem);
+}
+
+static const char *rlim_names[RLIM_NLIMITS] =
+	{ "     CPU", "   FSIZE", "    DATA", "   STACK",
+	  "    CORE", "     RSS", "   NPROC", "  NRFILE",
+	  " MEMLOCK", "      AS","   LOCKS" };
+
+static void print_ulimits(void)
+{
+	int i;
+
+	printk("\nresource limits:\n");
+	for (i = 0; i < RLIM_NLIMITS; i++)
+		printk("%s: cur: %08lx  [max: %08lx]\n", rlim_names[i],
+			current->rlim[i].rlim_cur, current->rlim[i].rlim_max);
+}

@@ -74,6 +74,7 @@ extern struct svc_program	nfsd_program;
 #ifdef CONFIG_NFSD_ACL
 extern struct svc_procedure	nfsd_acl_procedures3[];
 extern struct svc_program	nfsd_acl_program;
+extern unsigned int		nfsd3_acl_max_entries;
 #endif /* CONFIG_NFSD_ACL */
 
 /*

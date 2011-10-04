@@ -258,6 +258,7 @@ struct dentry *proc_lookup(struct inode * dir, struct dentry *dentry)
 	struct inode *inode;
 	struct proc_dir_entry * de;
 	int error;
+	extern void de_put(struct proc_dir_entry *);
 
 	error = -ENOENT;
 	inode = NULL;
@@ -271,7 +272,9 @@ struct dentry *proc_lookup(struct inode * dir, struct dentry *dentry)
 			if (!memcmp(dentry->d_name.name, de->name, de->namelen)) {
 				int ino = de->low_ino;
 				error = -EINVAL;
+				atomic_inc(&de->count);
 				inode = proc_get_inode(dir->i_sb, ino, de);
+				de_put(de);
 				break;
 			}
 		}

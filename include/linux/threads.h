@@ -22,8 +22,14 @@
 #define PID_MAX_DEFAULT 0x8000
 
 /*
- * A maximum of 4 million PIDs should be enough for a while:
+ * The size of the PID space is limited by the size of the inode number
+ * field (i_ino) in procfs inodes.  On 32-bit architectures, only the
+ * highest-order 16 bits are available for representing the PID.
  */
+#if BITS_PER_LONG < 64
+#define PID_MAX_LIMIT (64*1024)
+#else
 #define PID_MAX_LIMIT (4*1024*1024)
+#endif
 
 #endif

@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: hbaapi.h 1.4 2004/04/15 00:09:35EDT jselx Exp  $
+ * $Id: hbaapi.h 1.4.1.2 2004/07/29 20:23:28EDT sf_support Exp  $
  */
 
 #ifdef __cplusplus
@@ -162,6 +162,7 @@ extern "C" {
 						 * of reporting */
 #define HBA_PORTSPEED_1GBIT                 1	/* 1 GBit/sec */
 #define HBA_PORTSPEED_2GBIT                 2	/* 2 GBit/sec */
+#define HBA_PORTSPEED_4GBIT                 8	/* 2 GBit/sec */
 #define HBA_PORTSPEED_10GBIT                4	/* 10 GBit/sec */
 #define HBA_PORTSPEED_NOT_NEGOTIATED        5	/* Speed not established */
 

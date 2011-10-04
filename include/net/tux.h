@@ -39,10 +39,10 @@
 #include <net/tux_u.h>
 
 /* Maximum number of threads: */
-#define CONFIG_TUX_NUMTHREADS 8
+#define CONFIG_TUX_NUMTHREADS 16
 
 /* Number of cachemiss/IO threads: */
-#define NR_IO_THREADS 32
+#define NR_IO_THREADS 64
 
 /* Maximum number of listen sockets per thread: */
 #define CONFIG_TUX_NUMSOCKETS 16

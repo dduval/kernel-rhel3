@@ -75,6 +75,9 @@ void (*pm_idle)(void);
  */
 void (*pm_power_off)(void);
 
+/* optional machine reset function */
+void (*machine_reset)(void);
+
 void disable_hlt(void)
 {
 	hlt_counter++;
@@ -260,6 +263,9 @@ void machine_restart(char * __unused)
 	
 	cpuid = GET_APIC_ID(apic_read(APIC_ID));
 
+	if (crashdump_mode())
+		goto reboot;
+
 	if (reboot_smp) {
 
 		/* check to see if reboot_cpu is valid 
@@ -289,6 +295,7 @@ void machine_restart(char * __unused)
 	 * other OSs see a clean IRQ state.
 	 */
 		smp_send_stop();
+reboot:
 #endif
 	disable_IO_APIC();
 	/* Could do reset through the northbridge of the Hammer here. */
@@ -297,6 +304,10 @@ void machine_restart(char * __unused)
 	*((unsigned short *)__va(0x472)) = reboot_mode;
 	for (;;) {
 		int i;
+
+		if (machine_reset)
+			(*machine_reset)();
+
 		/* First fondle with the keyboard controller. */ 
 		for (i=0; i<100; i++) {
 			kb_wait();
@@ -809,7 +820,9 @@ static inline unsigned int get_random_int(void)
 
 unsigned long arch_align_stack(unsigned long sp)
 {
-	return sp - ((get_random_int() % 65536) << 4);
+	if (current->flags & PF_RELOCEXEC)
+		sp -= ((get_random_int() % 1024) << 4);
+	return sp & ~0xf;
 }
 
 /*

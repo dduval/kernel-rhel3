@@ -45,6 +45,18 @@ extern void mda_console_init(void);
 extern void tapechar_init(void);
 #endif
      
+#ifdef __PAGE_OFFSET
+#define KMEM_START		((unsigned long)__PAGE_OFFSET)
+#else
+#define KMEM_START		((unsigned long)PAGE_OFFSET)
+#endif
+#define KMEM_END		((unsigned long)high_memory)
+
+#define kmem_addr_ok(x)	((((unsigned long)(x) >= KMEM_START) && \
+				  ((unsigned long)(x) <  KMEM_END)) || \
+				 (((unsigned long)(x) >= VMALLOC_START) && \
+				  ((unsigned long)(x) <  VMALLOC_END)))
+
 static ssize_t do_write_mem(struct file * file, void *p, unsigned long realp,
 			    const char * buf, size_t count, loff_t *ppos)
 {
@@ -233,6 +245,9 @@ static ssize_t read_kmem(struct file *file, char *buf,
 	ssize_t virtr = 0;
 	char * kbuf; /* k-addr because vread() takes vmlist_lock rwlock */
 		
+	if (!kmem_addr_ok(p))
+		return -ENXIO;
+
 	if (p < (unsigned long) high_memory) {
 		read = count;
 		if (count > (unsigned long) high_memory - p)
@@ -297,6 +312,9 @@ static ssize_t write_kmem(struct file * file, const char * buf,
 	ssize_t wrote = 0;
 	ssize_t virtr = 0;
 	char * kbuf; /* k-addr because vwrite() takes vmlist_lock rwlock */
+
+	if (!kmem_addr_ok(p))
+		return -ENXIO;
 
 	if (p < (unsigned long) high_memory) {
 		wrote = count;
@@ -586,6 +604,9 @@ static int mmap_kmem(struct file * file, struct vm_area_struct * vma)
 {
 	unsigned long offset = vma->vm_pgoff << PAGE_SHIFT;
 	unsigned long size = vma->vm_end - vma->vm_start;
+
+	if (!kmem_addr_ok(offset))
+		return -ENXIO;
 
 	/*
 	 * If the user is not attempting to mmap a high memory address then

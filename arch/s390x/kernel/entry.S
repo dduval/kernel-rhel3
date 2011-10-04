@@ -167,7 +167,7 @@ system_call:
 sysc_noemu:
         lgf     %r8,0(%r7,%r10)   # load address of system call routine
         lg      %r1,__TASK_ptrace(%r9) # process ptrace flags
-        tml     %r1,0x802         # PT_TRACESYS|PT_AUDITED
+        tml     %r1,0x1802        # PT_TRACESYS|PT_AUDITED|PT_SINGLESTEP
         jnz     sysc_tracesys
         basr    %r14,%r8          # call sys_xxxx
         stg     %r2,SP_R2(%r15)   # store return value (change R2 on stack)
@@ -630,9 +630,15 @@ sys_call_table:
 	.long  SYSCALL(sys_io_submit,sys_ni_syscall)
 	.long  SYSCALL(sys_io_cancel,sys_ni_syscall)
 	.long  SYSCALL(sys_exit_group,sys32_exit_group_wrapper)
+#ifdef CONFIG_EPOLL
+	.long  SYSCALL(sys_epoll_create,sys_epoll_create_wrapper)
+	.long  SYSCALL(sys_epoll_ctl,sys_epoll_ctl_wrapper)	/* 250 */
+	.long  SYSCALL(sys_epoll_wait,sys_epoll_wait_wrapper)
+#else
 	.long  SYSCALL(sys_ni_syscall,sys_ni_syscall)
-	.long  SYSCALL(sys_ni_syscall,sys_ni_syscall)	/* 250 */
 	.long  SYSCALL(sys_ni_syscall,sys_ni_syscall)
+	.long  SYSCALL(sys_ni_syscall,sys_ni_syscall)
+#endif /* CONFIG_EPOLL */
 	.long  SYSCALL(sys_set_tid_address,sys32_set_tid_address_wrapper)
 	.long  SYSCALL(sys_ni_syscall,sys_ni_syscall)
 	.rept  255-253
@@ -720,7 +726,7 @@ pgm_svcper:
 pgm_svcper_noemu:
         lgf     %r8,0(%r7,%r10)   # load address of system call routine
         lg      %r1,__TASK_ptrace(%r9) # process ptrace flags
-        tml     %r1,0x802         # PT_TRACESYS|PT_AUDITED
+        tml     %r1,0x1802        # PT_TRACESYS|PT_AUDITED|PT_SINGLESTEP
         jnz     pgm_tracesys
         basr    %r14,%r8          # call sys_xxxx
         stg     %r2,SP_R2(%r15)   # store return value (change R2 on stack)

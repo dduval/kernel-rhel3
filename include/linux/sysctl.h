@@ -132,6 +132,7 @@ enum
 	KERN_HONOR_UAC_NOPRINT=61, /* int: allow access to UAC_NOPRINT prctl */
 	KERN_S390_HZ_TIMER=62,	/* int: hz timer on or off */
 	KERN_UNKNOWN_NMI_PANIC=63, /* int: unknown nmi panic flag */
+	KERN_MEM_NMI_PANIC=64,  /* int: memory nmi panic flag */
 };
 
 
@@ -361,6 +362,7 @@ enum
 	NET_IPV4_CONF_MEDIUM_ID=14,
 	NET_IPV4_CONF_NOXFRM=15,
 	NET_IPV4_CONF_NOPOLICY=16,
+	NET_IPV4_CONF_FORCE_IGMP_VERSION=17,
 };
 
 /* /proc/sys/net/ipv6 */

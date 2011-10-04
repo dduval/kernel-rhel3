@@ -452,6 +452,10 @@ extern void ia64_load_extra (struct task_struct *task);
 # define switch_to(prev,next,last)	__switch_to(prev, next, last)
 #endif
 
+#define prepare_arch_switch(rq, next)  do {spin_lock(&(next)->switch_lock); spin_unlock(&(rq)->lock);} while(0)
+#define finish_arch_switch(rq, prev)   do {spin_unlock_irq(&(prev)->switch_lock);} while(0)
+#define task_running(p)    ((CPU_CURR_PTR(task_cpu(p)) == (p)) || spin_is_locked(&(p)->switch_lock))
+
 #endif /* __KERNEL__ */
 
 #endif /* __ASSEMBLY__ */

@@ -1737,7 +1737,7 @@ static int apm(void *unused)
 	 * Method suggested by Ingo Molnar.
 	 */
 	if (cpu_number_map(smp_processor_id()) != 0) {
-		current->cpus_allowed = 1;
+		set_cpus_allowed(current, 1 << cpu_logical_map(0));
 		schedule();
 		if (unlikely(cpu_number_map(smp_processor_id()) != 0))
 			BUG();

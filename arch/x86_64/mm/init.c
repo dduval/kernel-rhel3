@@ -502,3 +502,36 @@ void free_bootmem_generic(unsigned long phys, unsigned len)
 	free_bootmem(phys, len);    
 #endif
 }
+
+#define __VIRTUAL_MASK_SHIFT	48
+
+int kern_addr_valid(unsigned long addr)
+{
+	unsigned long above = ((long)addr) >> __VIRTUAL_MASK_SHIFT;
+       pml4_t *pml4;
+       pgd_t *pgd;
+       pmd_t *pmd;
+       pte_t *pte;
+
+	if (above != 0 && above != -1UL)
+		return 0;
+	
+       pml4 = pml4_offset_k(addr);
+	if (pml4_none(*pml4))
+		return 0;
+
+       pgd = pgd_offset_k(addr);
+	if (pgd_none(*pgd))
+		return 0;
+
+       pmd = pmd_offset(pgd, addr);
+	if (pmd_none(*pmd))
+		return 0;
+	if (pmd_large(*pmd))
+		return pfn_valid(pte_pfn(*(pte_t *)pmd));
+
+       pte = pte_offset_kernel(pmd, addr);
+	if (pte_none(*pte))
+		return 0;
+	return pfn_valid(pte_pfn(*pte));
+}

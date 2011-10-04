@@ -64,6 +64,7 @@ static spinlock_t log_lock = SPIN_LOCK_UNLOCKED;
 
 static int ras_get_sensor_state_token;
 static int ras_check_exception_token;
+static int ras_error_log_max;
 
 #define EPOW_SENSOR_TOKEN   9
 #define EPOW_SENSOR_INDEX   0
@@ -85,7 +86,8 @@ void init_ras_IRQ(void)
 
 	ras_get_sensor_state_token = rtas_token("get-sensor-state");
 	ras_check_exception_token = rtas_token("check-exception");
-
+	ras_error_log_max = rtas_get_error_log_max();
+			  
 	/* Internal Errors */
 	if ((np = find_path_device("/event-sources/internal-errors")) != NULL) {
 		for (i = 0; i < num_props; i++) {
@@ -162,7 +164,7 @@ ras_epow_interrupt(int irq, void *dev_id, struct pt_regs * regs)
 	status = rtas_call(ras_check_exception_token, 6, 1, NULL, 
 			   RAS_VECTOR_OFFSET, virt_irq_to_real(virq), 
 			   EPOW_WARNING | POWERMGM_EVENTS, 
-			   critical, __pa(&log_buf), RTAS_ERROR_LOG_MAX);
+			   critical, __pa(&log_buf), ras_error_log_max);
 
 	udbg_printf("EPOW <0x%lx 0x%lx 0x%lx>\n", 
 		    *((unsigned long *)&log_buf), status, state); 
@@ -195,7 +197,7 @@ ras_error_interrupt(int irq, void *dev_id, struct pt_regs * regs)
 	status = rtas_call(ras_check_exception_token, 6, 1, NULL, 
 			   RAS_VECTOR_OFFSET, irq, INTERNAL_ERROR, 
 			   1 /* Time Critical */, __pa(&log_buf), 
-			   RTAS_ERROR_LOG_MAX);
+			   ras_error_log_max);
 
 	if ((status == 0) && (rtas_errlog.severity >= SEVERITY_ERROR_SYNC)) 
 		fatal = 1;

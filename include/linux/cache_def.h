@@ -13,3 +13,4 @@ struct cache_definition {
 
 extern void register_cache(struct cache_definition *);
 extern void unregister_cache(struct cache_definition *);
+extern int shrink_other_caches(unsigned int priority, int gfp_mask);

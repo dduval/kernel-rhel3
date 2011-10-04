@@ -472,10 +472,8 @@ static int scsi_dump_reset(Scsi_Device *sdev)
 	}
 
 	Dbg("request sense");
-	if ((ret = send_command(&scsi_dump_cmnd)) < 0) {
-		Err("sense failed");
-		return -EIO;
-	}
+	if ((ret = send_command(&scsi_dump_cmnd)) < 0)
+		Warn("sense failed");
 	return 0;
 }
 
@@ -486,6 +484,9 @@ scsi_dump_quiesce(struct disk_dump_device *dump_device)
 	struct Scsi_Host *host = sdev->host;
 	Scsi_Host_Template_dump *hostt = TEMPLATE_EXT(host);
 	int ret;
+	int enable_cache;
+
+	enable_cache = !hostt->dump_ops->no_write_cache_enable;
 
 	if (hostt->dump_ops->quiesce) {
 		ret = hostt->dump_ops->quiesce(sdev);
@@ -493,11 +494,13 @@ scsi_dump_quiesce(struct disk_dump_device *dump_device)
 			return ret;
 	}
 
+	diskdump_register_poll(sdev, (void (*)(void *))hostt->dump_ops->poll);
+
 	Dbg("do bus reset");
 	if ((ret = scsi_dump_reset(sdev)) < 0)
 		return ret;
 
-	if (sdev->scsi_level >= SCSI_2)
+	if (enable_cache && sdev->scsi_level >= SCSI_2)
 		enable_write_cache(sdev);
 
 	quiesce_ok = 1;
@@ -533,8 +536,11 @@ scsi_dump_shutdown(struct disk_dump_device *dump_device)
 	struct Scsi_Host *host = sdev->host;
 	Scsi_Host_Template_dump *hostt = TEMPLATE_EXT(host);
 	int ret;
+	int enable_cache;
 
-	if (sdev->scsi_level >= SCSI_2) {
+	enable_cache = !hostt->dump_ops->no_write_cache_enable;
+
+	if (enable_cache && sdev->scsi_level >= SCSI_2) {
 		init_sync_command(sdev, &scsi_dump_cmnd);
 		send_command(&scsi_dump_cmnd);
 	}

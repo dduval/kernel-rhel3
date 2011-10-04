@@ -23,9 +23,11 @@
 #include <linux/slab.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
+#include <linux/sysctl.h>
 
 #include <linux/nfs.h>
 #include <linux/sunrpc/svc.h>
+#include <linux/solaris_acl.h>
 #include <linux/nfsd/nfsd.h>
 #include <linux/nfsd/cache.h>
 #include <linux/nfsd/xdr.h>
@@ -35,6 +37,12 @@
 #include <linux/smp.h>
 #include <linux/smp_lock.h>
 #include <linux/init.h>
+
+#ifdef CONFIG_NFSD_ACL
+unsigned int nfsd3_acl_max_entries = NFS3_ACL_MAX_ENTRIES;
+MODULE_PARM(nfsd3_acl_max_entries, "i");
+MODULE_PARM_DESC(nfsd3_acl_max_entries, "Max number of ACE objects to support in an NFS_ACL response");
+#endif
 
 static int	nfsctl_svc(struct nfsctl_svc *data);
 static int	nfsctl_addclient(struct nfsctl_client *data);
@@ -49,6 +57,42 @@ static int	nfsctl_stopfodrop(struct nfsctl_fodrop *data);
 #ifdef notyet
 static int	nfsctl_ugidupdate(struct nfsctl_ugidmap *data);
 #endif
+
+static struct ctl_table_header *nfsd_sysctl_table;
+#define CTL_UNNUMBERED		-2
+static ctl_table nfsd_sysctl_files[] = {
+#ifdef CONFIG_NFSD_ACL
+	{
+		.ctl_name	= CTL_UNNUMBERED,
+		.procname	= "nfsd3_acl_max_entries",
+		.data		= &nfsd3_acl_max_entries,
+		.maxlen		= sizeof(int),
+		.mode		= 0444,
+		.proc_handler	= &proc_dointvec,
+	},
+#endif
+	{ .ctl_name = 0 }
+};
+
+static ctl_table nfsd_sysctl_dir[] = {
+	{
+		.ctl_name	= CTL_UNNUMBERED,
+		.procname	= "nfsd",
+		.mode		= 0555,
+		.child		= nfsd_sysctl_files,
+	},
+	{ .ctl_name = 0 }
+};
+
+static ctl_table nfsd_sysctl_root[] = {
+	{
+		.ctl_name	= CTL_FS,
+		.procname	= "fs",
+		.mode		= 0555,
+		.child		= nfsd_sysctl_dir,
+	},
+	{ .ctl_name = 0 }
+};
 
 extern struct seq_operations nfs_exports_op;
 static int exports_open(struct inode *inode, struct file *file)
@@ -349,11 +393,15 @@ nfsd_init(void)
 #ifdef MODULE
 	nfsd_linkage = &nfsd_linkage_s;
 #endif
+#ifdef CONFIG_NFSD_ACL
+	nfs3_fixup_proc_tables(nfsd3_acl_max_entries);
+#endif
 	nfsd_stat_init();	/* Statistics */
 	nfsd_cache_init();	/* RPC reply cache */
 	nfsd_export_init();	/* Exports table */
 	nfsd_lockd_init();	/* lockd->nfsd callbacks */
 	proc_export_init();
+	nfsd_sysctl_table = register_sysctl_table(nfsd_sysctl_root, 0);
 	return 0;
 }
 
@@ -366,6 +414,8 @@ nfsd_exit(void)
 #ifdef MODULE
 	nfsd_linkage = NULL;
 #endif
+	if (nfsd_sysctl_table)
+		unregister_sysctl_table(nfsd_sysctl_table);
 	nfsd_export_shutdown();
 	nfsd_cache_shutdown();
 	remove_proc_entry("fs/nfs/exports", NULL);

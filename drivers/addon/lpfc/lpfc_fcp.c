@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_fcp.c 1.166.1.15 2004/06/10 16:30:05EDT jselx Exp  $
+ * $Id: lpfc_fcp.c 1.166.1.44 2004/10/22 16:46:45EDT sf_support Exp  $
  */
 
 
@@ -71,8 +71,6 @@
 
 char *lpfc_drvr_name = LPFC_DRIVER_NAME;
 char *lpfc_release_version = LPFC_DRIVER_VERSION;
-#define LPFC_VERSION 1;
-uint32_t lpfc_version = LPFC_VERSION;
 
 MODULE_DESCRIPTION("Emulex LightPulse Fibre Channel driver - Open Source");
 MODULE_AUTHOR("Emulex Corporation - tech.support@emulex.com");
@@ -154,6 +152,38 @@ extern char *lpfc_fcp_bind_WWNN[];
 extern char *lpfc_fcp_bind_DID[];
 
 
+static struct pci_device_id lpfc_id_table[] = {
+	{PCI_VENDOR_ID_EMULEX, PCI_DEVICE_ID_VIPER,
+		PCI_ANY_ID, PCI_ANY_ID, },
+	{PCI_VENDOR_ID_EMULEX, PCI_DEVICE_ID_THOR,
+		PCI_ANY_ID, PCI_ANY_ID, },
+	{PCI_VENDOR_ID_EMULEX, PCI_DEVICE_ID_PEGASUS,
+		PCI_ANY_ID, PCI_ANY_ID, },
+	{PCI_VENDOR_ID_EMULEX, PCI_DEVICE_ID_CENTAUR,
+		PCI_ANY_ID, PCI_ANY_ID, },
+	{PCI_VENDOR_ID_EMULEX, PCI_DEVICE_ID_DRAGONFLY,
+		PCI_ANY_ID, PCI_ANY_ID, },
+	{PCI_VENDOR_ID_EMULEX, PCI_DEVICE_ID_SUPERFLY,
+		PCI_ANY_ID, PCI_ANY_ID, },
+	{PCI_VENDOR_ID_EMULEX, PCI_DEVICE_ID_RFLY,
+		PCI_ANY_ID, PCI_ANY_ID, },
+	{PCI_VENDOR_ID_EMULEX, PCI_DEVICE_ID_PFLY,
+		PCI_ANY_ID, PCI_ANY_ID, },
+	{PCI_VENDOR_ID_EMULEX, PCI_DEVICE_ID_HELIOS,
+		PCI_ANY_ID, PCI_ANY_ID, },
+	{PCI_VENDOR_ID_EMULEX, PCI_DEVICE_ID_JFLY,
+		PCI_ANY_ID, PCI_ANY_ID, },
+	{PCI_VENDOR_ID_EMULEX, PCI_DEVICE_ID_ZEPHYR,
+		PCI_ANY_ID, PCI_ANY_ID, },
+	{PCI_VENDOR_ID_EMULEX, PCI_DEVICE_ID_ZFLY,
+		PCI_ANY_ID, PCI_ANY_ID, },
+	{PCI_VENDOR_ID_EMULEX, PCI_DEVICE_ID_TFLY,
+		PCI_ANY_ID, PCI_ANY_ID, },
+	{PCI_VENDOR_ID_EMULEX, PCI_DEVICE_ID_LP101,
+		PCI_ANY_ID, PCI_ANY_ID, },
+	{ 0 }
+};
+MODULE_DEVICE_TABLE(pci, lpfc_id_table);
 
 int
 lpfc_detect(Scsi_Host_Template * tmpt)
@@ -161,29 +191,13 @@ lpfc_detect(Scsi_Host_Template * tmpt)
 	struct pci_dev *pdev = 0;
 	int instance = 0;
 	int i;
-	/* To add another, add a line before the last element.
-	 * Leave last element 0.
-	 */
-	uint32_t sType[] = {
-		PCI_DEVICE_ID_VIPER,
-		PCI_DEVICE_ID_THOR,
-		PCI_DEVICE_ID_PEGASUS,
-		PCI_DEVICE_ID_CENTAUR,
-		PCI_DEVICE_ID_DRAGONFLY,
-		PCI_DEVICE_ID_SUPERFLY,
-		PCI_DEVICE_ID_RFLY,
-		PCI_DEVICE_ID_PFLY,
-		PCI_DEVICE_ID_TFLY,
-		PCI_DEVICE_ID_LP101,
-		0
-	};
 
 	printk(LPFC_MODULE_DESC "\n");
 
 	/* Release the io_request_lock lock and reenable interrupts allowing
 	 * the driver to sleep if necessary.
 	 */
-	spin_unlock(&io_request_lock);
+	spin_unlock_irq(&io_request_lock);
 
 	memset((char *)&lpfcDRVR, 0, sizeof (lpfcDRVR_t));
 	lpfcDRVR.loadtime = jiffies;
@@ -193,15 +207,15 @@ lpfc_detect(Scsi_Host_Template * tmpt)
 
 	/* Search for all Device IDs supported */
 	i = 0;
-	while (sType[i]) {
-		instance = lpfc_detect_instance(instance, pdev, sType[i], tmpt);
+	while (lpfc_id_table[i].vendor) {
+		instance = lpfc_detect_instance(instance, pdev, lpfc_id_table[i].device, tmpt );
 		i++;
 	}
 
 
 	/* reacquire io_request_lock as the midlayer was holding it when it
 	   called us */
-	spin_lock(&io_request_lock);
+	spin_lock_irq(&io_request_lock);
 	return (instance);
 }
 
@@ -225,6 +239,16 @@ lpfc_detect_instance(int instance,
 
 		if (lpfc_linux_attach(instance, tmpt, pdev)) {
 			pci_release_regions(pdev);
+
+			/* Failed to attach to lpfc adapter: bus <bus>
+			   device <device> irq <irq> */
+			lpfc_printf_log(instance, &lpfc_msgBlk0443,
+					lpfc_mes0443,
+					lpfc_msgBlk0443.msgPreambleStr,
+					pdev->bus->number,
+					PCI_SLOT(pdev->devfn),
+					pdev->irq);
+
 			continue;
 		}
 		instance++;
@@ -307,6 +331,8 @@ lpfc_linux_attach(int instance, Scsi_Host_Template * tmpt, struct pci_dev *pdev)
 	INIT_LIST_HEAD(&phba->fc_plogi_list);
 	INIT_LIST_HEAD(&phba->fc_adisc_list);
 	INIT_LIST_HEAD(&phba->fc_nlpbind_list);
+	INIT_LIST_HEAD(&phba->delay_list);
+	INIT_LIST_HEAD(&phba->free_buf_list);
 
 	/* Initialize plxhba - LINUX specific */
 	phba->pcidev = pdev;
@@ -344,53 +370,11 @@ lpfc_linux_attach(int instance, Scsi_Host_Template * tmpt, struct pci_dev *pdev)
 		}
 	}
 
-	/* Initialize all per HBA locks */
-	lpfc_drvr_init_lock(phba);
-	spin_lock_init(&phba->hiprilock);
 
-	/* Set up the HBA specific LUN device lookup routine */
-	phba->lpfc_tran_find_lun = lpfc_tran_find_lun;
-
-	lpfc_sli_setup(phba);	/* Setup SLI Layer to run over lpfc HBAs */
-	lpfc_sli_queue_setup(phba);	/* Initialize the SLI Layer */
-
-	if (lpfc_mem_alloc(phba) == 0) {
-		goto error_3;
-	}
-
-	lpfc_bind_setup(phba);	/* Setup binding configuration parameters */
-
-	/* Initialize HBA structure */
-	phba->fc_edtov = FF_DEF_EDTOV;
-	phba->fc_ratov = FF_DEF_RATOV;
-	phba->fc_altov = FF_DEF_ALTOV;
-	phba->fc_arbtov = FF_DEF_ARBTOV;
-
-	/* Set the FARP and XRI timeout values now since they depend on
-	   fc_ratov. */
-	phba->fc_ipfarp_timeout = (3 * phba->fc_ratov);
-	phba->fc_ipxri_timeout = (3 * phba->fc_ratov);
-
-	spin_lock_init(&phba->task_lock);
-	tasklet_init(&phba->task_run, (void *)lpfc_tasklet,
-		(unsigned long) phba);
-	INIT_LIST_HEAD(&phba->task_disc);
-
-
-	LPFC_DRVR_LOCK(phba, iflag);
-
-	if ((rc = lpfc_sli_hba_setup(phba)) != 0) {	/* Initialize the HBA */
-		LPFC_DRVR_UNLOCK(phba, iflag);
-		goto error_5;
-	}
-
-	lpfc_sched_init_hba(phba, clp[LPFC_CFG_DFT_HBA_Q_DEPTH].a_current);
-
-	LPFC_DRVR_UNLOCK(phba, iflag);
-
-	/* 
+  	/* 
 	 * Register this board
 	 */
+
 	host = scsi_register(tmpt, sizeof (unsigned long));
 	if (host) {
 		phba->host = host;
@@ -400,7 +384,7 @@ lpfc_linux_attach(int instance, Scsi_Host_Template * tmpt, struct pci_dev *pdev)
 		printk (KERN_WARNING
 			"%s%d: scsi_host_alloc failed during attach\n", 
 			lpfc_drvr_name, phba->brd_no);
-		goto error_5;
+		goto error_3;
 	}
 
 	/*
@@ -422,13 +406,69 @@ lpfc_linux_attach(int instance, Scsi_Host_Template * tmpt, struct pci_dev *pdev)
 	/* Adapter ID - tell midlayer not to reserve an ID for us */
 	host->this_id = -1;
 
+
+
+	/* Initialize all per HBA locks */
+	lpfc_drvr_init_lock(phba);
+	spin_lock_init(&phba->hiprilock);
+
+	/* Set up the HBA specific LUN device lookup routine */
+	phba->lpfc_tran_find_lun = lpfc_tran_find_lun;
+
+	lpfc_sli_setup(phba);	/* Setup SLI Layer to run over lpfc HBAs */
+	lpfc_sli_queue_setup(phba);	/* Initialize the SLI Layer */
+
+	if (lpfc_mem_alloc(phba) == 0) {
+          	scsi_unregister(host);
+		goto error_3;
+	}
+
+	lpfc_bind_setup(phba);	/* Setup binding configuration parameters */
+
+	/* Initialize HBA structure */
+	phba->fc_edtov = FF_DEF_EDTOV;
+	phba->fc_ratov = FF_DEF_RATOV;
+	phba->fc_altov = FF_DEF_ALTOV;
+	phba->fc_arbtov = FF_DEF_ARBTOV;
+
+	/* Set the FARP and XRI timeout values now since they depend on
+	   fc_ratov. */
+	phba->fc_ipfarp_timeout = (3 * phba->fc_ratov);
+	phba->fc_ipxri_timeout = (3 * phba->fc_ratov);
+
+	tasklet_init(&phba->task_run, (void *)lpfc_tasklet,
+		(unsigned long) phba);
+	INIT_LIST_HEAD(&phba->task_disc);
+
+
 	/*
 	 * Setup the scsi timeout handler with a 
 	 * timeout value = greater of (2*RATOV, 5).
-	 */
+	 */                     	
+
 	timeout = (phba->fc_ratov << 1) > 5 ? (phba->fc_ratov << 1) : 5;
 	lpfc_start_timer(phba, timeout, &phba->scsi_tmofunc, 
 		lpfc_scsi_timeout_handler, (unsigned long)timeout, 0);
+
+
+	LPFC_DRVR_LOCK(phba, iflag);
+
+	if ((rc = lpfc_sli_hba_setup(phba)) != 0) {	/* Initialize the HBA */
+		LPFC_DRVR_UNLOCK(phba, iflag);
+		scsi_unregister(host);
+		goto error_5;
+	}
+
+	/* 
+	   This is to support HBAs returning max_xri less than configured
+	   HBA_Q_DEPTH 
+	*/
+	host->can_queue = clp[LPFC_CFG_DFT_HBA_Q_DEPTH].a_current - 10;
+
+	lpfc_sched_init_hba(phba, clp[LPFC_CFG_DFT_HBA_Q_DEPTH].a_current - 10);
+
+	LPFC_DRVR_UNLOCK(phba, iflag);
+
 
 
 	/*
@@ -581,6 +621,10 @@ lpfc_linux_detach(int instance)
 	LPFC_SLI_t       * psli;
 	struct clk_data  * clkData;
 	unsigned long      iflag;
+	LPFC_SCSI_BUF_t  * lpfc_cmd;
+	struct lpfc_dmabuf *cur_buf;
+	struct list_head *curr, *next;
+	struct timer_list *ptimer;
 
 	if ((phba = lpfc_get_phba_by_inst(instance)) == NULL) {
 		return(0);
@@ -588,22 +632,25 @@ lpfc_linux_detach(int instance)
 
 	psli = &phba->sli;
 
-	LPFC_DRVR_LOCK(phba, iflag);
-	while (!list_empty(&phba->timerList)) {
-		clkData = (struct clk_data *)(phba->timerList.next);
-		if (clkData) {
-			lpfc_stop_timer(clkData);
-		}
-	}
-
-	lpfc_tasklet((unsigned long)phba);
-	tasklet_kill(&phba->task_run);
-
-	LPFC_DRVR_UNLOCK(phba, iflag);
-
 	scsi_unregister(phba->host);
 
 	LPFC_DRVR_LOCK(phba, iflag);
+	phba->no_timer = 1;
+	list_for_each_safe(curr, next, &phba->timerList) {
+		clkData = list_entry(curr, struct clk_data, listLink);
+		if (clkData) {
+			ptimer = clkData->timeObj;
+			if (timer_pending(ptimer)) {
+				lpfc_stop_timer(clkData);	
+			}
+		}
+	}
+
+	LPFC_DRVR_UNLOCK(phba, iflag);
+	while (!list_empty(&phba->timerList)) {
+	}
+	LPFC_DRVR_LOCK(phba, iflag);
+
 	lpfc_sli_hba_down(phba);	/* Bring down the SLI Layer */
 	if (phba->intr_inited) {
 		/* Clear all interrupt enable conditions */
@@ -612,7 +659,9 @@ lpfc_linux_detach(int instance)
 		/* Clear all pending interrupts */
 		writel(0xffffffff, phba->HAregaddr);
 		readl(phba->HAregaddr); /* flush */
+		LPFC_DRVR_UNLOCK(phba, iflag);
 		free_irq(phba->pcidev->irq, phba);
+		LPFC_DRVR_LOCK(phba, iflag);
 		phba->intr_inited = 0;
 	}
 
@@ -621,14 +670,33 @@ lpfc_linux_detach(int instance)
 		pci_disable_device(phba->pcidev);
 	}
 
+	/* Complete any scheduled delayed i/o completions */
+	while(!list_empty(&phba->delay_list)) {
+		lpfc_cmd = list_entry(phba->delay_list.next, LPFC_SCSI_BUF_t, listentry);
+		list_del(&lpfc_cmd->listentry);
+		lpfc_iodone(phba, lpfc_cmd);
+	}
+
+	while(!list_empty(&phba->free_buf_list)) {
+		cur_buf = list_entry(phba->free_buf_list.next, DMABUF_t, list);
+		list_del(&cur_buf->list);
+		lpfc_mbuf_free(phba, cur_buf->virt, cur_buf->phys);
+		kfree((void *)cur_buf);
+	}
+
+	LPFC_DRVR_UNLOCK(phba, iflag);
+	lpfc_tasklet((unsigned long)phba);
+	tasklet_kill(&phba->task_run);
+	LPFC_DRVR_LOCK(phba, iflag);
+
 	lpfc_cleanup(phba, 0);
 	lpfc_scsi_free(phba);
 
 	LPFC_DRVR_UNLOCK(phba, iflag);
 	lpfc_mem_free(phba);
+	lpfc_unmemmap(phba);
 	LPFC_DRVR_LOCK(phba, iflag);
 
-	lpfc_unmemmap(phba);
 
 
 	if (phba->config)
@@ -882,8 +950,8 @@ lpfc_reset_bus_handler(struct scsi_cmnd *cmnd)
 
 	/* reacquire io_request_lock for midlayer */
 	spin_lock_irq(&io_request_lock);
-
-	return (SUCCESS);
+	
+	return rc == 1? SUCCESS: FAILED;
 
 }				/* lpfc_reset_bus_handler */
 
@@ -1065,6 +1133,7 @@ lpfc_intr_prep(lpfcHBA_t * phba)
 	 *    (ha_copy & ~(HA_ERATT | HA_LATT));
 	 */
 	writel((ha_copy & ~(HA_LATT | HA_ERATT)), phba->HAregaddr);
+	readl(phba->HAregaddr);
 	return (ha_copy);
 }				/* lpfc_intr_prep */
 
@@ -1334,16 +1403,15 @@ lpfc_config_setup(lpfcHBA_t * phba)
 		if ((clp[i].a_current >= clp[i].a_low) &&
 		    (clp[i].a_current <= clp[i].a_hi)) {
 			/* we continue if the range check is satisfied
-			 * however LPFC_CFG_TOPOLOGY has holes and both
-			 * LPFC_CFG_FCP_CLASS AND LPFC_CFG_IP_CLASS need
-			 * to readjusted iff they satisfy the range check
+			 * however LPFC_CFG_TOPOLOGY has holes and
+			 * LPFC_CFG_FCP_CLASS needs to readjusted iff
+			 * it satisfies the range check
 			 */
 			if (i == LPFC_CFG_TOPOLOGY) {
 				/* odd values 1,3,5 are out */
 				if (!(clp[i].a_current & 1))
 					continue;
-			} else if ((i == LPFC_CFG_FCP_CLASS)
-				   || (i == LPFC_CFG_IP_CLASS)) {
+			} else if (i == LPFC_CFG_FCP_CLASS) {
 				switch (clp[i].a_current) {
 				case 2:
 					/* CLASS2 = 1 */
@@ -1383,6 +1451,7 @@ lpfc_config_setup(lpfcHBA_t * phba)
 		break;
 	case PCI_DEVICE_ID_RFLY:
 	case PCI_DEVICE_ID_PFLY:
+	case PCI_DEVICE_ID_JFLY:
 	case PCI_DEVICE_ID_TFLY:
 		clp[LPFC_CFG_DFT_HBA_Q_DEPTH].a_current = LPFC_LC_HBA_Q_DEPTH;
 		break;
@@ -1831,25 +1900,10 @@ lpfc_utsname_nodename_check(void)
 		if (lpfc##hba##_no_device_delay != -1)                        \
 			value = lpfc##hba##_no_device_delay;                  \
 		break;                                                        \
-	case LPFC_CFG_NETWORK_ON:	/* network-on */                      \
-		value = lpfc_network_on;                                      \
-		if (lpfc##hba##_network_on != -1)                             \
-			value = lpfc##hba##_network_on;                       \
-		break;                                                        \
-	case LPFC_CFG_POST_IP_BUF:	/* post-ip-buf */                     \
-		value = lpfc_post_ip_buf;                                     \
-		if (lpfc##hba##_post_ip_buf != -1)                            \
-			value = lpfc##hba##_post_ip_buf;                      \
-		break;                                                        \
 	case LPFC_CFG_XMT_Q_SIZE:	/* xmt-que-size */                    \
 		value = lpfc_xmt_que_size;                                    \
 		if (lpfc##hba##_xmt_que_size != -1)                           \
 			value = lpfc##hba##_xmt_que_size;                     \
-		break;                                                        \
-	case LPFC_CFG_IP_CLASS:	/* ip-class */                                \
-		value = lpfc_ip_class;                                        \
-		if (lpfc##hba##_ip_class != -1)                               \
-			value = lpfc##hba##_ip_class;                         \
 		break;                                                        \
 	case LPFC_CFG_ACK0:	/* ack0 */                                    \
 		value = lpfc_ack0;                                            \
@@ -2156,13 +2210,10 @@ lpfc_sleep(lpfcHBA_t * phba, void *wait_q_head, long tmo)
 void
 lpfc_discq_tasklet(lpfcHBA_t * phba, LPFC_DISC_EVT_t * evtp)
 {
-	unsigned long flags;
 
 	/* Queue the cmnd to the iodone tasklet to be scheduled later */
-	spin_lock_irqsave(&phba->task_lock, flags);
 	list_add_tail(&evtp->evt_listp, &phba->task_disc);
 	phba->task_discq_cnt++;
-	spin_unlock_irqrestore(&phba->task_lock, flags);
 	tasklet_schedule(&phba->task_run);
 	return;
 }
@@ -2191,7 +2242,6 @@ lpfc_discq_post_event(lpfcHBA_t * phba, void *arg1, void *arg2, uint32_t evt)
 void
 lpfc_flush_disc_evtq(lpfcHBA_t * phba) {
 
-	unsigned long      flags;
 	LPFC_SLI_t       * psli;
 	struct list_head * pos, * pos_tmp;
 	struct list_head * cur, * next;
@@ -2200,9 +2250,9 @@ lpfc_flush_disc_evtq(lpfcHBA_t * phba) {
 	LPFC_IOCBQ_t     * cmdiocbp;
 	LPFC_IOCBQ_t     * rspiocbp;
 	LPFC_IOCBQ_t     * saveq;
+	LPFC_RING_MASK_t * func;
 
 	psli = &phba->sli;
-	spin_lock_irqsave(&phba->task_lock, flags);
 
 	list_for_each_safe(pos, pos_tmp, &phba->task_disc) {
 		evtp = list_entry(pos, LPFC_DISC_EVT_t, evt_listp);
@@ -2226,11 +2276,32 @@ lpfc_flush_disc_evtq(lpfcHBA_t * phba) {
 			}
 			lpfc_iocb_free(phba, saveq);
 			kfree(evtp);
+			continue;
 		}
+		if ((evtp->evt == LPFC_EVT_UNSOL_IOCB)) {
+                        list_del(&evtp->evt_listp);
+                        phba->task_discq_cnt--;
+
+                        func = (LPFC_RING_MASK_t *)(evtp->evt_arg1);
+                        saveq = (LPFC_IOCBQ_t *)(evtp->evt_arg2);
+                        (func->lpfc_sli_rcv_unsol_event) (phba,
+							  &psli->ring[LPFC_ELS_RING], saveq);
+                        /* Free up iocb buffer chain for command just
+                           processed */
+                        list_for_each_safe(cur, next, &saveq->list) {
+                                rspiocbp = list_entry(cur, LPFC_IOCBQ_t, list);
+                                list_del(&rspiocbp->list);
+                                lpfc_iocb_free(phba, rspiocbp);
+                        }
+                        lpfc_iocb_free(phba, saveq);
+                        kfree(evtp);
+                        continue;
+			
+                }
+
 		else
 			continue;
 	}
-	spin_unlock_irqrestore(&phba->task_lock, flags);
 }
 
 void
@@ -2248,19 +2319,23 @@ lpfc_tasklet(unsigned long p)
 	unsigned long      flags;
 
 	psli = &phba->sli;
-	spin_lock_irqsave(&phba->task_lock, flags);
+	LPFC_DRVR_LOCK(phba, flags);
+
 	/* check discovery event list */
 	while (!list_empty(&phba->task_disc)) {
 		evtp = list_entry(phba->task_disc.next, LPFC_DISC_EVT_t, evt_listp);
 		list_del(&evtp->evt_listp);
 		phba->task_discq_cnt--;
-		spin_unlock_irqrestore(&phba->task_lock, flags);
 
-		LPFC_DRVR_LOCK(phba, flags);
 		switch(evtp->evt) {
 		case LPFC_EVT_MBOX:
 			pmb = (LPFC_MBOXQ_t *)(evtp->evt_arg1);
-			(pmb->mbox_cmpl) (phba, pmb);
+			if (pmb->mbox_cmpl) {
+				(pmb->mbox_cmpl) (phba, pmb);
+			}
+			else {
+				lpfc_mbox_free(phba, pmb);
+			}
 			break;
 
 		case LPFC_EVT_SOL_IOCB:
@@ -2291,12 +2366,9 @@ lpfc_tasklet(unsigned long p)
 			lpfc_iocb_free(phba, saveq);
 			break;
 		}
-		LPFC_DRVR_UNLOCK(phba, flags);
-
-		spin_lock_irqsave(&phba->task_lock, flags);
 		kfree(evtp);
 	}
-	spin_unlock_irqrestore(&phba->task_lock, flags);
+	LPFC_DRVR_UNLOCK(phba, flags);
 	return;
 }
 
@@ -2341,12 +2413,13 @@ EXPORT_SYMBOL(lpfc_mbuf_free);
 EXPORT_SYMBOL(lpfc_page_alloc);
 EXPORT_SYMBOL(lpfc_page_free);
 EXPORT_SYMBOL(lpfc_nlp_alloc);
+EXPORT_SYMBOL(lpfc_nlp_free);
 EXPORT_SYMBOL(lpfc_nlp_bind);
+EXPORT_SYMBOL(lpfc_nlp_plogi);
 EXPORT_SYMBOL(lpfc_offline);
 EXPORT_SYMBOL(lpfc_online);
 EXPORT_SYMBOL(lpfc_prep_els_iocb);
 EXPORT_SYMBOL(lpfc_release_version);
-EXPORT_SYMBOL(lpfc_version);
 EXPORT_SYMBOL(lpfc_scsi_lun_reset);
 EXPORT_SYMBOL(lpfc_scsi_tgt_reset);
 EXPORT_SYMBOL(lpfc_sleep);

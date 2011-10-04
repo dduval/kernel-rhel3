@@ -32,7 +32,7 @@ static inline struct proc_dir_entry * de_get(struct proc_dir_entry *de)
 /*
  * Decrements the use count and checks for deferred deletion.
  */
-static void de_put(struct proc_dir_entry *de)
+void de_put(struct proc_dir_entry *de)
 {
 	if (de) {	
 		lock_kernel();		

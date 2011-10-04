@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_clock.c 1.23.1.2 2004/05/25 14:48:50EDT jselx Exp  $
+ * $Id: lpfc_clock.c 1.23.1.5 2004/08/20 20:51:24EDT sf_support Exp  $
  */
 
 #include <linux/version.h>
@@ -46,7 +46,16 @@ lpfc_start_timer(lpfcHBA_t * phba,
 {
 	struct clk_data *clkData;
 
+	if (phba->no_timer)
+		return;
+
 	clkData = kmalloc(sizeof(struct clk_data), GFP_ATOMIC);
+	if (!clkData) {
+		printk (KERN_WARNING
+                        "lpfc_start_timer kmalloc failed. board_no: %d\n",
+			phba->brd_no);
+		return;
+	}
 	clkData->timeObj = ptimer; 
 	clkData->phba = phba;
 	clkData->clData1 = data1;

@@ -43,7 +43,7 @@ EXPORT_SYMBOL(zone_table);
 zone_wired_t zone_wired[MAX_NR_ZONES*MAX_NR_NODES];
 
 static char *zone_names[MAX_NR_ZONES] = { "DMA", "Normal", "HighMem" };
-#ifdef CONFIG_HIGHMEM64G
+#if defined(CONFIG_HIGHMEM64G) || defined(CONFIG_X86_64)
 static int zone_balance_ratio[MAX_NR_ZONES] __initdata = { 4097, 128, 128, };
 static int zone_balance_min[MAX_NR_ZONES] __initdata = { 0 , 20, 20, };
 static int zone_balance_max[MAX_NR_ZONES] __initdata = { 0 , 255, 255, };
@@ -436,7 +436,20 @@ void fixup_freespace(zone_t * zone, int direct_reclaim)
 #define PAGES_LOW	2
 #define PAGES_HIGH	3
 
-#define zone_is_highmem(z) ((z) == &(z)->zone_pgdat->node_zones[ZONE_HIGHMEM])
+static int enough_freeable_memory(zone_t *z)
+{
+	int pages;
+
+	pages = z->free_pages + z->inactive_clean_pages +
+		z->inactive_laundry_pages + z->inactive_dirty_pages +
+		z->active_cache_pages + z->active_anon_pages;
+
+	if (pages > z->size * 10 / 100)
+		return 1;
+	else
+		return 0;
+}
+
 /*
  * This function does the dirty work for __alloc_pages
  * and is separated out to keep the code size smaller.
@@ -486,7 +499,7 @@ static struct page * __alloc_pages_limit(zonelist_t *zonelist,
 				return page;
 		}
 
-		if (wired)
+		if (wired && enough_freeable_memory(z))
 			break;
 	}
 
@@ -961,7 +974,8 @@ void show_free_areas_core(pg_data_t *pgdat)
 	for (type = 0; type < MAX_NR_ZONES; type++) {
 		struct list_head *head, *curr;
 		zone_t *zone = pgdat->node_zones + type;
- 		unsigned long nr, total, flags;
+		unsigned long total, flags;
+		unsigned long nr[MAX_ORDER];
 
 		total = 0;
 		if (zone->size) {
@@ -974,17 +988,23 @@ void show_free_areas_core(pg_data_t *pgdat)
 		 	for (order = 0; order < MAX_ORDER; order++) {
 				head = &(zone->free_area + order)->free_list;
 				curr = head;
-				nr = 0;
+				nr[order] = 0;
 				for (;;) {
 					if ((curr = curr->next) == head)
 						break;
-					nr++;
+					nr[order]++;
 				}
-				total += nr * (1 << order);
-				printk("%lu*%lukB ", nr, K(1UL) << order);
+				total += nr[order] * (1 << order);
 			}
 			spin_unlock(&zone->lock);
 			local_irq_restore(flags);
+			/*
+			 * Move the printk out of the irq-spinlock range
+			 * to avoid nmi_watchdog timer kicks off dump.
+			 */
+		 	for (order = 0; order < MAX_ORDER; order++) {
+				printk("%lu*%lukB ", nr[order], K(1UL) << order);
+			}
 		}
 		if (zone->size)
 			printk("= %lukB)\n", K(total));
@@ -1047,7 +1067,7 @@ static inline void build_zonelists(pg_data_t *pgdat)
 				zone = pgdat->node_zones + ZONE_NORMAL;
 				if (zone->size)
 					zonelist->zones[j++] = zone;
-#ifdef CONFIG_HIGHMEM64G					
+#if defined(CONFIG_HIGHMEM64G) || defined(CONFIG_X86_64)
 				break;
 #endif				
 			case ZONE_DMA:
@@ -1134,7 +1154,7 @@ static unsigned long memmap_init(struct page *start, struct page *end,
  *   - mark all memory queues empty
  *   - clear the memory bitmaps
  */
-extern unsigned int kswapd_minfree;
+extern int kswapd_minfree;
 void __init free_area_init_core(int nid, pg_data_t *pgdat, struct page **gmap,
 	unsigned long *zones_size, unsigned long zone_start_paddr, 
 	unsigned long *zholes_size, struct page *lmem_map)

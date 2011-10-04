@@ -70,8 +70,6 @@ static int test_ht;
 /* Bitmask of currently online CPUs */
 unsigned long cpu_online_map;
 
-/* which CPU (physical APIC ID) maps to which logical CPU number */
-volatile int x86_apicid_to_cpu[NR_CPUS];
 /* which logical CPU number maps to which CPU (physical APIC ID) */
 volatile int x86_cpu_to_apicid[NR_CPUS];
 
@@ -555,7 +553,6 @@ static int __init do_boot_cpu (int apicid)
 		panic("failed fork for CPU %d", cpu);
 	wake_up_forked_process(idle);
 	x86_cpu_to_apicid[cpu] = apicid;
-	x86_apicid_to_cpu[apicid] = cpu;
 	init_idle(idle, cpu);
 	idle->cpu = cpu;
 	idle->cpus_allowed = 1<<cpu;
@@ -770,7 +767,6 @@ static int __init do_boot_cpu (int apicid)
 	}
 	if (send_status || accept_status || boot_status) {
 		x86_cpu_to_apicid[cpu] = -1;
-		x86_apicid_to_cpu[apicid] = -1;
 		cpucount--;
 	}
 
@@ -836,7 +832,7 @@ extern int prof_counter[NR_CPUS];
 
 void __init smp_boot_cpus(void)
 {
-	int apicid, cpu, maxcpu;
+	int apicid, cpu, maxcpu, bit, kicked;
 
 #ifdef CONFIG_MTRR
 	/*  Must be done before other processors booted  */
@@ -848,7 +844,6 @@ void __init smp_boot_cpus(void)
 	 */
 
 	for (apicid = 0; apicid < NR_CPUS; apicid++) {
-		x86_apicid_to_cpu[apicid] = -1;
 		prof_counter[apicid] = 1;
 		prof_old_multiplier[apicid] = 1;
 		prof_multiplier[apicid] = 1;
@@ -865,7 +860,6 @@ void __init smp_boot_cpus(void)
 	 * We have the boot CPU online for sure.
 	 */
 	set_bit(0, &cpu_online_map);
-	x86_apicid_to_cpu[boot_cpu_id] = 0;
 	x86_cpu_to_apicid[0] = boot_cpu_id;
 	global_irq_holder = 0;
 	current->cpu = 0;
@@ -938,11 +932,13 @@ void __init smp_boot_cpus(void)
 	Dprintk("CPU present map: %lx\n", phys_cpu_present_map);
 
 	maxcpu = 0;
-	for (apicid = 0; apicid < NR_CPUS; apicid++) {
+	kicked = 1;
+	for (bit = 0; kicked < NR_CPUS && bit < MAX_APICS; bit++) {
+		apicid = cpu_present_to_apicid(bit);
 		/*
 		 * Don't even attempt to start the boot CPU!
 		 */
-		if (apicid == boot_cpu_id)
+		if (apicid == boot_cpu_id || (apicid == BAD_APICID))
 			continue;
 
 		if (!(phys_cpu_present_map & (1 << apicid)))
@@ -957,11 +953,13 @@ void __init smp_boot_cpus(void)
 		/*
 		 * Make sure we unmap all failed CPUs
 		 */
-		if ((x86_apicid_to_cpu[apicid] == -1) &&
-				(phys_cpu_present_map & (1 << apicid)))
+		if ((x86_cpu_to_apicid[cpu] == -1) && 
+				(phys_cpu_present_map & (1 << apicid))) {
 			printk("phys CPU #%d not responding - cannot use it.\n",apicid);
-		else if (cpu > maxcpu) 
+			continue;
+		} else if (cpu > maxcpu) 
 			maxcpu = cpu; 
+		++kicked;
 	}
 
 	/*

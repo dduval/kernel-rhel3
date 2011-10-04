@@ -1310,8 +1310,41 @@ static int dvd_read_manufact(struct cdrom_device_info *cdi, dvd_struct *s)
 	return ret;
 }
 
+static int check_feature_current(struct cdrom_device_info *cdi, __u16 feature)
+{
+	int ret;
+	u_char buf[12];
+	struct cdrom_generic_command cgc;
+	struct cdrom_device_ops *cdo = cdi->ops;
+
+	init_cdrom_command(&cgc, buf, sizeof(buf), CGC_DATA_READ);
+	cgc.cmd[0] = GPCMD_GET_CONFIGURATION;
+	cgc.cmd[1] = 2; /* only get one feature descriptor */
+	cgc.cmd[2] = feature >> 8;
+	cgc.cmd[3] = feature & 0xff;
+	cgc.cmd[8] = 12;
+
+	if ((ret = cdo->generic_packet(cdi, &cgc)))
+		return 0;
+	if (buf[3] < 8) /* i.e., drive doesn't support the feature */
+		return -EMEDIUMTYPE;
+	if ((buf[10] & 1) == 0) /* feature is not current--invalid media */ 
+		return -EMEDIUMTYPE;
+	return 0;
+}
+
 static int dvd_read_struct(struct cdrom_device_info *cdi, dvd_struct *s)
 {
+	int ret;
+
+	/* do a GET_CONFIGURATION to make sure drive can do
+	 * DVD_READ_STRUCTURE command with current media
+	 */
+	ret = check_feature_current(cdi, CDF_DVD_READ);
+	if (ret)
+		return ret;
+
+	/* actually read the requested DVD structure */
 	switch (s->type) {
 	case DVD_STRUCT_PHYSICAL:
 		return dvd_read_physical(cdi, s);

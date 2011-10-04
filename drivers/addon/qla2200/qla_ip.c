@@ -1744,12 +1744,12 @@ found_handle:
 	/* Set chip new ring index. */
 #if defined(ISP2200)
 	/* Added from 64bit start */
-	temp = CACHE_FLUSH(&reg->mailbox4);
 	WRT_REG_WORD(&reg->mailbox4, ha->req_ring_index);
+	PCI_POSTING(&reg->mailbox4);
 #else
 	/* Added from 64bit start */
-	temp = CACHE_FLUSH(&reg->req_q_in);
 	WRT_REG_WORD(&reg->req_q_in, ha->req_ring_index);
+	PCI_POSTING(&reg->req_q_in);
 #endif
 
 	spin_unlock_irqrestore(&ha->hardware_lock, flags);

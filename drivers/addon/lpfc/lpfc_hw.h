@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_hw.h 1.7 2004/04/15 00:11:46EDT jselx Exp  $
+ * $Id: lpfc_hw.h 1.7.1.3 2004/10/12 11:44:18EDT sf_support Exp  $
  */
 
 #ifndef  _H_LPFC_HW
@@ -1048,6 +1048,11 @@ typedef struct {
 #define PCI_DEVICE_ID_PEGASUS       0xf980
 #define PCI_DEVICE_ID_THOR          0xfa00
 #define PCI_DEVICE_ID_VIPER         0xfb00
+#define PCI_DEVICE_ID_HELIOS        0xfd00
+#define PCI_DEVICE_ID_JFLY          0xf0d5
+#define PCI_DEVICE_ID_LP111         0xf0d1
+#define PCI_DEVICE_ID_ZEPHYR        0xfe00
+#define PCI_DEVICE_ID_ZFLY          0xf0e5
 #define PCI_DEVICE_ID_LP101	    0xf0a1
 
 #define JEDEC_ID_ADDRESS            0x0080001c
@@ -1060,6 +1065,8 @@ typedef struct {
 #define PEGASUS_ORION_JEDEC_ID      0x0036
 #define PEGASUS_JEDEC_ID            0x0038
 #define THOR_JEDEC_ID               0x0012
+#define HELIOS_JEDEC_ID             0x0364
+#define ZEPHYR_JEDEC_ID             0x0577
 #define VIPER_JEDEC_ID              0x4838
 
 #define JEDEC_ID_MASK               0x0FFFF000
@@ -1505,6 +1512,8 @@ typedef struct {
 #define LINK_SPEED_AUTO 0	/* Auto selection */
 #define LINK_SPEED_1G   1	/* 1 Gigabaud */
 #define LINK_SPEED_2G   2	/* 2 Gigabaud */
+#define LINK_SPEED_4G   8	/* 4 Gigabaud */
+#define LINK_SPEED_10G  4 	/* 10 Gigabaud */
 
 } INIT_LINK_VAR;
 
@@ -2723,7 +2732,9 @@ lpfc_is_LC_HBA(unsigned short device)
 {
 	if ((device == PCI_DEVICE_ID_TFLY) ||
 	    (device == PCI_DEVICE_ID_PFLY) ||
-	    (device == PCI_DEVICE_ID_LP101) || (device == PCI_DEVICE_ID_RFLY))
+	    (device == PCI_DEVICE_ID_LP101) || 
+	    (device == PCI_DEVICE_ID_JFLY) || 
+	    (device == PCI_DEVICE_ID_RFLY))
 		return 1;
 	else
 		return 0;

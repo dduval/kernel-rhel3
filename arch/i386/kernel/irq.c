@@ -223,7 +223,7 @@ static void show(char * str)
 			printk(" <unknown> ");
 			continue;
 		}
-		esp &= ~(THREAD_SIZE-1);
+		esp = ((esp - 1) & ~(THREAD_SIZE - 1));
 		esp += sizeof(struct task_struct);
 		show_stack((void*)esp);
  	}

@@ -73,6 +73,9 @@
 /* 512byte sectors to blocks */
 #define SECTOR_BLOCK(s)	((s) >> (DUMP_BLOCK_SHIFT - 9))
 
+/* The number of block which is used for saving format information */
+#define USER_PARAM_BLOCK	2
+
 static unsigned int fallback_on_err = 1;
 static unsigned int allow_risky_dumps = 1;
 static unsigned int block_order = 2;
@@ -101,8 +104,6 @@ static unsigned int header_blocks;		/* The size of all headers */
 static unsigned int bitmap_blocks;		/* The size of bitmap header */
 static unsigned int total_ram_blocks;		/* The size of memory */
 static unsigned int total_blocks;		/* The sum of above */
-
-struct notifier_block *disk_dump_notifier_list;
 
 #if CONFIG_SMP
 static void freeze_cpu(void *dummy)
@@ -166,6 +167,14 @@ static int check_block_signature(void *buf, unsigned int block_nr)
 	int *words = buf;
 	unsigned int val;
 	int i;
+
+	/*
+	* Block 2 is used for the area which formatter saves options like
+	* the sampling rate or the number of blocks. the Kernel part does not
+	* check this block.
+	*/
+	if (block_nr == USER_PARAM_BLOCK)
+		return 1;
 
 	if (memcmp(buf, DUMP_PARTITION_SIGNATURE, sizeof(*words)))
 		return FALSE;
@@ -309,7 +318,7 @@ static int write_memory(struct disk_dump_partition *dump_part, int offset, unsig
 	char *kaddr;
 	unsigned int blocks = 0;
 	struct page *page;
-	unsigned int nr;
+	unsigned long nr;
 	int ret = 0;
 	int blk_in_chunk = 0;
 
@@ -321,12 +330,21 @@ static int write_memory(struct disk_dump_partition *dump_part, int offset, unsig
 			Warn("dump device is too small. %lu pages were not saved", max_mapnr - blocks);
 			goto out;
 		}
-		page = mem_map + nr;
-		kaddr = (char *)kmap_atomic(page, KM_DISKDUMP);
-		/*
-		 * need to copy because adapter drivers use virt_to_bus()
-		 */
-		memcpy(scratch + blk_in_chunk * PAGE_SIZE, kaddr, PAGE_SIZE);
+		page = pfn_to_page(nr);
+		kaddr = kmap_atomic(page, KM_DISKDUMP);
+
+		if (kern_addr_valid((unsigned long)kaddr)) {
+			/*
+			 * need to copy because adapter drivers use virt_to_bus()
+			 */
+			memcpy(scratch + blk_in_chunk * PAGE_SIZE, kaddr, PAGE_SIZE);
+		} else {
+			memset(scratch + blk_in_chunk * PAGE_SIZE, 0, PAGE_SIZE);
+			sprintf(scratch + blk_in_chunk * PAGE_SIZE,
+				"Unmapped page. PFN %lu\n", nr);
+			printk("Unmapped page. PFN %lu\n", nr);
+		}
+
 		blk_in_chunk++;
 		blocks++;
 		kunmap_atomic(kaddr, KM_DISKDUMP);
@@ -763,22 +781,31 @@ static int proc_ioctl(struct inode *inode, struct file *file, unsigned int cmd, 
 	return ret;
 }
 
-static void *disk_dump_seq_start(struct seq_file *seq, loff_t *pos)
+static struct disk_dump_partition *dump_part_by_pos(struct seq_file *seq,
+						    loff_t pos)
 {
 	struct disk_dump_device *dump_device;
 	struct disk_dump_partition *dump_part;
 	list_t *p;
-	loff_t n = *pos;
 
-	spin_lock(&disk_dump_lock);
 	list_for_each_entry(dump_device, &disk_dump_devices, list) {
 		seq->private = dump_device;
-		list_for_each_entry(dump_part, &dump_device->partitions, list) {
-			if (!n--)
+		list_for_each_entry(dump_part, &dump_device->partitions, list)
+			if (!pos--)
 				return dump_part;
-		}
 	}
 	return NULL;
+}
+
+static void *disk_dump_seq_start(struct seq_file *seq, loff_t *pos)
+{
+	loff_t n = *pos;
+
+	if (!n--)
+		return (void *)1;	/* header */
+
+	spin_lock(&disk_dump_lock);
+	return dump_part_by_pos(seq, n);
 }
 
 static void *disk_dump_seq_next(struct seq_file *seq, void *v, loff_t *pos)
@@ -787,9 +814,12 @@ static void *disk_dump_seq_next(struct seq_file *seq, void *v, loff_t *pos)
 	list_t *device = seq->private;
 	struct disk_dump_device *dump_device;
 
+	(*pos)++;
+	if (v == (void *)1)
+		return dump_part_by_pos(seq, 0);
+
 	dump_device = list_entry(device, struct disk_dump_device, list);
 
-	(*pos)++;
 	partition = partition->next;
 	if (partition != &dump_device->partitions)
 		return partition;
@@ -814,6 +844,17 @@ static int disk_dump_seq_show(struct seq_file *seq, void *v)
 	struct disk_dump_partition *dump_part = v;
 	char *page;
 	char *path;
+
+	if (v == (void *)1) {	/* header */
+		seq_printf(seq, "# sample_rate: %u\n", sample_rate);
+		seq_printf(seq, "# block_order: %u\n", block_order);
+		seq_printf(seq, "# fallback_on_err: %u\n", fallback_on_err);
+		seq_printf(seq, "# allow_risky_dumps: %u\n", allow_risky_dumps);
+		seq_printf(seq, "# total_blocks: %u\n", total_blocks);
+		seq_printf(seq, "#\n");
+
+		return 0;
+	}
 
 	if (!(page = (char *)__get_free_page(GFP_KERNEL)))
 		return -ENOMEM;
@@ -869,7 +910,6 @@ int unregister_disk_dump_type(struct disk_dump_type *dump_type)
 
 EXPORT_SYMBOL(register_disk_dump_type);
 EXPORT_SYMBOL(unregister_disk_dump_type);
-EXPORT_SYMBOL(disk_dump_notifier_list);
 
 
 static void compute_total_blocks(void)

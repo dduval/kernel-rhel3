@@ -66,6 +66,7 @@ EXPORT_SYMBOL(agp_backend_acquire);
 EXPORT_SYMBOL(agp_backend_release);
 
 static void flush_cache(void);
+static int agp_init_one(struct pci_dev *dev);
 
 static struct agp_bridge_data agp_bridge;
 static int agp_try_unsupported __initdata = 0;
@@ -6077,40 +6078,35 @@ static int __init agp_lookup_host_bridge (struct pci_dev *pdev)
 	return -ENODEV;
 }
 
-static int agp_check_supported_device(struct pci_dev *dev) {
-
-	int i;
-
-	for(i = 0; i < ARRAY_SIZE (agp_bridge_info); i++) {
-		if(dev->vendor == agp_bridge_info[i].vendor_id &&
-		   dev->device == agp_bridge_info[i].device_id)
-			return 1;
-	}
-
-	return 0;
-}
-
 /* Supported Device Scanning routine */
 
 static int __init agp_find_supported_device(void)
 {
 	struct pci_dev *dev = NULL;
-	u8 cap_ptr = 0x00;
+	int ret = -ENODEV;
 
-	do {
-		dev = pci_find_class(PCI_CLASS_BRIDGE_HOST << 8, dev);
-	} while((dev) && !agp_check_supported_device(dev));
-
-	if (dev == NULL) {
-		/* ZX1 QS LBA appears as PCI bridge, not host bridge */
-		do {
-			if ((dev = pci_find_class(PCI_CLASS_BRIDGE_PCI << 8, dev)) == NULL)
-				return -ENODEV;	
-		} while(!agp_check_supported_device(dev));
+	while ((dev = pci_find_class(PCI_CLASS_BRIDGE_HOST << 8, dev)) != NULL) {
+		ret = agp_init_one(dev);
+		if (ret != -ENODEV)
+			goto out;
 	}
 
-	agp_bridge.dev = dev;
+	/* ZX1 QS LBA appears as PCI bridge, not host bridge */
+	while ((dev = pci_find_class(PCI_CLASS_BRIDGE_PCI << 8, dev)) != NULL) {
+		ret = agp_init_one(dev);
+		if (ret != -ENODEV)
+			break;
+	}
+out:
+	if (agp_bridge.dev == NULL)
+		agp_bridge.dev = dev;
 
+	return ret;
+}
+
+static int __init agp_init_one(struct pci_dev *dev)
+{
+	u8 cap_ptr = 0x00;
 
 #ifdef CONFIG_AGP_AMD_8151
 	/* If there is any K8 northbridge in the system always use the K8 driver */
@@ -6124,6 +6120,7 @@ static int __init agp_find_supported_device(void)
 		cap_ptr = pci_find_capability(dev, PCI_CAP_ID_AGP);
 		if (cap_ptr == 0x00)
 			return -ENODEV;
+		agp_bridge.dev = dev;
 		agp_bridge.capndx = cap_ptr;
 		
 		/* Fill in the mode register */
@@ -6156,6 +6153,7 @@ static int __init agp_find_supported_device(void)
 			}
 			printk(KERN_INFO PFX "Detected an Intel "
 			       "i810 Chipset.\n");
+			agp_bridge.dev = dev;
 			agp_bridge.type = INTEL_I810;
 			return intel_i810_setup (i810_dev);
 
@@ -6171,6 +6169,7 @@ static int __init agp_find_supported_device(void)
 			}
 			printk(KERN_INFO PFX "Detected an Intel i810 "
 			       "DC100 Chipset.\n");
+			agp_bridge.dev = dev;
 			agp_bridge.type = INTEL_I810;
 			return intel_i810_setup(i810_dev);
 
@@ -6186,6 +6185,7 @@ static int __init agp_find_supported_device(void)
 			}
 			printk(KERN_INFO PFX "Detected an Intel i810 E "
 			       "Chipset.\n");
+			agp_bridge.dev = dev;
 			agp_bridge.type = INTEL_I810;
 			return intel_i810_setup(i810_dev);
 
@@ -6207,6 +6207,7 @@ static int __init agp_find_supported_device(void)
 			}
 			printk(KERN_INFO PFX "agpgart: Detected an Intel i815 "
 			       "Chipset.\n");
+			agp_bridge.dev = dev;
 			agp_bridge.type = INTEL_I810;
 			return intel_i810_setup(i810_dev);
 
@@ -6218,6 +6219,7 @@ static int __init agp_find_supported_device(void)
 					PCI_DEVICE_ID_INTEL_845_G_1, i810_dev);
 			}
 
+			agp_bridge.dev = dev;
 			if (i810_dev == NULL) {
                                 /* 
                                  * We probably have a I845 G chipset
@@ -6244,6 +6246,7 @@ static int __init agp_find_supported_device(void)
 					PCI_DEVICE_ID_INTEL_830_M_1, i810_dev);
 			}
 
+			agp_bridge.dev = dev;
 			if (i810_dev == NULL) {
                                 /* 
                                  * We probably have a I830MP chipset
@@ -6264,6 +6267,7 @@ static int __init agp_find_supported_device(void)
 				i810_dev = pci_find_device(PCI_VENDOR_ID_INTEL,
 					PCI_DEVICE_ID_INTEL_855_GM_1, i810_dev);
 			}
+			agp_bridge.dev = dev;
 			if (i810_dev == NULL) {
                                 /* 
                                  * We probably have an 855PM chipset
@@ -6305,6 +6309,7 @@ static int __init agp_find_supported_device(void)
 				i810_dev = pci_find_device(PCI_VENDOR_ID_INTEL,
 					PCI_DEVICE_ID_INTEL_855_PM_1, i810_dev);
 			}
+			agp_bridge.dev = dev;
 			if (i810_dev == NULL) {
                                 /* 
                                  * We probably have an 855PM chipset
@@ -6347,6 +6352,7 @@ static int __init agp_find_supported_device(void)
 					PCI_DEVICE_ID_INTEL_865_G_1, i810_dev);
 			}
 
+			agp_bridge.dev = dev;
 			if (i810_dev == NULL) {
                                 /* 
                                  * We probably have a 865G chipset
@@ -6387,16 +6393,19 @@ static int __init agp_find_supported_device(void)
 
 		switch (dev->device) {
 		case PCI_DEVICE_ID_SERVERWORKS_HE:
+			agp_bridge.dev = dev;
 			agp_bridge.type = SVWRKS_HE;
 			return serverworks_setup(bridge_dev);
 
 		case PCI_DEVICE_ID_SERVERWORKS_LE:
 		case 0x0007:
+			agp_bridge.dev = dev;
 			agp_bridge.type = SVWRKS_LE;
 			return serverworks_setup(bridge_dev);
 
 		default:
 			if(agp_try_unsupported) {
+				agp_bridge.dev = dev;
 				agp_bridge.type = SVWRKS_GENERIC;
 				return serverworks_setup(bridge_dev);
 			}
@@ -6444,7 +6453,7 @@ static int __init agp_find_supported_device(void)
 	agp_bridge.capndx = cap_ptr;
 
 	/* Fill in the mode register */
-	pci_read_config_dword(agp_bridge.dev,
+	pci_read_config_dword(dev,
 			      agp_bridge.capndx + 4,
 			      &agp_bridge.mode);
 

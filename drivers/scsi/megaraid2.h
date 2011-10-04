@@ -3,10 +3,11 @@
 
 #include <linux/version.h>
 #include <linux/spinlock.h>
+#include <linux/diskdumplib.h>
 
 
 #define MEGARAID_VERSION	\
-	"v2.10.6-RH1 (Release Date: Fri May 14 08:36:49 EDT 2004)\n"
+	"v2.10.8.2-RH1 (Release Date: Mon Jul 26 12:15:51 EDT 2004)\n"
 
 /*
  * Driver features - change the values to enable or disable features in the
@@ -82,6 +83,7 @@
 #define LSI_SUBSYS_VID			0x1000
 #define INTEL_SUBSYS_VID		0x8086
 #define FSC_SUBSYS_VID			0x1734
+#define ACER_SUBSYS_VID			0x1025
 
 #define HBA_SIGNATURE	      		0x3344
 #define HBA_SIGNATURE_471	  	0xCCCC
@@ -120,8 +122,17 @@
 #define NVIRT_CHAN		4	/* # of virtual channels to represent
 					   up to 60 logical drives */
 
-#define MEGARAID						\
-{								\
+/******************************** Disk dump ***********************************/
+#if defined(CONFIG_DISKDUMP) || defined(CONFIG_DISKDUMP_MODULE)
+#undef  schedule
+#define schedule		diskdump_schedule
+#undef  __wake_up
+#define __wake_up		diskdump_wake_up
+#undef  sleep_on_timeout
+#define sleep_on_timeout	diskdump_sleep_on_timeout
+#endif
+
+#define _MEGARAID						\
 	.name =				"MegaRAID",		\
 	.proc_name =		 	"megaraid",		\
 	.detect =			megaraid_detect,	\
@@ -143,9 +154,19 @@
 	.eh_bus_reset_handler =		megaraid_reset,		\
 	.eh_host_reset_handler =	megaraid_reset,		\
 	.highmem_io =			1,			\
-	.vary_io =			1			\
-}
+	.vary_io =			1			
 
+#if defined(CONFIG_DISKDUMP) || defined(CONFIG_DISKDUMP_MODULE)
+#define MEGARAID {						\
+	.hostt = {						\
+		_MEGARAID,					\
+		.disk_dump		= 1			\
+	},							\
+	.dump_ops			= &megaraid_dump_ops	\
+}
+#else
+#define MEGARAID { _MEGARAID }
+#endif
 
 
 typedef struct {
@@ -986,6 +1007,8 @@ typedef struct {
 	caddr_t			int_data;		/*internal data*/
 	dma_addr_t		int_data_dma_hndl;
 
+	int			hw_error;
+
 }adapter_t;
 
 
@@ -1093,6 +1116,7 @@ typedef enum { LOCK_INT, LOCK_EXT } lockscope_t;
 
 #define MBOX_ABORT_SLEEP	60
 #define MBOX_RESET_SLEEP	30
+#define MBOX_RESET_WAIT		180
 
 const char *megaraid_info (struct Scsi_Host *);
 

@@ -62,6 +62,7 @@ extern int cad_pid;
 extern int pid_max;
 #if defined(CONFIG_X86) && !defined(CONFIG_X86_64)
 extern int unknown_nmi_panic;
+extern int mem_nmi_panic;
 #endif
 
 int exec_shield = 1;
@@ -343,6 +344,8 @@ static ctl_table kern_table[] = {
 #endif
 #if defined(CONFIG_X86) && !defined(CONFIG_X86_64)
 	{KERN_UNKNOWN_NMI_PANIC, "unknown_nmi_panic", &unknown_nmi_panic,
+	 sizeof(int), 0644, NULL, &proc_dointvec},
+	{KERN_MEM_NMI_PANIC, "mem_nmi_panic", &mem_nmi_panic,
 	 sizeof(int), 0644, NULL, &proc_dointvec},
 #endif
 	{0}

@@ -133,6 +133,7 @@ static int
 restore_sigcontext(struct pt_regs *regs, struct sigcontext *sc, unsigned long *prax)
 {
 	unsigned int err = 0;
+	unsigned int caller_eflags;
 
 
 #define COPY(x)		err |= __get_user(regs->x, &sc->x)
@@ -160,6 +161,7 @@ restore_sigcontext(struct pt_regs *regs, struct sigcontext *sc, unsigned long *p
 	{
 		unsigned int tmpflags;
 		err |= __get_user(tmpflags, &sc->eflags);
+		caller_eflags = regs->eflags;
 		regs->eflags = (regs->eflags & ~0x40DD5) | (tmpflags & 0x40DD5);
 		regs->orig_rax = -1;		/* disable syscall checks */
 	}
@@ -175,6 +177,22 @@ restore_sigcontext(struct pt_regs *regs, struct sigcontext *sc, unsigned long *p
 	}
 
 	err |= __get_user(*prax, &sc->rax);
+
+	if (!err && unlikely(caller_eflags & X86_EFLAGS_TF) &&
+	    (current->ptrace & (PT_PTRACED|PT_DTRACE)) == (PT_PTRACED|PT_DTRACE)) {
+		/*
+		 * If ptrace single-stepped into the sigreturn system call,
+		 * then fake a single-step trap before we resume the restored
+		 * context.
+		 */
+		siginfo_t info;
+		info.si_signo = SIGTRAP;
+		info.si_errno = 0;
+		info.si_code = TRAP_BRKPT;
+		info.si_addr = (void *)regs->rip;
+		force_sig_info(SIGTRAP, &info, current);
+	}
+
 	return err;
 }
 #undef COPY
@@ -226,6 +244,7 @@ setup_sigcontext(struct sigcontext *sc, struct pt_regs *regs, unsigned long mask
 {
 	int tmp, err = 0;
 	struct task_struct *me = current;
+	unsigned long eflags;
 
 	tmp = 0;
 	err |= __put_user(0, &sc->gs);
@@ -251,7 +270,11 @@ setup_sigcontext(struct sigcontext *sc, struct pt_regs *regs, unsigned long mask
 	err |= __put_user(me->thread.error_code, &sc->err);
 	err |= __put_user(regs->rip, &sc->rip);
 	err |= __put_user(regs->cs, &sc->cs);
-	err |= __put_user(regs->eflags, &sc->eflags);
+	eflags = regs->eflags;
+	if (current->ptrace & PT_PTRACED) {
+		eflags &= ~TF_MASK;
+	}
+	err |= __put_user(eflags, &sc->eflags);
 	err |= __put_user(mask, &sc->oldmask);
 	err |= __put_user(me->thread.cr2, &sc->cr2);
 
@@ -360,7 +383,13 @@ static void setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
 	regs->ss = __USER_DS; 
 
 	set_fs(USER_DS);
-	regs->eflags &= ~TF_MASK;
+	if (regs->eflags & TF_MASK) {
+		if (current->ptrace & PT_PTRACED) {
+			ptrace_notify(SIGTRAP);
+		} else {
+			regs->eflags &= ~TF_MASK;
+		}
+	}
 
 #if DEBUG_SIG
 	printk("SIG deliver (%s:%d): sp=%p pc=%p ra=%p\n",

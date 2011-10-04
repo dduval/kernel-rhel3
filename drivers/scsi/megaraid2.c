@@ -14,7 +14,7 @@
  *	  - speed-ups (list handling fixes, issued_list, optimizations.)
  *	  - lots of cleanups.
  *
- * Version : v2.10.6 (May 14, 2004)
+ * Version : v2.10.8.2 (July 26, 2004)
  *
  * Authors:	Atul Mukker <Atul.Mukker@lsil.com>
  *		Sreenivas Bagalkote <Sreenivas.Bagalkote@lsil.com>
@@ -43,6 +43,7 @@
 #include "sd.h"
 #include "scsi.h"
 #include "hosts.h"
+#include "scsi_dump.h"
 
 #include "megaraid2.h"
 
@@ -340,6 +341,7 @@ mega_find_card(Scsi_Host_Template *host_template, u16 pci_vendor,
 				(subsysvid != HP_SUBSYS_VID) &&
 				(subsysvid != INTEL_SUBSYS_VID) &&
 				(subsysvid != FSC_SUBSYS_VID) &&
+				(subsysvid != ACER_SUBSYS_VID) &&
 				(subsysvid != LSI_SUBSYS_VID) ) continue;
 
 
@@ -1059,7 +1061,6 @@ mega_build_cmd(adapter_t *adapter, Scsi_Cmnd *cmd, int *busy)
 	mbox_t	*mbox;
 	long	seg;
 	char	islogical;
-	int	max_ldrv_num;
 	int	channel = 0;
 	int	target = 0;
 	int	ldrv_num = 0;   /* logical drive number */
@@ -1131,24 +1132,6 @@ mega_build_cmd(adapter_t *adapter, Scsi_Cmnd *cmd, int *busy)
 		}
 
 		ldrv_num = mega_get_ldrv_num(adapter, cmd, channel);
-
-
-		max_ldrv_num = (adapter->flag & BOARD_40LD) ?
-			MAX_LOGICAL_DRIVES_40LD : MAX_LOGICAL_DRIVES_8LD;
-
-		/*
-		 * max_ldrv_num increases by 0x80 if some logical drive was
-		 * deleted.
-		 */
-		if(adapter->read_ldidmap)
-			max_ldrv_num += 0x80;
-
-		if(ldrv_num > max_ldrv_num ) {
-			cmd->result = (DID_BAD_TARGET << 16);
-			cmd->scsi_done(cmd);
-			return NULL;
-		}
-
 	}
 	else {
 		if( cmd->lun > 7) {
@@ -2739,30 +2722,36 @@ megaraid_command (Scsi_Cmnd *cmd)
 }
 
 
-/**
- * megaraid_abort - abort the scsi command
- * @scp	- command to be aborted
- *
- * Abort a previous SCSI request. Only commands on the pending list can be
- * aborted. All the commands issued to the F/W must complete.
- */
 static int
 megaraid_abort(Scsi_Cmnd *scp)
 {
 	adapter_t		*adapter;
 	struct list_head	*pos, *next;
 	scb_t			*scb;
-	long			iter;
-	int			rval = SUCCESS;
+
+	printk("megaraid: aborting-%ld cmd=%x <c=%d t=%d l=%d>\n",
+		scp->serial_number, scp->cmnd[0], scp->channel,
+		scp->target, scp->lun);
 
 	adapter = (adapter_t *)scp->host->hostdata;
 
+	/*
+	 * Check if hw_error flag was set in previous RESET call. If it was,
+	 * then FW is hanging and unlikely to function. We can return FAILURE
+	 * from here and expect the RESET handler to be called.
+	 */
+
+	if (adapter->hw_error) {
+		printk("megaraid: hw error, cannot abort\n");
+		return FAILED;
+	}
+
 	ASSERT( spin_is_locked(adapter->host_lock) );
 
-	printk("megaraid: aborting-%ld cmd=%x <c=%d t=%d l=%d>\n",
-		scp->serial_number, scp->cmnd[0], scp->channel, scp->target,
-		scp->lun);
-
+	/*
+	 * If cmd is waiting to be issued to FW, ABORT it with SUCEESS. If it
+	 * has already been issued, return FAILURE and expect RESET later.
+	 */
 
 	list_for_each_safe( pos, next, &adapter->pending_list ) {
 
@@ -2772,15 +2761,11 @@ megaraid_abort(Scsi_Cmnd *scp)
 
 			scb->state |= SCB_ABORT;
 
-			/*
-			 * Check if this command was never issued. If this is
-			 * the case, take it off from the pending list and
-			 * complete.
-			 */
 			if( !(scb->state & SCB_ISSUED) ) {
 
-				printk(KERN_WARNING
-				"megaraid: %ld:%d, driver owner.\n",
+				/* Not issued to the FW yet; ABORT it */
+
+				printk( "megaraid: %ld:%d, driver owner.\n",
 					scp->serial_number, scb->idx);
 
 				scp->result = (DID_ABORT << 16);
@@ -2789,67 +2774,31 @@ megaraid_abort(Scsi_Cmnd *scp)
 
 				scp->scsi_done(scp);
 
-				break;
+				return SUCCESS;
+			}
+			else {
+				/* Issued to the FW; can do nothing */
+				return FAILED;
 			}
 		}
 	}
 
 	/*
-	 * By this time, either all commands are completed or aborted by
-	 * mid-layer. Do not return until all the commands are actually
-	 * completed by the firmware
+	 * cmd is _not_ in our pending_list. Most likely we completed the cmd
 	 */
-	iter = 0;
-	while( atomic_read(&adapter->pend_cmds) > 0 ) {
-		/*
-		 * Perform the ack sequence, since interrupts are not
-		 * available right now!
-		 */
-		if( adapter->flag & BOARD_MEMMAP ) {
-			megaraid_memmbox_ack_sequence(adapter);
-		}
-		else {
-			megaraid_iombox_ack_sequence(adapter);
-		}
-
-		/*
-		 * print a message once every second only
-		 */
-		if( !(iter % 1000) ) {
-			printk(
-			"megaraid: Waiting for %d commands to flush: iter:%ld\n",
-				atomic_read(&adapter->pend_cmds), iter);
-		}
-
-		if( iter++ < MBOX_ABORT_SLEEP*1000 ) {
-			mdelay(1);
-		}
-		else {
-			printk(KERN_WARNING
-				"megaraid: critical hardware error!\n");
-
-			rval = FAILED;
-
-			break;
-		}
-	}
-
-	if( rval == SUCCESS ) {
-		printk(KERN_INFO
-			"megaraid: abort sequence successfully completed.\n");
-	}
-
-	return rval;
+	return SUCCESS;
 }
 
 
 static int
 megaraid_reset(Scsi_Cmnd *cmd)
 {
-	adapter_t	*adapter;
-	megacmd_t	mc;
-	long		iter;
-	int		rval = SUCCESS;
+	DECLARE_WAIT_QUEUE_HEAD(wq);
+	int			i;
+	scb_t			*scb;
+	adapter_t		*adapter;
+	struct list_head	*pos, *next;
+	int			rval;
 
 	adapter = (adapter_t *)cmd->host->hostdata;
 
@@ -2859,31 +2808,56 @@ megaraid_reset(Scsi_Cmnd *cmd)
 		cmd->serial_number, cmd->cmnd[0], cmd->channel, cmd->target,
 		cmd->lun);
 
+	/*
+	 * Check if hw_error flag was set in previous RESET call. If it was,
+	 * then we needn't do any handling here. The controller will be marked
+	 * offline soon
+	 */
 
-#if MEGA_HAVE_CLUSTERING
-	mc.cmd = MEGA_CLUSTER_CMD;
-	mc.opcode = MEGA_RESET_RESERVATIONS;
-
-	spin_unlock_irq(adapter->host_lock);
-	if( mega_internal_command(adapter, LOCK_INT, &mc, NULL) != 0 ) {
-		printk(KERN_WARNING
-				"megaraid: reservation reset failed.\n");
+	if (adapter->hw_error) {
+		printk("megaraid: hw error, cannot reset\n");
+		return FAILED;
 	}
-	else {
-		printk(KERN_INFO "megaraid: reservation reset.\n");
-	}
-	spin_lock_irq(adapter->host_lock);
-#endif
 
 	/*
-	 * Do not return until all the commands are actually completed by the
-	 * firmware
+	 * Return all the pending cmds to the mid-layer with the cmd result
+	 * DID_RESET. Make sure you don't return the cmds ISSUED to FW.
 	 */
-	iter = 0;
-	while( atomic_read(&adapter->pend_cmds) > 0 ) {
+	list_for_each_safe( pos, next, &adapter->pending_list ) {
+
+		scb		= list_entry(pos, scb_t, list);
+		scb->state	|= SCB_RESET;
+
+		if( !(scb->state & SCB_ISSUED) ) {
+
+			/* Not issued to the FW; return with RESET */
+			cmd->result = (DID_RESET << 16);
+
+			mega_free_scb(adapter, scb);
+			if( cmd->scsi_done ) {
+				cmd->scsi_done(cmd);
+			}
+		}
+	}
+
+	/*
+	 * Under exceptional conditions, FW may take up to 3 mins to complete
+	 * processing all pending commands. We'll wait for maximum 3 mins to
+	 * see if all outstanding commands are completed.
+	 */
+
+	if (atomic_read(&adapter->pend_cmds) == 0)
+		return SUCCESS;
+
+	printk("megaraid: %d pending cmds; max wait %d seconds\n",
+		atomic_read(&adapter->pend_cmds), MBOX_RESET_WAIT );
+
+	for(i=0; (i<MBOX_RESET_WAIT)&&(atomic_read(&adapter->pend_cmds)); i++){
+
+		ASSERT( spin_is_locked(adapter->host_lock) );
+
 		/*
-		 * Perform the ack sequence, since interrupts are not
-		 * available right now!
+		 * Perform the ack sequence, since interrupts are unavailable
 		 */
 		if( adapter->flag & BOARD_MEMMAP ) {
 			megaraid_memmbox_ack_sequence(adapter);
@@ -2892,31 +2866,32 @@ megaraid_reset(Scsi_Cmnd *cmd)
 			megaraid_iombox_ack_sequence(adapter);
 		}
 
-		/*
-		 * print a message once every second only
-		 */
-		if( !(iter % 1000) ) {
-			printk(
-			"megaraid: Waiting for %d commands to flush: iter:%ld\n",
-				atomic_read(&adapter->pend_cmds), iter);
+		spin_unlock(adapter->host_lock);
+
+		/* Print a message once every 5 seconds */
+		if (!(i % 5)) {
+			printk("megaraid: pending %d; remaining %d seconds\n",
+				atomic_read(&adapter->pend_cmds),
+				MBOX_RESET_WAIT - i);
 		}
 
-		if( iter++ < MBOX_RESET_SLEEP*1000 ) {
-			mdelay(1);
-		}
-		else {
-			printk(KERN_WARNING
-				"megaraid: critical hardware error!\n");
+		sleep_on_timeout(&wq, HZ);
 
-			rval = FAILED;
-
-			break;
-		}
+		spin_lock(adapter->host_lock);
 	}
 
-	if( rval == SUCCESS ) {
-		printk(KERN_INFO
-			"megaraid: reset sequence successfully completed.\n");
+	/*
+	 * If after 3 mins there are still outstanding cmds, set the hw_error
+	 * flag so that we can return from subsequent ABORT/RESET handlers
+	 * without any processing
+	 */
+
+	rval = SUCCESS;
+	if (atomic_read(&adapter->pend_cmds)) {
+
+		adapter->hw_error = 1;
+		printk("megaraid: critical hardware error!\n" );
+		rval = FAILED;
 	}
 
 	return rval;
@@ -3970,6 +3945,7 @@ static int
 megaraid_reboot_notify (struct notifier_block *this, unsigned long code,
 		void *unused)
 {
+	DECLARE_WAIT_QUEUE_HEAD(wq);
 	adapter_t *adapter;
 	struct Scsi_Host *host;
 	u8 raw_mbox[sizeof(mbox_t)];
@@ -4022,10 +3998,10 @@ megaraid_reboot_notify (struct notifier_block *this, unsigned long code,
 	printk(KERN_INFO "megaraid: cache flush delay:   ");
 	for( i = 9; i >= 0; i-- ) {
 		printk("\b\b\b[%d]", i);
-		mdelay(1000);
+		sleep_on_timeout(&wq, HZ);
 	}
 	printk("\b\b\b[done]\n");
-	mdelay(1000);
+	sleep_on_timeout(&wq, HZ);
 
 	return NOTIFY_DONE;
 }
@@ -5178,16 +5154,10 @@ mega_get_ldrv_num(adapter_t *adapter, Scsi_Cmnd *cmd, int channel)
 	}
 
 	/*
-	 * If "delete logical drive" feature is enabled on this controller.
-	 * Do only if at least one delete logical drive operation was done.
-	 *
-	 * Also, after logical drive deletion, instead of logical drive number,
+	 * If "delete logical drive" feature is enabled on this controller,
 	 * the value returned should be 0x80+logical drive id.
-	 *
-	 * These is valid only for IO commands.
 	 */
-
-	if (adapter->support_random_del && adapter->read_ldidmap )
+	if (adapter->support_random_del)
 		ldrv_num += 0x80;
 
 	return ldrv_num;
@@ -5622,8 +5592,74 @@ mega_internal_done(Scsi_Cmnd *scmd)
 
 }
 
+#if defined(CONFIG_DISKDUMP) || defined(CONFIG_DISKDUMP_MODULE)
+static int
+megaraid_sanity_check(Scsi_Device *device)
+{
+	adapter_t	*adapter = (adapter_t *)device->host->hostdata;
+
+	if( adapter == NULL ) {
+		return -ENXIO;
+	}
+#ifdef SCSI_HAS_HOST_LOCK
+	if(spin_is_locked(adapter->host_lock)) {
+		return -EBUSY;
+	}
+#endif
+	return 0;
+}
+
+static int
+megaraid_quiesce(Scsi_Device *SDev)
+{
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,5,1)
+	spin_lock_init(&io_request_lock);
+#endif
+	return 0;
+}
+
+static void
+megaraid_poll(Scsi_Device *device)
+{
+	adapter_t	*adapter = (adapter_t *)device->host->hostdata;
+	u32		dword = 0;
+	u8		status;
+	u8		byte;
+
+	if( likely(adapter->flag & BOARD_MEMMAP) ) {
+		/* Check if a valid interrupt is pending */
+		dword = RDOUTDOOR(adapter);
+		if( dword != 0x10001234 ) {
+			/*
+			 * No more pending commands
+			 */
+			return;
+		}
+		megaraid_isr_memmapped(0, adapter, NULL);
+	} else {
+		/* Check if a valid interrupt is pending */
+		byte = irq_state(adapter);
+		if( (byte & VALID_INTR_BYTE) == 0 ) {
+			return;
+		}
+		megaraid_isr_iomapped(0, adapter, NULL);
+	}
+}
+
+static struct scsi_dump_ops megaraid_dump_ops = {
+	.sanity_check	= megaraid_sanity_check,
+	.quiesce	= megaraid_quiesce,
+	.poll		= megaraid_poll,
+	.no_write_cache_enable = 1
+};
+
+static Scsi_Host_Template_dump driver_template_dump = MEGARAID;
+#define driver_template		(driver_template_dump.hostt)
+
+#else
 static Scsi_Host_Template driver_template = MEGARAID;
 
+#endif
 #include "scsi_module.c"
 
 /* vi: set ts=8 sw=8 tw=78: */

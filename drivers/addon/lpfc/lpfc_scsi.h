@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_scsi.h 1.29 2004/05/03 13:37:15EDT jselx Exp  $
+ * $Id: lpfc_scsi.h 1.29.1.4 2004/09/30 14:51:55EDT sf_support Exp  $
  */
 
 #ifndef _H_LPFC_SCSI
@@ -142,10 +142,6 @@ struct lpfcScsiLun {
 #define SCSI_P0_INFO          0x20000	/* device has good P0 info */
 
 	uint16_t qfull_retries;	/* # of retries on qfull condition */
-#define MAX_QFULL_RETRIES   255
-#define MAX_QFULL_RETRY_INTERVAL 1000	/* 1000 (ms) */
-
-	uint16_t qfull_retry_interval;	/* the interval for qfull retry */
 	struct timer_list qfull_tmo_id;
 
 	uint32_t failMask;	/* failure mask for device */
@@ -186,6 +182,9 @@ struct lpfc_scsi_buf {
 
 	int        datadir;	/* Data direction as requested in the scsi
 				   command. */
+	uint32_t   seg_cnt;	/* Number of scatter-gather segments returned by
+				 * pci_map_sg.  The driver needs this for calls
+				 * to pci_unmap_sg. */
 	dma_addr_t nonsg_phys;	/* Non scatter-gather physical address. */
 
 	LPFCSCSILUN_t *pLun;

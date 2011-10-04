@@ -33,6 +33,8 @@
 #include <linux/lockd/bind.h>
 #include <linux/smp_lock.h>
 #include <linux/seq_file.h>
+#include <linux/solaris_acl.h>
+#include <linux/sysctl.h>
 
 #include <asm/system.h>
 #include <asm/uaccess.h>
@@ -40,6 +42,48 @@
 #define CONFIG_NFS_SNAPSHOT 1
 #define NFSDBG_FACILITY		NFSDBG_VFS
 #define NFS_PARANOIA 1
+
+#ifdef CONFIG_NFS_ACL
+unsigned int nfs3_acl_max_entries = NFS3_ACL_MAX_ENTRIES;
+MODULE_PARM(nfs3_acl_max_entries, "i");
+MODULE_PARM_DESC(nfs3_acl_max_entries, "Max number of ACE objects to support in an NFS_ACL response");
+#endif
+
+static struct ctl_table_header *nfs_sysctl_table;
+#define CTL_UNNUMBERED		-2
+static ctl_table nfs_sysctl_files[] = {
+#ifdef CONFIG_NFS_ACL
+	{
+		.ctl_name	= CTL_UNNUMBERED,
+		.procname	= "nfs3_acl_max_entries",
+		.data		= &nfs3_acl_max_entries,
+		.maxlen		= sizeof(int),
+		.mode		= 0444,
+		.proc_handler	= &proc_dointvec,
+	},
+#endif
+	{ .ctl_name = 0 }
+};
+
+static ctl_table nfs_sysctl_dir[] = {
+	{
+		.ctl_name	= CTL_UNNUMBERED,
+		.procname	= "nfs",
+		.mode		= 0555,
+		.child		= nfs_sysctl_files,
+	},
+	{ .ctl_name = 0 }
+};
+
+static ctl_table nfs_sysctl_root[] = {
+	{
+		.ctl_name	= CTL_FS,
+		.procname	= "fs",
+		.mode		= 0555,
+		.child		= nfs_sysctl_dir,
+	},
+	{ .ctl_name = 0 }
+};
 
 static struct inode * __nfs_fhget(struct super_block *, struct nfs_fh *, struct nfs_fattr *);
 void nfs_zap_caches(struct inode *);
@@ -52,7 +96,11 @@ static void nfs_put_super(struct super_block *);
 static void nfs_clear_inode(struct inode *);
 static void nfs_umount_begin(struct super_block *);
 static int  nfs_statfs(struct super_block *, struct statfs *);
+#ifdef __ARCH_HAS_STATFS64
+static int  nfs_statfs64(struct super_block *, struct statfs64 *);
+#endif
 static int  nfs_show_options(struct seq_file *, struct vfsmount *);
+extern void nfs3_fixup_xdr_tables(unsigned int max_acl);
 
 static struct super_operations nfs_sops = { 
 	read_inode:	nfs_read_inode,
@@ -63,6 +111,9 @@ static struct super_operations nfs_sops = {
 	clear_inode:	nfs_clear_inode,
 	umount_begin:	nfs_umount_begin,
 	show_options:	nfs_show_options,
+#ifdef __ARCH_HAS_STATFS64
+	statfs64:	nfs_statfs64,
+#endif
 };
 
 #ifdef CONFIG_NFS_ACL
@@ -392,6 +443,9 @@ nfs_read_super(struct super_block *sb, void *raw_data, int silent)
 
 	sb->s_magic      = NFS_SUPER_MAGIC;
 	sb->s_op         = &nfs_sops;
+#ifdef __ARCH_HAS_STATFS64
+	sb->s_flags	|= MS_HAS_STATFS64;
+#endif
 	server           = &sb->u.nfs_sb.s_server;
 	if (data->rsize)
 		server->rsize = nfs_block_size(data->rsize, NULL);
@@ -644,6 +698,41 @@ nfs_statfs(struct super_block *sb, struct statfs *buf)
 	return 0;
 }
 #undef TOOBIG
+
+#ifdef __ARCH_HAS_STATFS64
+static int
+nfs_statfs64(struct super_block *sb, struct statfs64 *buf)
+{
+	struct nfs_server *server = &sb->u.nfs_sb.s_server;
+	unsigned char blockbits;
+	unsigned long blockres;
+	struct nfs_fattr attr;
+	struct nfs_fsstat res = { &attr, };
+	int error;
+
+	error = server->rpc_ops->statfs(server, NFS_FH(sb->s_root->d_inode), &res);
+	buf->f_type = NFS_SUPER_MAGIC;
+	if (error < 0) {
+		printk("nfs_statfs64: statfs error = %d\n", -error);
+		goto out_err;
+	}
+
+	buf->f_bsize = sb->s_blocksize;
+	blockbits = sb->s_blocksize_bits;
+	blockres = (1 << blockbits) - 1;
+	buf->f_namelen = server->namelen;
+	buf->f_blocks = (res.tbytes + blockres) >> blockbits;
+	buf->f_bfree = (res.fbytes + blockres) >> blockbits;
+	buf->f_bavail = (res.abytes + blockres) >> blockbits;
+	buf->f_files = res.tfiles;
+	buf->f_ffree = res.afiles;
+	return 0;
+
+ out_err:
+	buf->f_bsize = buf->f_blocks = buf->f_bfree = buf->f_bavail = -1;
+	return 0;
+}
+#endif
 
 static int nfs_show_options(struct seq_file *m, struct vfsmount *mnt)
 {
@@ -1326,6 +1415,10 @@ static int __init init_nfs_fs(void)
 {
 	int err;
 
+#ifdef CONFIG_NFS_ACL
+	nfs3_fixup_xdr_tables(nfs3_acl_max_entries);
+#endif
+
 	err = nfs_init_nfspagecache();
 	if (err)
 		return err;
@@ -1340,6 +1433,7 @@ static int __init init_nfs_fs(void)
 
 #ifdef CONFIG_PROC_FS
 	rpc_proc_register(&nfs_rpcstat);
+	nfs_sysctl_table = register_sysctl_table(nfs_sysctl_root,0);
 #endif
         return register_filesystem(&nfs_fs_type);
 }
@@ -1351,6 +1445,8 @@ static void __exit exit_nfs_fs(void)
 	nfs_destroy_nfspagecache();
 #ifdef CONFIG_PROC_FS
 	rpc_proc_unregister("nfs");
+	if (nfs_sysctl_table)
+		unregister_sysctl_table(nfs_sysctl_table);
 #endif
 	unregister_filesystem(&nfs_fs_type);
 }

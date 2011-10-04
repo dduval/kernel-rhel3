@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_sched.h 1.11 2004/04/22 09:40:40EDT jselx Exp  $
+ * $Id: lpfc_sched.h 1.11.1.4 2004/10/12 19:23:06EDT sf_support Exp  $
  */
 
 #ifndef         LPFC_SCHED_H
@@ -120,6 +120,7 @@ typedef struct lpfcSchedHBA {
 	uint16_t currentOutstanding;	/* Depth on the HBA. */
 	LPFC_SCHED_STATUS_t status;	/* Status word for stopping any
 					   scheduling of the HBA */
+        struct lpfcScsiTarget *nextTargetToCheck; 
 } LPFC_SCHED_HBA_t;		/*   layer without queueing */
 
 /* ****************************************************************************
@@ -141,6 +142,7 @@ typedef struct lpfcSchedTarget {
 				       outstanding. */
 	LPFC_SCHED_STATUS_t status;	/* Pended entries can be scheduled or */
 	/*   or not at this time. */
+	struct lpfcScsiLun *nextLunToCheck;
 } LPFC_SCHED_TARGET_t;
 
 /* ****************************************************************************
@@ -217,8 +219,6 @@ void lpfc_sched_continue_hba(struct lpfcHBA *hba);
 **   command pts to the SCSI_BUF to be submitted.
 ** ********************************************************************** */
 
-void lpfc_sched_submit_command(struct lpfcHBA *hba,
-			       struct lpfc_scsi_buf *command);
 void lpfc_sched_service_high_priority_queue(struct lpfcHBA *pHba);
 
 /*      

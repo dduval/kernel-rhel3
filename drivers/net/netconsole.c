@@ -86,6 +86,8 @@ static unsigned long long mhz_cycles, jiffy_cycles;
  */
 #define MAX_NETCONSOLE_SKBS 128
 
+#define MAX_NETCONSOLE_TX_RETRIES 32
+
 static spinlock_t netconsole_lock = SPIN_LOCK_UNLOCKED;
 static int nr_netconsole_skbs;
 static struct sk_buff *netconsole_skbs;
@@ -232,8 +234,16 @@ repeat:
 
 static void transmit_raw_skb(struct sk_buff *skb, struct net_device *dev)
 {
+	int poll_count = 0;
 
 repeat_poll:
+	/* drop the packet if we are making no progress */
+	if (likely(!netdump_mode) && 
+	    poll_count++ > MAX_NETCONSOLE_TX_RETRIES) {
+		dev_kfree_skb_any(skb);
+		return;
+	}
+
 	spin_lock(&dev->xmit_lock);
 	dev->xmit_lock_owner = smp_processor_id();
 
@@ -875,10 +885,12 @@ static inline void print_status (req_t *req)
 
 #define CLI 1
 
-#if CONFIG_SMP
+#ifdef CONFIG_SMP
+static char cpus_frozen[NR_CPUS] = { 0 }; 
+
 static void freeze_cpu (void * dummy)
 {
-	printk("CPU#%d is frozen.\n", smp_processor_id());
+	cpus_frozen[smp_processor_id()] = 1;
 #if CLI
 	for (;;) __cli();
 #else
@@ -895,13 +907,25 @@ static void netconsole_netdump (struct pt_regs *regs)
 	struct net_device *dev = netconsole_dev;
 	struct pt_regs myregs;
 	req_t *req;
+#ifdef CONFIG_SMP
+	int i;
+#endif
 
 	__save_flags(flags);
 	__cli();
-#if CONFIG_SMP
+#ifdef CONFIG_SMP
 	smp_call_function(freeze_cpu, NULL, 1, -1);
-#endif
+	mdelay(3000);
+	for (i = 0; i < NR_CPUS; i++) {
+		if (cpus_frozen[i])
+			printk("CPU#%d is frozen.\n", i);
+		else if (i == smp_processor_id())
+			printk("CPU#%d is executing netdump.\n", i);
+	}
+#else
 	mdelay(1000);
+#endif /* CONFIG_SMP */
+
 	/*
 	 * Just in case we are crashing within the networking code
 	 * ... attempt to fix up.

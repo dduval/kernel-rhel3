@@ -46,12 +46,12 @@
 #include <linux/genhd.h>
 
 #define CCISS_DRIVER_VERSION(maj,min,submin) ((maj<<16)|(min<<8)|(submin))
-#define DRIVER_NAME "HP CISS Driver (v 2.4.52.RH1)"
+#define DRIVER_NAME "HP CISS Driver (v 2.4.52.RH2)"
 #define DRIVER_VERSION CCISS_DRIVER_VERSION(2,4,52)
 
 /* Embedded module documentation macros - see modules.h */
 MODULE_AUTHOR("Hewlett-Packard Company");
-MODULE_DESCRIPTION("Driver for HP SA5xxx SA6xxx Controllers version 2.4.52.RH1");
+MODULE_DESCRIPTION("Driver for HP SA5xxx SA6xxx Controllers version 2.4.52.RH2");
 MODULE_SUPPORTED_DEVICE("HP SA5i SA5i+ SA532 SA5300 SA5312 SA641 SA642 SA6400 SA6i SA6422 V100"); 
 MODULE_LICENSE("GPL");
 
@@ -81,7 +81,7 @@ const struct pci_device_id cciss_pci_device_id[] = {
                         0x0E11, 0x4091, 0, 0, 0},
 	{ PCI_VENDOR_ID_COMPAQ, PCI_DEVICE_ID_COMPAQ_CISSC,
                         0x0E11, 0x409E, 0, 0, 0},
-	{ PCI_VENDOR_ID_COMPAQ, PCI_DEVICE_ID_COMPAQ_CISSC,
+	{ PCI_VENDOR_ID_HP, PCI_DEVICE_ID_HP_CISS,
                         0x103C, 0x3211, 0, 0, 0},
 	{0,}
 };
@@ -591,7 +591,7 @@ int cciss_ioctl32_passthru(unsigned int fd, unsigned int cmd, unsigned long arg,
 	set_fs(old_fs);
 	if (err)
 		return err;
-	err |= copy_to_user(&arg32->error_info, &arg64.error_info, sizeof(&arg32->error_info));
+	err |= copy_to_user(&arg32->error_info, &arg64.error_info, sizeof(arg32->error_info));
 	if (err)
 		return -EFAULT;
 	return err;
@@ -624,7 +624,7 @@ int cciss_ioctl32_big_passthru(unsigned int fd, unsigned int cmd, unsigned long 
 	set_fs(old_fs);
 	if (err)
 		return err;
-	err |= copy_to_user(&arg32->error_info, &arg64.error_info, sizeof(&arg32->error_info));
+	err |= copy_to_user(&arg32->error_info, &arg64.error_info, sizeof(arg32->error_info));
 	if (err)
 		return -EFAULT;
 	return err;
@@ -695,6 +695,7 @@ static int cciss_ioctl(struct inode *inode, struct file *filep,
 	case BLKFLSBUF:
 	case BLKBSZSET:
 	case BLKBSZGET:
+	case BLKSSZGET:
 	case BLKROSET:
 	case BLKROGET:
 	case BLKRASET:
@@ -954,6 +955,8 @@ static int cciss_ioctl(struct inode *inode, struct file *filep,
 				kfree(buff);
 				return -EFAULT;
 			}
+		} else {
+			memset(buff, 0, iocommand.buf_size);
 		}
 		if ((c = cmd_alloc(h , 0)) == NULL) {
 			kfree(buff);
@@ -1071,13 +1074,16 @@ static int cciss_ioctl(struct inode *inode, struct file *filep,
 					goto cleanup1;
 				}
 				if (iocommand.Request.Type.Direction == 
-						XFER_WRITE)
+						XFER_WRITE) {
 				   /* Copy the data into the buffer created */
 				   if (copy_from_user(buff[sg_used], data_ptr, 
 						buff_size[sg_used])) {
 					status = -ENOMEM;
 					goto cleanup1;			
 				   }
+				} else {
+					memset(buff[sg_used], 0, buff_size[sg_used]);
+				}
 				size_left_alloc -= buff_size[sg_used];
 				data_ptr += buff_size[sg_used];
 				sg_used++;
@@ -2680,7 +2686,7 @@ static int find_PCI_BAR_index(struct pci_dev *pdev,
 static int cciss_pci_init(ctlr_info_t *c, struct pci_dev *pdev)
 {
 	ushort subsystem_vendor_id, subsystem_device_id, command;
-	unchar irq = pdev->irq, ready = 0;
+	int ready = 0;
 	__u32 board_id, scratchpad;
 	__u64 cfg_offset;
 	__u32 cfg_base_addr;
@@ -2736,11 +2742,11 @@ static int cciss_pci_init(ctlr_info_t *c, struct pci_dev *pdev)
 
 #ifdef CCISS_DEBUG
 	printk("command = %x\n", command);
-	printk("irq = %x\n", irq);
+	printk("irq = %x\n", pdev->irq);
 	printk("board_id = %x\n", board_id);
 #endif /* CCISS_DEBUG */ 
 
-	c->intr = irq;
+	c->intr = pdev->irq;
 
 	/*
 	 * Memory base addr is first addr , the second points to the config

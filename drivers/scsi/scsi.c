@@ -129,8 +129,9 @@ static union scsi_done_queue {
  */
 unsigned int scsi_logging_level;
 
-const char *const scsi_device_types[MAX_SCSI_DEVICE_CODE] =
+static const char *const __scsi_device_types[MAX_SCSI_DEVICE_CODE+1] =
 {
+	"Unprobed         ",
 	"Direct-Access    ",
 	"Sequential-Access",
 	"Printer          ",
@@ -146,6 +147,14 @@ const char *const scsi_device_types[MAX_SCSI_DEVICE_CODE] =
 	"Unknown          ",
 	"Enclosure        ",
 };
+
+#define _SDT_STRINGIFY1(x) #x
+#define _SDT_STRINGIFY2(x) _SDT_STRINGIFY1(x)
+#define SCSI_DEV_TYPES _SDT_STRINGIFY2(scsi_device_types)
+
+__asm__ (".globl " SCSI_DEV_TYPES "\n\t"
+         SCSI_DEV_TYPES " = __scsi_device_types + "
+         _SDT_STRINGIFY2(BITS_PER_LONG) "/8");
 
 /* 
  * Function prototypes.
@@ -1198,7 +1207,7 @@ void scsi_softirq_handler(struct softirq_action *not_used)
 	Scsi_Cmnd *SCpnt;
 	int cpu = smp_processor_id();
 	struct list_head *item;
-
+	unsigned long flags;
 
 	while (1 == 1) {
 		local_irq_disable();
@@ -1269,7 +1278,9 @@ void scsi_softirq_handler(struct softirq_action *not_used)
 				SCpnt->host->host_failed++;
 				SCpnt->owner = SCSI_OWNER_ERROR_HANDLER;
 				SCpnt->state = SCSI_STATE_FAILED;
+				spin_lock_irqsave(SCpnt->host->host_lock, flags);
 				SCpnt->host->in_recovery = 1;
+				spin_unlock_irqrestore(SCpnt->host->host_lock, flags);
 			} else {
 				/*
 				 * We only get here if the error recovery thread has died.
@@ -1357,7 +1368,9 @@ void scsi_finish_command(Scsi_Cmnd * SCpnt)
          * for both the queue full condition on a device, and for a
          * host full condition on the host.
          */
+        spin_lock_irqsave(host->host_lock, flags);
         host->host_blocked = FALSE;
+        spin_unlock_irqrestore(host->host_lock, flags);
         device->device_blocked = FALSE;
 
 	/*
@@ -1475,6 +1488,12 @@ void scsi_build_commandblocks(Scsi_Device * SDpnt)
 	int j;
 	Scsi_Cmnd *SCpnt;
 	request_queue_t *q = &SDpnt->request_queue;
+
+	/*
+	 * Only init things once.
+	 */
+	if (SDpnt->has_cmdblocks)
+		return;
 
 	/*
 	 * Init the spin lock that protects alloc/free of command blocks
@@ -1832,8 +1851,23 @@ static int proc_scsi_gen_write(struct file * file, const char * buf,
 			goto out;	/* there is no such device attached */
 
 		err = -EBUSY;
-		if (scd->access_count)
+		spin_lock_irq(scd->request_queue.queue_lock);
+		if (scd->access_count != 0) {
+			printk(KERN_INFO "scsi%d: remove-single-device %d %d %d failed, device busy(%d).\n", host, channel, id, lun, scd->access_count);
+			spin_unlock_irq(scd->request_queue.queue_lock);
 			goto out;
+		}
+		if (scd->online == 0) {
+			/*
+			 * If we are busy, or some other context is already
+			 * removing this device, then we leave it alone.
+			 */
+			printk(KERN_INFO "scsi%d: remove-single-device %d %d %d failed, device offline.\n", host, channel, id, lun, scd->access_count);
+			spin_unlock_irq(scd->request_queue.queue_lock);
+			goto out;
+		}
+		scd->online = 0;
+		spin_unlock_irq(scd->request_queue.queue_lock);
 
 		SDTpnt = scsi_devicelist;
 		while (SDTpnt != NULL) {
@@ -1865,6 +1899,11 @@ static int proc_scsi_gen_write(struct file * file, const char * buf,
 			blk_cleanup_queue(&scd->request_queue);
 			kfree((char *) scd);
 		} else {
+			/*
+			 * Oops, we didn't detach, might as well set it
+			 * back online.
+			 */
+			scd->online = 1;
 			goto out;
 		}
 		err = 0;

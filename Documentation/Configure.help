@@ -12073,6 +12073,16 @@ CONFIG_B44
   <file:Documentation/networking/net-modules.txt>.  The module will be
   called b44.
 
+nForce Ethernet support (EXPERIMENTAL)
+CONFIG_FORCEDETH
+  If you have a network (Ethernet) controller of this type, say Y and
+  read the Ethernet-HOWTO, available from
+  <http://www.tldp.org/docs.html#howto>.
+
+  To compile this driver as a module, choose M here and read
+  <file:Documentation/networking/net-modules.txt>.  The module will be
+  called forcedeth.o.
+
 CS89x0 support (Daynaport CS and LC cards)
 CONFIG_CS89x0
   Support for CS89x0 chipset based Ethernet cards. If you have a

@@ -549,7 +549,6 @@ int aio_put_req(struct kiocb *req)
 		put_ioctx(ctx);
 	return ret;
 }
-EXPORT_SYMBOL_GPL(aio_put_req);
 
 /*	Lookup an ioctx id.  ioctx_list is lockless for reads.
  *	FIXME: this is O(n) and is only suitable for development.
@@ -1310,3 +1309,6 @@ EXPORT_SYMBOL_GPL(generic_file_kvec_read);
 EXPORT_SYMBOL_GPL(generic_file_aio_read);
 EXPORT_SYMBOL_GPL(generic_file_kvec_write);
 EXPORT_SYMBOL_GPL(generic_file_aio_write);
+EXPORT_SYMBOL_GPL(aio_max_size);
+EXPORT_SYMBOL_GPL(aio_put_req);
+EXPORT_SYMBOL_GPL(aio_complete);

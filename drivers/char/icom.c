@@ -1038,7 +1038,6 @@ static int startup(struct icom_port *icom_port_info)
     change_speed(icom_port_info, 0);
 
     icom_port_info->flags |= ASYNC_INITIALIZED;
-    spin_unlock_irqrestore(&icom_lock,flags);
 
     return 0;
 
@@ -1481,7 +1480,6 @@ static void icom_flush_chars(struct tty_struct * tty)
     spin_lock_irqsave(&icom_lock,flags);
     if (icom_port_info->put_length) {
         trace_lock(icom_port_info, TRACE_START_FLUSH,icom_port_info->put_length);
-        icom_port_info->put_length = 0;
         icom_port_info->statStg->xmit[0].flags = (unsigned short int)cpu_to_le16(SA_FLAGS_READY_TO_XMIT);
         icom_port_info->statStg->xmit[0].leLength = (unsigned short int)cpu_to_le16(icom_port_info->put_length);
         offset = (unsigned long)&icom_port_info->statStg->xmit[0] - (unsigned long)icom_port_info->statStg;
@@ -1489,6 +1487,8 @@ static void icom_flush_chars(struct tty_struct * tty)
         cmdReg = readb(&icom_port_info->dram->CmdReg);
         writeb(cmdReg | CMD_XMIT_RCV_ENABLE,&icom_port_info->dram->CmdReg);
         writeb(START_XMIT,&icom_port_info->dram->StartXmitCmd);
+
+        icom_port_info->put_length = 0;
     }
     spin_unlock_irqrestore(&icom_lock,flags);
 }
@@ -2683,7 +2683,7 @@ static int icom_init(void)
     scan_index;
     struct pci_dev   *dev[MAX_ADAPTERS];
     unsigned int      irq_number[MAX_ADAPTERS];
-    unsigned long     base_addr[MAX_ADAPTERS];
+    unsigned long     base_addr_pci[MAX_ADAPTERS];
     unsigned char     valid_indices[MAX_ADAPTERS];
 #define VALID 1
 #define INVALID 0
@@ -2732,11 +2732,11 @@ static int icom_init(void)
         pci_write_config_dword(dev[index],PCI_COMMAND, command_reg | 0x00000146);
         pci_write_config_dword(dev[index],0x44, 0x8300830A);
 
-        base_addr[index] = pci_resource_start(dev[index],0);
+        base_addr_pci[index] = pci_resource_start(dev[index],0);
 
         duplicate = 0;
         for (index2 = 0; index2 < index; index2++) {
-            if (base_addr[index] == base_addr[index2])
+            if (base_addr_pci[index] == base_addr_pci[index2])
                 duplicate = 1;
         }
         if (duplicate) continue;
@@ -2775,11 +2775,11 @@ static int icom_init(void)
         pci_write_config_dword(dev[index],0x44, 0x42004200);
         pci_write_config_dword(dev[index],0x48, 0x42004200);
 
-        base_addr[index] = pci_resource_start(dev[index],0);	
+        base_addr_pci[index] = pci_resource_start(dev[index],0);	
 
         duplicate = 0;
         for (index2 = 0; index2 < index; index2++) {
-            if (base_addr[index] == base_addr[index2])
+            if (base_addr_pci[index] == base_addr_pci[index2])
                 duplicate = 1;
         }
         if (duplicate) continue;
@@ -2804,7 +2804,7 @@ static int icom_init(void)
         (index < adapter_count);       scan_index++) {
 
         if (valid_indices[scan_index]) {
-            icom_adapter_info[index].base_addr = base_addr[scan_index];
+            icom_adapter_info[index].base_addr_pci = base_addr_pci[scan_index];
             icom_adapter_info[index].irq_number = irq_number[scan_index];
             icom_adapter_info[index].pci_dev = dev[scan_index];
             icom_adapter_info[index].version = valid_indices[scan_index];
@@ -2869,26 +2869,31 @@ static int icom_init(void)
             }
             minor_number += 4;
 
-            if (!request_mem_region(icom_adapter_info[index].base_addr,
+            if (!request_mem_region(icom_adapter_info[index].base_addr_pci,
                                     pci_resource_len(icom_adapter_info[index].pci_dev,0),
                                     "icom")) {
                 printk(KERN_ERR"icom:  request_mem_region FAILED\n");
             }
 
+            icom_adapter_info[index].base_addr =
+		      (unsigned long) ioremap(icom_adapter_info[index].base_addr_pci,
+					      pci_resource_len(icom_adapter_info[index].pci_dev, 0));
 
             retval = diag_main(&icom_adapter_info[index]);
 
             if(retval)  {
-                release_mem_region(icom_adapter_info[index].base_addr,
+                release_mem_region(icom_adapter_info[index].base_addr_pci,
                                    pci_resource_len(icom_adapter_info[index].pci_dev,0));
+          	    pci_disable_device(dev[index]);
                 continue;	
             }
 
             /* save off irq and request irq line */
             if (request_irq(irq_number[scan_index], icom_interrupt, SA_INTERRUPT |
                             SA_SHIRQ, ICOM_DRIVER_NAME, (void *)&icom_adapter_info[index])) {
-                release_mem_region(icom_adapter_info[index].base_addr,
+                release_mem_region(icom_adapter_info[index].base_addr_pci,
                                    pci_resource_len(icom_adapter_info[index].pci_dev,0));
+                pci_disable_device(dev[index]);
                 printk(KERN_ERR"icom:  request_irq FAILED\n");
                 continue;
             }
@@ -3105,8 +3110,9 @@ void cleanup_module(void)
         }
 
         free_irq(icom_adapter_info[index].irq_number, (void *)&icom_adapter_info[index]);
-        release_mem_region(icom_adapter_info[index].base_addr,
+        release_mem_region(icom_adapter_info[index].base_addr_pci,
                            pci_resource_len(icom_adapter_info[index].pci_dev,0));
+        pci_disable_device(icom_adapter_info[index].pci_dev);
     }
 
     kfree(icom_adapter_info);

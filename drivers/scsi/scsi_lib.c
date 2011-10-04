@@ -350,8 +350,10 @@ void scsi_queue_next_request(request_queue_t * q, Scsi_Cmnd * SCpnt)
 	if (SHpnt->host_blocked || SHpnt->host_self_blocked)
 		return;
 
+	spin_lock_irqsave(SHpnt->host_lock, flags);
 	if (SHpnt->some_device_starved) {
 		SHpnt->some_device_starved = 0;
+		spin_unlock_irqrestore(SHpnt->host_lock, flags);
 		for (SDpnt = SHpnt->host_queue; SDpnt; SDpnt = SDpnt->next) {
 			request_queue_t *q;
 			if (SHpnt->can_queue > 0 &&
@@ -368,9 +370,12 @@ void scsi_queue_next_request(request_queue_t * q, Scsi_Cmnd * SCpnt)
 		}
 		if (SDpnt != NULL) {
 			/* We didn't get them all, turn the flag back on */
+			spin_lock_irqsave(SHpnt->host_lock, flags);
 			SHpnt->some_device_starved = 1;
+			spin_unlock_irqrestore(SHpnt->host_lock, flags);
 		}
-	}
+	} else
+		spin_unlock_irqrestore(SHpnt->host_lock, flags);
 }
 
 /*
@@ -1143,7 +1148,10 @@ void scsi_request_fn(request_queue_t * q)
 	if (!SDpnt->device_blocked && !list_empty(&q->queue_head) &&
 	     atomic_read(&SDpnt->device_busy) == 0) {
 		SDpnt->starved = 1;
+		wmb();
+		spin_lock(SHpnt->host_lock);
 		SHpnt->some_device_starved = 1;
+		spin_unlock(SHpnt->host_lock);
 	}
 }
 
@@ -1191,8 +1199,11 @@ void scsi_block_requests(struct Scsi_Host * SHpnt)
 void scsi_unblock_requests(struct Scsi_Host * SHpnt)
 {
 	Scsi_Device *SDloop;
+	unsigned long flags;
 
+	spin_lock_irqsave(SHpnt->host_lock, flags);
 	SHpnt->host_self_blocked = FALSE;
+	spin_unlock_irqrestore(SHpnt->host_lock, flags);
 	/* Now that we are unblocked, try to start the queues. */
 	for (SDloop = SHpnt->host_queue; SDloop; SDloop = SDloop->next)
 		scsi_queue_next_request(&SDloop->request_queue, NULL);

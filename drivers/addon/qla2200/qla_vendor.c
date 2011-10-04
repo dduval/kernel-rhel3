@@ -160,7 +160,7 @@ qla2100_set_vend_direction(scsi_qla_host_t *ha,
 {
         dga_scdb_t	*dsp = (dga_scdb_t *) cmd;
 
-        if( cmd->data_cmnd[0] == UCSCSI_DCMD ) {
+        if( cmd->cmnd[0] == UCSCSI_DCMD ) {
                 switch( dsp->dsc_dcmd.mb_Command ) {
                 case DACMD_WRITE_CONF_ONDISK:
                 case DACMD_WRITE_CONFIG:

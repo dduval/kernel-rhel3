@@ -1102,7 +1102,6 @@ static void do_shmem_file_read(struct file * filp, loff_t *ppos, read_descriptor
 	struct address_space *mapping = inode->i_mapping;
 	unsigned long index, offset;
 	loff_t pos = *ppos;
-	int nr = 1;
 
 	if (unlikely(pos < 0))
 		return;
@@ -1110,9 +1109,10 @@ static void do_shmem_file_read(struct file * filp, loff_t *ppos, read_descriptor
 	index = pos >> PAGE_CACHE_SHIFT;
 	offset = pos & ~PAGE_CACHE_MASK;
 
-	while (nr && desc->count) {
+	for (;;) {
 		struct page *page;
-		unsigned long end_index, nr;
+		unsigned long end_index;
+		int nr, ret;
 
 		end_index = inode->i_size >> PAGE_CACHE_SHIFT;
 		if (index > end_index)
@@ -1123,10 +1123,10 @@ static void do_shmem_file_read(struct file * filp, loff_t *ppos, read_descriptor
 			if (nr <= offset)
 				break;
 		}
+		nr -= offset;
 
-		nr = nr - offset;
-
-		if ((desc->error = shmem_getpage(inode, index, &page)))
+		desc->error = shmem_getpage(inode, index, &page);
+		if (desc->error)
 			break;
 
 		if (mapping->i_mmap_shared != NULL)
@@ -1142,12 +1142,14 @@ static void do_shmem_file_read(struct file * filp, loff_t *ppos, read_descriptor
 		 * "pos" here (the actor routine has to update the user buffer
 		 * pointers and the remaining count).
 		 */
-		nr = file_read_actor(desc, page, offset, nr);
-		offset += nr;
+		ret = file_read_actor(desc, page, offset, nr);
+		offset += ret;
 		index += offset >> PAGE_CACHE_SHIFT;
 		offset &= ~PAGE_CACHE_MASK;
 	
 		page_cache_release(page);
+		if (nr != ret || !desc->count)
+			break;
 	}
 
 	*ppos = ((loff_t) index << PAGE_CACHE_SHIFT) + offset;

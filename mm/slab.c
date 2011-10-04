@@ -98,12 +98,6 @@
 #define	FORCED_DEBUG	0
 #endif
 
-/*
- * Parameters for kmem_cache_reap
- */
-#define REAP_SCANLEN	10
-#define REAP_PERFECT	10
-
 /* Shouldn't this be in a header file somewhere? */
 #define	BYTES_PER_WORD		sizeof(void *)
 
@@ -455,8 +449,13 @@ void __init kmem_cache_sizes_init(void)
 		 * allow tighter packing of the smaller caches. */
 		snprintf(name, sizeof(name), "size-%Zd",sizes->cs_size);
 		if (!(sizes->cs_cachep =
+#ifdef CONFIG_IA64
+			kmem_cache_create(name, sizes->cs_size,
+					0, SLAB_CACHE_DMA|SLAB_HWCACHE_ALIGN, NULL, NULL))) {
+#else
 			kmem_cache_create(name, sizes->cs_size,
 					0, SLAB_HWCACHE_ALIGN, NULL, NULL))) {
+#endif
 			BUG();
 		}
 
@@ -756,8 +755,8 @@ cal_wastage:
 		if ((left_over*8) <= (PAGE_SIZE<<cachep->gfporder))
 			break;	/* Acceptable internal fragmentation. */
 
-		if (size < PAGE_SIZE && cachep->gfporder == 1)
-			break;  /* no larger than 2 page slabs for kernel structs */
+		if (size < PAGE_SIZE)
+			break;  /* no larger than single-page slabs for kernel structs */
 next:
 		cachep->gfporder++;
 	} while (1);
@@ -795,6 +794,10 @@ next:
 	cachep->gfpflags = 0;
 	if (flags & SLAB_CACHE_DMA)
 		cachep->gfpflags |= GFP_DMA;
+#ifdef CONFIG_IA64
+	else
+		cachep->gfpflags |= __GFP_HIGHMEM;
+#endif
 	spin_lock_init(&cachep->spinlock);
 	cachep->objsize = size;
 	INIT_LIST_HEAD(&cachep->slabs_full);
@@ -1350,7 +1353,9 @@ static inline void * __kmem_cache_alloc (kmem_cache_t *cachep, int flags)
 	unsigned long save_flags;
 	void* objp;
 
+#ifndef CONFIG_IA64
 	kmem_cache_alloc_head(cachep, flags);
+#endif
 try_again:
 	local_irq_save(save_flags);
 #ifdef CONFIG_SMP
@@ -1781,7 +1786,6 @@ int kmem_cache_reap (int gfp_mask)
 		if (down_trylock(&cache_chain_sem))
 			return 0;
 
-	scan = REAP_SCANLEN;
 	best_len = 0;
 	best_pages = 0;
 	best_cachep = NULL;
@@ -1837,17 +1841,12 @@ int kmem_cache_reap (int gfp_mask)
 			best_cachep = searchp;
 			best_len = full_free;
 			best_pages = pages;
-			if (pages >= REAP_PERFECT) {
-				clock_searchp = list_entry(searchp->next.next,
-							kmem_cache_t,next);
-				goto perfect;
-			}
 		}
 next_unlock:
 		spin_unlock_irq(&searchp->spinlock);
 next:
 		searchp = list_entry(searchp->next.next,kmem_cache_t,next);
-	} while (--scan && searchp != clock_searchp);
+	} while (searchp != clock_searchp);
 
 	clock_searchp = searchp;
 
@@ -1856,7 +1855,6 @@ next:
 		goto out;
 
 	spin_lock_irq(&best_cachep->spinlock);
-perfect:
 	/* free only 50% of the free slabs */
 	best_len = (best_len + 1)/2;
 	for (scan = 0; scan < best_len; scan++) {

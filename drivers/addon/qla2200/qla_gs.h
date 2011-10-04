@@ -34,18 +34,18 @@ extern "C" {
 #define GS_SUBTYPE_FDMI_HBA	0x10
 
 /* FDMI Command Codes. */
-#define	GRHL	0x100
-#define	GHAT	0x101
-#define	GRPL	0x102
-#define	GPAT	0x110
-#define	RHBA	0x200
-#define	RHAT	0x201
-#define	RPRT	0x210
-#define	RPA	0x211
-#define	DHBA	0x300
-#define	DHAT	0x301
-#define	DPRT	0x310
-#define	DPA	0x311
+#define	FDMI_CC_GRHL	0x100
+#define	FDMI_CC_GHAT	0x101
+#define	FDMI_CC_GRPL	0x102
+#define	FDMI_CC_GPAT	0x110
+#define	FDMI_CC_RHBA	0x200
+#define	FDMI_CC_RHAT	0x201
+#define	FDMI_CC_RPRT	0x210
+#define	FDMI_CC_RPA	0x211
+#define	FDMI_CC_DHBA	0x300
+#define	FDMI_CC_DHAT	0x301
+#define	FDMI_CC_DPRT	0x310
+#define	FDMI_CC_DPA	0x311
 
 /*
  * CT information unit basic preamble.

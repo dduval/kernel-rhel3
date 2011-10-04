@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_crtn.h 1.46.1.4 2004/06/01 14:38:00EDT jselx Exp  $
+ * $Id: lpfc_crtn.h 1.2 2004/11/02 13:25:13EST sf_support Exp  $
  */
 
 #ifndef _H_LPFC_CRTN
@@ -70,10 +70,14 @@ int lpfc_nlp_plogi(lpfcHBA_t *, LPFC_NODELIST_t *);
 int lpfc_nlp_adisc(lpfcHBA_t *, LPFC_NODELIST_t *);
 int lpfc_nlp_unmapped(lpfcHBA_t *, LPFC_NODELIST_t *);
 int lpfc_nlp_mapped(struct lpfcHBA *, LPFC_NODELIST_t *, LPFC_BINDLIST_t *);
+void lpfc_set_npr_tmo(lpfcHBA_t *, LPFCSCSITARGET_t *, LPFC_NODELIST_t *);
+int lpfc_can_npr_tmo(lpfcHBA_t *, LPFCSCSITARGET_t *, LPFC_NODELIST_t *);
 void lpfc_set_disctmo(lpfcHBA_t *);
 int lpfc_can_disctmo(lpfcHBA_t *);
 int lpfc_driver_abort(lpfcHBA_t *, LPFC_NODELIST_t *);
 int lpfc_no_rpi(lpfcHBA_t *, LPFC_NODELIST_t *);
+int lpfc_new_rpi(lpfcHBA_t *, uint16_t);
+void lpfc_dequenode(lpfcHBA_t *, LPFC_NODELIST_t *);
 int lpfc_freenode(lpfcHBA_t *, LPFC_NODELIST_t *);
 int lpfc_nlp_remove(lpfcHBA_t *, LPFC_NODELIST_t *);
 LPFC_NODELIST_t *lpfc_findnode_did(lpfcHBA_t *, uint32_t, uint32_t);
@@ -92,12 +96,7 @@ LPFC_SCSI_BUF_t *lpfc_build_scsi_cmd(lpfcHBA_t *, LPFC_NODELIST_t *, uint32_t,
 int lpfc_disc_issue_rptlun(lpfcHBA_t *, LPFC_NODELIST_t *);
 void lpfc_set_failmask(lpfcHBA_t *, LPFC_NODELIST_t *, uint32_t, uint32_t);
 
-
 LPFC_NODELIST_t *lpfc_findnode_rpi(lpfcHBA_t * phba, uint16_t rpi);
-LPFC_NODELIST_t *lpfc_findnode_remove_rpi(lpfcHBA_t * phba, uint16_t rpi);
-void lpfc_addnode_rpi(lpfcHBA_t * phba, LPFC_NODELIST_t * ndlp, uint16_t rpi);
-LPFC_NODELIST_t *lpfc_removenode_rpihash(lpfcHBA_t * phba,
-					 LPFC_NODELIST_t * ndlp);
 
 int lpfc_discq_post_event(lpfcHBA_t *, void *, void *, uint32_t);
 void lpfc_tasklet(unsigned long);
@@ -248,6 +247,7 @@ uint32_t lpfc_del_bind(lpfcHBA_t * phba, uint8_t bind_type,
 
 int lpfc_initial_flogi(lpfcHBA_t *);
 int lpfc_issue_els_flogi(lpfcHBA_t *, LPFC_NODELIST_t *, uint8_t);
+int lpfc_els_abort_flogi(lpfcHBA_t *);
 int lpfc_issue_els_plogi(lpfcHBA_t *, LPFC_NODELIST_t *, uint8_t);
 int lpfc_issue_els_prli(lpfcHBA_t *, LPFC_NODELIST_t *, uint8_t);
 int lpfc_issue_els_adisc(lpfcHBA_t *, LPFC_NODELIST_t *, uint8_t);
@@ -340,6 +340,7 @@ uint32_t fc_get_cfg_param(int, int);
 
 void lpfc_qthrottle_up(unsigned long);
 void lpfc_npr_timeout(unsigned long);
+void lpfc_scsi_assign_rpi(lpfcHBA_t *, LPFCSCSITARGET_t *, uint16_t);
 int lpfc_scsi_hba_reset(lpfcHBA_t *, LPFC_SCSI_BUF_t *);
 void lpfc_scsi_issue_inqsn(lpfcHBA_t *, void *, void *);
 void lpfc_scsi_issue_inqp0(lpfcHBA_t *, void *, void *);
@@ -426,7 +427,7 @@ void lpfc_scsi_lower_lun_qthrottle(lpfcHBA_t *, LPFC_SCSI_BUF_t *);
 void lpfc_sched_init_hba(lpfcHBA_t *, uint16_t);
 void lpfc_sched_target_init(LPFCSCSITARGET_t *, uint16_t);
 void lpfc_sched_lun_init(LPFCSCSILUN_t *, uint16_t);
-void lpfc_sched_submit_command(lpfcHBA_t *, LPFC_SCSI_BUF_t *);
+int lpfc_sched_submit_command(lpfcHBA_t *, LPFC_SCSI_BUF_t *);
 void lpfc_sched_queue_command(lpfcHBA_t *, LPFC_SCSI_BUF_t *);
 void lpfc_sched_add_target_to_ring(lpfcHBA_t *, LPFCSCSITARGET_t *);
 void lpfc_sched_remove_target_from_ring(lpfcHBA_t *, LPFCSCSITARGET_t *);

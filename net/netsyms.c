@@ -262,6 +262,8 @@ EXPORT_SYMBOL(ip_route_input);
 EXPORT_SYMBOL(icmp_send);
 EXPORT_SYMBOL(ip_options_compile);
 EXPORT_SYMBOL(ip_options_undo);
+EXPORT_SYMBOL(arp_create);
+EXPORT_SYMBOL(arp_xmit);
 EXPORT_SYMBOL(arp_send);
 EXPORT_SYMBOL(arp_broken_ops);
 EXPORT_SYMBOL(__ip_select_ident);

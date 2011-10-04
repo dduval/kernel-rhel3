@@ -477,7 +477,7 @@ do_realpath(struct sysarg_data *target, void *arg, int arg_flags)
 {
 	struct nameidata nd;
 	unsigned int	name_len, pathsize;
-	int		error, flags, len;
+	int		error, flags, len, offset;
 	char		*pathbuf, *slash, *str;
 
 	/* strnlen_user includes the NUL charatcer */
@@ -573,18 +573,25 @@ do_realpath(struct sysarg_data *target, void *arg, int arg_flags)
 	len = strlen(str);
 	if (str != pathbuf)
 		memmove(pathbuf, str, len+1);
-	DPRINTF("dir=%s\n", pathbuf);
+	DPRINTF("dir=%s len=%d\n", pathbuf, len);
 
 	/* Attach the last path component (we've already made
 	 * sure above that the buffer space is sufficient */
 	if (name_len) {
 		DPRINTF("last=%.*s\n", name_len, slash);
-		*(pathbuf + len) = '/';
-		memcpy(pathbuf + len + 1, slash, name_len);
-		len += name_len + 1;
+		if (pathbuf[0] == '/' && len == 1) {
+			/* already at root level, don't add additional  '/' */
+			offset = 0;
+		} else {
+			offset = 1;
+			pathbuf[len] = '/';
+		}
+		memcpy(pathbuf + len + offset, slash, name_len);
+		len += name_len + offset;
 		pathbuf[len] = '\0';
 	}
 	target->at_path.len = len;
+	DPRINTF("pathbuf=%s len=%d\n", pathbuf, len);
 
 	path_release(&nd);
 	return len;

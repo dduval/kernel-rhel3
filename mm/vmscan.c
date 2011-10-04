@@ -67,7 +67,7 @@ void unregister_cache(struct cache_definition *cache)
 	up(&other_caches_sem);
 }
 
-static int shrink_other_caches(unsigned int priority, int gfp_mask)
+int shrink_other_caches(unsigned int priority, int gfp_mask)
 {
 	struct list_head *p;
 	int ret = 0;
@@ -247,6 +247,10 @@ static inline int need_rebalance_dirty(zone_t * zone)
 		(zone->inactive_laundry_pages + zone->inactive_clean_pages))
 		return 1;
 
+	if (zone->inactive_laundry_pages / 2 + zone->inactive_clean_pages +
+			zone->free_pages < zone->pages_high)
+		return 1;
+
 	return 0;
 }
 
@@ -264,6 +268,24 @@ static inline int need_rebalance_laundry(zone_t * zone)
 
 	return 0;
 }
+
+/*
+ * returns the active cache ratio relative to the total active list
+ * times 100 (eg. 30% cache returns 30)
+ */
+static inline int cache_ratio(struct zone_struct * zone)
+{
+        if (!zone->size)
+                return 0;
+        return 100 * zone->active_cache_pages / (zone->active_cache_pages +
+                        zone->active_anon_pages + 1);
+}
+                                                                                                                   
+struct cache_limits cache_limits = {
+        .min = 1,
+        .borrow = 15,
+        .max = 30,
+};
 
 /**
  * launder_page - clean dirty page, move to inactive_laundry list
@@ -288,6 +310,15 @@ int launder_page(zone_t * zone, int gfp_mask, struct page *page)
 
 	BUG_ON(!PageInactiveDirty(page));
 	del_page_from_inactive_dirty_list(page);
+
+	/* if pagecache is over max, don't reclaim anonymous pages */	
+	if (cache_ratio(zone) > cache_limits.max && page_anon(page) &&
+			free_min(zone) < 0) {
+		add_page_to_active_list(page, INITIAL_AGE);
+		page_cache_release(page);
+		return 0;
+	}
+
 	add_page_to_inactive_laundry_list(page);
 	/* store the time we start IO */
 	page->age = (jiffies/HZ)&255;
@@ -535,24 +566,6 @@ static inline void kachunk_cache(struct zone_struct * zone)
 }
 
 #define BATCH_WORK_AMOUNT	64
-
-/*
- * returns the active cache ratio relative to the total active list
- * times 100 (eg. 30% cache returns 30)
- */
-static inline int cache_ratio(struct zone_struct * zone)
-{
-	if (!zone->size)
-		return 0;
-	return 100 * zone->active_cache_pages / (zone->active_cache_pages +
-			zone->active_anon_pages + 1);
-}
-
-struct cache_limits cache_limits = {
-	.min = 1,
-	.borrow = 15,
-	.max = 100,
-};
 
 int skip_mapped_pages = 0;
 
@@ -996,6 +1009,7 @@ static int do_try_to_free_pages(unsigned int gfp_mask)
 {
 	int ret = 0;
 	struct zone_struct * zone;
+	pg_data_t *pgdat;
 
 	/*
 	 * Eat memory from filesystem page cache, buffer cache,
@@ -1020,6 +1034,18 @@ static int do_try_to_free_pages(unsigned int gfp_mask)
 	ret += shrink_dqcache_memory(DEF_PRIORITY, gfp_mask);
 #endif
 	ret += shrink_other_caches(DEF_PRIORITY, gfp_mask);
+
+#ifdef CONFIG_HIGHMEM
+	/* reclaim bufferheaders on highmem systems with lowmem exhaustion */
+	for_each_pgdat(pgdat) {
+		zone_t *zone = pgdat->node_zones;
+
+		if (free_low(zone + ZONE_DMA) > 0 || free_low(zone + ZONE_NORMAL) > 0) {
+			ret += try_to_reclaim_buffers(DEF_PRIORITY, gfp_mask);
+			break;
+		}
+	}
+#endif
 
 	/* 	
 	 * Reclaim unused slab cache memory.
@@ -1180,7 +1206,7 @@ int kswapd(void *unused)
 }
 
 static int kswapd_overloaded;
-unsigned int kswapd_minfree;	/* initialized in mm/page_alloc.c */
+int kswapd_minfree;	/* initialized in mm/page_alloc.c */
 DECLARE_WAIT_QUEUE_HEAD(kswapd_wait);
 DECLARE_WAIT_QUEUE_HEAD(kswapd_done);
 
@@ -1263,13 +1289,16 @@ static void wakeup_memwaiters(void)
  */
 int try_to_free_pages(unsigned int gfp_mask)
 {
-	int ret = 1;
+	int ret = 0;
 
 	gfp_mask = pf_gfp_mask(gfp_mask);
 	if (gfp_mask & __GFP_WAIT) {
-		current->flags |= PF_MEMALLOC;
-		ret = do_try_to_free_pages(gfp_mask);
-		current->flags &= ~PF_MEMALLOC;
+		if (!(current->flags & PF_MEMALLOC)) {
+			current->flags |= PF_MEMALLOC;
+			ret = do_try_to_free_pages(gfp_mask);
+			current->flags &= ~PF_MEMALLOC;
+		} else if (gfp_mask & (__GFP_IO | __GFP_FS))
+			ret = do_try_to_free_pages(gfp_mask & ~(__GFP_IO | __GFP_FS));
 	}
 
 	return ret;
@@ -1366,7 +1395,7 @@ int kscand(void *unused)
 				iv = max(iv / 2, MIN_AGING_INTERVAL);
 			/* ... or too quickly. */
 			else if (!zone->need_scan)
-				iv = max(iv + (iv / 2), MAX_AGING_INTERVAL);
+				iv = min(iv + (iv / 2), MAX_AGING_INTERVAL);
 			zone->need_scan = 0;
 			zone->age_interval = iv;
 			zone->age_next = jiffies + iv;

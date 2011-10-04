@@ -294,7 +294,6 @@ static struct sysrq_key_op sysrq_showcpus_op = {
 	action_msg:	"Show CPUs",
 };
 
-
 static void sysrq_handle_showstate(int key, struct pt_regs *pt_regs,
 		struct kbd_struct *kbd, struct tty_struct *tty) {
 	show_state();
@@ -428,7 +427,7 @@ static __inline__ int sysrq_key_table_key2index(int key) {
  */
 
 void __sysrq_lock_table (void) { spin_lock(&sysrq_key_table_lock); }
-
+int __sysrq_trylock_table (void) { return spin_trylock(&sysrq_key_table_lock); }
 void __sysrq_unlock_table (void) { spin_unlock(&sysrq_key_table_lock); }
 
 /*
@@ -462,7 +461,9 @@ void handle_sysrq(int key, struct pt_regs *pt_regs,
 	if (!sysrq_ctls.enabled)
 		return;
 
-	__sysrq_lock_table();
+	if (!__sysrq_trylock_table())
+		return;
+
 	__handle_sysrq_nolock(key, pt_regs, kbd, tty);
 	__sysrq_unlock_table();
 }

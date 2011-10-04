@@ -227,6 +227,10 @@ fi
 
 dep_tristate '  TV card (bt848) mixer support' CONFIG_SOUND_TVMIXER $CONFIG_SOUND $CONFIG_I2C
 
+dep_tristate '  AD1980 front/back switch plugin' CONFIG_SOUND_AD1980 $CONFIG_SOUND 
+
+dep_tristate '  Wolfson Touchscreen/BMON plugin' CONFIG_SOUND_WM97XX $CONFIG_SOUND 
+
 # A cross directory dependence. The sound modules will need gameport.o compiled in,
 # but it resides in the drivers/char/joystick directory. This define_tristate takes
 # care of that. --Vojtech

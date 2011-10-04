@@ -425,6 +425,8 @@ running once the system is up.
 
 	notsc           [BUGS=IA-32] Disable Time Stamp Counter
 
+	no-usb-handoff	[HW] Disable early USB BIOS -> OS handoff
+
 	nowb		[ARM]
  
 	opl3=		[HW,SOUND]
@@ -619,7 +621,9 @@ running once the system is up.
 	uart6850=	[HW,SOUND]
  
 	usbfix		[BUGS=IA-64] 
- 
+
+	usb-handoff	[HW] Enable early USB BIOS -> OS handoff
+
 	video=		[FB] frame buffer configuration.
 
 	vga=		[BOOT] on ix386, select a particular video mode

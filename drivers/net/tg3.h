@@ -1,8 +1,9 @@
 /* $Id: tg3.h,v 1.37.2.32 2002/03/11 12:18:18 davem Exp $
  * tg3.h: Definitions for Broadcom Tigon3 ethernet driver.
  *
- * Copyright (C) 2001, 2002 David S. Miller (davem@redhat.com)
+ * Copyright (C) 2001, 2002, 2003, 2004 David S. Miller (davem@redhat.com)
  * Copyright (C) 2001 Jeff Garzik (jgarzik@pobox.com)
+ * Copyright (C) 2004 Sun Microsystems Inc.
  */
 
 #ifndef _T3_H
@@ -116,12 +117,14 @@
 #define  CHIPREV_ID_5704_A0		 0x2000
 #define  CHIPREV_ID_5704_A1		 0x2001
 #define  CHIPREV_ID_5704_A2		 0x2002
+#define  CHIPREV_ID_5704_A3		 0x2003
 #define  CHIPREV_ID_5705_A0		 0x3000
 #define  CHIPREV_ID_5705_A1		 0x3001
 #define  CHIPREV_ID_5705_A2		 0x3002
 #define  CHIPREV_ID_5705_A3		 0x3003
 #define  CHIPREV_ID_5750_A0		 0x4000
 #define  CHIPREV_ID_5750_A1		 0x4001
+#define  CHIPREV_ID_5750_A3		 0x4003
 #define  GET_ASIC_REV(CHIP_REV_ID)	((CHIP_REV_ID) >> 12)
 #define   ASIC_REV_5700			 0x07
 #define   ASIC_REV_5701			 0x00
@@ -518,8 +521,50 @@
 #define MAC_EXTADDR_11_HIGH		0x00000588
 #define MAC_EXTADDR_11_LOW		0x0000058c
 #define MAC_SERDES_CFG			0x00000590
+#define  MAC_SERDES_CFG_EDGE_SELECT	 0x00001000
 #define MAC_SERDES_STAT			0x00000594
-/* 0x598 --> 0x600 unused */
+/* 0x598 --> 0x5b0 unused */
+#define SG_DIG_CTRL			0x000005b0
+#define  SG_DIG_USING_HW_AUTONEG	 0x80000000
+#define  SG_DIG_SOFT_RESET		 0x40000000
+#define  SG_DIG_DISABLE_LINKRDY		 0x20000000
+#define  SG_DIG_CRC16_CLEAR_N		 0x01000000
+#define  SG_DIG_EN10B			 0x00800000
+#define  SG_DIG_CLEAR_STATUS		 0x00400000
+#define  SG_DIG_LOCAL_DUPLEX_STATUS	 0x00200000
+#define  SG_DIG_LOCAL_LINK_STATUS	 0x00100000
+#define  SG_DIG_SPEED_STATUS_MASK	 0x000c0000
+#define  SG_DIG_SPEED_STATUS_SHIFT	 18
+#define  SG_DIG_JUMBO_PACKET_DISABLE	 0x00020000
+#define  SG_DIG_RESTART_AUTONEG		 0x00010000
+#define  SG_DIG_FIBER_MODE		 0x00008000
+#define  SG_DIG_REMOTE_FAULT_MASK	 0x00006000
+#define  SG_DIG_PAUSE_MASK		 0x00001800
+#define  SG_DIG_GBIC_ENABLE		 0x00000400
+#define  SG_DIG_CHECK_END_ENABLE	 0x00000200
+#define  SG_DIG_SGMII_AUTONEG_TIMER	 0x00000100
+#define  SG_DIG_CLOCK_PHASE_SELECT	 0x00000080
+#define  SG_DIG_GMII_INPUT_SELECT	 0x00000040
+#define  SG_DIG_MRADV_CRC16_SELECT	 0x00000020
+#define  SG_DIG_COMMA_DETECT_ENABLE	 0x00000010
+#define  SG_DIG_AUTONEG_TIMER_REDUCE	 0x00000008
+#define  SG_DIG_AUTONEG_LOW_ENABLE	 0x00000004
+#define  SG_DIG_REMOTE_LOOPBACK		 0x00000002
+#define  SG_DIG_LOOPBACK		 0x00000001
+#define SG_DIG_STATUS			0x000005b4
+#define  SG_DIG_CRC16_BUS_MASK		 0xffff0000
+#define  SG_DIG_PARTNER_FAULT_MASK	 0x00600000 /* If !MRADV_CRC16_SELECT */
+#define  SG_DIG_PARTNER_ASYM_PAUSE	 0x00100000 /* If !MRADV_CRC16_SELECT */
+#define  SG_DIG_PARTNER_PAUSE_CAPABLE	 0x00080000 /* If !MRADV_CRC16_SELECT */
+#define  SG_DIG_PARTNER_HALF_DUPLEX	 0x00040000 /* If !MRADV_CRC16_SELECT */
+#define  SG_DIG_PARTNER_FULL_DUPLEX	 0x00020000 /* If !MRADV_CRC16_SELECT */
+#define  SG_DIG_PARTNER_NEXT_PAGE	 0x00010000 /* If !MRADV_CRC16_SELECT */
+#define  SG_DIG_AUTONEG_STATE_MASK	 0x00000ff0
+#define  SG_DIG_COMMA_DETECTOR		 0x00000008
+#define  SG_DIG_MAC_ACK_STATUS		 0x00000004
+#define  SG_DIG_AUTONEG_COMPLETE	 0x00000002
+#define  SG_DIG_AUTONEG_ERROR		 0x00000001
+/* 0x5b8 --> 0x600 unused */
 #define MAC_TX_MAC_STATE_BASE		0x00000600 /* 16 bytes */
 #define MAC_RX_MAC_STATE_BASE		0x00000610 /* 20 bytes */
 /* 0x624 --> 0x800 unused */
@@ -1504,7 +1549,7 @@
  * exist only in the cards on-chip SRAM.  All 16 send bds are under
  * the same mode, they may not be configured individually.
  *
- * The mode we use is controlled by TG3_FLAG_HOST_TXDS in tp->tg3_flags.
+ * This driver always uses host memory TX descriptors.
  *
  * To use host memory TX descriptors:
  *	1) Set GRC_MODE_HOST_SENDBDS in GRC_MODE register.
@@ -1960,7 +2005,6 @@ struct tg3 {
 
 	spinlock_t			tx_lock;
 
-	/* TX descs are only used if TG3_FLAG_HOST_TXDS is set. */
 	struct tg3_tx_buffer_desc	*tx_ring;
 	struct tx_ring_info		*tx_buffers;
 	dma_addr_t			tx_desc_mapping;
@@ -1996,7 +2040,6 @@ struct tg3 {
 
 	u32				rx_offset;
 	u32				tg3_flags;
-#define TG3_FLAG_HOST_TXDS		0x00000001
 #define TG3_FLAG_TXD_MBOX_HWBUG		0x00000002
 #define TG3_FLAG_RX_CHECKSUMS		0x00000004
 #define TG3_FLAG_USE_LINKCHG_REG	0x00000008
@@ -2026,15 +2069,13 @@ struct tg3 {
 #define TG3_FLAG_JUMBO_ENABLE		0x00800000
 #define TG3_FLAG_10_100_ONLY		0x01000000
 #define TG3_FLAG_PAUSE_AUTONEG		0x02000000
-#define TG3_FLAG_PAUSE_RX		0x04000000
-#define TG3_FLAG_PAUSE_TX		0x08000000
 #define TG3_FLAG_BROKEN_CHECKSUMS	0x10000000
 #define TG3_FLAG_GOT_SERDES_FLOWCTL	0x20000000
 #define TG3_FLAG_SPLIT_MODE		0x40000000
 #define TG3_FLAG_INIT_COMPLETE		0x80000000
 	u32				tg3_flags2;
 #define TG3_FLG2_RESTART_TIMER		0x00000001
-#define TG3_FLG2_SUN_5704		0x00000002
+#define TG3_FLG2_SUN_570X		0x00000002
 #define TG3_FLG2_NO_ETH_WIRE_SPEED	0x00000004
 #define TG3_FLG2_IS_5788		0x00000008
 #define TG3_FLG2_MAX_RXPEND_64		0x00000010
@@ -2044,6 +2085,10 @@ struct tg3 {
 #define TG3_FLG2_PHY_BER_BUG		0x00000100
 #define TG3_FLG2_PCI_EXPRESS		0x00000200
 #define TG3_FLG2_ASF_NEW_HANDSHAKE	0x00000400
+#define TG3_FLG2_HW_AUTONEG		0x00000800
+#define TG3_FLG2_PHY_JUST_INITTED	0x00001000
+#define TG3_FLG2_PHY_SERDES		0x00002000
+#define TG3_FLG2_CAPACITIVE_COUPLING	0x00004000
 
 	u32				split_mode_max_reqs;
 #define SPLIT_MODE_5704_MAX_REQ		3
@@ -2091,7 +2136,6 @@ struct tg3 {
 #define PHY_ID_BCM5705			0x600081a0
 #define PHY_ID_BCM5750			0x60008180
 #define PHY_ID_BCM8002			0x60010140
-#define PHY_ID_SERDES			0xfeedbee0
 #define PHY_ID_INVALID			0xffffffff
 #define PHY_ID_REV_MASK			0x0000000f
 #define PHY_REV_BCM5401_B0		0x1
@@ -2114,7 +2158,7 @@ struct tg3 {
 	 (X) == PHY_ID_BCM5411 || (X) == PHY_ID_BCM5701 || \
 	 (X) == PHY_ID_BCM5703 || (X) == PHY_ID_BCM5704 || \
 	 (X) == PHY_ID_BCM5705 || (X) == PHY_ID_BCM5750 || \
-	 (X) == PHY_ID_BCM8002 || (X) == PHY_ID_SERDES)
+	 (X) == PHY_ID_BCM8002)
 
 	struct tg3_hw_stats		*hw_stats;
 	dma_addr_t			stats_mapping;

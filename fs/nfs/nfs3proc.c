@@ -708,7 +708,7 @@ nfs3_proc_setacl(struct inode *inode, int type, struct posix_acl *acl)
 
 	/* We are doing this here, because XDR marshalling can only
 	   return -ENOMEM. */
-	if (acl && acl->a_count > NFS3_ACL_MAX_ENTRIES)
+	if (acl && acl->a_count > nfs3_acl_max_entries)
 		return -EINVAL;
 	args.inode = inode;
 	args.mask = NFS3_ACL|NFS3_DFACL;

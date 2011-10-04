@@ -949,9 +949,17 @@ static int st_open(struct inode *inode, struct file *filp)
 	write_unlock_irqrestore(&st_dev_arr_lock, flags);
 	STp->rew_at_close = STp->autorew_dev = (MINOR(inode->i_rdev) & 0x80) == 0;
 
-	if (STp->device->host->hostt->module)
-		__MOD_INC_USE_COUNT(STp->device->host->hostt->module);
-	STp->device->access_count++;
+	spin_lock_irq(STp->device->request_queue.queue_lock);
+	if (STp->device->online) {
+		if (STp->device->host->hostt->module)
+			__MOD_INC_USE_COUNT(STp->device->host->hostt->module);
+		STp->device->access_count++;
+		spin_unlock_irq(STp->device->request_queue.queue_lock);
+	} else {
+		spin_unlock_irq(STp->device->request_queue.queue_lock);
+		STp->in_use = 0;
+		return (-ENODEV);
+	}
 
 	if (!scsi_block_when_processing_errors(STp->device)) {
 		retval = (-ENXIO);
@@ -1018,9 +1026,11 @@ static int st_open(struct inode *inode, struct file *filp)
 		STp->buffer = NULL;
 	}
 	STp->in_use = 0;
+	spin_lock_irq(STp->device->request_queue.queue_lock);
 	STp->device->access_count--;
 	if (STp->device->host->hostt->module)
 	    __MOD_DEC_USE_COUNT(STp->device->host->hostt->module);
+	spin_unlock_irq(STp->device->request_queue.queue_lock);
 	return retval;
 
 }

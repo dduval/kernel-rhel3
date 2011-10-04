@@ -19,11 +19,11 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_version.h 1.7.1.5 2004/06/10 17:23:21EDT jselx Exp  $
+ * $Id: lpfc_version.h 1.2 2004/11/02 15:00:57EST sf_support Exp  $
  */
 
-#define LPFC_DRIVER_VERSION "7.0.3"
-#define LPFN_DRIVER_VERSION "7.0.3"
+#define LPFC_DRIVER_VERSION "7.1.14"
+#define LPFN_DRIVER_VERSION "7.1.14"
 
 #define LPFC_DRIVER_NAME "lpfc"
 

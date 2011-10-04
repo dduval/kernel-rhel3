@@ -123,7 +123,7 @@ ENTRY(system_call)
 	movq  %rax,ORIG_RAX-ARGOFFSET(%rsp) 
 	movq  %rcx,RIP-ARGOFFSET(%rsp)	
 	GET_CURRENT(%rcx)
-	testl $PT_TRACESYS|PT_AUDITED,tsk_ptrace(%rcx)
+	testl $PT_TRACESYS|PT_AUDITED|PT_SINGLESTEP,tsk_ptrace(%rcx)
 	jne tracesys
 	cmpq $__NR_syscall_max,%rax
 	ja badsys

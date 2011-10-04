@@ -111,5 +111,6 @@ enum nfs3_ftype {
 /* Number of 32bit words in post_op_attr */
 #define NFS3_POST_OP_ATTR_WORDS		22
 
+extern unsigned int nfs3_acl_max_entries;
 #endif /* __KERNEL__ */
 #endif /* _LINUX_NFS3_H */

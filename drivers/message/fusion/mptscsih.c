@@ -2460,7 +2460,6 @@ mptscsih_qcmd(Scsi_Cmnd *SCpnt, void (*done)(Scsi_Cmnd *))
 	int	 datadir;
 	u32	 datalen;
 	u32	 scsictl;
-	u32	 scsidir;
 	u32	 cmd_len;
 	int	 my_idx;
 	int	 ii;
@@ -2475,6 +2474,29 @@ mptscsih_qcmd(Scsi_Cmnd *SCpnt, void (*done)(Scsi_Cmnd *))
 	SCpnt->scsi_done = done;
 
 	pTarget = hd->Targets[target];
+	
+	if ( pTarget ) {
+		if ( lun > pTarget->last_lun ) {
+			dsprintk((MYIOC_s_INFO_FMT
+				"qcmd: lun=%d > last_lun=%d on id=%d\n",
+				hd->ioc->name, lun, pTarget->last_lun, target));
+			SCpnt->result = DID_BAD_TARGET << 16;
+			SCpnt->scsi_done(SCpnt);
+			return FAILED;
+		}
+		/* Default to untagged. Once a target structure has been 
+		 * allocated, use the Inquiry data to determine if device 
+		 * supports tagged.
+	 	*/
+		if ( (pTarget->tflags & MPT_TARGET_FLAGS_Q_YES)
+		    && (SCpnt->device->tagged_supported)) {
+			scsictl = MPI_SCSIIO_CONTROL_SIMPLEQ;
+		} else {
+			scsictl = MPI_SCSIIO_CONTROL_UNTAGGED;
+		}
+
+	} else
+		scsictl = MPI_SCSIIO_CONTROL_UNTAGGED;
 
 	dmfprintk((MYIOC_s_INFO_FMT "qcmd: SCpnt=%p, done()=%p\n",
 			(hd && hd->ioc) ? hd->ioc->name : "ioc?", SCpnt, done));
@@ -2521,24 +2543,13 @@ mptscsih_qcmd(Scsi_Cmnd *SCpnt, void (*done)(Scsi_Cmnd *))
 	datadir = mptscsih_io_direction(SCpnt);
 	if (datadir == SCSI_DATA_READ) {
 		datalen = SCpnt->request_bufflen;
-		scsidir = MPI_SCSIIO_CONTROL_READ;	/* DATA IN  (host<--ioc<--dev) */
+		scsictl |= MPI_SCSIIO_CONTROL_READ;	/* DATA IN  (host<--ioc<--dev) */
 	} else if (datadir == SCSI_DATA_WRITE) {
 		datalen = SCpnt->request_bufflen;
-		scsidir = MPI_SCSIIO_CONTROL_WRITE;	/* DATA OUT (host-->ioc-->dev) */
+		scsictl |= MPI_SCSIIO_CONTROL_WRITE;	/* DATA OUT (host-->ioc-->dev) */
 	} else {
 		datalen = 0;
-		scsidir = MPI_SCSIIO_CONTROL_NODATATRANSFER;
-	}
-
-	/* Default to untagged. Once a target structure has been allocated,
-	 * use the Inquiry data to determine if device supports tagged.
-	 */
-	if (   pTarget
-	    && (pTarget->tflags & MPT_TARGET_FLAGS_Q_YES)
-	    && (SCpnt->device->tagged_supported)) {
-		scsictl = scsidir | MPI_SCSIIO_CONTROL_SIMPLEQ;
-	} else {
-		scsictl = scsidir | MPI_SCSIIO_CONTROL_UNTAGGED;
+		scsictl |= MPI_SCSIIO_CONTROL_NODATATRANSFER;
 	}
 
 	/* Use the above information to set up the message frame
@@ -4961,6 +4972,7 @@ mptscsih_initTarget(MPT_SCSI_HOST *hd, int bus_id, int target_id, u8 lun, char *
 		vdev->ioc_id = hd->ioc->id;
 		vdev->target_id = target_id;
 		vdev->bus_id = bus_id;
+		vdev->last_lun = MPT_LAST_LUN;
 
 		hd->Targets[target_id] = vdev;
 		dprintk((KERN_INFO "  *NEW* Target structure (id %d) @ %p\n",
@@ -5323,7 +5335,7 @@ mptscsih_writeSDP1(MPT_SCSI_HOST *hd, int portnum, int target_id, int flags)
 	MPT_ADAPTER		*ioc = hd->ioc;
 	Config_t		*pReq;
 	SCSIDevicePage1_t	*pData;
-	VirtDevice		*pTarget;
+	VirtDevice		*pTarget=NULL;
 	MPT_FRAME_HDR		*mf;
 	dma_addr_t		 dataDma;
 	u16			 req_idx;
@@ -5487,6 +5499,17 @@ mptscsih_writeSDP1(MPT_SCSI_HOST *hd, int portnum, int target_id, int flags)
 		pData->RequestedParameters = cpu_to_le32(requested);
 		pData->Reserved = 0;
 		pData->Configuration = cpu_to_le32(configuration);
+
+		if ( pTarget ) {
+			if ( requested & MPI_SCSIDEVPAGE1_RP_IU ) {
+				pTarget->last_lun = MPT_LAST_LUN;
+			} else {
+				pTarget->last_lun = MPT_NON_IU_LAST_LUN;
+			}
+			dsprintk((MYIOC_s_INFO_FMT
+				"writeSDP1: last_lun=%d on id=%d\n",
+				ioc->name, pTarget->last_lun, id));
+		}
 
 		dprintk((MYIOC_s_INFO_FMT
 			"write SDP1: id %d pgaddr 0x%x req 0x%x config 0x%x\n",

@@ -366,6 +366,7 @@ struct icom_port {
 
 struct icom_adapter {
     unsigned long      base_addr;
+    unsigned long      base_addr_pci;
     unsigned char      slot;
     unsigned char      irq_number;
     struct pci_dev     *pci_dev;

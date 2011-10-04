@@ -321,11 +321,20 @@ static int mprotect_fixup(struct vm_area_struct * vma, struct vm_area_struct ** 
 	return 0;
 }
 
+#ifndef PROT_GROWSDOWN
+#define PROT_GROWSDOWN	0x01000000
+#define PROT_GROWSUP	0x02000000
+#endif
+
 asmlinkage long sys_mprotect(unsigned long start, size_t len, unsigned long prot)
 {
 	unsigned long nstart, end, tmp;
 	struct vm_area_struct * vma, * next, * prev;
 	int error = -EINVAL;
+	const int grows = prot & (PROT_GROWSDOWN|PROT_GROWSUP);
+	prot &= ~(PROT_GROWSDOWN|PROT_GROWSUP);
+	if (grows == (PROT_GROWSDOWN|PROT_GROWSUP)) /* can't be both */
+		return -EINVAL;
 
 	vm_validate_enough("entering mprotect");
 
@@ -344,8 +353,26 @@ asmlinkage long sys_mprotect(unsigned long start, size_t len, unsigned long prot
 
 	vma = find_vma_prev(current->mm, start, &prev);
 	error = -ENOMEM;
-	if (!vma || vma->vm_start > start)
+	if (!vma)
 		goto out;
+	if (unlikely (grows & PROT_GROWSDOWN)) {
+		if (vma->vm_start >= end)
+			goto out;
+		start = vma->vm_start;
+		error = -EINVAL;
+		if (!(vma->vm_flags & VM_GROWSDOWN))
+			goto out;
+	}
+	else {
+		if (vma->vm_start > start)
+			goto out;
+		if (unlikely(grows & PROT_GROWSUP)) {
+			end = vma->vm_end;
+			error = -EINVAL;
+			if (!(vma->vm_flags & VM_GROWSUP))
+				goto out;
+		}
+	}
 
 	for (nstart = start ; ; ) {
 		unsigned int newflags;
@@ -359,6 +386,16 @@ asmlinkage long sys_mprotect(unsigned long start, size_t len, unsigned long prot
 		/* Here we know that  vma->vm_start <= nstart < vma->vm_end. */
 
 		newflags = prot | (vma->vm_flags & ~(PROT_READ | PROT_WRITE | PROT_EXEC));
+		/*
+		 * If the application expects PROT_READ to imply PROT_EXEC, and
+		 * the mapping isn't for a region whose permissions disallow
+		 * execute access, then enable PROT_EXEC.
+		 */
+		if ((prot & (PROT_EXEC | PROT_READ)) == PROT_READ &&
+		    !(current->flags & PF_RELOCEXEC) &&
+		    (vma->vm_flags & VM_MAYEXEC))
+			newflags |= PROT_EXEC;
+
 		if ((newflags & ~(newflags >> 4)) & 0xf) {
 			error = -EACCES;
 			goto out;

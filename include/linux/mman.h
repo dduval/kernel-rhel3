@@ -9,6 +9,7 @@
 extern int vm_enough_memory(long pages);
 extern void vm_unacct_memory(long pages);
 extern void vm_validate_enough(char *x);
+extern atomic_t vm_committed_space;
 
 #ifndef MAP_POPULATE
 # define MAP_POPULATE 0x8000

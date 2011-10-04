@@ -84,6 +84,7 @@ void set_single_step(struct task_struct *task)
 	per_struct *per_info=
 			(per_struct *)&task->thread.per_info;	
 	
+	task->ptrace |= PT_SINGLESTEP;
 	per_info->single_step=1;  /* Single step */
 	FixPerRegisters(task);
 }
@@ -93,6 +94,7 @@ void clear_single_step(struct task_struct *task)
 	per_struct *per_info=
 			(per_struct *)&task->thread.per_info;
 
+	task->ptrace &= ~PT_SINGLESTEP;
 	per_info->single_step=0;
 	FixPerRegisters(task);
 }
@@ -391,10 +393,11 @@ asmlinkage void syscall_trace_enter(struct pt_regs *regs)
 
 asmlinkage void syscall_trace_exit(struct pt_regs *regs)
 {
+	int ptrace = current->ptrace;
+
 	if (isaudit(current) && (current->ptrace & PT_AUDITED))
 		audit_result(regs);
-	if ((current->ptrace & (PT_PTRACED|PT_TRACESYS)) ==
-		(PT_PTRACED|PT_TRACESYS))
+	if ((ptrace & PT_PTRACED) && (ptrace & (PT_TRACESYS|PT_SINGLESTEP)))
 		syscall_ptrace();
 }
 

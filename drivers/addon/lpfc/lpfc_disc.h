@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_disc.h 1.18.1.3 2004/06/10 15:54:25EDT jselx Exp  $
+ * $Id: lpfc_disc.h 1.2 2004/11/02 13:25:17EST sf_support Exp  $
  */
 
 #ifndef  _H_LPFC_DISC
@@ -71,7 +71,7 @@ typedef enum lpfc_farp_addr_type {
 } LPFC_FARP_ADDR_TYPE;
 
 /* This is the protocol dependent definition for a Node List Entry.
- * This is used by Fibre Channel protocol to support FCP and IP.
+ * This is used by Fibre Channel protocol to support FCP.
  */
 
 struct lpfc_bindlist {
@@ -94,19 +94,13 @@ struct lpfc_nodelist {
 #define NLP_FABRIC         0x4			/* entry represents a Fabric
 						   entity */
 #define NLP_FCP_TARGET     0x8			/* entry is an FCP target */
-#define NLP_IP_NODE        0x10			/* entry is an IP/FC node */
 
 	uint16_t             nlp_rpi;
 
 	uint8_t              nlp_fcp_info;	/* Remote class info */
-	uint8_t              nlp_ip_info;	/* Remote class info */
 #define NLP_FCP_2_DEVICE   0x10			/* FCP-2 device */
 
 	volatile int         nlp_rflag;
-#define NLP_NPR_ACTIVE     0x2			/* lpfc NPort recovery
-						   activated */
-#define NLP_FREED_NODE     0x4			/* nodelist entry is on free
-						   list */
 #define NLP_DELAY_REMOVE   0x8                  /* Defer removal till end of DSM */
 
 	uint16_t       nlp_state;		/* state transition indicator */
@@ -128,7 +122,6 @@ struct lpfc_nodelist {
 
 	LPFC_BINDLIST_t *nlp_listp_bind;	/* Linked list bounded remote
 						   ports */
-	struct lpfc_nodelist *nlp_rpi_hash_next;
 };
 
 typedef struct lpfc_nodelist LPFC_NODELIST_t;
@@ -174,7 +167,6 @@ typedef struct lpfc_node_farp_pend LPFC_NODE_FARP_PEND_t;
 #define NLP_SEED_DID       0x4000	/* Entry scsi id is seeded for DID */
 #define NLP_SEED_MASK      0x807000	/* mask for seeded flags */
 #define NLP_NS_NODE        0x8000	/* Authenticated entry by NameServer */
-#define NLP_NODEV_TMO      0x10000	/* nodev timeout is running for node */
 #define NLP_DELAY_TMO      0x20000	/* delay timeout is running for node */
 #define NLP_DISC_NODE      0x40000	/* node is included in num_disc_nodes */
 #define NLP_RCV_PLOGI      0x80000	/* Rcv'ed PLOGI from remote system */

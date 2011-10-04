@@ -71,8 +71,29 @@ extern inline int cpu_number_map(int cpu)
  * Some lowlevel functions might want to know about
  * the real APIC ID <-> CPU # mapping.
  */
-extern volatile int x86_apicid_to_cpu[NR_CPUS];
 extern volatile int x86_cpu_to_apicid[NR_CPUS];
+
+static inline char x86_apicid_to_cpu(char apicid)
+{
+	int i;
+
+	for (i = 0; i < NR_CPUS; ++i)
+		if (x86_cpu_to_apicid[i] == apicid)
+			return i;
+
+	return -1;
+}
+
+
+extern u8 bios_cpu_apicid[];
+
+static inline int cpu_present_to_apicid(int mps_cpu)
+{
+	if (mps_cpu < NR_CPUS)
+		return (int)bios_cpu_apicid[mps_cpu];
+	else
+		return BAD_APICID;
+}
 
 /*
  * General functions that each host system must provide.
@@ -105,7 +126,7 @@ extern int slow_smp_processor_id(void);
 	(!apic_disabled ? hard_smp_processor_id() : slow_smp_processor_id())
 #else
 #define safe_smp_processor_id() \
-	(!apic_disabled ? x86_apicid_to_cpu[hard_smp_processor_id()] : 0)
+	(!apic_disabled ? x86_apicid_to_cpu(hard_smp_processor_id()) : 0)
 #endif
 
 #endif /* !ASSEMBLY */

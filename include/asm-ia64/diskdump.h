@@ -53,18 +53,20 @@ struct disk_dump_sub_header {
 #define size_of_sub_header()	((sizeof(struct disk_dump_sub_header) + PAGE_SIZE - 1) / DUMP_BLOCK_SIZE)
 
 #define write_sub_header() \
-({								\
- 	int ret;						\
-	struct unw_frame_info *info = platform_arg;		\
-								\
-	ia64_do_copy_regs(info, &dump_sub_header.elf_regs);	\
-	dump_sub_header.sw[smp_processor_id()] = info->sw;	\
-	clear_page(scratch);					\
-	memcpy(scratch, &dump_sub_header, sizeof(dump_sub_header));\
- 								\
-	if ((ret = write_blocks(dump_part, 2, scratch, 1)) >= 0)\
-		ret = 1; /* size of sub header in page */;	\
-	ret;							\
+({									\
+ 	int ret;							\
+	struct unw_frame_info *info = platform_arg;			\
+	extern int init_dump;						\
+									\
+	if (!init_dump)							\
+		ia64_do_copy_regs(info, &dump_sub_header.elf_regs);	\
+	dump_sub_header.sw[smp_processor_id()] = info->sw;		\
+	clear_page(scratch);						\
+	memcpy(scratch, &dump_sub_header, sizeof(dump_sub_header));	\
+ 									\
+	if ((ret = write_blocks(dump_part, 2, scratch, 1)) >= 0)	\
+		ret = 1; /* size of sub header in page */;		\
+	ret;								\
 })
 
 #define platform_freeze_cpu() 					\

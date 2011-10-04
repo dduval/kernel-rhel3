@@ -85,6 +85,7 @@ void ptrace_disable(struct task_struct *child)
 { 
 	long tmp;
 
+	child->ptrace &= ~PT_SINGLESTEP;
 	tmp = get_stack_long(child, EFL_OFFSET) & ~TRAP_FLAG;
 	put_stack_long(child, EFL_OFFSET, tmp);
 }
@@ -312,6 +313,7 @@ asmlinkage long sys_ptrace(long request, long pid, long addr, long data)
 			child->ptrace |= PT_TRACESYS;
 		else
 			child->ptrace &= ~PT_TRACESYS;
+		child->ptrace &= ~PT_SINGLESTEP;
 		child->exit_code = data;
 	/* make sure the single step bit is not set. */
 		tmp = get_stack_long(child, EFL_OFFSET);
@@ -363,6 +365,7 @@ asmlinkage long sys_ptrace(long request, long pid, long addr, long data)
 			break;
 		child->exit_code = SIGKILL;
 		/* make sure the single step bit is not set. */
+		child->ptrace &= ~PT_SINGLESTEP;
 		tmp = get_stack_long(child, EFL_OFFSET) & ~TRAP_FLAG;
 		put_stack_long(child, EFL_OFFSET, tmp);
 		wake_up_process(child);
@@ -376,6 +379,7 @@ asmlinkage long sys_ptrace(long request, long pid, long addr, long data)
 		if ((unsigned long) data > _NSIG)
 			break;
 		child->ptrace &= ~PT_TRACESYS;
+		child->ptrace |= PT_SINGLESTEP;
 		if ((child->ptrace & PT_DTRACE) == 0) {
 			/* Spurious delayed TF traps may occur */
 			child->ptrace |= PT_DTRACE;
@@ -496,8 +500,9 @@ asmlinkage void syscall_trace_enter(struct pt_regs *regs)
 
 asmlinkage void syscall_trace_leave(struct pt_regs *regs)
 {
-       if ((current->ptrace & (PT_PTRACED|PT_TRACESYS)) == (PT_PTRACED|PT_TRACESYS))
-               syscall_ptrace(regs);
+	int ptrace = current->ptrace;
+	if ((ptrace & PT_PTRACED) && (ptrace & (PT_TRACESYS|PT_SINGLESTEP)))
+		syscall_ptrace(regs);
 
        if (isaudit(current) && (current->ptrace & PT_AUDITED))
                audit_result(regs);

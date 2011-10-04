@@ -428,7 +428,8 @@ static void locks_insert_block(struct file_lock *blocker,
 	}
 	list_add_tail(&waiter->fl_block, &blocker->fl_block);
 	waiter->fl_next = blocker;
-	list_add(&waiter->fl_link, &blocked_list);
+	if (blocker->fl_flags & FL_POSIX)
+		list_add(&waiter->fl_link, &blocked_list);
 }
 
 static inline

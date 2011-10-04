@@ -16,7 +16,7 @@ obj-y :=	open.o read_write.o devices.o file_table.o buffer.o \
 		dcache.o inode.o attr.o bad_inode.o file.o iobuf.o dnotify.o \
 		filesystems.o namespace.o seq_file.o quota.o xattr.o
 
-
+obj-$(CONFIG_EPOLL)		+= eventpoll.o
 obj-$(CONFIG_QUOTA)		+= dquot.o
 obj-$(CONFIG_QFMT_V1)		+= quota_v1.o
 obj-$(CONFIG_QFMT_V2)		+= quota_v2.o

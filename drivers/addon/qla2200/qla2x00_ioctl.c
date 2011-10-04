@@ -44,6 +44,7 @@ extern int qla2x00_write_nvram_word(scsi_qla_host_t *, uint8_t, uint16_t);
 extern int qla2x00_send_loopback(scsi_qla_host_t *, EXT_IOCTL *, int);
 extern int qla2x00_read_option_rom(scsi_qla_host_t *, EXT_IOCTL *, int);
 extern int qla2x00_update_option_rom(scsi_qla_host_t *, EXT_IOCTL *, int);
+extern int qla2x00_get_option_rom_layout(scsi_qla_host_t *, EXT_IOCTL *, int);
 #endif
 
 
@@ -536,28 +537,28 @@ qla2x00_ioctl(Scsi_Device *dev, int cmd, void *arg)
 #if defined(INTAPI)
 	case INT_CC_READ_NVRAM:
 		ret = qla2x00_read_nvram(ha, pext, mode);
-
 		break;
 
 	case INT_CC_UPDATE_NVRAM:
 		ret = qla2x00_update_nvram(ha, pext, mode);
-
 		break;
 
 	case INT_CC_LOOPBACK:
 		ret = qla2x00_send_loopback(ha, pext, mode);
-
 		break;
 
 	case INT_CC_READ_OPTION_ROM:
 		ret = qla2x00_read_option_rom(ha, pext, mode);
-
 		break;
 
 	case INT_CC_UPDATE_OPTION_ROM:
 		ret = qla2x00_update_option_rom(ha, pext, mode);
-
 		break;
+
+	case INT_CC_GET_OPTION_ROM_LAYOUT:
+	        ret = qla2x00_get_option_rom_layout(ha, pext, mode);
+	        break; 
+
 #endif /* INTAPI */
 
 	case EXT_CC_SEND_FCCT_PASSTHRU:
@@ -3394,6 +3395,57 @@ qla2x00_send_els_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 }
 #endif
 
+#if !REG_FDMI_ENABLED
+/*
+ * qla2x00_mgmt_svr_login
+ *	Login management server.
+ *
+ * Input:
+ *	ha:	adapter state pointer.
+ *
+ * Returns:
+ *	qla2x00 local function return status code.
+ *
+ * Context:
+ *	Kernel context.
+ */
+int
+qla2x00_mgmt_svr_login(scsi_qla_host_t *ha)
+{
+	int		tmp_rval = 0;
+	uint16_t	mb[MAILBOX_REGISTER_COUNT];
+
+	DEBUG13(printk("%s(%ld): entered\n",
+	    __func__, ha->host_no);)
+
+	/* check on management server login status */
+	if (ha->flags.management_server_logged_in == 0) {
+		/* login to management server device */
+
+		tmp_rval = qla2x00_login_fabric(ha, MANAGEMENT_SERVER,
+		    0xff, 0xff, 0xfa, &mb[0], BIT_1);
+
+		if (tmp_rval != 0 || mb[0] != 0x4000) {
+
+	 		DEBUG2_13(printk(
+			    "%s(%ld): inst=%ld ERROR login to MS.\n",
+			    __func__, ha->host_no, ha->instance);)
+
+			return (QL_STATUS_ERROR);
+		}
+
+		ha->flags.management_server_logged_in = 1;
+		DEBUG13(printk("%s(%ld): success login to MS.\n",
+		    __func__, ha->host_no);)
+	}
+
+	DEBUG13(printk("%s(%ld): exiting.\n",
+	    __func__, ha->host_no);)
+
+	return (QL_STATUS_SUCCESS);
+}
+#endif
+
 /*
  * qla2x00_send_fcct
  *	Passes the FC CT command down to firmware as MSIOCB and
@@ -4273,10 +4325,16 @@ qla2x00_sc_scsi_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 	DEBUG9(qla2x00_dump_buffer((uint8_t *)&pscsi_cmd->data_cmnd[0],
 	    pscsi_cmd->cmd_len);)
 
-	if (pscsi_pass->Direction == EXT_DEF_SCSI_PASSTHRU_DATA_OUT) {
-		pscsi_cmd->sc_data_direction = SCSI_DATA_WRITE;
-	} else {
-		pscsi_cmd->sc_data_direction = SCSI_DATA_READ;
+	switch(pscsi_pass->Direction) {
+		case  EXT_DEF_SCSI_PASSTHRU_DATA_OUT :
+			pscsi_cmd->sc_data_direction = SCSI_DATA_WRITE;
+			break;
+		case EXT_DEF_SCSI_PASSTHRU_DATA_IN :
+			pscsi_cmd->sc_data_direction = SCSI_DATA_READ;
+			break;
+		default :	
+			pscsi_cmd->sc_data_direction = SCSI_DATA_NONE;
+			break;
 	}
 
 	/* send command to adapter */
@@ -4633,10 +4691,16 @@ qla2x00_sc_fc_scsi_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 	DEBUG9(printk("%s Dump of cdb buffer:\n", __func__);)
 	DEBUG9(qla2x00_dump_buffer((uint8_t *)&pfc_scsi_cmd->data_cmnd[0], 16);)
 
-	if (pfc_scsi_pass->Direction == EXT_DEF_SCSI_PASSTHRU_DATA_OUT) {
-		pfc_scsi_cmd->sc_data_direction = SCSI_DATA_WRITE;
-	} else {
-		pfc_scsi_cmd->sc_data_direction = SCSI_DATA_READ;
+	switch(pfc_scsi_pass->Direction) {
+		case  EXT_DEF_SCSI_PASSTHRU_DATA_OUT :
+			pfc_scsi_cmd->sc_data_direction = SCSI_DATA_WRITE;
+			break;
+		case EXT_DEF_SCSI_PASSTHRU_DATA_IN :
+			pfc_scsi_cmd->sc_data_direction = SCSI_DATA_READ;
+			break;
+		default :	
+			pfc_scsi_cmd->sc_data_direction = SCSI_DATA_NONE;
+			break;
 	}
 
 	/* send command to adapter */
@@ -4969,10 +5033,16 @@ qla2x00_sc_scsi3_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 	    __func__, ha->host_no, ha->instance);)
 	DEBUG9(qla2x00_dump_buffer((uint8_t *)&pscsi3_cmd->data_cmnd[0], 16);)
 
-	if (pscsi3_pass->Direction == EXT_DEF_SCSI_PASSTHRU_DATA_OUT) {
-		pscsi3_cmd->sc_data_direction = SCSI_DATA_WRITE;
-	} else {
-		pscsi3_cmd->sc_data_direction = SCSI_DATA_READ;
+	switch(pscsi3_pass->Direction) {
+		case  EXT_DEF_SCSI_PASSTHRU_DATA_OUT :
+			pscsi3_cmd->sc_data_direction = SCSI_DATA_WRITE;
+			break;
+		case EXT_DEF_SCSI_PASSTHRU_DATA_IN :
+			pscsi3_cmd->sc_data_direction = SCSI_DATA_READ;
+			break;
+		default :	
+			pscsi3_cmd->sc_data_direction = SCSI_DATA_NONE;
+			break;
 	}
  	if (pscsi3_pass->Timeout)
 		pscsi3_cmd->timeout_per_command = pscsi3_pass->Timeout * HZ;
@@ -5776,18 +5846,38 @@ qla2x00_set_led_state(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 				return (ret);
 			}
 
+			if (ha->pio_address) 
+				reg = (device_reg_t *)ha->pio_address;
+
 			/* Turn off both LEDs */
 			spin_lock_irqsave(&ha->hardware_lock, cpu_flags);
-			gpio_enable = RD_REG_WORD(&reg->gpioe);
-			gpio_data   = RD_REG_WORD(&reg->gpiod);
+			if (ha->pio_address) {
+				gpio_enable = RD_REG_WORD_IOMEM(&reg->gpioe);
+				gpio_data   = RD_REG_WORD_IOMEM(&reg->gpiod);
+			} else {
+				gpio_enable = RD_REG_WORD(&reg->gpioe);
+				gpio_data   = RD_REG_WORD(&reg->gpiod);
+			}
 			gpio_enable |= LED_MASK;
 
 			/* Set the modified gpio_enable values */
-			WRT_REG_WORD(&reg->gpioe,gpio_enable);
+			if (ha->pio_address) {
+				WRT_REG_WORD_IOMEM(&reg->gpioe,gpio_enable);
+				RD_REG_WORD_IOMEM(&reg->gpioe);
+			} else {	
+				WRT_REG_WORD(&reg->gpioe,gpio_enable);
+				PCI_POSTING(&reg->gpioe);
+			}
 
 			/* Clear out previously set LED colour */
 			gpio_data &= ~LED_MASK;
-			WRT_REG_WORD(&reg->gpiod,gpio_data);
+			if (ha->pio_address) {
+				WRT_REG_WORD_IOMEM(&reg->gpiod,gpio_data);
+				RD_REG_WORD_IOMEM(&reg->gpiod);
+			} else {
+				WRT_REG_WORD(&reg->gpiod,gpio_data);
+				PCI_POSTING(&reg->gpiod);
+			}
 			spin_unlock_irqrestore(&ha->hardware_lock, cpu_flags);
 
 			/* Let the per HBA timer kick off the blinking process*/

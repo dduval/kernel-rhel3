@@ -504,7 +504,8 @@ struct cdrom_generic_command
  * of MODE_SENSE_POWER_PAGE */
 #define GPMODE_CDROM_PAGE		0x0d
 
-
+/* Features */
+#define CDF_DVD_READ		0x001f
 
 /* DVD struct types */
 #define DVD_STRUCT_PHYSICAL	0x00

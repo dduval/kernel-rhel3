@@ -60,6 +60,7 @@ void __handle_sysrq_nolock(int, struct pt_regs *,
  */
 
 void __sysrq_lock_table (void);
+int __sysrq_trylock_table (void);
 void __sysrq_unlock_table (void);
 struct sysrq_key_op *__sysrq_get_key_op (int key);
 void __sysrq_put_key_op (int key, struct sysrq_key_op *op_p);

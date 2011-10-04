@@ -104,8 +104,7 @@ die (const char *str, struct pt_regs *regs, long err)
 
 	if (die.lock_owner != smp_processor_id()) {
 		console_verbose();
-		if (!crashdump_mode())
-			spin_lock_irq(&die.lock);
+		spin_lock_irq(&die.lock);
 		die.lock_owner = smp_processor_id();
 		die.lock_owner_depth = 0;
 		bust_spinlocks(1);

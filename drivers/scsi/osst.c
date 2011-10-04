@@ -4181,11 +4181,19 @@ static int os_scsi_tape_open(struct inode * inode, struct file * filp)
 	STp->in_use       = 1;
 	STp->rew_at_close = (MINOR(inode->i_rdev) & 0x80) == 0;
 
-	if (STp->device->host->hostt->module)
-		 __MOD_INC_USE_COUNT(STp->device->host->hostt->module);
-	if (osst_template.module)
-		 __MOD_INC_USE_COUNT(osst_template.module);
-	STp->device->access_count++;
+	spin_lock_irq(STp->device->request_queue.queue_lock);
+	if (STp->device->online) {
+		if (STp->device->host->hostt->module)
+			 __MOD_INC_USE_COUNT(STp->device->host->hostt->module);
+		if (osst_template.module)
+			 __MOD_INC_USE_COUNT(osst_template.module);
+		STp->device->access_count++;
+		spin_unlock_irq(STp->device->request_queue.queue_lock);
+	} else {
+		STp->in_use = 0;
+		spin_unlock_irq(STp->device->request_queue.queue_lock);
+		return -ENODEV;
+	}
 
 	if (mode != STp->current_mode) {
 #if DEBUG
@@ -4523,12 +4531,14 @@ err_out:
 	}
 	STp->in_use = 0;
 	STp->header_ok = 0;
+	spin_lock_irq(STp->device->request_queue.queue_lock);
 	STp->device->access_count--;
 
 	if (STp->device->host->hostt->module)
 	    __MOD_DEC_USE_COUNT(STp->device->host->hostt->module);
 	if (osst_template.module)
 	    __MOD_DEC_USE_COUNT(osst_template.module);
+	spin_unlock_irq(STp->device->request_queue.queue_lock);
 
 	return retval;
 }

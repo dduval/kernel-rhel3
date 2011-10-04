@@ -191,7 +191,7 @@ struct mpc_config_translation
 #define MAX_IRQ_SOURCES 256
 #endif /* CONFIG_MULTIQUAD */
 
-#define MAX_MP_BUSSES 32
+#define MAX_MP_BUSSES 260
 enum mp_bustype {
 	MP_BUS_ISA = 1,
 	MP_BUS_EISA,

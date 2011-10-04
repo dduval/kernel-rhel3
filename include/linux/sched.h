@@ -624,6 +624,7 @@ struct task_struct {
 #define PT_TRACE_EXIT   0x00000200
 #define PT_DTRACE	0x00000400      /* delayed trace (used on m68k, i386) */
 #define PT_AUDITED	0x00000800      /* being audited */
+#define PT_SINGLESTEP	0x00001000	/* PTRACE_SINGLESTEP in progress */
 
 #define is_dumpable(tsk)    ((tsk)->task_dumpable && (tsk)->mm && (tsk)->mm->dumpable)
 

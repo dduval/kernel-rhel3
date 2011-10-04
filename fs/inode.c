@@ -813,6 +813,8 @@ void prune_icache(int goal)
 	avg_pages = avg_pages / (inodes_stat.nr_inodes + 1);
 	spin_lock(&inode_lock);
 	while (goal-- > 0) {
+		int invalidated_inode;
+
 		if (list_empty(&inode_unused_pagecache))
 			break;
 		entry = inode_unused_pagecache.prev;
@@ -836,13 +838,21 @@ void prune_icache(int goal)
 		 * skip it for now; bdflush (which we woke up above) will
 		 * eventually make the inode freeable.
 		 */
+		invalidated_inode = 0;
 		if (list_empty(&inode->i_mapping->dirty_pages) &&
-				!inode_has_buffers(inode))
+				!inode_has_buffers(inode)) {
 			invalidate_inode_pages(inode);
-
+			invalidated_inode = 1;
+		}
 		/* release inode */
 		spin_lock(&inode_lock);
 		inode->i_state &= ~I_LOCK;
+		if (invalidated_inode && !(inode->i_state & I_FREEING)) {
+			/* wasn't called earlier because I_LOCK was set */
+			__refile_inode(inode);
+		}
+		/* wake up any potential waiters in wait_on_inode() */
+		wake_up(&inode->i_wait);
 	}
 	spin_unlock(&inode_lock);
 #endif /* CONFIG_HIGHMEM */

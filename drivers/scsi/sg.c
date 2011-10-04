@@ -265,19 +265,26 @@ static int sg_open(struct inode * inode, struct file * filp)
     Sg_fd * sfp;
     int res;
     int retval = -EBUSY;
+    struct request_queue *q;
 
     SCSI_LOG_TIMEOUT(3, printk("sg_open: dev=%d, flags=0x%x\n", dev, flags));
     sdp = sg_get_dev(dev);
     if ((! sdp) || (! sdp->device))
         return -ENXIO;
-    if (sdp->detached)
-    	return -ENODEV;
+    q = &sdp->device->request_queue;
 
+    spin_lock_irq(q->queue_lock);
+    if (sdp->device->online && !sdp->detached) {
      /* This driver's module count bumped by fops_get in <linux/fs.h> */
      /* Prevent the device driver from vanishing while we sleep */
-     if (sdp->device->host->hostt->module)
-        __MOD_INC_USE_COUNT(sdp->device->host->hostt->module);
-    sdp->device->access_count++;
+	     if (sdp->device->host->hostt->module)
+	        __MOD_INC_USE_COUNT(sdp->device->host->hostt->module);
+	    sdp->device->access_count++;
+	    spin_unlock_irq(q->queue_lock);
+    } else {
+	    spin_unlock_irq(q->queue_lock);
+	    return -ENODEV;
+    }
 
     if (! ((flags & O_NONBLOCK) ||
 	   scsi_block_when_processing_errors(sdp->device))) {
@@ -330,9 +337,11 @@ static int sg_open(struct inode * inode, struct file * filp)
     return 0;
 
 error_out:
+    spin_lock_irq(q->queue_lock);
     sdp->device->access_count--;
     if ((! sdp->detached) && sdp->device->host->hostt->module)
         __MOD_DEC_USE_COUNT(sdp->device->host->hostt->module);
+    spin_unlock_irq(q->queue_lock);
     return retval;
 }
 

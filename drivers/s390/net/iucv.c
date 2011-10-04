@@ -1,5 +1,5 @@
 /* 
- * $Id: iucv.c,v 1.40.2.2 2003/11/20 19:35:14 felfert Exp $
+ * $Id: iucv.c,v 1.40.2.5 2004/06/29 07:37:33 braunu Exp $
  *
  * IUCV network driver
  *
@@ -29,7 +29,7 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  *
- * RELEASE-TAG: IUCV lowlevel driver $Revision: 1.40.2.2 $
+ * RELEASE-TAG: IUCV lowlevel driver $Revision: 1.40.2.5 $
  *
  */
 
@@ -340,7 +340,7 @@ do { \
 static void
 iucv_banner(void)
 {
-	char vbuf[] = "$Revision: 1.40.2.2 $";
+	char vbuf[] = "$Revision: 1.40.2.5 $";
 	char *version = vbuf;
 
 	if ((version = strchr(version, ':'))) {
@@ -441,17 +441,19 @@ iucv_exit(void)
 static __inline__ iucv_param *
 grab_param(void)
 {
-	iucv_param *ret;
-	int i = 0;
+	iucv_param *ptr;
+        static int hint = 0;
 
-	while (atomic_compare_and_swap(0, 1, &iucv_param_pool[i].in_use)) {
-		i++;
-		if (i >= PARAM_POOL_SIZE)
-			i = 0;
-	}
-	ret = &iucv_param_pool[i];
-	memset(&ret->param, 0, sizeof(ret->param));
-	return ret;
+	ptr = iucv_param_pool + hint;
+	do {
+		ptr++;
+		if (ptr >= iucv_param_pool + PARAM_POOL_SIZE)
+			ptr = iucv_param_pool;
+	} while (atomic_compare_and_swap(0, 1, &ptr->in_use));
+	hint = ptr - iucv_param_pool;
+
+	memset(&ptr->param, 0, sizeof(ptr->param));
+	return ptr;
 }
 
 /**
@@ -766,6 +768,7 @@ iucv_register_program (__u8 pgmname[16],
 		if (iucv_pathid_table == NULL) {
 			printk(KERN_WARNING "%s: iucv_pathid_table storage "
 			       "allocation failed\n", __FUNCTION__);
+			kfree(new_handler);
 			return NULL;
 		}
 		memset (iucv_pathid_table, 0, max_connections * sizeof(handler *));
@@ -2335,7 +2338,8 @@ iucv_do_int(iucv_GeneralInterrupt * int_buf)
 					iucv_debug(2,
 						   "found a matching handler");
 					break;
-				}
+				} else
+					h = NULL;
 			}
 			spin_unlock_irqrestore (&iucv_lock, flags);
 			if (h) {

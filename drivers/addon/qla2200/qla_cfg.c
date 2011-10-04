@@ -114,6 +114,7 @@ int qla2x00_export_target( void *, uint16_t , fc_port_t *, uint16_t );
  * Global data items
  */
 mp_host_t  *mp_hosts_base = NULL;
+DECLARE_MUTEX(mp_hosts_lock);
 BOOL   mp_config_required = FALSE;
 static int    mp_num_hosts = 0;
 static BOOL   mp_initialized = FALSE;
@@ -203,6 +204,7 @@ qla2x00_cfg_init(scsi_qla_host_t *ha)
 	/* First HBA, initialize the failover global properties */
 	qla2x00_fo_init_params(ha);
 
+	down(&mp_hosts_lock);
 	/* If the user specified a device configuration then
 	 * it is use as the configuration. Otherwise, we wait
 	 * for path discovery.
@@ -210,6 +212,7 @@ qla2x00_cfg_init(scsi_qla_host_t *ha)
 	if (mp_config_required)
 		qla2x00_cfg_build_path_tree(ha);
 	rval = qla2x00_cfg_path_discovery(ha);
+	up(&mp_hosts_lock);
 	clear_bit(CFG_ACTIVE, &ha->cfg_flags);
 	LEAVE("qla2x00_cfg_init");
 	return rval;
@@ -333,7 +336,9 @@ qla2x00_cfg_event_notify(scsi_qla_host_t *ha, uint32_t i_type)
 			 * Update our path tree in case we are
 			 * losing the adapter
 			 */
+			down(&mp_hosts_lock);
 			qla2x00_update_mp_tree();
+			up(&mp_hosts_lock);
 			/* Free our resources for adapter */
 			break;
 		case MP_NOTIFY_LOOP_UP:
@@ -345,7 +350,9 @@ qla2x00_cfg_event_notify(scsi_qla_host_t *ha, uint32_t i_type)
 				host->flags |= MP_HOST_FLAG_NEEDS_UPDATE;
 				host->fcports = &ha->fcports;
 				set_bit(CFG_FAILOVER, &ha->cfg_flags);
+				down(&mp_hosts_lock);
 				qla2x00_update_mp_tree();
+				up(&mp_hosts_lock);
 				clear_bit(CFG_FAILOVER, &ha->cfg_flags);
 			}
 			break;
@@ -4597,7 +4604,7 @@ qla2x00_map_os_targets(mp_host_t *host)
 							dp->nodename,
 							WWN_SIZE);
 					memcpy(tgt->port_name,
-							path->port->port_name,
+							path->portname,
 							WWN_SIZE);
 					tgt->vis_port = path->port;
 				}

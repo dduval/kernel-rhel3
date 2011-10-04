@@ -121,6 +121,7 @@ static struct cfg_device_info cfg_device_list[] = {
 #define QLA2322_DEVICE_ID   0x2322
 #define QLA6312_DEVICE_ID   0x6312
 #define QLA6322_DEVICE_ID   0x6322
+#define QLA2400_DEVICE_ID   0x2400
 //#define QLAFBLITE_DEVICE_ID   	   /* Not Known yet */	
 #define QLA2200A_RISC_ROM_VER  4
 #define FPM_2300            6

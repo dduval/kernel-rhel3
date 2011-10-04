@@ -27,6 +27,7 @@
 #include <linux/dcache.h>
 #include <linux/blkdev.h>
 #include <linux/utsname.h>
+#include <linux/notifier.h>
 
 /* The minimum Dump I/O unit. Must be the same of PAGE_SIZE */
 #define DUMP_BLOCK_SIZE		PAGE_SIZE
@@ -38,6 +39,9 @@
 
 int diskdump_register_hook(void (*dump_func)(struct pt_regs *, void *));
 void diskdump_unregister_hook(void);
+
+/* notifiers to be called before starting dump */
+extern struct notifier_block *disk_dump_notifier_list;
 
 /*
  * The handler that adapter driver provides for the common module of

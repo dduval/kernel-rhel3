@@ -1,6 +1,7 @@
 #ifndef _PPC64_RTAS_H
 #define _PPC64_RTAS_H
 
+#include <linux/kernel.h>
 #include <linux/spinlock.h>
 #include <asm/page.h>
 
@@ -203,10 +204,21 @@ extern void pSeries_log_error(char *buf, unsigned int err_type, int fatal);
 /* All the types and not flags */
 #define ERR_TYPE_MASK	(ERR_TYPE_RTAS_LOG | ERR_TYPE_KERNEL_PANIC)
 
-#define RTAS_ERR KERN_ERR "RTAS: "
+#define RTAS_DEBUG KERN_DEBUG "RTAS: "
   
-#define RTAS_ERROR_LOG_MAX 1024
+#define RTAS_ERROR_LOG_MAX 2048
   
+static inline int rtas_get_error_log_max (void)
+{
+	int buflen;
+	buflen = rtas_token ("rtas-error-log-max");
+	if ((buflen == RTAS_UNKNOWN_SERVICE) ||
+	    (buflen > RTAS_ERROR_LOG_MAX)) {
+		printk (KERN_WARNING "RTAS: bad log buffer size %d\n", buflen);
+		buflen = RTAS_ERROR_LOG_MAX;
+	}
+	return buflen;
+}
   
 /* Event Scan Parameters */
 #define EVENT_SCAN_ALL_EVENTS	0xf0000000

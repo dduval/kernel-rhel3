@@ -72,7 +72,8 @@ struct proc_dir_entry {
 	kdev_t	rdev;
 };
 
-#define PROC_INODE_PROPER(inode) ((inode)->i_ino & ~0xffff)
+#define PROC_INODE_SHIFT         16
+#define PROC_INODE_PROPER(inode) (((inode)->i_ino >> PROC_INODE_SHIFT) != 0)
 
 #ifdef CONFIG_PROC_FS
 

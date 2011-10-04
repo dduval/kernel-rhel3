@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_logmsg.c 1.37 2004/04/30 10:21:02EDT jselx Exp  $
+ * $Id: lpfc_logmsg.c 1.2 2004/11/02 10:17:23EST sf_support Exp  $
  */
 #include <linux/version.h>
 #include <linux/spinlock.h>
@@ -511,7 +511,7 @@ msgLogDef lpfc_msgBlk0113 = {
 /*
 msgName: lpfc_mes0114
 message:  PLOGI chkparm OK
-descript: Recieved a PLOGI from a remote NPORT and its Fibre Channel service 
+descript: Received a PLOGI from a remote NPORT and its Fibre Channel service 
           parameters match this HBA. Request can be accepted.
 data:     (1) nlp_DID (2) nlp_state (3) nlp_flag (4) nlp_Rpi
 severity: Information
@@ -634,7 +634,7 @@ msgLogDef lpfc_msgBlk0119 = {
 /*
 msgName: lpfc_mes0120
 message:  PLOGI chkparm OK
-descript: Recieved a PLOGI from a remote NPORT and its Fibre Channel service 
+descript: Received a PLOGI from a remote NPORT and its Fibre Channel service 
           parameters match this HBA. Request can be accepted.
 data:     (1) nlp_DID (2) nlp_state (3) nlp_flag (4) nlp_Rpi
 severity: Information
@@ -655,7 +655,7 @@ msgLogDef lpfc_msgBlk0120 = {
 /*
 msgName: lpfc_mes0121
 message:  PLOGI chkparm OK
-descript: Recieved a PLOGI from a remote NPORT and its Fibre Channel service 
+descript: Received a PLOGI from a remote NPORT and its Fibre Channel service 
           parameters match this HBA. Request can be accepted.
 data:     (1) nlp_DID (2) nlp_state (3) nlp_flag (4) nlp_Rpi
 severity: Information
@@ -676,7 +676,7 @@ msgLogDef lpfc_msgBlk0121 = {
 /*
 msgName: lpfc_mes0122
 message:  PLOGI chkparm OK
-descript: Recieved a PLOGI from a remote NPORT and its Fibre Channel service 
+descript: Received a PLOGI from a remote NPORT and its Fibre Channel service 
           parameters match this HBA. Request can be accepted.
 data:     (1) nlp_DID (2) nlp_state (3) nlp_flag (4) nlp_Rpi
 severity: Information
@@ -697,7 +697,7 @@ msgLogDef lpfc_msgBlk0122 = {
 /*
 msgName: lpfc_mes0123
 message:  PLOGI chkparm OK
-descript: Recieved a PLOGI from a remote NPORT and its Fibre Channel service 
+descript: Received a PLOGI from a remote NPORT and its Fibre Channel service 
           parameters match this HBA. Request can be accepted.
 data:     (1) nlp_DID (2) nlp_state (3) nlp_flag (4) nlp_Rpi
 severity: Information
@@ -718,7 +718,7 @@ msgLogDef lpfc_msgBlk0123 = {
 /*
 msgName: lpfc_mes0124
 message:  PLOGI chkparm OK
-descript: Recieved a PLOGI from a remote NPORT and its Fibre Channel service 
+descript: Received a PLOGI from a remote NPORT and its Fibre Channel service 
           parameters match this HBA. Request can be accepted.
 data:     (1) nlp_DID (2) nlp_state (3) nlp_flag (4) nlp_Rpi
 severity: Information
@@ -739,7 +739,7 @@ msgLogDef lpfc_msgBlk0124 = {
 /*
 msgName: lpfc_mes0125
 message:  PLOGI chkparm OK
-descript: Recieved a PLOGI from a remote NPORT and its Fibre Channel service 
+descript: Received a PLOGI from a remote NPORT and its Fibre Channel service 
           parameters match this HBA. Request can be accepted.
 data:     (1) nlp_DID (2) nlp_state (3) nlp_flag (4) nlp_Rpi
 severity: Information
@@ -760,7 +760,7 @@ msgLogDef lpfc_msgBlk0125 = {
 /*
 msgName: lpfc_mes0126
 message:  PLOGI chkparm OK
-descript: Recieved a PLOGI from a remote NPORT and its Fibre Channel service 
+descript: Received a PLOGI from a remote NPORT and its Fibre Channel service 
           parameters match this HBA. Request can be accepted.
 data:     (1) nlp_DID (2) nlp_state (3) nlp_flag (4) nlp_Rpi
 severity: Information
@@ -862,27 +862,6 @@ msgLogDef lpfc_msgBlk0202 = {
 	lpfc_msgPreambleDIi,
 	LPFC_MSG_OPUT_GLOB_CTRL,
 	LPFC_LOG_MSG_TYPE_INFO,
-	LOG_DISCOVERY,
-	ERRID_LOG_UNEXPECT_EVENT
-};
-
-/*
-msgName: lpfc_mes0203
-message:  Nodev timeout on NPort <nlp_DID>
-descript: A remote NPort the was discovered by the driver disappeared for more
-          than LPFC_NODEV_TMO seconds.
-data:     (1) nlp_flag (2) nlp_state (3) nlp_rpi
-severity: Error
-log:      Always
-action:   Check connections to Fabric / HUB or remote device.
-*/
-char lpfc_mes0203[] = "%sNodev timeout on NPort x%x Data: x%x x%x x%x";
-msgLogDef lpfc_msgBlk0203 = {
-	LPFC_LOG_MSG_DI_0203,
-	lpfc_mes0203,
-	lpfc_msgPreambleDIe,
-	LPFC_MSG_OPUT_GLOB_CTRL,
-	LPFC_LOG_MSG_TYPE_ERR,
 	LOG_DISCOVERY,
 	ERRID_LOG_UNEXPECT_EVENT
 };
@@ -1663,6 +1642,26 @@ msgLogDef lpfc_msgBlk0241 = {
 };
 
 /*
+msgName: lpfc_mes0242
+message:  Abort outstanding I/O to the Fabric
+descript: All outstanding I/Os to the fabric are cleaned up.
+data:     (1) Fabric_DID
+severity: Information
+log:      LOG_DISCOVERY verbose
+action:   No action needed, informational
+*/
+char lpfc_mes0242[] = "%sAbort outstanding I/O to the Fabric x%x";
+msgLogDef lpfc_msgBlk0242 = {
+	LPFC_LOG_MSG_DI_0242,
+	lpfc_mes0242,
+	lpfc_msgPreambleDIi,
+	LPFC_MSG_OPUT_GLOB_CTRL,
+	LPFC_LOG_MSG_TYPE_INFO,
+	LOG_DISCOVERY,
+	ERRID_LOG_UNEXPECT_EVENT
+};
+
+/*
 msgName: lpfc_mes0243
 message:  Issue FDMI request failed
 descript: Cannot issue FDMI request to HBA.
@@ -1809,6 +1808,71 @@ msgLogDef lpfc_msgBlk0249 = {
 };
 
 /*
+msgName: lpfc_mes0250
+message:  EXPIRED nodev timer
+descript: A device disappeared for greater than the configuration parameter 
+          (lpfc_nodev_tmo) seconds. All I/O associated with this device 
+          will be failed.  
+data:     (1) dev_did (2) scsi_id (3) rpi 
+severity: Error
+log:      Always
+action:   Check physical connections to Fibre Channel network and the 
+          state of the remote PortID.
+*/
+char      lpfc_mes0250[] = "%sEXPIRED nodev timer Data: x%x x%x x%x"; 
+msgLogDef lpfc_msgBlk0250 = {
+          LPFC_LOG_MSG_DI_0250,
+          lpfc_mes0250,
+          lpfc_msgPreambleDIe,
+          LPFC_MSG_OPUT_GLOB_CTRL,
+          LPFC_LOG_MSG_TYPE_ERR,
+          LOG_DISCOVERY,
+          ERRID_LOG_UNEXPECT_EVENT 
+};
+
+/*
+msgName: lpfc_mes0256
+message:  Start nodev timer
+descript: A target disappeared from the Fibre Channel network. If the 
+          target does not return within nodev-tmo timeout all I/O to 
+          the target will fail.
+data:     (1) nlp_DID (2) nlp_flag (3) nlp_state (4) nlp
+severity: Information
+log:      LOG_DISCOVERY verbose
+action:   No action needed, informational
+*/
+char lpfc_mes0256[] = "%sStart nodev timer Data: x%x x%x x%x x%x";
+msgLogDef lpfc_msgBlk0256 = {
+	LPFC_LOG_MSG_DI_0256,
+	lpfc_mes0256,
+	lpfc_msgPreambleDIi,
+	LPFC_MSG_OPUT_GLOB_CTRL,
+	LPFC_LOG_MSG_TYPE_INFO,
+	LOG_DISCOVERY,
+	ERRID_LOG_UNEXPECT_EVENT
+};
+
+/*
+msgName: lpfc_mes0260
+message:  Stop Nodev timeout on NPort <nlp_DID>
+descript: The FCP target was rediscovered and I/O can be resumed.
+data:     (1) nlp_DID (2) nlp_flag (3) nlp_state (4) nlp
+severity: Information
+log:      LOG_DISCOVERY verbose
+action:   No action needed, informational
+*/
+char lpfc_mes0260[] = "%sStop nodev timeout on NPort x%x Data: x%x x%x x%x";
+msgLogDef lpfc_msgBlk0260 = {
+	LPFC_LOG_MSG_DI_0260,
+	lpfc_mes0260,
+	lpfc_msgPreambleDIi,
+	LPFC_MSG_OPUT_GLOB_CTRL,
+	LPFC_LOG_MSG_TYPE_INFO,
+	LOG_DISCOVERY,
+	ERRID_LOG_UNEXPECT_EVENT
+};
+
+/*
  *  Begin MAILBOX LOG Message Structures
  */
 
@@ -1835,6 +1899,9 @@ msgLogDef lpfc_msgBlk0300 = {
 	LOG_MBOX,
 	ERRID_LOG_UNEXPECT_EVENT
 };
+
+
+
 
 /*
 msgName: lpfc_mes0301
@@ -2786,6 +2853,29 @@ msgLogDef lpfc_msgBlk0442 = {
 };
 
 /*
+msgName: lpfc_mes0443
+message:  Failed to attach to lpfc adapter: bus <bus> device <device> irq <irq>
+descript: An lpfc adapter was found in the pci config but the lpfc driver failed
+          to attach.
+data:     (1) bus (2) device (3) irq
+severity: Error
+log:      Always
+action:   This error could indicate a hardware or firmware problem. If 
+          problems persist report these errors to Technical Support.
+*/
+char lpfc_mes0443[] =
+    "%sFailed to attach to lpfc adapter: bus %02x device %02x irq %d";
+msgLogDef lpfc_msgBlk0443 = {
+	LPFC_LOG_MSG_IN_0443,
+	lpfc_mes0443,
+	lpfc_msgPreambleINe,
+	LPFC_MSG_OPUT_GLOB_CTRL,
+	LPFC_LOG_MSG_TYPE_ERR,
+	LOG_INIT,
+	ERRID_LOG_INIT
+};
+
+/*
 msgName: lpfc_mes0446
 message:  Adapter failed to init, mbxCmd <cmd> CFG_RING, mbxStatus <status>,
           ring <num>
@@ -2854,49 +2944,6 @@ msgLogDef lpfc_msgBlk0448 = {
 	ERRID_LOG_INIT
 };
 
-/*
-msgName: lpfc_mes0449
-message:  WorldWide PortName Type <type> doesn't conform to IP Profile
-descript: In order to run IP, the WorldWide PortName must be of type 
-          IEEE (NAA = 1). This message displays if the adapter WWPN 
-          doesn't conform with the standard.
-data:     None
-severity: Error
-log:      Always
-action:   Turn off the network-on configuration parameter or configure 
-          a different WWPN.
-*/
-char lpfc_mes0449[] =
-    "%sWorldWide PortName Type x%x doesn't conform to IP Profile";
-msgLogDef lpfc_msgBlk0449 = {
-	LPFC_LOG_MSG_IN_0449,
-	lpfc_mes0449,
-	lpfc_msgPreambleINe,
-	LPFC_MSG_OPUT_GLOB_CTRL,
-	LPFC_LOG_MSG_TYPE_ERR,
-	LOG_INIT,
-	ERRID_LOG_INIT
-};
-
-/*
-msgName: lpfc_mes0450
-message:  Adapter failed to init, mbxCmd <cmd> FARP, mbxStatus <status> 
-descript: Adapter initialization failed when issuing FARP mailbox command.
-data:     None
-severity: Warning
-log:      LOG_INIT verbose
-action:   None required
-*/
-char lpfc_mes0450[] = "%sAdapter failed to init, mbxCmd x%x FARP, mbxStatus x%x";
-msgLogDef lpfc_msgBlk0450 = {
-	LPFC_LOG_MSG_IN_0450,
-	lpfc_mes0450,
-	lpfc_msgPreambleINw,
-	LPFC_MSG_OPUT_GLOB_CTRL,
-	LPFC_LOG_MSG_TYPE_WARN,
-	LOG_INIT,
-	ERRID_LOG_INIT
-};
 
 /*
 msgName: lpfc_mes0451
@@ -3115,187 +3162,6 @@ msgLogDef lpfc_msgBlk0601 = {
 	ERRID_LOG_UNEXPECT_EVENT
 };
 
-/*
-msgName: lpfc_mes0602
-message:  IP Response Ring <num> out of posted buffers
-descript: The IP ring returned all posted buffers to the driver 
-          and is waiting for the driver to post new buffers. This 
-          could mean the host system is out of TCP/IP buffers. 
-data:     (1) fc_missbufcnt (2) NoRcvBuf
-severity: Warning
-log:      LOG_IP verbose
-action:   Try allocating more IP buffers (STREAMS buffers or mbufs) 
-          of size 4096 and/or increasing the post-ip-buf lpfc 
-          configuration parameter. Reboot the system.
-*/
-char lpfc_mes0602[] =
-    "%sIP Response Ring %d out of posted buffers Data: x%x x%x";
-msgLogDef lpfc_msgBlk0602 = {
-	LPFC_LOG_MSG_IP_0602,
-	lpfc_mes0602,
-	lpfc_msgPreambleIPw,
-	LPFC_MSG_OPUT_GLOB_CTRL,
-	LPFC_LOG_MSG_TYPE_WARN,
-	LOG_IP,
-	ERRID_LOG_NO_RESOURCE
-};
-
-/*
-msgName: lpfc_mes0603
-message:  Xmit Sequence completion error
-descript: A XMIT_SEQUENCE command completed with a status error 
-          in the IOCB.
-data:     (1) ulpStatus (2) ulpIoTag (3) ulpWord[4] (4) did
-severity: Warning
-log:      LOG_IP verbose
-action:   If there are many errors to one device, check physical 
-          connections to Fibre Channel network and the state of 
-          the remote PortID.  The driver attempts to recover by 
-          creating a new exchange to the remote device.
-*/
-char lpfc_mes0603[] = "%sXmit Sequence completion error Data: x%x x%x x%x x%x";
-msgLogDef lpfc_msgBlk0603 = {
-	LPFC_LOG_MSG_IP_0603,
-	lpfc_mes0603,
-	lpfc_msgPreambleIPw,
-	LPFC_MSG_OPUT_GLOB_CTRL,
-	LPFC_LOG_MSG_TYPE_WARN,
-	LOG_IP,
-	ERRID_LOG_UNEXPECT_EVENT
-};
-
-/*
-msgName: lpfc_mes0604
-message:  Post buffer for IP ring <num> failed
-descript: The driver cannot allocate a buffer to post to the IP ring. 
-          This usually means the host system is out of TCP/IP buffers. 
-data:     (1) missbufcnt
-severity: Error
-log:      Always
-action:   Try allocating more IP buffers (STREAMS buffers or mbufs) 
-          of size 4096. Reboot the system.
-*/
-char lpfc_mes0604[] = "%sPost buffer for IP ring %d failed Data: x%x";
-msgLogDef lpfc_msgBlk0604 = {
-	LPFC_LOG_MSG_IP_0604,
-	lpfc_mes0604,
-	lpfc_msgPreambleIPe,
-	LPFC_MSG_OPUT_GLOB_CTRL,
-	LPFC_LOG_MSG_TYPE_ERR,
-	LOG_IP,
-	ERRID_LOG_NO_RESOURCE
-};
-
-/*
-msgName: lpfc_mes0605
-message:  No room on IP xmit queue
-descript: The system is generating IOCB commands to be processed 
-          faster than the adapter can process them. 
-data:     (1) xmitnoroom
-severity: Warning
-log:      LOG_IP verbose
-action:   Check the state of the link. If the link is up and running, 
-          reconfigure the xmit queue size to be larger. Note, a larger 
-          queue size may require more system IP buffers. If the link 
-          is down, check physical connections to Fibre Channel network.
-*/
-char lpfc_mes0605[] = "%sNo room on IP xmit queue Data: x%x";
-msgLogDef lpfc_msgBlk0605 = {
-	LPFC_LOG_MSG_IP_0605,
-	lpfc_mes0605,
-	lpfc_msgPreambleIPw,
-	LPFC_MSG_OPUT_GLOB_CTRL,
-	LPFC_LOG_MSG_TYPE_WARN,
-	LOG_IP,
-	ERRID_LOG_UNEXPECT_EVENT
-};
-
-/*
-msgName: lpfc_mes0606
-message:  XRI Create for IP traffic to DID <did>.
-descript: The lpfc driver is missing an exchange resource identifier
-          (XRI) for this node and needs to create one prior to 
-          the transmit operation.
-data:     None
-severity: Information
-log:      LOG_IP verbose
-action:   No action needed, informational
-*/
-char lpfc_mes0606[] = "%sXRI Create for IP traffic to DID x%x";
-msgLogDef lpfc_msgBlk0606 = {
-	LPFC_LOG_MSG_IP_0606,
-	lpfc_mes0606,
-	lpfc_msgPreambleIPi,
-	LPFC_MSG_OPUT_GLOB_CTRL,
-	LPFC_LOG_MSG_TYPE_INFO,
-	LOG_IP,
-	ERRID_LOG_UNEXPECT_EVENT
-};
-
-/*
-msgName: lpfc_mes0607
-message:  XRI response from DID with XRI <xri> and status <ulpStatus>
-descript: The driver received an XRI response from SLI with the resulting
-          exchange resource id and status.
-data:     None
-severity: Information
-log:      LOG_IP verbose
-action:   No action needed, informational
-*/
-char lpfc_mes0607[] = "%sXRI response from DID x%x with XRI x%x and status x%x";
-msgLogDef lpfc_msgBlk0607 = {
-	LPFC_LOG_MSG_IP_0607,
-	lpfc_mes0607,
-	lpfc_msgPreambleIPi,
-	LPFC_MSG_OPUT_GLOB_CTRL,
-	LPFC_LOG_MSG_TYPE_INFO,
-	LOG_IP,
-	ERRID_LOG_UNEXPECT_EVENT
-};
-
-/*
-msgName: lpfc_mes0608
-message:  IP packet timed out 
-descript: An IP IOCB command was posted to a ring and did not complete
-          within timeout seconds.
-data:     (1) Did
-severity: Warning
-log:      LOG_IP verbose
-action:   If no IP packet is going through the adapter, reboot the system;
-          If problem persists, contact Technical Support.
-*/
-char lpfc_mes0608[] = "%sIP packet timed out Data: x%x";
-msgLogDef lpfc_msgBlk0608 = {
-	LPFC_LOG_MSG_IP_0608,
-	lpfc_mes0608,
-	lpfc_msgPreambleIPw,
-	LPFC_MSG_OPUT_GLOB_CTRL,
-	LPFC_LOG_MSG_TYPE_WARN,
-	LOG_IP,
-	ERRID_LOG_UNEXPECT_EVENT
-};
-
-/*
-msgName: lpfc_mes0609
-message:  Network buffer and DMA address mismatch
-descript: An IP buffer free operation found a mismatch between an
-          IP buffer and its dma address.
-data:     (1) pib (2) ip buff found (3) ip buf actual (4) dma address
-severity: Error
-log:      Always
-action:   Stop traffic and reboot the system.
-*/
-char lpfc_mes0609[] =
-    "%sIP buffer-DMA address mismatch Data: x%llx x%llx x%llx x%llx";
-msgLogDef lpfc_msgBlk0609 = {
-	LPFC_LOG_MSG_IP_0609,
-	lpfc_mes0609,
-	lpfc_msgPreambleIPe,
-	LPFC_MSG_OPUT_GLOB_CTRL,
-	LPFC_LOG_MSG_TYPE_ERR,
-	LOG_IP,
-	ERRID_LOG_UNEXPECT_EVENT
-};
 
 /*
 msgName: lpfc_mes0610
@@ -3325,39 +3191,17 @@ msgLogDef lpfc_msgBlk0610 = {
  */
 
 /*
-msgName: lpfc_mes0700
-message:  Start nodev timer
-descript: A target disappeared from the Fibre Channel network. If the 
-          target does not return within nodev-tmo timeout all I/O to 
-          the target will fail.
-data:     (1) nlp_DID (2) nlp_flag (3) nlp_state (4) nlp
-severity: Information
-log:      LOG_FCP verbose
-action:   No action needed, informational
-*/
-char lpfc_mes0700[] = "%sStart nodev timer Data: x%x x%x x%x x%x";
-msgLogDef lpfc_msgBlk0700 = {
-	LPFC_LOG_MSG_FP_0700,
-	lpfc_mes0700,
-	lpfc_msgPreambleFPi,
-	LPFC_MSG_OPUT_GLOB_CTRL,
-	LPFC_LOG_MSG_TYPE_INFO,
-	LOG_FCP,
-	ERRID_LOG_UNEXPECT_EVENT
-};
-
-/*
 msgName: lpfc_mes0701
 message:  Issue Abort Task Set to TGT <num> LUN <num>
 descript: The SCSI layer detected that it needs to abort all I/O 
           to a specific device. This results in an FCP Task 
           Management command to abort the I/O in progress. 
-data:     (1) rpi (2) flags
+data:     (1) scsi_id (2) lun_id (1) (3) rpi (4) flags
 severity: Information
 log:      LOG_FCP verbose
 action:   Check state of device in question. 
 */
-char lpfc_mes0701[] = "%sIssue Abort Task Set to TGT %d LUN %d Data: x%x x%x";
+char lpfc_mes0701[] = "%sIssue Abort Task Set to TGT x%x LUN x%llx Data: x%x x%x";
 msgLogDef lpfc_msgBlk0701 = {
 	LPFC_LOG_MSG_FP_0701,
 	lpfc_mes0701,
@@ -3396,58 +3240,15 @@ message:  Issue LUN Reset to TGT <num> LUN <num>
 descript: The SCSI layer detected that it needs to abort all I/O 
           to a specific device. This results in an FCP Task 
           Management command to abort the I/O in progress. 
-data:     (1) rpi (2) flags
+data:     (1) scsi_id (2) lun_id (3) rpi (4) flags
 severity: Information
 log:      LOG_FCP verbose
 action:   Check state of device in question. 
 */
-char lpfc_mes0703[] = "%sIssue LUN Reset to TGT %d LUN %d Data: x%x x%x";
+char lpfc_mes0703[] = "%sIssue LUN Reset to TGT x%x LUN x%llx Data: x%x x%x";
 msgLogDef lpfc_msgBlk0703 = {
 	LPFC_LOG_MSG_FP_0703,
 	lpfc_mes0703,
-	lpfc_msgPreambleFPi,
-	LPFC_MSG_OPUT_GLOB_CTRL,
-	LPFC_LOG_MSG_TYPE_INFO,
-	LOG_FCP,
-	ERRID_LOG_UNEXPECT_EVENT
-};
-
-/*
-msgName: lpfc_mes0706
-message:  Start nodev timer
-descript: A target disappeared from the Fibre Channel network. If the 
-          target does not return within nodev-tmo timeout all I/O to 
-          the target will fail.
-data:     (1) nlp_DID (2) nlp_flag (3) nlp_state (4) nlp
-severity: Information
-log:      LOG_FCP verbose
-action:   No action needed, informational
-*/
-char lpfc_mes0706[] = "%sStart nodev timer Data: x%x x%x x%x x%x";
-msgLogDef lpfc_msgBlk0706 = {
-	LPFC_LOG_MSG_FP_0706,
-	lpfc_mes0706,
-	lpfc_msgPreambleFPi,
-	LPFC_MSG_OPUT_GLOB_CTRL,
-	LPFC_LOG_MSG_TYPE_INFO,
-	LOG_FCP,
-	ERRID_LOG_UNEXPECT_EVENT
-};
-
-/*
-msgName: lpfc_mes0710
-message:  Iodone <target>/<lun> error <result> SNS <lp> <lp3>
-descript: This error indicates the FC driver is returning SCSI 
-          command to the SCSI layer in error or with sense data.
-data:     (1) retry (2) resid
-severity: Information
-log:      LOG_FCP verbose
-action:   No action needed, informational
-*/
-char lpfc_mes0710[] = "%sIodone <%d/%d> error x%x SNS x%x x%x Data: x%x x%x";
-msgLogDef lpfc_msgBlk0710 = {
-	LPFC_LOG_MSG_FP_0710,
-	lpfc_mes0710,
 	lpfc_msgPreambleFPi,
 	LPFC_MSG_OPUT_GLOB_CTRL,
 	LPFC_LOG_MSG_TYPE_INFO,
@@ -3465,7 +3266,7 @@ severity: Error
 log:      Always
 action:   Check state of device in question.
 */
-char lpfc_mes0712[] = "%sSCSI layer issued abort device Data: x%x x%x";
+char lpfc_mes0712[] = "%sSCSI layer issued abort device Data: x%x x%llx";
 msgLogDef lpfc_msgBlk0712 = {
 	LPFC_LOG_MSG_FP_0712,
 	lpfc_mes0712,
@@ -3486,7 +3287,7 @@ severity: Error
 log:      Always
 action:   Check state of target in question.
 */
-char lpfc_mes0713[] = "%sSCSI layer issued Target Reset Data: x%x x%x";
+char lpfc_mes0713[] = "%sSCSI layer issued Target Reset Data: x%x x%llx";
 msgLogDef lpfc_msgBlk0713 = {
 	LPFC_LOG_MSG_FP_0713,
 	lpfc_mes0713,
@@ -3565,13 +3366,13 @@ msgLogDef lpfc_msgBlk0717 = {
 msgName: lpfc_mes0729
 message:  FCP cmd <cmnd> failed <target>/<lun>
 descript: The specifed device failed an FCP command. 
-data:     (1) status (2) result (3) xri (4) iotag
+data:     (1) cmnd (2) scsi_id (3) lun_id (4) status (5) result (6) xri (7) iotag
 severity: Warning
 log:      LOG_FCP verbose
 action:   Check the state of the target in question.
 */
 char lpfc_mes0729[] =
-    "%sFCP cmd x%x failed <%d/%d> status: x%x result: x%x Data: x%x x%x";
+    "%sFCP cmd x%x failed, x%x x%llx, status: x%x result: x%x Data: x%x x%x";
 msgLogDef lpfc_msgBlk0729 = {
 	LPFC_LOG_MSG_FP_0729,
 	lpfc_mes0729,
@@ -3666,8 +3467,8 @@ msgLogDef lpfc_msgBlk0737 = {
 
 /*
 msgName: lpfc_mes0738
-message:  Scheduler recieved Queue Full status from FCP device <tgt> <lun>.
-descript: Scheduler recieved a Queue Full error status from specified FCP
+message:  Scheduler received Queue Full status from FCP device <tgt> <lun>.
+descript: Scheduler received a Queue Full error status from specified FCP
           device.
 data:     (1) qfull_retry_count (2) qfull_retries (3) currentOutstanding
           (4) maxOutstanding
@@ -3676,7 +3477,7 @@ log:      LOG_FCP verbose
 action:   No action needed, informational
 */
 char lpfc_mes0738[] =
-    "%sScheduler recieved Queue Full status from FCP device %d %d Data: x%x x%x x%x x%x";
+    "%sScheduler received Queue Full status from FCP device %d %d Data: x%x x%x x%x x%x";
 msgLogDef lpfc_msgBlk0738 = {
 	LPFC_LOG_MSG_FP_0738,
 	lpfc_mes0738,
@@ -3696,7 +3497,7 @@ severity: Information
 log:      LOG_FCP verbose
 action:   No action needed, informational
 */
-char lpfc_mes0747[] = "%sCmpl Target Reset Data: x%x x%x x%x x%x x%x"; 
+char lpfc_mes0747[] = "%sCmpl Target Reset Data: x%x x%llx x%x x%x x%x"; 
 msgLogDef lpfc_msgBlk0747 = {
 	LPFC_LOG_MSG_FP_0747,
 	lpfc_mes0747,
@@ -3716,7 +3517,7 @@ severity: Information
 log:      LOG_FCP verbose
 action:   No action needed, informational
 */
-char lpfc_mes0748[] = "%sCmpl LUN Reset Data: x%x x%x x%x x%x x%x"; 
+char lpfc_mes0748[] = "%sCmpl LUN Reset Data: x%x x%llx x%x x%x x%x"; 
 msgLogDef lpfc_msgBlk0748 = {
 	LPFC_LOG_MSG_FP_0748,
 	lpfc_mes0748,
@@ -3736,7 +3537,7 @@ severity: Information
 log:      LOG_FCP verbose
 action:   No action needed, informational
 */
-char lpfc_mes0749[] = "%sCmpl Abort Task Set Data: x%x x%x x%x x%x x%x"; 
+char lpfc_mes0749[] = "%sCmpl Abort Task Set Data: x%x x%llx x%x x%x x%x"; 
 msgLogDef lpfc_msgBlk0749 = {
 	LPFC_LOG_MSG_FP_0749,
 	lpfc_mes0749,
@@ -4459,26 +4260,6 @@ msgLogDef lpfc_msgBlk1604 = {
 	lpfc_msgPreambleLDe,
 	LPFC_MSG_OPUT_GLOB_CTRL,
 	LPFC_LOG_MSG_TYPE_ERR,
-	LOG_LIBDFC,
-	ERRID_LOG_UNEXPECT_EVENT
-};
-
-/*
-msgName: lpfc_mes1605
-message:  Issue Report LUN on NPort <nlp_DID>
-descript: The driver issued an Libdfc REPORT_LUN SCSI command to a FCP target.
-data:     (1) nlp_failMask (2) nlp_state (3) nlp_rpi
-severity: Information
-log:      LOG_LIBDFC verbose
-action:   No action needed, informational
-*/
-char lpfc_mes1605[] = "%sIssue Report LUN on NPort x%x Data: x%x x%x x%x";
-msgLogDef lpfc_msgBlk1605 = {
-	LPFC_LOG_MSG_IO_1605,
-	lpfc_mes1605,
-	lpfc_msgPreambleLDi,
-	LPFC_MSG_OPUT_GLOB_CTRL,
-	LPFC_LOG_MSG_TYPE_INFO,
 	LOG_LIBDFC,
 	ERRID_LOG_UNEXPECT_EVENT
 };

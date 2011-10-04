@@ -43,6 +43,9 @@ unsigned long volatile diskdump_base_jiffies;
 static unsigned long long timestamp_base;
 static unsigned long timestamp_hz;
 
+/* notifiers to be called before starting dump */
+struct notifier_block *disk_dump_notifier_list;
+
 #define DISKDUMP_NUM_TASKLETS	8
 
 /*
@@ -55,6 +58,21 @@ static struct tasklet_struct	*diskdump_tasklets[DISKDUMP_NUM_TASKLETS];
 static LIST_HEAD(diskdump_timers);
 static LIST_HEAD(diskdump_taskq);
 
+static void (*diskdump_poll_func)(void *);
+static void *diskdump_poll_device;
+
+void diskdump_register_poll(void *device, void (*poll_func)(void *))
+{
+	diskdump_poll_device = device;
+	diskdump_poll_func = poll_func;
+}
+
+static int woken;
+
+void _diskdump_wake_up(wait_queue_head_t *q, unsigned int mode, int nr_exclusive)
+{
+	woken = 1;
+}
 
 static int store_tasklet(struct tasklet_struct *tasklet)
 {
@@ -173,6 +191,32 @@ void diskdump_update(void)
 	}
 }
 
+void _diskdump_schedule(void)
+{
+	woken = 0;
+	while (!woken) {
+		diskdump_poll_func(diskdump_poll_device);
+		udelay(100);
+		diskdump_update();
+	}
+}
+
+signed long _diskdump_schedule_timeout(signed long timeout)
+{
+	unsigned long expire;
+
+	expire = timeout + jiffies;
+	woken = 0;
+	while (time_before(jiffies, expire)) {
+		diskdump_poll_func(diskdump_poll_device);
+		udelay(100);
+		diskdump_update();
+		if (woken)
+			return (signed long)(expire - jiffies);
+	}
+	return 0;
+}
+
 void diskdump_lib_init(void)
 {
 	unsigned long long t;
@@ -194,6 +238,7 @@ void diskdump_lib_exit(void)
 	jiffies = diskdump_base_jiffies;
 }
 
+EXPORT_SYMBOL(disk_dump_notifier_list);
 EXPORT_SYMBOL(diskdump_lib_init);
 EXPORT_SYMBOL(diskdump_lib_exit);
 EXPORT_SYMBOL(diskdump_update);
@@ -202,5 +247,9 @@ EXPORT_SYMBOL(_diskdump_del_timer);
 EXPORT_SYMBOL(_diskdump_mod_timer);
 EXPORT_SYMBOL(_diskdump_tasklet_schedule);
 EXPORT_SYMBOL(_diskdump_schedule_task);
+EXPORT_SYMBOL(_diskdump_schedule);
+EXPORT_SYMBOL(_diskdump_schedule_timeout);
+EXPORT_SYMBOL(_diskdump_wake_up);
+EXPORT_SYMBOL(diskdump_register_poll);
 
 MODULE_LICENSE("GPL");

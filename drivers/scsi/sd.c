@@ -486,6 +486,7 @@ static int sd_open(struct inode *inode, struct file *filp)
 	int target, retval = -ENXIO;
 	Scsi_Device * SDev;
 	target = DEVICE_NR(inode->i_rdev);
+	struct request_queue *q;
 
 	SCSI_LOG_HLQUEUE(1, printk("target=%d, max=%d\n", target, sd_template.dev_max));
 
@@ -514,11 +515,19 @@ static int sd_open(struct inode *inode, struct file *filp)
 	 * Module unloading must be prevented
 	 */
 	SDev = rscsi_disks[target].device;
-	if (SDev->host->hostt->module)
-		__MOD_INC_USE_COUNT(SDev->host->hostt->module);
-	if (sd_template.module)
-		__MOD_INC_USE_COUNT(sd_template.module);
-	SDev->access_count++;
+	q = &SDev->request_queue;
+	spin_lock_irq(q->queue_lock);
+	if (SDev->online) {
+		if (SDev->host->hostt->module)
+			__MOD_INC_USE_COUNT(SDev->host->hostt->module);
+		if (sd_template.module)
+			__MOD_INC_USE_COUNT(sd_template.module);
+		SDev->access_count++;
+		spin_unlock_irq(q->queue_lock);
+	} else {
+		spin_unlock_irq(q->queue_lock);
+		return -ENODEV;
+	}
 
 	if (rscsi_disks[target].device->removable) {
 		SDev->allow_revalidate = 1;
@@ -569,11 +578,13 @@ static int sd_open(struct inode *inode, struct file *filp)
 	return 0;
 
 error_out:
+	spin_lock_irq(q->queue_lock);
 	SDev->access_count--;
 	if (SDev->host->hostt->module)
 		__MOD_DEC_USE_COUNT(SDev->host->hostt->module);
 	if (sd_template.module)
 		__MOD_DEC_USE_COUNT(sd_template.module);
+	spin_unlock_irq(q->queue_lock);
 	return retval;	
 }
 

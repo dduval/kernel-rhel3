@@ -56,7 +56,7 @@ ENTRY(ia32_syscall)
 	cld
 	SAVE_ARGS
 	GET_CURRENT(%r10)
-	testl $PT_TRACESYS|PT_AUDITED,tsk_ptrace(%r10) 
+	testl $PT_TRACESYS|PT_AUDITED|PT_SINGLESTEP,tsk_ptrace(%r10) 
 	jne  ia32_tracesys
 	cmpl $(IA32_NR_syscalls),%eax
 	jae  ia32_badsys

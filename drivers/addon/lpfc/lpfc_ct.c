@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_ct.c 1.63.1.2 2004/05/09 10:58:01EDT jselx Exp  $
+ * $Id: lpfc_ct.c 1.2 2004/11/02 11:28:58EST sf_support Exp  $
  *
  * Fibre Channel SCSI LAN Device Driver CT support
  */
@@ -142,6 +142,8 @@ lpfc_ct_unsol_event(lpfcHBA_t * phba,
 		icmd->ulpBdeCount = 0;
 	}
 
+	list_del(&head);
+
 	/*
 	 * if not early-exiting and there is p_mbuf,
 	 * then do  FC_REG_CT_EVENT for HBAAPI libdfc event handling
@@ -158,14 +160,16 @@ lpfc_ct_unsol_event(lpfcHBA_t * phba,
 	}
 
 exit_unsol_event:
-	list_for_each_safe(curr, next, &p_mbuf->list) {
-		matp = list_entry(curr, DMABUF_t, list);
-		lpfc_mbuf_free(phba, matp->virt, matp->phys);
-		list_del(&matp->list);
-		kfree(matp);
+	if (p_mbuf) {
+		list_for_each_safe(curr, next, &p_mbuf->list) {
+			matp = list_entry(curr, DMABUF_t, list);
+			lpfc_mbuf_free(phba, matp->virt, matp->phys);
+			list_del(&matp->list);
+			kfree(matp);
+		}
+		lpfc_mbuf_free(phba, p_mbuf->virt, p_mbuf->phys);
+		kfree(p_mbuf);
 	}
-	lpfc_mbuf_free(phba, p_mbuf->virt, p_mbuf->phys);
-	kfree(p_mbuf);
 	return;
 }
 
@@ -422,12 +426,10 @@ lpfc_alloc_ct_rsp(lpfcHBA_t * phba, int cmdcode, ULP_BDE64 * bpl, uint32_t size,
 int
 lpfc_ns_rsp(lpfcHBA_t * phba, DMABUF_t * mp, uint32_t Size)
 {
-	lpfcCfgParam_t *clp;
 	SLI_CT_REQUEST *Response;
 	LPFC_NODELIST_t *ndlp, *new_ndlp;
 	struct list_head *listp, *pos, *pos_tmp;
 	struct list_head *node_list[4];
-	LPFCSCSITARGET_t *targetp;
 	DMABUF_t *mlast, *mhead;
 	uint32_t *ctptr;
 	uint32_t Did;
@@ -435,7 +437,6 @@ lpfc_ns_rsp(lpfcHBA_t * phba, DMABUF_t * mp, uint32_t Size)
 	int Cnt, new_node, i;
 	struct list_head head, *curr, *next;
 
-	clp = &phba->config[0];
 	ndlp = 0;
 
 	lpfc_set_disctmo(phba);
@@ -498,8 +499,16 @@ lpfc_ns_rsp(lpfcHBA_t * phba, DMABUF_t * mp, uint32_t Size)
 				    lpfc_findnode_did(phba, NLP_SEARCH_ALL,
 						      Did);
 				if (ndlp) {
-					lpfc_disc_state_machine(phba, ndlp, 0,
-							NLP_EVT_DEVICE_ADD);
+					/*
+					 * Event NLP_EVT_DEVICE_ADD will trigger ADISC to be
+					 * sent to the N_port after receiving a LOGO from it.
+					 * Don't call state machine if NLP_LOGO_ACC is set
+					 * Let lpfc_cmpl_els_logo_acc() to handle this node
+					 */
+					if (!(ndlp->nlp_flag & NLP_LOGO_ACC)) {
+						lpfc_disc_state_machine(phba, ndlp, (void *)0,
+									NLP_EVT_DEVICE_ADD);
+					}
 				} else {
 					new_node = 1;
 					if ((ndlp = (LPFC_NODELIST_t *)
@@ -583,53 +592,9 @@ lpfc_ns_rsp(lpfcHBA_t * phba, DMABUF_t * mp, uint32_t Size)
 				continue;	
 			}
 
-			targetp = ndlp->nlp_Target;
-
-			/* Make sure nodev tmo is NOT running so DEVICE_RM
-			   really removes it */
-			if (ndlp->nlp_tmofunc.function) {
-				lpfc_stop_timer((struct clk_data *)
-						ndlp->nlp_tmofunc.data);
-				ndlp->nlp_flag &= ~(NLP_NODEV_TMO
-						    | NLP_DELAY_TMO);
-				ndlp->nlp_rflag &= ~NLP_NPR_ACTIVE;
-			}
-
 			lpfc_disc_state_machine(phba, ndlp, 0,
 						NLP_EVT_DEVICE_RM);
 
-			/* If the node is an FCP target, go into NPort Recovery
-			 * mode to give it a chance to come back.
-			 */
-			if (targetp) {
-				if (clp[LPFC_CFG_HOLDIO].a_current) {
-					targetp->targetFlags |= FC_NPR_ACTIVE;
-					if (targetp->tmofunc.function) {
-						lpfc_stop_timer(
-							(struct clk_data *)
-							targetp->tmofunc.data);
-					}
-				} else {
-					if (clp[LPFC_CFG_NODEV_TMO].a_current) {
-						targetp->targetFlags |=
-							FC_NPR_ACTIVE;
-						if (targetp->tmofunc.function) {
-							lpfc_stop_timer((struct
-								clk_data *)
-								targetp->
-								tmofunc.data);
-						}
-
-						lpfc_start_timer(phba,
-							clp[LPFC_CFG_NODEV_TMO]
-								 .a_current,
-							&targetp->tmofunc,
-							lpfc_npr_timeout,
-							(unsigned long)targetp,
-							0);
-					}
-				}
-			}
 		}
 	}
 
@@ -796,6 +761,15 @@ lpfc_cmpl_ct_cmd_gid_ft(lpfcHBA_t * phba,
 	bmp = (DMABUF_t *) cmdiocb->context3;
 
 	irsp = &rspiocb->iocb;
+
+	/*
+	 * If the iocb is aborted by the driver do not retry it.
+	 */
+        if ((irsp->ulpStatus ) &&
+            ((irsp->un.ulpWord[4] == IOERR_SLI_DOWN)||
+	     (irsp->un.ulpWord[4] == IOERR_SLI_ABORTED)))
+                goto out;
+
 	if (irsp->ulpStatus) {
 		/* Check for retry */
 		if (phba->fc_ns_retry < LPFC_MAX_NS_RETRY) {
@@ -1387,6 +1361,60 @@ lpfc_fdmi_cmd(lpfcHBA_t * phba, LPFC_NODELIST_t * ndlp, int cmdcode)
 				ab->EntryCnt++;
 				size += FOURBYTES + len;
 				break;
+			case PCI_DEVICE_ID_HELIOS:
+				ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) rh +
+							  size);
+				ae->ad.bits.AttrType = be16_to_cpu(MODEL);
+				strcpy((char *)ae->un.Model, "LP11000");
+				len = strlen((char *)ae->un.Model);
+				len += (len & 3) ? (4 - (len & 3)) : 4;
+				ae->ad.bits.AttrLen =
+				    be16_to_cpu(FOURBYTES + len);
+				ab->EntryCnt++;
+				size += FOURBYTES + len;
+
+				/* #5 HBA attribute entry */
+				ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) rh +
+							  size);
+				ae->ad.bits.AttrType =
+				    be16_to_cpu(MODEL_DESCRIPTION);
+				strcpy((char *)ae->un.ModelDescription,
+				       "Emulex LightPulse LP1100 4 Gigabit PCI "
+				       "Fibre Channel Adapter");
+				len = strlen((char *)ae->un.ModelDescription);
+				len += (len & 3) ? (4 - (len & 3)) : 4;
+				ae->ad.bits.AttrLen =
+				    be16_to_cpu(FOURBYTES + len);
+				ab->EntryCnt++;
+				size += FOURBYTES + len;
+				break;
+			case PCI_DEVICE_ID_JFLY:
+				ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) rh +
+							  size);
+				ae->ad.bits.AttrType = be16_to_cpu(MODEL);
+				strcpy((char *)ae->un.Model, "LP1150");
+				len = strlen((char *)ae->un.Model);
+				len += (len & 3) ? (4 - (len & 3)) : 4;
+				ae->ad.bits.AttrLen =
+				    be16_to_cpu(FOURBYTES + len);
+				ab->EntryCnt++;
+				size += FOURBYTES + len;
+
+				/* #5 HBA attribute entry */
+				ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) rh +
+							  size);
+				ae->ad.bits.AttrType =
+				    be16_to_cpu(MODEL_DESCRIPTION);
+				strcpy((char *)ae->un.ModelDescription,
+				       "Emulex LightPulse LP1150 4 Gigabit PCI "
+				       "Fibre Channel Adapter");
+				len = strlen((char *)ae->un.ModelDescription);
+				len += (len & 3) ? (4 - (len & 3)) : 4;
+				ae->ad.bits.AttrLen =
+				    be16_to_cpu(FOURBYTES + len);
+				ab->EntryCnt++;
+				size += FOURBYTES + len;
+				break;
 			case PCI_DEVICE_ID_LP101:
 				ae = (ATTRIBUTE_ENTRY *) ((uint8_t *) rh +
 							  size);
@@ -1531,6 +1559,9 @@ lpfc_fdmi_cmd(lpfcHBA_t * phba, LPFC_NODELIST_t * ndlp, int cmdcode)
 			ae->ad.bits.AttrLen = be16_to_cpu(FOURBYTES + 4);
 			if (FC_JEDEC_ID(vp->rev.biuRev) == VIPER_JEDEC_ID)
 				ae->un.SupportSpeed = HBA_PORTSPEED_10GBIT;
+			else if (FC_JEDEC_ID(vp->rev.biuRev) ==
+				  HELIOS_JEDEC_ID)
+				ae->un.SupportSpeed = HBA_PORTSPEED_4GBIT;
 			else if ((FC_JEDEC_ID(vp->rev.biuRev) ==
 				  CENTAUR_2G_JEDEC_ID)
 				 || (FC_JEDEC_ID(vp->rev.biuRev) ==
@@ -1968,6 +1999,28 @@ lpfc_get_hba_model_desc(lpfcHBA_t * phba, uint8_t * mdp, uint8_t * descp)
 			       "Emulex LightPulse LP101 2 Gigabit PCI Fibre "
 			       "Channel Adapter",
 			       62);
+		}
+		break;
+	case PCI_DEVICE_ID_HELIOS:
+		if (mdp) {
+			memcpy(mdp, "LP11000", 9);
+		}
+		if (descp) {
+			memcpy(descp,
+			       "Emulex LightPulse LP11000 4 Gigabit PCI Fibre "
+			       "Channel Adapter",
+			       64);
+		}
+		break;
+	case PCI_DEVICE_ID_JFLY:
+		if (mdp) {
+			memcpy(mdp, "LP1150", 8);
+		}
+		if (descp) {
+			memcpy(descp,
+			       "Emulex LightPulse LP1150 4 Gigabit PCI Fibre "
+			       "Channel Adapter",
+			       63);
 		}
 		break;
 	}

@@ -15,6 +15,7 @@ extern unsigned char esr_disable;
 extern unsigned char int_delivery_mode;
 extern unsigned int int_dest_addr_mode;
 extern int cyclone_setup(char*);
+extern int usb_early_handoff;
 
 static inline void detect_clustered_apic(char* oem, char* prod)
 {
@@ -32,6 +33,7 @@ static inline void detect_clustered_apic(char* oem, char* prod)
 		esr_disable = 1;
 		/*Start cyclone clock*/
 		cyclone_setup(0);
+		usb_early_handoff = 1;
 	}
 	else if (!strncmp(oem, "IBM ENSW", 8) && !strncmp(prod, "RUTHLESS SMP", 9)){
 		clustered_apic_mode = CLUSTERED_APIC_XAPIC;
@@ -41,6 +43,7 @@ static inline void detect_clustered_apic(char* oem, char* prod)
 		esr_disable = 1;
 		/*Start cyclone clock*/
 		cyclone_setup(0);
+		usb_early_handoff = 1;
 	}
 	else if (!strncmp(oem, "IBM NUMA", 8)){
 		clustered_apic_mode = CLUSTERED_APIC_NUMAQ;

@@ -25,6 +25,7 @@
 #include <asm/irq.h>
 #include <asm/mmx.h>
 #include <asm/nmi.h>
+#include <linux/nmi.h>
 #include <asm/desc.h>
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
@@ -127,9 +128,12 @@ EXPORT_SYMBOL(smp_call_function);
 EXPORT_SYMBOL(flush_tlb_page);
 #endif
 
-#if defined(CONFIG_X86_LOCAL_APIC) && defined(CONFIG_PM)
+#ifdef CONFIG_X86_LOCAL_APIC
+EXPORT_SYMBOL_GPL(touch_nmi_watchdog);
+#ifdef CONFIG_PM
 EXPORT_SYMBOL_GPL(set_nmi_pm_callback);
 EXPORT_SYMBOL_GPL(unset_nmi_pm_callback);
+#endif
 #endif
 
 #ifdef CONFIG_MCA
@@ -240,3 +244,5 @@ EXPORT_SYMBOL(swiotlb);
 
 extern int page_is_ram(unsigned long);
 EXPORT_SYMBOL_GPL(page_is_ram);
+extern int kern_addr_valid(unsigned long addr);
+EXPORT_SYMBOL_GPL(kern_addr_valid);

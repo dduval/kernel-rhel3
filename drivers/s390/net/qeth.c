@@ -1,6 +1,6 @@
 /*
  *
- * linux/drivers/s390/net/qeth.c ($Revision: 1.337 $)
+ * linux/drivers/s390/net/qeth.c ($Revision: 1.337.4.6 $)
  *
  * Linux on zSeries OSA Express and HiperSockets support
  *
@@ -156,6 +156,7 @@ void volatile qeth_eyecatcher(void)
 #include <asm/irq.h>
 #include <asm/s390dyn.h>
 #include <asm/debug.h>
+#include <asm/processor.h>
 
 #include <asm/qdio.h>
 
@@ -171,7 +172,7 @@ MODULE_PARM_DESC(qeth_sparebufs,"the number of pre-allocated spare buffers " \
 static int global_stay_in_mem=0;
 
 /****************** MODULE STUFF **********************************/
-#define VERSION_QETH_C "$Revision: 1.337 $"
+#define VERSION_QETH_C "$Revision: 1.337.4.6 $"
 static const char *version="qeth S/390 OSA-Express driver (" \
 	VERSION_QETH_C "/" VERSION_QETH_H "/" VERSION_QETH_MPC_H
 	QETH_VERSION_IPV6 QETH_VERSION_VLAN ")";
@@ -307,7 +308,8 @@ static void qeth_wait_nonbusy(unsigned int timeout)
 	set_task_state(current,TASK_RUNNING);
 }
 
-static void qeth_get_mac_for_ipm(__u32 ipm,char *mac,struct net_device *dev) {
+static inline void qeth_get_mac_for_ipm(__u32 ipm,char *mac,
+					struct net_device *dev) {
 	if (dev->type==ARPHRD_IEEE802_TR)
 		ip_tr_mc_map(ipm,mac);
 	else
@@ -419,7 +421,7 @@ static int inline my_spin_lock_nonbusy(qeth_card_t *card,spinlock_t *lock)
 #define QETH_GET_ADDR(x) ((__u32)x)
 #endif /* CONFIG_ARCH_S390X */
 
-static int qeth_does_card_exist(qeth_card_t *card)
+static inline int qeth_does_card_exist(qeth_card_t *card)
 {
 	qeth_card_t *c=firstcard;
 	int rc=0;
@@ -1062,7 +1064,7 @@ static int qeth_wait_for_event(atomic_t *var,unsigned int timeout)
 	return retval;
 }
 
-static int qeth_get_spare_buf(void)
+static inline int qeth_get_spare_buf(void)
 {
 	int i=0;
 	char dbf_text[15];
@@ -1147,7 +1149,7 @@ static inline void qeth_clear_input_buffer(qeth_card_t *card,int bufno)
 	}
 }
 
-static void qeth_queue_input_buffer(qeth_card_t *card,int bufno,
+static inline void qeth_queue_input_buffer(qeth_card_t *card,int bufno,
 				    unsigned int under_int)
 {
 	int count=0,start=0,stop=0,pos;
@@ -1502,7 +1504,8 @@ static void qeth_transform_outbound_addrs(qeth_card_t *card,
 		}
 	}
 }
-static void qeth_get_linux_addrs_for_buffer(qeth_card_t *card,int buffer_no)
+static inline void qeth_get_linux_addrs_for_buffer(qeth_card_t *card,
+						   int buffer_no)
 {
 	int i;
 	void *ptr;
@@ -1518,7 +1521,7 @@ static void qeth_get_linux_addrs_for_buffer(qeth_card_t *card,int buffer_no)
 	}
 }
 
-static void qeth_read_in_buffer(qeth_card_t *card,int buffer_no)
+static inline void qeth_read_in_buffer(qeth_card_t *card,int buffer_no)
 {
         struct sk_buff *skb;
         void *hdr_ptr;
@@ -2640,11 +2643,36 @@ static int qeth_hard_start_xmit(struct sk_buff *skb,struct net_device *dev)
         qeth_card_t *card;
 	char dbf_text[15];
 	int result;
+	unsigned long stackptr;
+	static int floodcount = 0;
 
         card=(qeth_card_t*)(dev->priv);
 
         if (skb==NULL)
 		return 0;
+
+#ifdef CONFIG_ARCH_S390X
+	asm volatile ("lgr %0,15" : "=d" (stackptr));
+#else /* CONFIG_ARCH_S390X */
+	asm volatile ("lr %0,15" : "=d" (stackptr));
+#endif /* CONFIG_ARCH_S390X */
+	/*
+	 * Prevent stack overflows.
+	 * Normal and async stack is both 8k on s390 and 16k on s390x,
+	 * so it doesn't matter whether we're in an interrupt
+	 * - This is a lie, it's 8KB on both architectures --zaitcev
+	 */
+	if ((stackptr & STACK_PTR_MASK) <
+	    (sizeof(struct task_struct) + WORST_CASE_STACK_USAGE)) {
+		sprintf(dbf_text,"STOF%4x",card->irq0);
+		QETH_DBF_TEXT1(1,trace,dbf_text);
+		if (floodcount < 100) {
+			PRINT_ERR("Possible stack overflow (%lu)\n", stackptr);
+			show_trace((unsigned long *)stackptr);
+			floodcount++;
+		}
+		return -EBUSY;
+	}
 
 #ifdef QETH_DBF_LIKE_HELL
 	QETH_DBF_HEX4(0,data,skb->data,__max(QETH_DBF_DATA_LEN,skb->len));

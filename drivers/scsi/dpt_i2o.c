@@ -65,6 +65,7 @@ MODULE_DESCRIPTION("Adaptec I2O RAID Driver");
 #include "scsi.h"
 #include "hosts.h"
 #include "sd.h"
+#include "scsi_dump.h"
 
 #include "dpt/dptsig.h"
 #include "dpti.h"
@@ -414,7 +415,7 @@ static int adpt_queue(Scsi_Cmnd * cmd, void (*done) (Scsi_Cmnd *))
 		return 1;
 	}
 
-	if(cmd->eh_state != SCSI_STATE_QUEUED){
+	if(!dpti_crashdump_mode() && (cmd->eh_state != SCSI_STATE_QUEUED)){
 		// If we are not doing error recovery
 		mod_timer(&cmd->eh_timeout, timeout);
 	}
@@ -3330,7 +3331,140 @@ static static void adpt_delay(int millisec)
 
 #endif
 
+#if defined(CONFIG_DISKDUMP) || defined(CONFIG_DISKDUMP_MODULE)
+static int
+adpt_i2o_sanity_check(Scsi_Device *device)
+{
+	adpt_hba* pHba = (adpt_hba*) device->host->hostdata[0];
+	struct adpt_device* pDev = NULL;
+
+	if(pHba == NULL) {
+		return -ENXIO;
+	}
+
+	pDev = pHba->channel[device->channel].device[device->id];
+	while(pDev) {
+		if(pDev->scsi_lun == device->lun) {
+			break;
+		}
+		pDev = pDev->next_lun;
+	}
+
+	if(pDev == NULL) {
+		return -ENXIO;
+	}
+ 
+	if(spin_is_locked(&adpt_post_wait_lock)) {
+		return -EBUSY;
+	}
+
+	return 0;
+}
+
+static int
+adpt_i2o_quiesce(Scsi_Device *SDev)
+{
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,5,1)
+	spin_lock_init(&io_request_lock);
+#endif
+	return 0;
+}
+
+static void adpt_isr_poll(adpt_hba* pHba)
+{
+	Scsi_Cmnd* cmd;
+	u32 m;
+	ulong reply;
+	u32 status=0;
+	u32 context;
+	ulong flags = 0;
+
+	if (pHba == NULL ){
+		printk(KERN_WARNING"adpt_isr: NULL dev_id\n");
+		return;
+	}
+	spin_lock_irqsave(&io_request_lock, flags);
+	m = readl(pHba->reply_port);
+	if(m == EMPTY_QUEUE){
+		spin_unlock_irqrestore(&io_request_lock,flags);
+		return;
+	}
+	reply = (ulong)bus_to_virt(m);
+
+	if (readl(reply) & MSG_FAIL) {
+		u32 old_m = readl(reply+28); 
+		ulong msg;
+		u32 old_context;
+		PDEBUG("%s: Failed message\n",pHba->name);
+		if(old_m >= 0x100000){
+			printk(KERN_ERR"%s: Bad preserved MFA (%x)- dropping frame\n",pHba->name,old_m);
+			writel(m,pHba->reply_port);
+			spin_unlock_irqrestore(&io_request_lock,flags);
+			return;
+		}
+		// Transaction context is 0 in failed reply frame
+		msg = (ulong)(pHba->msg_addr_virt + old_m);
+		old_context = readl(msg+12);
+		writel(old_context, reply+12);
+		adpt_send_nop(pHba, old_m);
+	} 
+	context = readl(reply+8);
+	if(context & 0x40000000){ // IOCTL
+		ulong p = (ulong)(readl(reply+12));
+		if( p != 0) {
+			memcpy((void*)p, (void*)reply, REPLY_FRAME_SIZE * 4);
+		}
+		// All IOCTLs will also be post wait
+	}
+	if(context & 0x80000000){ // Post wait message
+		status = readl(reply+16);
+		if(status  >> 24){
+			status &=  0xffff; /* Get detail status */
+		} else {
+			status = I2O_POST_WAIT_OK;
+		}
+		if(!(context & 0x40000000)) {
+			cmd = (Scsi_Cmnd*) readl(reply+12); 
+			if(cmd != NULL) {
+				printk(KERN_WARNING"%s: Apparent SCSI cmd in Post Wait Context - cmd=%p context=%x\n", pHba->name, cmd, context);
+			}
+		}
+		adpt_i2o_post_wait_complete(context, status);
+	} else { // SCSI message
+		cmd = (Scsi_Cmnd*) readl(reply+12); 
+		if(cmd != NULL){
+			adpt_i2o_to_scsi(reply, cmd);
+		}
+	}
+	writel(m, pHba->reply_port);
+
+	spin_unlock_irqrestore(&io_request_lock, flags);
+	return;
+
+}
+
+static void
+adpt_i2o_poll(Scsi_Device *device)
+{
+        adpt_hba* pHba = (adpt_hba*) device->host->hostdata[0];
+
+	adpt_isr_poll(pHba);
+}
+
+static struct scsi_dump_ops dpt_i2o_dump_ops = {
+	.sanity_check	= adpt_i2o_sanity_check,
+	.quiesce	= adpt_i2o_quiesce,
+	.poll		= adpt_i2o_poll
+};
+static Scsi_Host_Template_dump driver_template_dump = DPT_I2O;
+#define driver_template	(driver_template_dump.hostt)
+
+#else
+
 static Scsi_Host_Template driver_template = DPT_I2O;
+
+#endif
+
 #include "scsi_module.c"
 EXPORT_NO_SYMBOLS;
 MODULE_LICENSE("GPL");

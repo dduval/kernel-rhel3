@@ -1183,6 +1183,8 @@ ptrace_disable (struct task_struct *child)
 	child_psr->ss = 0;
 	child_psr->tb = 0;
 
+	child->ptrace &= ~PT_SINGLESTEP;
+
 	/* Turn off flag indicating that the KRBS is sync'd with child's VM: */
 	child->thread.flags &= ~IA64_THREAD_KRBS_SYNCED;
 }
@@ -1284,6 +1286,7 @@ sys_ptrace (long request, pid_t pid, unsigned long addr, unsigned long data,
 			child->ptrace |= PT_TRACESYS;
 		else
 			child->ptrace &= ~PT_TRACESYS;
+		child->ptrace &= ~PT_SINGLESTEP;
 		child->exit_code = data;
 
 		/* make sure the single step/taken-branch trap bits are not set: */
@@ -1310,6 +1313,7 @@ sys_ptrace (long request, pid_t pid, unsigned long addr, unsigned long data,
 		/* make sure the single step/take-branch tra bits are not set: */
 		ia64_psr(pt)->ss = 0;
 		ia64_psr(pt)->tb = 0;
+		child->ptrace &= ~PT_SINGLESTEP;
 
 		/* Turn off flag indicating that the KRBS is sync'd with child's VM: */
 		child->thread.flags &= ~IA64_THREAD_KRBS_SYNCED;
@@ -1325,6 +1329,7 @@ sys_ptrace (long request, pid_t pid, unsigned long addr, unsigned long data,
 			goto out_tsk;
 
 		child->ptrace &= ~PT_TRACESYS;
+		child->ptrace |= PT_SINGLESTEP;
 		if (request == PTRACE_SINGLESTEP) {
 			ia64_psr(pt)->ss = 1;
 		} else {
@@ -1395,7 +1400,8 @@ asmlinkage void syscall_trace_enter(struct pt_regs *regs, unsigned long *bsp)
 
 asmlinkage void syscall_trace_leave(struct pt_regs *regs)
 {
-	if ((current->ptrace & (PT_PTRACED|PT_TRACESYS)) == (PT_PTRACED|PT_TRACESYS))
+	int ptrace = current->ptrace;
+	if ((ptrace & PT_PTRACED) && (ptrace & (PT_TRACESYS|PT_SINGLESTEP)))
 		syscall_trace();
 
 #if defined(CONFIG_AUDIT) || defined(CONFIG_AUDIT_MODULE)

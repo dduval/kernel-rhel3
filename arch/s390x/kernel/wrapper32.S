@@ -6,6 +6,7 @@
 *    Copyright (C) 2000 IBM Deutschland Entwicklung GmbH, IBM Corporation
 *    Author(s): Gerhard Tonn (ton@de.ibm.com),
 */ 
+#include <linux/config.h>
 
 	.globl  sys32_exit_wrapper 
 sys32_exit_wrapper:
@@ -1245,3 +1246,26 @@ sys32_exit_group_wrapper:
 sys32_set_tid_address_wrapper:
 	llgtr	%r2,%r2			# int *
 	jg	sys_set_tid_address	# branch to system call
+
+#ifdef CONFIG_EPOLL
+	.globl  sys_epoll_create_wrapper
+sys_epoll_create_wrapper:
+	lgfr	%r2,%r2			# int
+	jg	sys_epoll_create	# branch to system call
+
+	.globl  sys_epoll_ctl_wrapper
+sys_epoll_ctl_wrapper:
+	lgfr	%r2,%r2			# int
+	lgfr	%r3,%r3			# int
+	lgfr	%r4,%r4			# int
+	llgtr	%r5,%r5			# struct epoll_event *
+	jg	sys_epoll_ctl		# branch to system call
+
+	.globl  sys_epoll_wait_wrapper
+sys_epoll_wait_wrapper:
+	lgfr	%r2,%r2			# int
+	llgtr	%r3,%r3			# struct epoll_event *
+	lgfr	%r4,%r4			# int
+	lgfr	%r5,%r5			# int
+	jg	sys_epoll_wait		# branch to system call
+#endif /* CONFIG_EPOLL */

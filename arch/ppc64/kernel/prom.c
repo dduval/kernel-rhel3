@@ -1241,13 +1241,11 @@ prom_hold_cpus(unsigned long mem)
 
 		/* Init paca for secondary threads.   They start later. */
 		for (i=1; i < cpu_threads; i++) {
-			cpuid++;
-			if (cpuid >= NR_CPUS)
-				continue;
-			_xPaca[cpuid].xHwProcNum = interrupt_server[i];
 			prom_print_hex(interrupt_server[i]);
 			prom_print(RELOC(" : preparing thread ... "));
-			if (_naca->smt_state) {
+			if (_naca->smt_state && cpuid < NR_CPUS-1) {
+				cpuid++;
+				_xPaca[cpuid].xHwProcNum = interrupt_server[i];
 				set_bit(cpuid, &RELOC(cpu_available_map));
 				prom_print(RELOC("available"));
 			} else {

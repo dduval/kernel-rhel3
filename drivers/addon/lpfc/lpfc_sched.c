@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_sched.c 1.34 2004/04/30 09:40:48EDT jselx Exp  $
+ * $Id: lpfc_sched.c 1.34.1.7 2004/10/12 19:22:54EDT sf_support Exp  $
  */
 
 #include <linux/version.h>
@@ -130,7 +130,7 @@ lpfc_sched_continue_hba(lpfcHBA_t * hba)
 
 void
 lpfc_sched_sli_done(lpfcHBA_t * pHba,
-		   LPFC_IOCBQ_t * pIocbIn, LPFC_IOCBQ_t * pIocbOut)
+		    LPFC_IOCBQ_t * pIocbIn, LPFC_IOCBQ_t * pIocbOut)
 {
 	LPFC_SCSI_BUF_t *pCommand = (LPFC_SCSI_BUF_t *) pIocbIn->context1;
 	LPFCSCSILUN_t *plun = pCommand->pLun;
@@ -157,7 +157,7 @@ lpfc_sched_sli_done(lpfcHBA_t * pHba,
 	pHba->hbaSched.currentOutstanding--;
 
 	pci_dma_sync_single(pHba->pcidev, pCommand->dma_ext->phys, 
-				LPFC_SCSI_DMA_EXT_SIZE, PCI_DMA_FROMDEVICE);
+			    LPFC_SCSI_DMA_EXT_SIZE, PCI_DMA_FROMDEVICE);
 
 	fcprsp = pCommand->fcp_rsp;
 	if ((pCommand->status == IOSTAT_FCP_RSP_ERROR) &&
@@ -174,22 +174,15 @@ lpfc_sched_sli_done(lpfcHBA_t * pHba,
 				plun->lunSched.currentOutstanding,
 				plun->lunSched.maxOutstanding);
 
-		if ((plun->qfull_retries > 0) &&
-		    (pCommand->qfull_retry_count < plun->qfull_retries)) {
+		if (((plun->qfull_retries > 0) &&
+		     (pCommand->qfull_retry_count < plun->qfull_retries)) || 
+		    (plun->lunSched.currentOutstanding + plun->lunSched.q_cnt == 0)){
 			clp = &pHba->config[0];
 			if (clp[LPFC_CFG_DQFULL_THROTTLE_UP_TIME].a_current) {
 				lpfc_scsi_lower_lun_qthrottle(pHba, pCommand);
 			}
-			if (plun->qfull_retry_interval > 0) {
-				/*
-				 * force to retrying after delay 1 second
-				 */
-				lpfc_start_timer(pHba, 1, &plun->qfull_tmo_id,
-						 lpfc_qfull_retry, 
-						 (unsigned long)pCommand, 0);
-			} else {
-				lpfc_sched_queue_command(pHba, pCommand);
-			}
+			lpfc_sched_queue_command(pHba, pCommand);
+			plun->qcmdcnt++;
 			pCommand->qfull_retry_count++;
 			goto skipcmpl;
 		}
@@ -197,7 +190,7 @@ lpfc_sched_sli_done(lpfcHBA_t * pHba,
 
 	(pCommand->cmd_cmpl) (pHba, pCommand);
 
-      skipcmpl:
+ skipcmpl:
 
 	if (!doNotCheck) {
 		doNotCheck = 1;
@@ -215,196 +208,181 @@ lpfc_sched_check(lpfcHBA_t * hba)
 	return;
 }
 
-int
-process_command(lpfcHBA_t *hba, 
-		LPFC_SCHED_TARGET_t *targetSched,
-		LPFC_SCHED_LUN_t *lunSched,
-		int *stopSched)
-{
-	LPFC_SCSI_BUF_t *command=0;
-	LPFC_SLI_t *psli;
-	LPFC_NODELIST_t *ndlp;
-	int sliStatus;
-	LPFC_IOCBQ_t *pIocbq;
-	struct list_head *pos, *head, *next;
-	int nfail=0;
 
+static void    
+lpfc_sched_internal_check(lpfcHBA_t  *hba) 
+{
+	LPFC_SCHED_HBA_t  * hbaSched           = &hba->hbaSched;
+	LPFC_SLI_t        * psli;
+	LPFC_NODELIST_t   * ndlp;
+	int                numberOfFailedTargetChecks = 0;
+	int                didSuccessSubmit   = 0;    /* SLI optimization for Port signals */
+	int                stopSched          = 0;    /* used if SLI rejects on interloop */
+
+	/* get the elx_sli struct from phba */
 	psli = &hba->sli;
-	head = &lunSched-> commandList;
-	list_for_each_safe(pos, 
-			   next, 
-			   head) {
-					
-		command =
-			list_entry(pos,
-				   LPFC_SCSI_BUF_t,
-				   listentry);
-		list_del(pos);
-		--lunSched->q_cnt;
-
-		if (!command) {
-			nfail++;
-			continue;
-		}
-
-		ndlp = command->pLun->pnode;
-		if (ndlp == 0) {
-			nfail++;
-			lpfc_sched_queue_command(hba,
-						command);
-			continue;
-		}
-		
-		pIocbq = &command->cur_iocbq;
-		/*  Current assumption is let SLI queue it until it busy us */
-		
-		pIocbq->context1 = command;
-		pIocbq->iocb_cmpl = lpfc_sched_sli_done;
-								
-		/* put the RPI number and NODELIST info in the IOCB command */
-		pIocbq->iocb.ulpContext = ndlp->nlp_rpi;
-		if (ndlp->
-		    nlp_fcp_info & NLP_FCP_2_DEVICE) {
-			pIocbq->iocb.ulpFCP2Rcvy = 1;
-		}
-		pIocbq->iocb.ulpClass =
-			(ndlp->nlp_fcp_info & 0x0f);
-		
-		/* Get an iotag and finish setup of IOCB  */
-		pIocbq->iocb.ulpIoTag =
-			lpfc_sli_next_iotag(hba,
-					   &psli->
-					   ring[psli->
-						fcp_ring]);
-		if (pIocbq->iocb.ulpIoTag == 0) {
-			*stopSched = 1;
-			list_add(&command->listentry,
-				 head);
-			++lunSched->q_cnt;
-			break;
-		}
-		sliStatus = lpfc_sli_issue_iocb(hba,
-					       &psli->
-					       ring
-					       [psli->
-						fcp_ring],
-					       pIocbq,
-					       SLI_IOCB_RET_IOCB);
-		
-		switch (sliStatus) {
-		case IOCB_ERROR:
-		case IOCB_BUSY:
-			*stopSched = 1;
-			list_add(&command->listentry,
-				 head);
-			++lunSched->q_cnt;
-			break;
-			
-		case IOCB_SUCCESS:
-			lunSched->currentOutstanding++;
-			targetSched->currentOutstanding++;
-			hba->hbaSched.currentOutstanding++;
-			break;
-
-		default:
-			
-			break;
-		}
-	}
-	return nfail;
-}
-
-static void
-lpfc_sched_internal_check(lpfcHBA_t * hba)
-{
-	LPFC_SCHED_HBA_t *hbaSched = &hba->hbaSched;
-	int numberOfFailedTargetChecks = 0;
-	int stopSched = 0;	/* used if SLI rejects on interloop */
-	struct list_head *pos, *pos_tmp, *pos1, *pos1_tmp;
-
-
+   
 	/* Service the High Priority Queue first */
 	if (hba->hbaSched.q_cnt)
 		lpfc_sched_service_high_priority_queue(hba);
-
-	/* If targetCount is identically 0 then there are no Targets on the ring
-	   therefore no pending commands on any LUN
-	 */
-	if ((hbaSched->targetCount == 0) ||
-	    (hbaSched->status == LPFC_SCHED_STATUS_PAUSED))
+   
+	/* If targetCount is identically 0 then there are no Targets on the ring therefore
+	   no pending commands on any LUN           
+	*/
+	if ( (hbaSched->targetCount == 0) ||
+	     (hbaSched->status == LPFC_SCHED_STATUS_PAUSED) )   
 		return;
-
+   
 	/* We are going to cycle through the Targets
 	   on a round robin basis until we make a pass through
 	   with nothing to schedule. 
-	 */
+	*/
 
-	list_for_each_safe(pos, pos_tmp, &hbaSched->targetRing) {
-		if ((hbaSched->currentOutstanding < hbaSched->maxOutstanding) &&
-		    (numberOfFailedTargetChecks < hbaSched->targetCount)) {
-			LPFCSCSITARGET_t *target = list_entry(pos,
-							     LPFCSCSITARGET_t,
-							     listentry);
-			LPFC_SCHED_TARGET_t *targetSched = &target->targetSched;
-
-			int numberOfFailedLunChecks = 0;
-			if ((targetSched->currentOutstanding <
-			     targetSched->maxOutstanding)
-			    && (targetSched->status != LPFC_SCHED_STATUS_PAUSED)) {
-			
-				list_for_each_safe(pos1, pos1_tmp, &targetSched->lunRing) {
-					if (numberOfFailedLunChecks < targetSched->lunCount) {
-						LPFCSCSILUN_t *lun = list_entry(pos1,
-									       LPFCSCSILUN_t,
-									       listentry);
-						LPFC_SCHED_LUN_t *lunSched = &lun->lunSched;
-
-						if ((lunSched->currentOutstanding <
-						     lunSched->maxOutstanding)
-						    && (lunSched->status !=
-							LPFC_SCHED_STATUS_PAUSED)) {
-
-							numberOfFailedTargetChecks += process_command(hba,
-												      targetSched,
-												      lunSched,
-												      &stopSched);
-
-							/* 
-							 * Check if there is any pending command on the lun. If not 
-							 * remove the lun. If this is the last lun in the target, the
-							 * target also will get removed from the scheduler ring.
-							 */
-							if (list_empty(&lunSched->commandList))
-								lpfc_sched_remove_lun_from_ring
-									(hba, lun);
-							if (stopSched)
-								goto err_rtn;
-						}
-
-						/* This brace ends LUN window
-						   open */
-					} else {
-						goto err_rtn;
-					}
-					/* This brace ends While looping through
-					   LUNs on a Target */
-				}
-
-			}
-
-			if (numberOfFailedLunChecks >= targetSched->lunCount)
-				numberOfFailedTargetChecks++;
-			else
-				numberOfFailedTargetChecks = 0;
-		} /* if Target isn't pended */
-		else {
-			break;
+	while ( (stopSched == 0)                                            &&
+		(hbaSched->currentOutstanding < hbaSched->maxOutstanding) &&
+		(numberOfFailedTargetChecks < hbaSched->targetCount) ) {
+		LPFCSCSITARGET_t      *target      = hbaSched->nextTargetToCheck;
+		LPFC_SCHED_TARGET_t   *targetSched = &target->targetSched;
+		LPFCSCSITARGET_t      *newNext     = list_entry(target->listentry.next,
+								LPFCSCSITARGET_t,
+								listentry);
+		int                   numberOfFailedLunChecks = 0;
+      
+		if (target->listentry.next == &hbaSched->targetRing) {
+			newNext = list_entry( hbaSched->targetRing.next,
+					      LPFCSCSITARGET_t,
+					      listentry);
 		}
 
-	}			/* While looping through Targets on HBA */
- err_rtn:
+		if (( targetSched->currentOutstanding  < targetSched->maxOutstanding) &&
+		    ( targetSched->status != LPFC_SCHED_STATUS_PAUSED)) {
+			while ( numberOfFailedLunChecks < targetSched->lunCount ) {
+				LPFCSCSILUN_t      *lun        = target->targetSched.nextLunToCheck;
+				LPFC_SCHED_LUN_t   *lunSched   = &lun->lunSched;
+				LPFCSCSILUN_t      *newNextLun = list_entry(lun->listentry.next,
+									    LPFCSCSILUN_t,
+									    listentry);
+			   
+				if ( lun->listentry.next == &target->targetSched.lunRing ) {
+					newNextLun = list_entry(target->targetSched.lunRing.next,
+								LPFCSCSILUN_t,
+								listentry);
+				}
+
+				if (( lunSched->currentOutstanding < lunSched->maxOutstanding ) &&
+				    ( !(list_empty(&lunSched->commandList))) &&
+				    ( lunSched->status != LPFC_SCHED_STATUS_PAUSED)) {
+					LPFC_SCSI_BUF_t   *command;
+					int               sliStatus;
+					LPFC_IOCBQ_t      *pIocbq;
+					struct list_head *head;
+
+					head = lunSched->commandList.next;
+					command = list_entry(head,
+							     LPFC_SCSI_BUF_t,
+							     listentry);
+					list_del(head);
+					--lunSched->q_cnt;
+				   
+					if (!command) {
+						numberOfFailedLunChecks++;
+						targetSched->nextLunToCheck  = newNextLun;
+						continue;
+					}
+				   
+					ndlp = command->pLun->pnode;
+					if(ndlp == 0) {
+						numberOfFailedLunChecks++;
+						lpfc_sched_queue_command(hba,command);
+						targetSched->nextLunToCheck  = newNextLun;
+						continue;
+					}
+	       
+					pIocbq = &command->cur_iocbq;
+				   
+					pIocbq->context1  = command;
+					pIocbq->iocb_cmpl = lpfc_sched_sli_done;
+				   
+					/* put the RPI number and NODELIST info in the IOCB command */
+					pIocbq->iocb.ulpContext = ndlp->nlp_rpi;
+					if (ndlp->nlp_fcp_info & NLP_FCP_2_DEVICE) {
+						pIocbq->iocb.ulpFCP2Rcvy = 1;
+					}
+					pIocbq->iocb.ulpClass = (ndlp->nlp_fcp_info & 0x0f);
+				   
+					/* Get an iotag and finish setup of IOCB  */
+					pIocbq->iocb.ulpIoTag = lpfc_sli_next_iotag( hba,
+										     &psli->ring[ psli->fcp_ring] );
+					if(pIocbq->iocb.ulpIoTag == 0) {
+						stopSched = 1;
+						list_add(&command->listentry,
+							 &lunSched->commandList);
+						++lunSched->q_cnt;
+						break;
+					}
+				   
+					sliStatus = lpfc_sli_issue_iocb(hba,
+									&psli->ring[ psli->fcp_ring],
+									pIocbq, SLI_IOCB_RET_IOCB);
+	       
+				   
+					switch (sliStatus) {
+					case  IOCB_ERROR:   
+					case  IOCB_BUSY: 
+						stopSched = 1;
+						list_add(&command->listentry,
+							 &lunSched->commandList);
+						++lunSched->q_cnt;
+						break;
+		     
+					case  IOCB_SUCCESS:
+						didSuccessSubmit = 1;
+						lunSched->currentOutstanding++;
+						targetSched->currentOutstanding++;
+						hbaSched->currentOutstanding++;
+						targetSched->nextLunToCheck = newNextLun;
+						break;
+		     
+					default:
+						break;
+					}      /* End of Switch */				   
+
+					/* 
+					 * Check if there is any pending command on the lun. If not 
+					 * remove the lun. If this is the last lun in the target, the
+					 * target also will get removed from the scheduler ring.
+					 */
+					if (list_empty(&lunSched->commandList))		   
+						lpfc_sched_remove_lun_from_ring(hba,lun);
+
+					/* Either we shipped or SLI refused the operation. In any chase
+					 * the driver is done with this LUN/Target!. 
+					 */
+					break;
+
+					/* This brace ends LUN window open */
+				}   
+				else {
+					numberOfFailedLunChecks++;
+					targetSched->nextLunToCheck = newNextLun;
+				}
+				/* This brace ends While looping through LUNs on a Target */
+			}
+	 
+			if ( numberOfFailedLunChecks >= targetSched->lunCount )  
+				numberOfFailedTargetChecks++;
+			else 
+				numberOfFailedTargetChecks = 0;
+		}   /* if Target isn't pended */
+		else 
+			numberOfFailedTargetChecks++;
+      
+		hbaSched->nextTargetToCheck = newNext;
+	}   /* While looping through Targets on HBA */
+  
 	return;
 }
+
 
 void
 lpfc_sched_service_high_priority_queue(struct lpfcHBA *hba)
@@ -426,9 +404,9 @@ lpfc_sched_service_high_priority_queue(struct lpfcHBA *hba)
 	 */
 	list_for_each_safe(pos, pos_tmp, &hba->hbaSched.highPriorityCmdList) {
 		command =
-		    list_entry(pos,
-			       LPFC_SCSI_BUF_t,
-			       listentry);
+			list_entry(pos,
+				   LPFC_SCSI_BUF_t,
+				   listentry);
 		list_del(pos);
 		--hba->hbaSched.q_cnt;
 
@@ -450,7 +428,7 @@ lpfc_sched_service_high_priority_queue(struct lpfcHBA *hba)
 					pIocbq->iocb.ulpFCP2Rcvy = 1;
 				}
 				pIocbq->iocb.ulpClass =
-				    (ndlp->nlp_fcp_info & 0x0f);
+					(ndlp->nlp_fcp_info & 0x0f);
 			}
 		}
 
@@ -466,14 +444,14 @@ lpfc_sched_service_high_priority_queue(struct lpfcHBA *hba)
 		if (pIocbq->iocb.ulpIoTag == 0) {
 			pIocbq->iocb.ulpIoTag =
 				lpfc_sli_next_iotag(hba,
-					    &psli->ring[psli->fcp_ring]);
+						    &psli->ring[psli->fcp_ring]);
 		}
 
 		sliStatus = lpfc_sli_issue_iocb(hba,
-					       &psli->ring[psli->fcp_ring],
-					       pIocbq,
-					       SLI_IOCB_HIGH_PRIORITY |
-					       SLI_IOCB_RET_IOCB);
+						&psli->ring[psli->fcp_ring],
+						pIocbq,
+						SLI_IOCB_HIGH_PRIORITY |
+						SLI_IOCB_RET_IOCB);
 
 		switch (sliStatus) {
 		case IOCB_ERROR:
@@ -520,7 +498,7 @@ lpfc_sched_dequeue(lpfcHBA_t * hba, LPFC_SCSI_BUF_t * ourCommand)
 			if (!pLunSched->q_cnt){
 				/* queue is empty */
 				lpfc_sched_remove_lun_from_ring(hba,
-							ourCommand->pLun);
+								ourCommand->pLun);
 			}
 			break;
 		}
@@ -531,8 +509,8 @@ lpfc_sched_dequeue(lpfcHBA_t * hba, LPFC_SCSI_BUF_t * ourCommand)
 
 uint32_t
 lpfc_sched_flush_command(lpfcHBA_t * pHba,
-			LPFC_SCSI_BUF_t * command,
-			uint8_t iocbStatus, uint32_t word4)
+			 LPFC_SCSI_BUF_t * command,
+			 uint8_t iocbStatus, uint32_t word4)
 {
 	LPFC_SCSI_BUF_t *foundCommand = lpfc_sched_dequeue(pHba, command);
 	uint32_t found = 0;
@@ -567,7 +545,7 @@ lpfc_sched_flush_command(lpfcHBA_t * pHba,
 
 uint32_t
 lpfc_sched_flush_lun(lpfcHBA_t * pHba,
-		    LPFCSCSILUN_t * lun, uint8_t iocbStatus, uint32_t word4)
+		     LPFCSCSILUN_t * lun, uint8_t iocbStatus, uint32_t word4)
 {
 	struct list_head *cur, *next;
 
@@ -576,9 +554,9 @@ lpfc_sched_flush_lun(lpfcHBA_t * pHba,
 	list_for_each_safe(cur, next, &lun->lunSched.commandList) {
 		IOCB_t *pIOCB;
 		LPFC_SCSI_BUF_t *command =
-		    list_entry(cur,
-			       LPFC_SCSI_BUF_t,
-			       listentry);
+			list_entry(cur,
+				   LPFC_SCSI_BUF_t,
+				   listentry);
 		list_del(cur);
 		--lun->lunSched.q_cnt;
 
@@ -603,19 +581,24 @@ lpfc_sched_flush_lun(lpfcHBA_t * pHba,
 
 	/* flush the SLI layer also */
 	lpfc_sli_abort_iocb_lun(pHba, &pHba->sli.ring[pHba->sli.fcp_ring],
-			       lun->pTarget->scsi_id, lun->lun_id);
+				lun->pTarget->scsi_id, lun->lun_id);
 	return (numberFlushed);
 }
 
 uint32_t
 lpfc_sched_flush_target(lpfcHBA_t * pHba,
-		       LPFCSCSITARGET_t * target,
-		       uint8_t iocbStatus, uint32_t word4)
+			LPFCSCSITARGET_t * target,
+			uint8_t iocbStatus, uint32_t word4)
 {
 	LPFCSCSILUN_t *lun;
 	int numberFlushed = 0;
 	struct list_head *cur_h, *next_h;
 	struct list_head *cur_l, *next_l;
+
+	if (target->rptlunfunc.function) {
+		lpfc_stop_timer((struct clk_data *) target->rptlunfunc.data);
+		target->targetFlags &= ~FC_RETRY_RPTLUN;
+	}
 
 	/* walk the list of LUNs on this target and flush each LUN.  We
 	   accomplish this by pulling the first LUN off the head of the
@@ -628,9 +611,9 @@ lpfc_sched_flush_target(lpfcHBA_t * pHba,
 		list_for_each_safe(cur_l, next_l, &lun->lunSched.commandList) {
 			IOCB_t *pIOCB;
 			LPFC_SCSI_BUF_t *command =
-			    list_entry(cur_l,
-				       LPFC_SCSI_BUF_t,
-				       listentry);
+				list_entry(cur_l,
+					   LPFC_SCSI_BUF_t,
+					   listentry);
 			list_del(cur_l);
 			--lun->lunSched.q_cnt;
 
@@ -658,7 +641,7 @@ lpfc_sched_flush_target(lpfcHBA_t * pHba,
 
 	/* flush the SLI layer also */
 	lpfc_sli_abort_iocb_tgt(pHba, &pHba->sli.ring[pHba->sli.fcp_ring],
-			       target->scsi_id);
+				target->scsi_id);
 	return (numberFlushed);
 }
 
@@ -677,38 +660,38 @@ lpfc_sched_flush_hba(lpfcHBA_t * pHba, uint8_t iocbStatus, uint32_t word4)
 				    LPFCSCSITARGET_t,
 				    listentry);
 		list_for_each_safe(cur_l, next_l, &target->targetSched.lunRing)
-		{
-			lun = list_entry(cur_l, LPFCSCSILUN_t, listentry);
-			list_for_each_safe(cur_c, next_c,
-					   &lun->lunSched.commandList) {
-				IOCB_t *pIOCB;
-				LPFC_SCSI_BUF_t *command =
-				    list_entry(cur_c,
-					       LPFC_SCSI_BUF_t,
-					       listentry);
-				list_del(cur_c);
-				--lun->lunSched.q_cnt;
+			{
+				lun = list_entry(cur_l, LPFCSCSILUN_t, listentry);
+				list_for_each_safe(cur_c, next_c,
+						   &lun->lunSched.commandList) {
+					IOCB_t *pIOCB;
+					LPFC_SCSI_BUF_t *command =
+						list_entry(cur_c,
+							   LPFC_SCSI_BUF_t,
+							   listentry);
+					list_del(cur_c);
+					--lun->lunSched.q_cnt;
 
-				pIOCB = (IOCB_t *) & (command->cur_iocbq.iocb);
-				pIOCB->ulpStatus = iocbStatus;
-				command->status = iocbStatus;
-				if (word4) {
-					pIOCB->un.ulpWord[4] = word4;
-					command->result = word4;
+					pIOCB = (IOCB_t *) & (command->cur_iocbq.iocb);
+					pIOCB->ulpStatus = iocbStatus;
+					command->status = iocbStatus;
+					if (word4) {
+						pIOCB->un.ulpWord[4] = word4;
+						command->result = word4;
+					}
+
+					if (command->status) {
+						lun->errorcnt++;
+					}
+					lun->iodonecnt++;
+
+					(command->cmd_cmpl) (pHba, command);
+
+					numberFlushed++;
 				}
 
-				if (command->status) {
-					lun->errorcnt++;
-				}
-				lun->iodonecnt++;
-
-				(command->cmd_cmpl) (pHba, command);
-
-				numberFlushed++;
+				lpfc_sched_remove_lun_from_ring(pHba, lun);
 			}
-
-			lpfc_sched_remove_lun_from_ring(pHba, lun);
-		}
 		lpfc_sched_remove_target_from_ring(pHba, target);
 	}
 
@@ -717,7 +700,7 @@ lpfc_sched_flush_hba(lpfcHBA_t * pHba, uint8_t iocbStatus, uint32_t word4)
 	return (numberFlushed);
 }
 
-void
+int
 lpfc_sched_submit_command(lpfcHBA_t * hba, LPFC_SCSI_BUF_t * command)
 {
 	LPFC_NODELIST_t *ndlp;
@@ -730,7 +713,7 @@ lpfc_sched_submit_command(lpfcHBA_t * hba, LPFC_SCSI_BUF_t * command)
 		LPFC_SCHED_HBA_t *hbaSched = &hba->hbaSched;
 		LPFC_SCHED_LUN_t *lunSched = &command->pLun->lunSched;
 		LPFC_SCHED_TARGET_t *targetSched =
-		    &command->pLun->pTarget->targetSched;
+			&command->pLun->pTarget->targetSched;
 		LPFC_IOCBQ_t *pIocbq = &command->cur_iocbq;
 		LPFC_SLI_t *psli = &hba->sli;
 
@@ -738,26 +721,32 @@ lpfc_sched_submit_command(lpfcHBA_t * hba, LPFC_SCSI_BUF_t * command)
 
 		ndlp = command->pLun->pnode;
 		if (ndlp == 0) {
-			/* For now, just requeue to scheduler if ndlp is not
-			   available yet */
-			lpfc_sched_queue_command(hba, command);
-			return;
+			if(!(command->pLun->pTarget->targetFlags &
+				FC_NPR_ACTIVE)) {
+				return (1);
+			}
+			/* To be filled in later */
+			pIocbq->iocb.ulpContext = 0;
+			pIocbq->iocb.ulpFCP2Rcvy = 0;
+			pIocbq->iocb.ulpClass = CLASS3;
+		}
+		else {
+			/* put RPI number and NODELIST info in IOCB command */
+			pIocbq->iocb.ulpContext = ndlp->nlp_rpi;
+			if (ndlp->nlp_fcp_info & NLP_FCP_2_DEVICE) {
+				pIocbq->iocb.ulpFCP2Rcvy = 1;
+			}
+			pIocbq->iocb.ulpClass = (ndlp->nlp_fcp_info & 0x0f);
 		}
 
 		pIocbq->context1 = command;
 		pIocbq->iocb_cmpl = lpfc_sched_sli_done;
 
-		/* put the RPI number and NODELIST info in the IOCB command */
-		pIocbq->iocb.ulpContext = ndlp->nlp_rpi;
-		if (ndlp->nlp_fcp_info & NLP_FCP_2_DEVICE) {
-			pIocbq->iocb.ulpFCP2Rcvy = 1;
-		}
-		pIocbq->iocb.ulpClass = (ndlp->nlp_fcp_info & 0x0f);
 		/* Get an iotag and finish setup of IOCB  */
 		pIocbq->iocb.ulpIoTag = lpfc_sli_next_iotag(hba,
-						   &psli->ring[psli->fcp_ring]);
+							    &psli->ring[psli->fcp_ring]);
 
-		if ((pIocbq->iocb.ulpIoTag != 0) &&
+		if ((pIocbq->iocb.ulpIoTag != 0) && ndlp &&
 		    (hbaSched->currentOutstanding < hbaSched->maxOutstanding) &&
 		    (hbaSched->status & LPFC_SCHED_STATUS_OKAYTOSEND) &&
 		    (targetSched->lunCount == 0) &&
@@ -775,10 +764,11 @@ lpfc_sched_submit_command(lpfcHBA_t * hba, LPFC_SCSI_BUF_t * command)
 
 			int sliStatus;
 
+			
 			sliStatus =
-			    lpfc_sli_issue_iocb(hba,
-						&psli->ring[psli->fcp_ring],
-						pIocbq, SLI_IOCB_RET_IOCB);
+				lpfc_sli_issue_iocb(hba,
+						    &psli->ring[psli->fcp_ring],
+						    pIocbq, SLI_IOCB_RET_IOCB);
 
 			switch (sliStatus) {
 			case IOCB_ERROR:
@@ -812,7 +802,7 @@ lpfc_sched_submit_command(lpfcHBA_t * hba, LPFC_SCSI_BUF_t * command)
 	   so now go schedule. */
 	if (okayToSchedule)
 		lpfc_sched_internal_check(hba);
-	return;
+	return (0);
 }
 
 void
@@ -821,11 +811,11 @@ lpfc_sched_queue_command(lpfcHBA_t * hba, LPFC_SCSI_BUF_t * command)
 	LPFCSCSILUN_t *lun = command->pLun;
 	LPFC_SCHED_LUN_t *lunSched = &lun->lunSched;
 	struct list_head *head;
-
+	
 	head = (struct list_head *)&lunSched->commandList;
 	
-	list_add(&command->listentry,
-		 head);
+	list_add_tail(&command->listentry,
+		      head);
 	lunSched->q_cnt++;
 
 	lpfc_sched_add_lun_to_ring(hba, lun);
@@ -844,7 +834,9 @@ lpfc_sched_add_target_to_ring(lpfcHBA_t * hba, LPFCSCSITARGET_t * target)
 		return;
 
 	list_add_tail(&target->listentry, &hbaSched->targetRing);
-
+	if ( hbaSched->targetCount == 0 ) {
+		hbaSched->nextTargetToCheck = target;
+	}
 	hbaSched->targetCount++;
 	return;
 }
@@ -861,7 +853,9 @@ lpfc_sched_add_lun_to_ring(lpfcHBA_t * hba, LPFCSCSILUN_t * lun)
 		return;
 
 	list_add_tail(&lun->listentry, &targetSched->lunRing);
-
+	if ( targetSched->lunCount == 0 ) {
+		targetSched->nextLunToCheck = lun;
+	}
 
 	targetSched->lunCount++;
 	lpfc_sched_add_target_to_ring(hba, target);
@@ -874,9 +868,25 @@ lpfc_sched_remove_target_from_ring(lpfcHBA_t * hba, LPFCSCSITARGET_t * target)
 
 	LPFC_SCHED_HBA_t *hbaSched = &hba->hbaSched;
 
-	if (list_empty(&hbaSched->targetRing))
+	if (list_empty(&target->listentry))
 		return;		/* Not on Ring */
 	hbaSched->targetCount--;
+
+	if ( hbaSched->targetCount ) {
+		if ( hbaSched->nextTargetToCheck == target ) {
+			if (target->listentry.next == &hbaSched->targetRing) {
+				hbaSched->nextTargetToCheck  = list_entry( hbaSched->targetRing.next,
+									   LPFCSCSITARGET_t,
+									   listentry);
+			} else {
+				hbaSched->nextTargetToCheck = list_entry ( target->listentry.next,
+									   LPFCSCSITARGET_t,
+									   listentry);
+			}
+		}
+	} else {
+		hbaSched->nextTargetToCheck = 0;
+	}
 
 	list_del_init(&target->listentry);
 	return;
@@ -888,11 +898,32 @@ lpfc_sched_remove_lun_from_ring(lpfcHBA_t * hba, LPFCSCSILUN_t * lun)
 	LPFCSCSITARGET_t *target = lun->pTarget;
 	LPFC_SCHED_TARGET_t *targetSched = &target->targetSched;
 
-	if (list_empty(&targetSched->lunRing))
+	if (list_empty(&lun->listentry))
 		return;		/* Not on Ring  */
 
 	targetSched->lunCount--;
 
+	if ( targetSched->lunCount ) {     /*  Delink the LUN from the Ring */
+		
+		if ( targetSched->nextLunToCheck == lun ) {
+
+			if ( lun->listentry.next == &target->targetSched.lunRing ) {
+				targetSched->nextLunToCheck = 
+					list_entry(target->targetSched.lunRing.next,
+						   LPFCSCSILUN_t,
+						   listentry);
+			} else {
+				targetSched->nextLunToCheck = 
+					list_entry(lun->listentry.next,
+						   LPFCSCSILUN_t,
+						   listentry);
+
+			}
+
+		}
+	} else
+		targetSched->nextLunToCheck = 0; /*   Ring is empty */
+	
 	list_del_init(&lun->listentry);
 
 	if (!targetSched->lunCount)

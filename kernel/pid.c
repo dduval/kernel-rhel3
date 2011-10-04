@@ -70,8 +70,8 @@ inline void free_pidmap(int pid)
  */
 static inline pidmap_t *next_free_map(pidmap_t *map, int *max_steps)
 {
-	while (--*max_steps) {
-		if (++map == map_limit)
+	while (--*max_steps > 0) {
+		if (++map >= map_limit)
 			map = pidmap_array;
 		if (unlikely(!map->page)) {
 			unsigned long page = get_zeroed_page(GFP_KERNEL);
@@ -101,9 +101,9 @@ int alloc_pidmap(void)
 	pidmap_t *map;
 
 	pid = last_pid + 1;
-	if (pid >= pid_max)
+	if (pid >= pid_max || pid >= PID_MAX_LIMIT)
 		pid = RESERVED_PIDS;
-
+pid_wrap:
 	offset = pid & BITS_PER_PAGE_MASK;
 	map = pidmap_array + pid / BITS_PER_PAGE;
 
@@ -121,7 +121,7 @@ return_pid:
 	
 	if (!offset || !atomic_read(&map->nr_free)) {
 next_map:
-		map = next_free_map(map, &max_steps);
+		map = next_free_map(map - (offset == 0), &max_steps);
 		if (!map)
 			goto failure;
 		offset = 0;
@@ -133,11 +133,16 @@ scan_more:
 	offset = find_next_zero_bit(map->page, BITS_PER_PAGE, offset);
 	if (offset >= BITS_PER_PAGE)
 		goto next_map;
+
+	/* validate the tentative pid */
+	pid = (map - pidmap_array) * BITS_PER_PAGE + offset;
+	if (pid >= pid_max) {
+		pid = RESERVED_PIDS;
+		goto pid_wrap;
+	}
 	if (test_and_set_bit(offset, map->page))
 		goto scan_more;
 
-	/* we got the PID: */
-	pid = (map - pidmap_array) * BITS_PER_PAGE + offset;
 	goto return_pid;
 
 failure:

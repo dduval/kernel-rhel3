@@ -60,7 +60,7 @@ static inline void stack_overflow_check(struct pt_regs *regs)
 
 	if (regs->rsp >= curbase && regs->rsp <= curbase + THREAD_SIZE &&
 	    regs->rsp <  curbase + sizeof(struct task_struct) + 128 && 
-	    warned + 60*HZ >= jiffies) { 
+	    time_after_eq(jiffies, warned + 60 * HZ)) { 
 		printk("do_IRQ: %s near stack overflow (cur:%Lx,rsp:%lx)\n",
 		       current->comm, curbase, regs->rsp); 
 		show_stack(NULL);

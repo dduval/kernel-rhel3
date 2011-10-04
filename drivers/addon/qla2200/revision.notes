@@ -1,15 +1,139 @@
 /*
- * QLogic ISP2200 and ISP2300 Linux Driver Revision List File.
+ * QLogic ISP22xx and ISP23xx/ISP63xx Linux Driver Revision List File.
  *
  ********************************************************************
  *
  * Revision History
+ *  
+ *  Rev  7.01.01		August 11, 2004	RA/AV
+ *  	- Formal release.
+ *	- Updated Readme.qla2x00
+ *	- Fixed the logic to retry loop resync process for pci-dma 
+ *	  consistent memory alloc failure.
+ *  
+ *  Rev  7.01.00		July 30, 2004	RA
+ *  	- Formal release.
+ *  
+ *  Rev  7.00.04b6		July 28, 2004	RA
+ *	- Dont check for nvram_config update flag as its dynamic now.
+ * 	  	 	
+ *  Rev  7.00.04b5		July 22, 2004	RA/DG/AV
+ *	- Added cmd line param - ql2xprocessnotready to disable
+ *	  the handling of NOT READY within the driver.Default
+ *	  behaviour is to process NOT READY unless turned off
+ *	  from the cmd line.
+ *	- Added the updated EVA fix.
+ *	- Check the /lib/<xxxx>/updates dir path in the makefile to 
+ *	  rename the embedded driver.
+ *	- Added code to retry loop resync process for pci-dma 
+ *	  consistent memory alloc failure.
+ *
+ *  Rev  7.00.04b4		July 15, 2004	RA/DG/AV
+ *	- Rename the embedded conf modules in the latest redhat dist
+ *	  to avoid conflicts.
+ *	- Added the Fcode parse fix.
+ *	- Added the semaphore to protect the updation of failover 
+ *	  database.
+ *	- No need to subtract "one" from the sense buffer length.
+ *	- Check to see whether we need to process done_q in do_dpc once
+ *	  its active.
+ *	- Updated QLA23XX HBA's to v3.03.01  
+ *	- Set the firmware options for swing/emphasis before init_fw.
+ *  
+ *  Rev  7.00.04b3		July 1, 2004	RA
+ *	- Dont check for device id for accessing the gpio pins in 
+ *	  iomap mode.
+ *	- Took out the 7.00.04b2test1 change.
+ *
+ *  Rev  7.00.04b2test5		July 1, 2004	RA
+ *	- Use iomap for accessing gpio register(blink led) across the board.
+ *	  Problems accessing QLA2310 gpio reg on 64 bit system.
+ *
+ *  Rev  7.00.04b2test4		July 1, 2004	RA
+ *	- Use iomap for accessing flash register across the board.
+ *	  Problems accessing QLA2310 flash reg on 64 bit system.
+ *  Rev  7.00.04b2test3		June 25, 2004	RA
+ *	- Corrected to use iomap kernel api for pci posting when accessing
+ *	  in iomap mode for gpio and flash reg.
+ *	
+ *  Rev  7.00.04b2test2		June 23, 2004	RA
+ *	- Fixed panic in qla2x00_write_flash_byte. Read flash_data reg
+ *	  for pci posting instead of flash_addr reg.
+ *
+ *  Rev  7.00.04b2test1		June 23, 2004	RA
+ *	- Mark the luns enabled in the lun data for non failover driver if
+ *	  we found it during discovery.
+ *
+ *  Rev  7.00.04b2		June 18, 2004	RA
+ *	- Updated the 23XX Firmware to 3.02.30  
+ *  	
+ *  Rev  7.00.04b2pre2		June 11, 2004	RA/AV
+ *	- Display the correct data rate(2Gb) for QLA200 in proc_info
+ *	- Fixed the cmd direction for passthru in ioctl path.
+ *	- Dont modify the data rate to 2Gb for 23XX. Honor the NVRAM value.
+ *	  Seems like left over from QLA200 code base (F/W defaults to 
+ *	  2Gb for QLA200  irrespective of whats passed in icb).	
+ *	- Fixed  qla2x00_mgmt_svr_login() unresolved symbol issue during 
+ * 	  driver load with FDMI turned off.
+ *	- Fixed compile warnings and error when DEBUG9_10 is enabled.
+ *	- Set the permission for HbaApiNode to 600 (for root only).
+ *	- Use FDMI_CC_* prefix for fdmi control codes defined in
+ *	  qla_gs.h file to avoid conflicts with command codes defined
+ *	  in PPC platform (Patrick.Mansfield@ibm.com)
+ *	- Get the portname from path, instead of port struct in path 
+ *	  in qla2x00_map_os_tgt(). Configuration may specify a port
+ *	  which may not be found during discovery (ER38011)	
+ *
+ *  Rev  7.00.04b2pre1		May 12, 2004	RA
+ *	- Complete the command right away once it shows up in the done
+ *	  queue in qla2x00_eh_wait_on_command() call. (Vmware).
+ *	- Fixed PCI posting issues.
+ *	- Fixed tape error recovery issues.
+ *	- Fixed bogus copying of target info in get_port_database().
+ *	  Copy the data only if F/W informs that the target is logged in.
+ *      - Add wmb() to selected locations during request-queue and
+ *        response-queue modifications.
+ *	- Schedule a HBA reset if link down timeout expired and tape
+ *	  cmds are outstanding with RISC. Non Tape cmds are returned
+ *	  by the Firmware right away with 0x28 or 0x29 compl status
+ *	  but not tape cmds when the cable is unplugged from the HBA side.
+ *	- Fixed endianess issue while manipulating init-cb during 
+ *	  nvram_config.
+ *	- Dont do context switching while waiting for HBA to come online 
+ *	  during ioctl_error_recovery.
+ *	- Fixed compilation issue for qla2100 driver (RedHat);
+ *	- Perform flash operations after pausing RISC and processing of
+ *	  I/Os and mbx cmd. Schedule HBA reset and wait for it to complete
+ *	  after the completion of flash operations and restart I/Os etc.	
+ *
+ *  Rev  7.00.04b1		May 12, 2004	RA/DG/AV
+ *	- Additional flash support for various board types.
+ *	- Add module parameter ql2xfdmienable.
+ *	- Flash/GPIO register for 2312 V2 chip can only be accessed in 
+ *	  iomap mode on 133 MHz slot(otherwise cannot flash option rom 
+ *	  and blink led).
+ *	- Fixed the panic if MEMORY_MAPPED_IO macro  was disabled.
+ * 	  Incorrect usage of macro and multiple defines lead to panic.
+ *	- Disable/Enable the PCI Command register while resetting the chip.
+ *	- Wait for ISP reset to complete before we notify the API 
+ *	  OptionRomUpdate/NvramUpdate etc completed.
+ *	- Set the Loop down timer during abort isp if loop was already
+ *	  down for the driver to detect cable is unplugged at min time.
+ *	- Correction for clearing the DFLG_NO_CABLE flag too early during
+ *	  fw_ready().
+ *	- Check size of response buffer instead of request buffer in
+ *	  qla2x00_read_option_rom_ext().
+ *	- Read the Boot Code versions (flash version) during ISP reset.
+ *	- Handle the failure case of pci_map_sg() call.
+ *	- Dont bypass if same domain and area of adapter.
+ *	- Look for cmnd[] instead of data_cmnd[] field for direction.
+ *
  *
  *  Rev  7.00.00b27/7.00.03	Apr 23, 2004	RA/DG/AV
  *	- Fixed recursive logic in ZIO code.
- *	- Add module parameters to allow adjustment of 
- *	 of performance parameters sg_tablesize and max_sectors 
- *	 in driver template.
+ *	- Add module parameters to allow adjustment of performance
+ *	  parameters sg_tablesize and max_sectors in driver
+ *	  template.
  *	- Alignment issue in /proc display on IA64.
  *
  *  Rev  7.00.00b26		Apr 20, 2004	RA/DG

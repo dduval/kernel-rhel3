@@ -2,6 +2,10 @@
 
     ata_piix.c - Intel PATA/SATA controllers
 
+    Maintained by:  Jeff Garzik <jgarzik@pobox.com>
+    		    Please ALWAYS copy linux-ide@vger.kernel.org
+		    on emails.
+
 
 	Copyright 2003-2004 Red Hat Inc
 	Copyright 2003-2004 Jeff Garzik
@@ -102,6 +106,7 @@ static Scsi_Host_Template piix_sht = {
 	.name			= DRV_NAME,
 	.detect			= ata_scsi_detect,
 	.release		= ata_scsi_release,
+	.ioctl                  = ata_scsi_ioctl,
 	.queuecommand		= ata_scsi_queuecmd,
 	.eh_strategy_handler	= ata_scsi_error,
 	.can_queue		= ATA_DEF_QUEUE,
@@ -385,7 +390,7 @@ static void piix_sata_phy_reset(struct ata_port *ap)
 
 static void piix_set_piomode (struct ata_port *ap, struct ata_device *adev)
 {
-	unsigned int pio	= adev->pio_mode;
+	unsigned int pio	= adev->pio_mode - XFER_PIO_0;
 	struct pci_dev *dev	= ap->host_set->pdev;
 	unsigned int is_slave	= (adev->devno != 0);
 	unsigned int master_port= ap->port_no ? 0x42 : 0x40;

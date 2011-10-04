@@ -100,6 +100,7 @@ set_single_step(struct task_struct *task)
 	struct pt_regs *regs = task->thread.regs;
 	if (regs != NULL)
 		regs->msr |= MSR_SE;
+	task->ptrace |= PT_SINGLESTEP;
 }
 
 static inline void
@@ -108,6 +109,7 @@ clear_single_step(struct task_struct *task)
 	struct pt_regs *regs = task->thread.regs;
 	if (regs != NULL)
 		regs->msr &= ~MSR_SE;
+	task->ptrace &= ~PT_SINGLESTEP;
 }
 
 /*
@@ -401,9 +403,11 @@ void syscall_trace_enter(struct pt_regs *regs)
 
 void syscall_trace_leave(struct pt_regs *regs)
 {
+	int ptrace = current->ptrace;
+
 	if (isaudit(current) && (current->ptrace & PT_AUDITED))
 		audit_result(regs);
 
-	if ((current->ptrace & (PT_PTRACED|PT_TRACESYS)) == (PT_PTRACED|PT_TRACESYS))
+	if ((ptrace & PT_PTRACED) && (ptrace & (PT_TRACESYS|PT_SINGLESTEP)))
 		syscall_ptrace();
 }

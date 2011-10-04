@@ -436,9 +436,8 @@ qla2x00_fo_get_lun_data(EXT_IOCTL *pext, FO_LUN_DATA_INPUT *bp, int mode)
 				/* set MSB if masked */
 				entry->Data[lun] = LUN_DATA_PREFERRED_PATH;
 				if (!EXT_IS_LUN_BIT_SET(&(fcport->lun_mask),
-				    lun)) {
+				    lun))
 					entry->Data[lun] |= LUN_DATA_ENABLED;
-				}
 			}
 
 			DEBUG9(printk("%s: got lun_mask for tgt %d\n",

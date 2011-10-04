@@ -15,7 +15,7 @@
 
 #define QETH_NAME " qeth"
 
-#define VERSION_QETH_H "$Revision: 1.113 $"
+#define VERSION_QETH_H "$Revision: 1.113.4.2 $"
 
 /******************** CONFIG STUFF ***********************/
 //#define QETH_DBF_LIKE_HELL
@@ -84,6 +84,22 @@
 #define QETH_HARDSETUP_LAPS 5
 #define QETH_HARDSETUP_CLEAR_LAPS 3
 #define QETH_RECOVERY_HARDSETUP_RETRY 2
+
+/* the worst case stack usage is:
+ * qeth_hard_start_xmit
+ * do_QDIO
+ * qeth_qdio_output_handler
+ * do_QDIO
+ * qeth_qdio_output_handler
+ * (no more recursion as we have called netif_stop_queue)
+ */
+#ifdef CONFIG_ARCH_S390X
+#define STACK_PTR_MASK 0x3fff
+#define WORST_CASE_STACK_USAGE 1100
+#else /* CONFIG_ARCH_S390X */
+#define STACK_PTR_MASK 0x1fff
+#define WORST_CASE_STACK_USAGE 800
+#endif /* CONFIG_ARCH_S390X */
 
 /************************* DEBUG FACILITY STUFF *********************/
 

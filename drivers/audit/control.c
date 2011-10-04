@@ -64,6 +64,9 @@ int				audit_all_processes = 0;
 unsigned int			audit_max_messages = 1024;
 int				audit_allow_suspend = 1;
 int				audit_paranoia = 0;
+#ifdef __ia64__
+int				audit_disable_32bit = 0;
+#endif
 
 static int	__audit_attach(struct task_struct *, int, struct aud_process *);
 static void	audit_attach_all(void);

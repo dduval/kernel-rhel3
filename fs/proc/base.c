@@ -34,7 +34,7 @@
  * about magical ranges too.
  */
 
-#define fake_ino(pid,ino) (((pid)<<16)|(ino))
+#define fake_ino(pid,ino)  (((ino_t)(pid) << PROC_INODE_SHIFT) | (ino))
 
 ssize_t proc_pid_read_maps(struct task_struct*,struct file*,char*,size_t,loff_t*);
 int proc_pid_stat(struct task_struct*,char*);
@@ -585,7 +585,7 @@ enum pid_directory_inos {
 	PROC_PID_MAPS,
 	PROC_PID_CPU,
 	PROC_PID_MOUNTS,
-	PROC_PID_FD_DIR = 0x8000,	/* 0x8000-0xffff */
+	PROC_PID_FD_DIR = 1 << (PROC_INODE_SHIFT - 1), /* 0x8000-0xffff */
 };
 
 #define E(type,name,mode) {(type),sizeof(name)-1,(name),(mode)}
@@ -615,7 +615,8 @@ static int proc_readfd(struct file * filp, void * dirent, filldir_t filldir)
 {
 	struct inode *inode = filp->f_dentry->d_inode;
 	struct task_struct *p = inode->u.proc_i.task;
-	unsigned int fd, pid, ino;
+	unsigned int fd, pid;
+	ino_t ino;
 	int retval;
 	char buf[NUMBUF];
 	struct files_struct * files;
@@ -734,6 +735,7 @@ static int task_dumpable(struct task_struct *task)
 static struct inode *proc_pid_make_inode(struct super_block * sb, struct task_struct *task, int ino)
 {
 	struct inode * inode;
+	pid_t pid;
 
 	/* We need a new inode */
 	
@@ -744,9 +746,10 @@ static struct inode *proc_pid_make_inode(struct super_block * sb, struct task_st
 	/* Common stuff */
 
 	inode->i_mtime = inode->i_atime = inode->i_ctime = CURRENT_TIME;
-	inode->i_ino = fake_ino(task->pid, ino);
+	pid = task->pid;
+	inode->i_ino = fake_ino(pid, ino);
 
-	if (!task->pid)
+	if (!pid)
 		goto out_unlock;
 
 	/*
@@ -765,6 +768,7 @@ out:
 	return inode;
 
 out_unlock:
+	inode->u.generic_ip = NULL;	/* paranoia, but... */
 	iput(inode);
 	return NULL;
 }
@@ -869,8 +873,8 @@ static struct dentry *proc_lookupfd(struct inode * dir, struct dentry * dentry)
 	return NULL;
 
 out_unlock2:
-	put_files_struct(files);
 	read_unlock(&files->file_lock);
+	put_files_struct(files);
 out_unlock:
 	iput(inode);
 out:

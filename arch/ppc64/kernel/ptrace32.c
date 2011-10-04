@@ -113,6 +113,7 @@ set_single_step(struct task_struct *task)
 	struct pt_regs *regs = task->thread.regs;
 	if (regs != NULL)
 		regs->msr |= MSR_SE;
+	task->ptrace |= PT_SINGLESTEP;
 }
 
 static inline void
@@ -121,6 +122,7 @@ clear_single_step(struct task_struct *task)
 	struct pt_regs *regs = task->thread.regs;
 	if (regs != NULL)
 		regs->msr &= ~MSR_SE;
+	task->ptrace &= ~PT_SINGLESTEP;
 }
 
 int sys32_ptrace(long request, long pid, unsigned long addr, unsigned long data)

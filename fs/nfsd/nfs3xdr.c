@@ -284,7 +284,7 @@ xdr_argsize_check(struct svc_rqst *rqstp, u32 *p)
 {
 	struct svc_buf	*buf = &rqstp->rq_argbuf;
 
-	return p - buf->base <= buf->buflen;
+	return p >= buf->base && p <= buf->base + buf->buflen;
 }
 
 static inline int
@@ -543,11 +543,11 @@ nfs3svc_decode_setaclargs(struct svc_rqst *rqstp, u32 *p,
 	
 	/* argp->acl_{access,default} are released in nfsd3_proc_setacl. */
 	acl = (args->mask & NFS3_ACL) ? &args->acl_access : NULL;
-	if (!(p = nfs_acl_decode(p, end, NULL, acl)))
+	if (!(p = nfs_acl_decode_limit(p, end, NULL, acl, nfsd3_acl_max_entries)))
 		return 0;
 	
 	acl = (args->mask & NFS3_DFACL) ? &args->acl_default : NULL;
-	if (!(p = nfs_acl_decode(p, end, NULL, acl))) {
+	if (!(p = nfs_acl_decode_limit(p, end, NULL, acl, nfsd3_acl_max_entries))) {
 		posix_acl_release(args->acl_access);
 		args->acl_access = NULL;
 		return 0;
@@ -904,12 +904,12 @@ nfs3svc_encode_getaclres(struct svc_rqst *rqstp, u32 *p,
 		struct inode *inode = dentry->d_inode;
 
 		*p++ = htonl(resp->mask);
-		if (!(p = nfs_acl_encode(p, end, inode, resp->acl_access,
-				   resp->mask & NFS3_ACL, 0)))
+		if (!(p = nfs_acl_encode_limit(p, end, inode, resp->acl_access,
+				   resp->mask & NFS3_ACL, 0, nfsd3_acl_max_entries)))
 			return 0;
-		if (!(p = nfs_acl_encode(p, end, inode, resp->acl_default,
+		if (!(p = nfs_acl_encode_limit(p, end, inode, resp->acl_default,
 		    			 resp->mask & NFS3_DFACL,
-					 NFS3_ACL_DEFAULT)))
+					 NFS3_ACL_DEFAULT, nfsd3_acl_max_entries)))
 			return 0;
 	}
 

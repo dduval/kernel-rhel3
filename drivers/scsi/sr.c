@@ -518,6 +518,8 @@ struct block_device_operations sr_bdops =
 
 static int sr_open(struct cdrom_device_info *cdi, int purpose)
 {
+	struct request_queue *q;
+	struct scsi_device *sdpnt;
 	check_disk_change(cdi->dev);
 
 	if (MINOR(cdi->dev) >= sr_template.dev_max
@@ -531,11 +533,19 @@ static int sr_open(struct cdrom_device_info *cdi, int purpose)
 	if (!scsi_block_when_processing_errors(scsi_CDs[MINOR(cdi->dev)].device)) {
 		return -ENXIO;
 	}
-	scsi_CDs[MINOR(cdi->dev)].device->access_count++;
-	if (scsi_CDs[MINOR(cdi->dev)].device->host->hostt->module)
-		__MOD_INC_USE_COUNT(scsi_CDs[MINOR(cdi->dev)].device->host->hostt->module);
+	sdpnt = scsi_CDs[MINOR(cdi->dev)].device;
+	q = &sdpnt->request_queue;
+	spin_lock_irq(q->queue_lock);
+	if (!sdpnt->online) {
+		spin_unlock_irq(q->queue_lock);
+		return -ENODEV;
+	}
+	sdpnt->access_count++;
+	if (sdpnt->host->hostt->module)
+		__MOD_INC_USE_COUNT(sdpnt->host->hostt->module);
 	if (sr_template.module)
 		__MOD_INC_USE_COUNT(sr_template.module);
+	spin_unlock_irq(q->queue_lock);
 
 	/* If this device did not have media in the drive at boot time, then
 	 * we would have been unable to get the sector size.  Check to see if

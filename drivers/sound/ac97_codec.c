@@ -174,6 +174,7 @@ static const struct {
 	{0x83847608, "SigmaTel STAC9708",	&sigmatel_9708_ops},
 	{0x83847609, "SigmaTel STAC9721/23",	&sigmatel_9721_ops},
 	{0x83847644, "SigmaTel STAC9744/45",	&sigmatel_9744_ops},
+	{0x83847652, "SigmaTel STAC9752/53",	&default_ops},
 	{0x83847656, "SigmaTel STAC9756/57",	&sigmatel_9744_ops},
 	{0x83847666, "SigmaTel STAC9750T",	&sigmatel_9744_ops},
 	{0x83847684, "SigmaTel STAC9783/84?",	&null_ops},
@@ -292,6 +293,10 @@ static const unsigned int ac97_oss_rm[] = {
 	[SOUND_MIXER_IGAIN]	= AC97_REC_STEREO,
 	[SOUND_MIXER_PHONEIN] 	= AC97_REC_PHONE
 };
+
+static LIST_HEAD(codecs);
+static LIST_HEAD(codec_drivers);
+static DECLARE_MUTEX(codec_sem);
 
 /* reads the given OSS mixer from the ac97 the caller must have insured that the ac97 knows
    about that given mixer, and should be holding a spinlock for the card */
@@ -727,14 +732,15 @@ static int ac97_check_modem(struct ac97_codec *codec)
  *	one reference taken.
  */
  
-struct ac97_codec *ac97_alloc_codec()
+struct ac97_codec *ac97_alloc_codec(void)
 {
 	struct ac97_codec *codec = kmalloc(sizeof(struct ac97_codec), GFP_KERNEL);
-	if(codec)
-	{
-		memset(codec, 0, sizeof(*codec));
-		spin_lock_init(&codec->lock);
-	}
+	if(!codec)
+		return NULL;
+
+	memset(codec, 0, sizeof(*codec));
+	spin_lock_init(&codec->lock);
+	INIT_LIST_HEAD(&codec->list);
 	return codec;
 }
 
@@ -751,8 +757,17 @@ EXPORT_SYMBOL(ac97_alloc_codec);
  
 void ac97_release_codec(struct ac97_codec *codec)
 {
-	if(codec->codec_unregister)
-		codec->codec_unregister(codec);
+	/* Remove from the list first, we don't want to be
+	   "rediscovered" */
+	down(&codec_sem);
+	list_del(&codec->list);
+	up(&codec_sem);
+	/*
+	 *	The driver needs to deal with internal
+	 *	locking to avoid accidents here. 
+	 */
+	if(codec->driver)
+		codec->driver->remove(codec, codec->driver);
 	kfree(codec);
 }
 
@@ -788,6 +803,8 @@ int ac97_probe_codec(struct ac97_codec *codec)
 	int i;
 	char cidbuf[CODEC_ID_BUFSZ];
 	u16 f;
+	struct list_head *l;
+	struct ac97_driver *d;
 	
 	/* probing AC97 codec, AC97 2.0 says that bit 15 of register 0x00 (reset) should 
 	 * be read zero.
@@ -826,6 +843,8 @@ int ac97_probe_codec(struct ac97_codec *codec)
 			break;
 		}
 	}
+
+	codec->model = (id1 << 16) | id2;
 	
 	f = codec->codec_read(codec, AC97_EXTENDED_STATUS);
 	if(f & 4)
@@ -841,7 +860,30 @@ int ac97_probe_codec(struct ac97_codec *codec)
 		codec->modem ? "Modem" : (audio ? "Audio" : ""),
 	       codec_id(id1, id2, cidbuf), codec->name);
 
-	return ac97_init_mixer(codec);
+	if(!ac97_init_mixer(codec))
+		return 0;
+		
+	/* 
+	 *	Attach last so the caller can override the mixer
+	 *	callbacks.
+	 */
+	 
+	down(&codec_sem);
+	list_add(&codec->list, &codecs);
+
+	list_for_each(l, &codec_drivers) {
+		d = list_entry(l, struct ac97_driver, list);
+		if ((codec->model ^ d->codec_id) & d->codec_mask)
+			continue;
+		if(d->probe(codec, d) == 0)
+		{
+			codec->driver = d;
+			break;
+		}
+	}
+
+	up(&codec_sem);
+	return 1;
 }
 
 static int ac97_init_mixer(struct ac97_codec *codec)
@@ -1035,6 +1077,9 @@ static int wolfson_init05(struct ac97_codec * codec)
 /* WM9711, WM9712 */
 static int wolfson_init11(struct ac97_codec * codec)
 {
+	/* stop pop's during suspend/resume */
+	codec->codec_write(codec, AC97_WM97XX_TEST, codec->codec_read(codec, AC97_WM97XX_TEST) & 0xffbf);
+
 	/* set out3 volume */
 	codec->codec_write(codec, AC97_WM9711_OUT3VOL, 0x0808);
 	return 0;
@@ -1345,4 +1390,67 @@ int ac97_restore_state(struct ac97_codec *codec)
 
 EXPORT_SYMBOL(ac97_restore_state);
 
+/**
+ *	ac97_register_driver	-	register a codec helper
+ *	@driver: Driver handler
+ *
+ *	Register a handler for codecs matching the codec id. The handler
+ *	attach function is called for all present codecs and will be 
+ *	called when new codecs are discovered.
+ */
+ 
+int ac97_register_driver(struct ac97_driver *driver)
+{
+	struct list_head *l;
+	struct ac97_codec *c;
+	
+	down(&codec_sem);
+	INIT_LIST_HEAD(&driver->list);
+	list_add(&driver->list, &codec_drivers);
+	
+	list_for_each(l, &codecs)
+	{
+		c = list_entry(l, struct ac97_codec, list);
+		if(c->driver != NULL || ((c->model ^ driver->codec_id) & driver->codec_mask))
+			continue;
+		if(driver->probe(c, driver))
+			continue;
+		c->driver = driver;
+	}
+	up(&codec_sem);
+	return 0;
+}
+
+EXPORT_SYMBOL_GPL(ac97_register_driver);
+
+/**
+ *	ac97_unregister_driver	-	unregister a codec helper
+ *	@driver: Driver handler
+ *
+ *	Register a handler for codecs matching the codec id. The handler
+ *	attach function is called for all present codecs and will be 
+ *	called when new codecs are discovered.
+ */
+ 
+void ac97_unregister_driver(struct ac97_driver *driver)
+{
+	struct list_head *l;
+	struct ac97_codec *c;
+	
+	down(&codec_sem);
+	list_del_init(&driver->list);
+	
+	list_for_each(l, &codecs)
+	{
+		c = list_entry(l, struct ac97_codec, list);
+		if(c->driver == driver)
+			driver->remove(c, driver);
+		c->driver = NULL;
+	}
+	
+	up(&codec_sem);
+}
+
+EXPORT_SYMBOL_GPL(ac97_unregister_driver);
+	
 MODULE_LICENSE("GPL");

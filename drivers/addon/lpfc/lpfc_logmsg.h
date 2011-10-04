@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_logmsg.h 1.14 2004/04/22 09:34:26EDT jselx Exp  $
+ * $Id: lpfc_logmsg.h 1.2 2004/11/02 10:17:25EST sf_support Exp  $
  */
 
 #ifndef _H_LPFC_LOGMSG
@@ -142,7 +142,6 @@ extern char lpfc_mes0127[];
 extern char lpfc_mes0200[];
 extern char lpfc_mes0201[];
 extern char lpfc_mes0202[];
-extern char lpfc_mes0203[];
 extern char lpfc_mes0204[];
 extern char lpfc_mes0205[];
 extern char lpfc_mes0206[];
@@ -180,6 +179,7 @@ extern char lpfc_mes0238[];
 extern char lpfc_mes0239[];
 extern char lpfc_mes0240[];
 extern char lpfc_mes0241[];
+extern char lpfc_mes0242[];
 extern char lpfc_mes0243[];
 extern char lpfc_mes0244[];
 extern char lpfc_mes0245[];
@@ -187,6 +187,9 @@ extern char lpfc_mes0246[];
 extern char lpfc_mes0247[];
 extern char lpfc_mes0248[];
 extern char lpfc_mes0249[];
+extern char lpfc_mes0250[];
+extern char lpfc_mes0256[];
+extern char lpfc_mes0260[];
 
 /* MAILBOX LOG Messages */
 extern char lpfc_mes0300[];
@@ -233,11 +236,10 @@ extern char lpfc_mes0439[];
 extern char lpfc_mes0440[];
 extern char lpfc_mes0441[];
 extern char lpfc_mes0442[];
+extern char lpfc_mes0443[];
 extern char lpfc_mes0446[];
 extern char lpfc_mes0447[];
 extern char lpfc_mes0448[];
-extern char lpfc_mes0449[];
-extern char lpfc_mes0450[];
 extern char lpfc_mes0451[];
 extern char lpfc_mes0453[];
 extern char lpfc_mes0454[];
@@ -250,23 +252,12 @@ extern char lpfc_mes0462[];
 /* IP LOG Messages */
 extern char lpfc_mes0600[];
 extern char lpfc_mes0601[];
-extern char lpfc_mes0602[];
-extern char lpfc_mes0603[];
-extern char lpfc_mes0604[];
-extern char lpfc_mes0605[];
-extern char lpfc_mes0606[];
-extern char lpfc_mes0607[];
-extern char lpfc_mes0608[];
-extern char lpfc_mes0609[];
 extern char lpfc_mes0610[];
 
 /* FCP LOG Messages */
-extern char lpfc_mes0700[];
 extern char lpfc_mes0701[];
 extern char lpfc_mes0702[];
 extern char lpfc_mes0703[];
-extern char lpfc_mes0706[];
-extern char lpfc_mes0710[];
 extern char lpfc_mes0712[];
 extern char lpfc_mes0713[];
 extern char lpfc_mes0714[];
@@ -324,7 +315,6 @@ extern char lpfc_mes1601[];
 extern char lpfc_mes1602[];
 extern char lpfc_mes1603[];
 extern char lpfc_mes1604[];
-extern char lpfc_mes1605[];
 extern char lpfc_mes1606[];
 extern char lpfc_mes1607[];
 
@@ -366,7 +356,6 @@ extern msgLogDef lpfc_msgBlk0127;
 extern msgLogDef lpfc_msgBlk0200;
 extern msgLogDef lpfc_msgBlk0201;
 extern msgLogDef lpfc_msgBlk0202;
-extern msgLogDef lpfc_msgBlk0203;
 extern msgLogDef lpfc_msgBlk0204;
 extern msgLogDef lpfc_msgBlk0205;
 extern msgLogDef lpfc_msgBlk0206;
@@ -404,6 +393,7 @@ extern msgLogDef lpfc_msgBlk0238;
 extern msgLogDef lpfc_msgBlk0239;
 extern msgLogDef lpfc_msgBlk0240;
 extern msgLogDef lpfc_msgBlk0241;
+extern msgLogDef lpfc_msgBlk0242;
 extern msgLogDef lpfc_msgBlk0243;
 extern msgLogDef lpfc_msgBlk0244;
 extern msgLogDef lpfc_msgBlk0245;
@@ -411,6 +401,10 @@ extern msgLogDef lpfc_msgBlk0246;
 extern msgLogDef lpfc_msgBlk0247;
 extern msgLogDef lpfc_msgBlk0248;
 extern msgLogDef lpfc_msgBlk0249;
+extern msgLogDef lpfc_msgBlk0250;
+extern msgLogDef lpfc_msgBlk0256;
+extern msgLogDef lpfc_msgBlk0260;
+
 
 /* MAILBOX LOG Message Structures */
 extern msgLogDef lpfc_msgBlk0300;
@@ -457,11 +451,10 @@ extern msgLogDef lpfc_msgBlk0439;
 extern msgLogDef lpfc_msgBlk0440;
 extern msgLogDef lpfc_msgBlk0441;
 extern msgLogDef lpfc_msgBlk0442;
+extern msgLogDef lpfc_msgBlk0443;
 extern msgLogDef lpfc_msgBlk0446;
 extern msgLogDef lpfc_msgBlk0447;
 extern msgLogDef lpfc_msgBlk0448;
-extern msgLogDef lpfc_msgBlk0449;
-extern msgLogDef lpfc_msgBlk0450;
 extern msgLogDef lpfc_msgBlk0451;
 extern msgLogDef lpfc_msgBlk0453;
 extern msgLogDef lpfc_msgBlk0454;
@@ -474,23 +467,12 @@ extern msgLogDef lpfc_msgBlk0462;
 /* IP LOG Message Structures */
 extern msgLogDef lpfc_msgBlk0600;
 extern msgLogDef lpfc_msgBlk0601;
-extern msgLogDef lpfc_msgBlk0602;
-extern msgLogDef lpfc_msgBlk0603;
-extern msgLogDef lpfc_msgBlk0604;
-extern msgLogDef lpfc_msgBlk0605;
-extern msgLogDef lpfc_msgBlk0606;
-extern msgLogDef lpfc_msgBlk0607;
-extern msgLogDef lpfc_msgBlk0608;
-extern msgLogDef lpfc_msgBlk0609;
 extern msgLogDef lpfc_msgBlk0610;
 
 /* FCP LOG Message Structures */
-extern msgLogDef lpfc_msgBlk0700;
 extern msgLogDef lpfc_msgBlk0701;
 extern msgLogDef lpfc_msgBlk0702;
 extern msgLogDef lpfc_msgBlk0703;
-extern msgLogDef lpfc_msgBlk0706;
-extern msgLogDef lpfc_msgBlk0710;
 extern msgLogDef lpfc_msgBlk0712;
 extern msgLogDef lpfc_msgBlk0713;
 extern msgLogDef lpfc_msgBlk0714;
@@ -548,7 +530,6 @@ extern msgLogDef lpfc_msgBlk1601;
 extern msgLogDef lpfc_msgBlk1602;
 extern msgLogDef lpfc_msgBlk1603;
 extern msgLogDef lpfc_msgBlk1604;
-extern msgLogDef lpfc_msgBlk1605;
 extern msgLogDef lpfc_msgBlk1606;
 extern msgLogDef lpfc_msgBlk1607;
 
@@ -590,7 +571,6 @@ extern msgLogDef lpfc_msgBlk1607;
 #define LPFC_LOG_MSG_DI_0200    200
 #define LPFC_LOG_MSG_DI_0201    201
 #define LPFC_LOG_MSG_DI_0202    202
-#define LPFC_LOG_MSG_DI_0203    203
 #define LPFC_LOG_MSG_DI_0204    204
 #define LPFC_LOG_MSG_DI_0205    205
 #define LPFC_LOG_MSG_DI_0206    206
@@ -628,6 +608,7 @@ extern msgLogDef lpfc_msgBlk1607;
 #define LPFC_LOG_MSG_DI_0239    239
 #define LPFC_LOG_MSG_DI_0240    240
 #define LPFC_LOG_MSG_DI_0241    241
+#define LPFC_LOG_MSG_DI_0242    242
 #define LPFC_LOG_MSG_DI_0243    243
 #define LPFC_LOG_MSG_DI_0244    244
 #define LPFC_LOG_MSG_DI_0245    245
@@ -635,6 +616,9 @@ extern msgLogDef lpfc_msgBlk1607;
 #define LPFC_LOG_MSG_DI_0247    247
 #define LPFC_LOG_MSG_DI_0248    248
 #define LPFC_LOG_MSG_DI_0249    249
+#define LPFC_LOG_MSG_DI_0250    250
+#define LPFC_LOG_MSG_DI_0256    256
+#define LPFC_LOG_MSG_DI_0260    260
 
 /* MAILBOX LOG Message Numbers */
 #define LPFC_LOG_MSG_MB_0300    300
@@ -681,11 +665,10 @@ extern msgLogDef lpfc_msgBlk1607;
 #define LPFC_LOG_MSG_IN_0440    440
 #define LPFC_LOG_MSG_IN_0441    441
 #define LPFC_LOG_MSG_IN_0442    442
+#define LPFC_LOG_MSG_IN_0443    443
 #define LPFC_LOG_MSG_IN_0446    446
 #define LPFC_LOG_MSG_IN_0447    447
 #define LPFC_LOG_MSG_IN_0448    448
-#define LPFC_LOG_MSG_IN_0449    449
-#define LPFC_LOG_MSG_IN_0450    450
 #define LPFC_LOG_MSG_IN_0451    451
 #define LPFC_LOG_MSG_IN_0453    453
 #define LPFC_LOG_MSG_IN_0454    454
@@ -702,23 +685,12 @@ extern msgLogDef lpfc_msgBlk1607;
 /* IP LOG Message Numbers */
 #define LPFC_LOG_MSG_IP_0600    600
 #define LPFC_LOG_MSG_IP_0601    601
-#define LPFC_LOG_MSG_IP_0602    602
-#define LPFC_LOG_MSG_IP_0603    603
-#define LPFC_LOG_MSG_IP_0604    604
-#define LPFC_LOG_MSG_IP_0605    605
-#define LPFC_LOG_MSG_IP_0606    606
-#define LPFC_LOG_MSG_IP_0607    607
-#define LPFC_LOG_MSG_IP_0608    608
-#define LPFC_LOG_MSG_IP_0609    609
 #define LPFC_LOG_MSG_IP_0610    610
 
 /* FCP LOG Message Numbers */
-#define LPFC_LOG_MSG_FP_0700    700
 #define LPFC_LOG_MSG_FP_0701    701
 #define LPFC_LOG_MSG_FP_0702    702
 #define LPFC_LOG_MSG_FP_0703    703
-#define LPFC_LOG_MSG_FP_0706    706
-#define LPFC_LOG_MSG_FP_0710    710
 #define LPFC_LOG_MSG_FP_0712    712
 #define LPFC_LOG_MSG_FP_0713    713
 #define LPFC_LOG_MSG_FP_0714    714
@@ -783,7 +755,6 @@ extern msgLogDef lpfc_msgBlk1607;
 #define LPFC_LOG_MSG_IO_1602   1602
 #define LPFC_LOG_MSG_IO_1603   1603
 #define LPFC_LOG_MSG_IO_1604   1604
-#define LPFC_LOG_MSG_IO_1605   1605
 #define LPFC_LOG_MSG_IO_1606   1606
 #define LPFC_LOG_MSG_IO_1607   1607
 

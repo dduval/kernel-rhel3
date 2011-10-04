@@ -833,6 +833,33 @@ static inline struct page * get_page_map(struct page *page)
 	return page;
 }
 
+#ifndef CONFIG_X86_4G
+static inline int
+untouched_anonymous_page(struct mm_struct* mm, struct vm_area_struct *vma,
+			 unsigned long address)
+{
+	pgd_t *pgd;
+	pmd_t *pmd;
+
+	/* Check if the vma is for an anonymous mapping. */
+	if (vma->vm_ops && vma->vm_ops->nopage)
+		return 0;
+
+	/* Check if page directory entry exists. */
+	pgd = pgd_offset(mm, address);
+	if (pgd_none(*pgd) || unlikely(pgd_bad(*pgd)))
+		return 1;
+
+	/* Check if page middle directory entry exists. */
+	pmd = pmd_offset(pgd, address);
+	if (pmd_none(*pmd) || unlikely(pmd_bad(*pmd)))
+		return 1;
+
+	/* There is a pte slot for 'address' in 'mm'. */
+	return 0;
+}
+#endif
+
 /*
  * Please read Documentation/cachetlb.txt before using this function,
  * accessing foreign memory spaces can cause cache coherency problems.
@@ -874,6 +901,13 @@ int __get_user_pages(struct task_struct *tsk, struct mm_struct *mm, unsigned lon
 		do {
 			struct page *map;
 			while (!(map = follow_page(mm, start, write))) {
+#ifndef CONFIG_X86_4G
+				if (!write &&
+				    untouched_anonymous_page(mm, vma, start)) {
+					map = ZERO_PAGE(start);
+					break;
+				}
+#endif
 				spin_unlock(&mm->page_table_lock);
 				switch (handle_mm_fault(mm, vma, start, write)) {
 				case 1:
@@ -1345,8 +1379,11 @@ int remap_page_range(struct vm_area_struct *vma, unsigned long from,
  */
 static inline void establish_pte(struct vm_area_struct * vma, unsigned long address, pte_t *page_table, pte_t entry)
 {
-	vm_set_pte(vma, address, page_table, entry);
+	if (!pte_none(*page_table))
+		vm_account_remove(vma, *page_table, address);
+	pte_clear(page_table);
 	flush_tlb_page(vma, address);
+	vm_set_pte(vma, address, page_table, entry);
 	update_mmu_cache(vma, address, entry);
 }
 
@@ -1387,6 +1424,7 @@ static int do_wp_page(struct mm_struct *mm, struct vm_area_struct * vma,
 {
 	struct page *old_page, *new_page;
 	struct pte_chain * pte_chain = NULL;
+	int old_page_locked = 0;
 
 	old_page = pte_page(pte);
 	if (!VALID_PAGE(old_page))
@@ -1394,8 +1432,9 @@ static int do_wp_page(struct mm_struct *mm, struct vm_area_struct * vma,
 
 	if (!TryLockPage(old_page)) {
 		int reuse = can_share_swap_page(old_page);
-		unlock_page(old_page);
+		old_page_locked = 1;
 		if (reuse) {
+			unlock_page(old_page);
 			flush_cache_page(vma, address);
 			establish_pte(vma, address, page_table, pte_mkyoung(pte_mkdirty(pte_mkwrite(pte))));
 			pte_unmap(page_table);
@@ -1437,6 +1476,8 @@ static int do_wp_page(struct mm_struct *mm, struct vm_area_struct * vma,
 	}
 	pte_unmap(page_table);
 	spin_unlock(&mm->page_table_lock);
+	if (old_page_locked)
+		unlock_page(old_page);
 	page_cache_release(new_page);
 	page_cache_release(old_page);
 	pte_chain_free(pte_chain);
@@ -1448,6 +1489,8 @@ bad_wp_page:
 	printk("do_wp_page: bogus page at address %08lx (page 0x%lx)\n",address,(unsigned long)old_page);
 	return -1;
 no_mem:
+	if (old_page_locked)
+		unlock_page(old_page);
 	page_cache_release(old_page);
 	pte_chain_free(pte_chain);
 	return -1;
@@ -1658,19 +1701,8 @@ static int do_anonymous_page(struct mm_struct * mm, struct vm_area_struct * vma,
 {
 	pte_t entry;
 	struct page * page = ZERO_PAGE(addr);
-	struct pte_chain * pte_chain;
+	struct pte_chain * pte_chain = NULL;
 	int ret;
-
-	pte_chain = pte_chain_alloc(GFP_ATOMIC);
-	if (!pte_chain) {
-		pte_unmap(page_table);
-		spin_unlock(&mm->page_table_lock);
-		pte_chain = pte_chain_alloc(GFP_KERNEL);
-		if (!pte_chain)
-			goto no_mem;
-		spin_lock(&mm->page_table_lock);
-		page_table = pte_offset_map(pmd, addr);
-	}
 
 	/* Read-only mapping of ZERO_PAGE. */
 	entry = pte_wrprotect(mk_pte(ZERO_PAGE(addr), vma->vm_page_prot));
@@ -1681,6 +1713,9 @@ static int do_anonymous_page(struct mm_struct * mm, struct vm_area_struct * vma,
 		pte_unmap(page_table);
 		spin_unlock(&mm->page_table_lock);
 
+		pte_chain = pte_chain_alloc(GFP_KERNEL);
+		if (!pte_chain)
+			goto no_mem;
 		page = alloc_page(GFP_HIGHUSER);
 		if (!page)
 			goto no_mem;
@@ -1702,8 +1737,8 @@ static int do_anonymous_page(struct mm_struct * mm, struct vm_area_struct * vma,
 	}
 
 	vm_set_pte(vma, addr, page_table, entry);
-	/* ignores ZERO PAGE */
-	pte_chain = page_add_rmap(page, page_table, pte_chain);
+	if (write_access)
+		pte_chain = page_add_rmap(page, page_table, pte_chain);
 
 	/* No need to invalidate - it was non-present before */
 	update_mmu_cache(vma, addr, entry);
@@ -2118,6 +2153,7 @@ struct kvec *mm_map_user_kvec(struct mm_struct *mm, int rw, unsigned long ptr,
 	dprintk("map_user_kvec: err(%d) rw=%d\n", err, rw);
 	return ERR_PTR(err);
 }
+EXPORT_SYMBOL_GPL(mm_map_user_kvec);
 
 /*
  * Unmap all of the pages referenced by a kiobuf.  We release the pages,

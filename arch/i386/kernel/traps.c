@@ -315,6 +315,7 @@ bug:
 }
 
 spinlock_t die_lock = SPIN_LOCK_UNLOCKED;
+static int die_owner = -1;
 
 void die(const char * str, struct pt_regs * regs, long err)
 {
@@ -333,8 +334,13 @@ void die(const char * str, struct pt_regs * regs, long err)
 	}
 #endif	
 	console_verbose();
-	if (!crashdump_mode())
-		spin_lock_irq(&die_lock);
+	local_irq_disable();
+	if (!spin_trylock(&die_lock)) {
+		if (smp_processor_id() != die_owner)
+			spin_lock(&die_lock);
+		/* allow recursive die to fall through */
+	}
+	die_owner = smp_processor_id();
 	bust_spinlocks(1);
 	handle_BUG(regs);
 	printk("%s: %04lx\n", str, err & 0xffff);
@@ -343,6 +349,7 @@ void die(const char * str, struct pt_regs * regs, long err)
 	if (panic_on_oops)
 		panic("Fatal exception");
 	bust_spinlocks(0);
+	die_owner = -1;
 	spin_unlock_irq(&die_lock);
 	do_exit(SIGSEGV);
 }
@@ -488,7 +495,7 @@ asmlinkage void do_general_protection(struct pt_regs * regs, long error_code)
 		 * we wont hit this branch next time around.
 		 */
 		if (desc1->a != desc2->a || desc1->b != desc2->b) {
-			if (print_fatal_signals >= 2) {
+			if (print_fatal_signals >= 3) {
 				printk("#GPF fixup (%ld[seg:%lx]) at %08lx, CPU#%d.\n", error_code, error_code/8, regs->eip, smp_processor_id());
 				printk(" exec_limit: %08lx, user_cs: %08lx/%08lx, CPU_cs: %08lx/%08lx.\n", current->mm->context.exec_limit, desc1->a, desc1->b, desc2->a, desc2->b);
 			}
@@ -565,6 +572,7 @@ static void unknown_nmi_error(unsigned char reason, struct pt_regs * regs)
 }
 
 int unknown_nmi_panic = 0;
+int mem_nmi_panic = 0;
 
 static spinlock_t nmi_print_lock = SPIN_LOCK_UNLOCKED;
 
@@ -612,8 +620,14 @@ static void default_do_nmi(struct pt_regs * regs)
 		unknown_nmi_error(reason, regs);
 		return;
 	}
-	if (reason & 0x80)
+	if (reason & 0x80) {
+		if (mem_nmi_panic) {
+			char buf[64];
+			sprintf(buf, "NMI received for possible memory parity error %02x\n", reason);
+			die_nmi(regs, buf);
+		}
 		mem_parity_error(reason, regs);
+	}
 	if (reason & 0x40)
 		io_check_error(reason, regs);
 	/*

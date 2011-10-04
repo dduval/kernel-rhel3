@@ -1,5 +1,5 @@
 /*
- * $Id: netiucv.c,v 1.21 2002/12/09 18:40:44 mschwide Exp $
+ * $Id: netiucv.c,v 1.21.8.6 2004/06/29 07:37:33 braunu Exp $
  *
  * IUCV network driver
  *
@@ -28,7 +28,7 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  *
- * RELEASE-TAG: IUCV network driver $Revision: 1.21 $
+ * RELEASE-TAG: IUCV network driver $Revision: 1.21.8.5 $
  *
  */
 
@@ -114,7 +114,6 @@ typedef struct iucv_connection_t {
 	spinlock_t               collect_lock;
 	int                      collect_len;
 	int                      max_buffsize;
-	int                      flags;
 	fsm_timer                timer;
 	int                      retry;
 	fsm_instance             *fsm;
@@ -122,8 +121,6 @@ typedef struct iucv_connection_t {
 	connection_profile       prof;
 	char                     userid[9];
 } iucv_connection;
-
-#define CONN_FLAGS_BUFSIZE_CHANGED 1
 
 /**
  * Linked list of all connection structs.
@@ -590,7 +587,7 @@ conn_action_rx(fsm_instance *fi, int event, void *arg)
 	iucv_MessagePending *eib = (iucv_MessagePending *)ev->data;
 	netiucv_priv *privptr = (netiucv_priv *)conn->netdev->priv;
 
-	__u16 msglen = eib->ln1msg2.ipbfln1f;
+	__u32 msglen = eib->ln1msg2.ipbfln1f;
 	int rc;
 
 #ifdef DEBUG
@@ -613,6 +610,7 @@ conn_action_rx(fsm_instance *fi, int event, void *arg)
 			  conn->rx_buff->data, msglen, NULL, NULL, NULL);
 	if (rc != 0 || msglen < 5) {
 		privptr->stats.rx_errors++;
+		printk(KERN_INFO "iucv_receive returned %08x\n", rc);
 		return;
 	}
 	netiucv_unpack_skb(conn, conn->rx_buff);
@@ -693,7 +691,7 @@ conn_action_txdone(fsm_instance *fi, int event, void *arg)
 			fsm_newstate(fi, CONN_STATE_IDLE);
 			if (privptr)
 				privptr->stats.tx_errors += txpackets;
-			printk(KERN_DEBUG "iucv_send returned %08x\n",
+			printk(KERN_INFO "iucv_send returned %08x\n",
 			       rc);
 		} else {
 			if (privptr) {
@@ -1019,6 +1017,7 @@ static void
 dev_action_connup(fsm_instance *fi, int event, void *arg)
 {
 	net_device   *dev = (net_device *)arg;
+	netiucv_priv *privptr = (netiucv_priv *)dev->priv;
 
 #ifdef DEBUG
 	printk(KERN_DEBUG "%s() called\n", __FUNCTION__);
@@ -1027,8 +1026,8 @@ dev_action_connup(fsm_instance *fi, int event, void *arg)
 		case DEV_STATE_STARTWAIT:
 			fsm_newstate(fi, DEV_STATE_RUNNING);
 			printk(KERN_INFO
-			       "%s: connected with remote side\n",
-			       dev->name);
+			       "%s: connected with remote side %s\n",
+			       dev->name, privptr->conn->userid);
 			break;
 		case DEV_STATE_STOPWAIT:
 			printk(KERN_INFO
@@ -1418,7 +1417,6 @@ netiucv_buffer_write(struct file *file, const char *buf, size_t count,
 	privptr->conn->max_buffsize = bs1;
 	if (!(dev->flags & IFF_RUNNING))
 		dev->mtu = bs1 - NETIUCV_HDRLEN - NETIUCV_HDRLEN;
-	privptr->conn->flags |= CONN_FLAGS_BUFSIZE_CHANGED;
 
 	return count;
 }
@@ -2046,7 +2044,7 @@ netiucv_free_netdevice(net_device *dev)
 static void
 netiucv_banner(void)
 {
-	char vbuf[] = "$Revision: 1.21 $";
+	char vbuf[] = "$Revision: 1.21.8.5 $";
 	char *version = vbuf;
 
 	if ((version = strchr(version, ':'))) {

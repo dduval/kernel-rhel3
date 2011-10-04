@@ -181,7 +181,7 @@ system_call:
         stosm   24(%r15),0x03     # reenable interrupts
         l       %r8,sys_call_table-entry_base(%r7,%r13) # get system call addr.
         l       %r1,__TASK_ptrace(%r9) # process ptrace flags
-        tml     %r1,0x802         # PT_TRACESYS|PT_AUDITED
+        tml     %r1,0x1802        # PT_TRACESYS|PT_AUDITED|PT_SINGLESTEP
         bnz     BASED(sysc_tracesys)
         basr    %r14,%r8          # call sys_xxxx
         st      %r2,SP_R2(%r15)   # store return value (change R2 on stack)
@@ -595,9 +595,15 @@ sys_call_table:
 	.long  sys_io_submit
 	.long  sys_io_cancel
 	.long  sys_exit_group
+#ifdef CONFIG_EPOLL
+	.long  sys_epoll_create
+	.long  sys_epoll_ctl		 /* 250 */
+	.long  sys_epoll_wait
+#else
 	.long  sys_ni_syscall
-	.long  sys_ni_syscall		 /* 250 */
 	.long  sys_ni_syscall
+	.long  sys_ni_syscall
+#endif
 	.long  sys_set_tid_address
 	.long  sys_ni_syscall
 	.rept  255-253
@@ -683,7 +689,7 @@ pgm_svcper:
         stosm   24(%r15),0x03     # reenable interrupts
         l       %r8,sys_call_table-entry_base(%r7,%r13) # get system call addr.
         l       %r1,__TASK_ptrace(%r9) # process ptrace flags
-        tml     %r1,0x802         # PT_TRACESYS|PT_AUDITED
+        tml     %r1,0x1802        # PT_TRACESYS|PT_AUDITED|PT_SINGLESTEP
         bnz     BASED(pgm_tracesys)
         basr    %r14,%r8          # call sys_xxxx
         st      %r2,SP_R2(%r15)   # store return value (change R2 on stack)

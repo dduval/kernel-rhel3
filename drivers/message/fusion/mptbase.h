@@ -81,8 +81,8 @@
 #define COPYRIGHT	"Copyright (c) 1999-2004 " MODULEAUTHOR
 #endif
 
-#define MPT_LINUX_VERSION_COMMON	"2.05.16"
-#define MPT_LINUX_PACKAGE_NAME		"@(#)mptlinux-2.05.16"
+#define MPT_LINUX_VERSION_COMMON	"2.05.16.02"
+#define MPT_LINUX_PACKAGE_NAME		"@(#)mptlinux-2.05.16.02"
 #define WHAT_MAGIC_STRING		"@" "(" "#" ")"
 
 #define show_mptmod_ver(s,ver)  \
@@ -98,6 +98,7 @@
 #define MPT_MAX_FC_DEVICES		255
 #define MPT_MAX_SCSI_DEVICES		16
 #define MPT_LAST_LUN			255
+#define MPT_NON_IU_LAST_LUN		63
 #define MPT_SENSE_BUFFER_ALLOC		64
 	/* allow for 256 max sense alloc, but only 255 max request */
 #if MPT_SENSE_BUFFER_ALLOC >= 256
@@ -404,7 +405,7 @@ typedef struct _VirtDevice {
 	ScsiCmndTracker		 WaitQ;
 	ScsiCmndTracker		 SentQ;
 	ScsiCmndTracker		 DoneQ;
-	u32			 num_luns;
+	u32			 last_lun;
 	u32			 luns[8];		/* Max LUNs is 256 */
 	u8			 pad[4];
 	u8			 inq_data[8];

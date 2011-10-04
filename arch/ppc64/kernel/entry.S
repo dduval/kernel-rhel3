@@ -82,7 +82,7 @@ _GLOBAL(DoSyscall)
 1:
 #endif /* SHOW_SYSCALLS */
 	ld	r10,TASK_PTRACE(r13)
-	andi.	r10,r10,PT_TRACESYS|PT_AUDITED
+	andi.	r10,r10,PT_TRACESYS|PT_AUDITED|PT_SINGLESTEP
 	bne-	50f
 	cmpli	0,r0,NR_syscalls
 	bge-	66f
@@ -220,7 +220,7 @@ _GLOBAL(ppc64_rt_sigreturn)
 	bl	.sys_rt_sigreturn
 
 80:	ld	r10,TASK_PTRACE(r13)
-	andi.	r10,r10,PT_TRACESYS|PT_AUDITED
+	andi.	r10,r10,PT_TRACESYS|PT_AUDITED|PT_SINGLESTEP
 	bne-	81f
 	cmpi	0,r3,0
 	bge	.ret_from_except

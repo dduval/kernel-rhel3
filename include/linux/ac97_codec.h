@@ -214,6 +214,9 @@
                                     (CODEC)->supported_mixers & (1<<FOO) )
 
 struct ac97_codec {
+	/* Linked list of codecs */
+	struct list_head list;
+
 	/* AC97 controller connected with */
 	void *private_data;
 
@@ -221,6 +224,7 @@ struct ac97_codec {
 	int id;
 	int dev_mixer; 
 	int type;
+	u32 model;
 
 	int modem:1;
 
@@ -237,7 +241,8 @@ struct ac97_codec {
 	/* callback used by helper drivers for interesting ac97 setups */
 	void  (*codec_unregister) (struct ac97_codec *codec);
 	
-	void *helper_private;	/* Private data for the helper */
+	struct ac97_driver *driver;
+	void *driver_private;	/* Private data for the driver */
 	
 	spinlock_t lock;
 	
@@ -297,5 +302,17 @@ extern int ac97_restore_state(struct ac97_codec *codec);
 
 extern struct ac97_codec *ac97_alloc_codec(void);
 extern void ac97_release_codec(struct ac97_codec *codec);
+
+struct ac97_driver {
+	struct list_head list;
+	char *name;
+	u32 codec_id;
+	u32 codec_mask;
+	int (*probe) (struct ac97_codec *codec, struct ac97_driver *driver);
+	void (*remove) (struct ac97_codec *codec, struct ac97_driver *driver);
+};
+
+extern int ac97_register_driver(struct ac97_driver *driver);
+extern void ac97_unregister_driver(struct ac97_driver *driver);
 
 #endif /* _AC97_CODEC_H_ */

@@ -543,6 +543,12 @@ static void *early_enable_eeh(struct device_node *dn, void *data)
 	if (!class_code || !vendor_id || !device_id)
 		return NULL;
 
+	/* There is nothing to check on PCI to ISA bridges */
+	if (dn->type && !strcmp(dn->type, "isa")) {
+		dn->eeh_mode |= EEH_MODE_NOCHECK;
+		return NULL;
+	}
+
 	/* Now decide if we are going to "Disable" EEH checking
 	 * for this device.  We still run with the EEH hardware active,
 	 * but we won't be checking for ff's.  This means a driver

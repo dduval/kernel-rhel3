@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_compat.h 1.14.1.2 2004/05/24 17:30:36EDT jselx Exp  $
+ * $Id: lpfc_compat.h 1.14.1.3 2004/07/14 09:13:31EDT sf_support Exp  $
  *
  * This file provides macros to aid compilation in the Linux 2.4 kernel
  * over various platform architectures.

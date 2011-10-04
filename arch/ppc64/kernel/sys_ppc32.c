@@ -2916,6 +2916,8 @@ do_sys32_shmctl(int first, int second, void *uptr)
 	case IPC_RMID:
 	case SHM_LOCK:
 	case SHM_UNLOCK:
+		if (second == (IPC_INFO | IPC_64))
+			second = IPC_INFO;
 		err = sys_shmctl(first, second, (struct shmid_ds *)uptr);
 		break;
 	case IPC_SET:
@@ -3252,6 +3254,11 @@ asmlinkage long sys32_sendfile(u32 out_fd, u32 in_fd, __kernel_off_t32* offset, 
 	return ret;
 }
 
+asmlinkage long sys32_sendfile64(u32 out_fd, u32 in_fd, loff_t *offset, u32 count)
+{
+	return sys_sendfile64((int)out_fd, (int)in_fd, (loff_t *) AA(offset), count);
+}
+
 extern asmlinkage int sys_setsockopt(int fd, int level, int optname, char *optval, int optlen);
 
 struct ipt_rateinfo32 {
@@ -3560,13 +3567,14 @@ asmlinkage long sys32_setsockopt(int fd, int level, int optname,
 	if (optname == IPT_SO_SET_REPLACE)
 		return do_netfilter_replace(fd, level, optname,
 					    optval, optlen);
-	if (optname == SO_ATTACH_FILTER)
+	if (level == SOL_SOCKET && optname == SO_ATTACH_FILTER)
 		return do_set_attach_filter(fd, level, optname,
 					    optval, optlen);
 	if (level == SOL_ICMPV6 && optname == ICMPV6_FILTER)
 		return do_set_icmpv6_filter(fd, level, optname,
 					    optval, optlen);
-	if (optname == SO_SNDTIMEO || optname == SO_RCVTIMEO)
+	if (level == SOL_SOCKET &&
+	    (optname == SO_SNDTIMEO || optname == SO_RCVTIMEO))
 		return do_set_sock_timeout(fd, level, optname, optval, optlen);
 
 	return sys_setsockopt(fd, level, optname, optval, optlen);

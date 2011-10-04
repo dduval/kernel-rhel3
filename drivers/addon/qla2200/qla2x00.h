@@ -142,9 +142,8 @@ typedef char BOOL;
  * I/O register
 */
 /* #define MEMORY_MAPPED_IO  */    /* Enable memory mapped I/O */
-#define MEMORY_MAPPED_IO  1
 
-#if defined(MEMORY_MAPPED_IO)
+#if MEMORY_MAPPED_IO
 #define RD_REG_BYTE(addr)         readb(addr)
 #define RD_REG_WORD(addr)         readw(addr)
 #define RD_REG_DWORD(addr)        readl(addr)
@@ -159,6 +158,13 @@ typedef char BOOL;
 #define WRT_REG_WORD(addr, data)  (outw(data,(unsigned long)addr))
 #define WRT_REG_DWORD(addr, data) (outl(data,(unsigned long)addr))
 #endif  /* MEMORY_MAPPED_IO */
+
+/* The ISP2312 v2 chip cannot access the FLASH/GPIO registers via MMIO
+ * in 133 MHZ slot.
+ */
+#define RD_REG_WORD_IOMEM(addr)         (inw((unsigned long)addr))
+#define WRT_REG_WORD_IOMEM(addr, data)  (outw(data,(unsigned long)addr))
+
 /*
  * Fibre Channel device definitions.
  */
@@ -213,6 +219,11 @@ typedef char BOOL;
 #define PORT_NEED_MAP       0x102       
 #define PORT_LOST_ID        0x200       
 #define PORT_LOGIN_NEEDED   0x400       
+
+// Inbound or Outbound tranfer of data
+#define QLA2X00_UNKNOWN  0
+#define QLA2X00_READ	1
+#define QLA2X00_WRITE	2
 
 /*
  * Timeout timer counts in seconds
@@ -2915,6 +2926,7 @@ typedef struct scsi_qla_host
 #define MBX_CMD_WANT	2 /* 2nd bit */
 #define MBX_INTERRUPT	3 /* 3rd bit */
 #define MBX_INTR_WAIT   4 /* 4rd bit */
+#define MBX_UPDATE_FLASH_ACTIVE 5 /* 5th bit */
 
 	spinlock_t	mbx_reg_lock;   /* Mbx Cmd Register Lock */
 	spinlock_t	mbx_q_lock;     /* Mbx Active Cmd Queue Lock */
@@ -3157,6 +3169,8 @@ typedef struct scsi_qla_host
 	/* Model description string from our table based on NVRAM spec */
 	uint8_t		model_desc[80];
 
+	uint16_t	product_id[4];
+
  	/* Scsi midlayer lock */
  	spinlock_t		host_lock ____cacheline_aligned;
 } scsi_qla_host_t;
@@ -3305,6 +3319,9 @@ void qla2x00_setup(char *s);
  */
 #define TEMPLATE_PROC_DIR proc_dir: NULL,
 
+/* As per RH, backout scsi-affine feature. */
+#undef SH_HAS_CAN_QUEUE_MASK
+
 #define QLA2100_LINUX_TEMPLATE {				\
 TEMPLATE_NEXT 	 	 	 	 	 	 	\
 TEMPLATE_MODULE 	  	 	 	 	 	\
@@ -3335,6 +3352,7 @@ TEMPLATE_PROC_DIR 	  	 	 	 	 	\
 TEMPLATE_USE_NEW_EH_CODE 	 	 	 	 	\
 TEMPLATE_MAX_SECTORS						\
 TEMPLATE_EMULATED						\
+	use_clustering: ENABLE_CLUSTERING,			\
 	vary_io: 1,						\
 	use_clustering: 0,					\
 	highmem_io: 1						\

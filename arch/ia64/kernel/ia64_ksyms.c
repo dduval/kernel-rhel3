@@ -196,3 +196,5 @@ extern int page_is_ram (unsigned long pagenr);
 EXPORT_SYMBOL(page_is_ram);
 EXPORT_SYMBOL(unw_init_running);
 
+extern int init_dump;
+EXPORT_SYMBOL(init_dump);

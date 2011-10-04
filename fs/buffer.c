@@ -49,6 +49,7 @@
 #include <linux/completion.h>
 #include <linux/mm_inline.h>
 #include <linux/bootmem.h>
+#include <linux/cache_def.h>
 
 #include <asm/uaccess.h>
 #include <asm/io.h>
@@ -815,11 +816,20 @@ void __invalidate_buffers(kdev_t dev, int destroy_dirty_buffers)
 	}
 }
 
-static void free_more_memory(void)
+static void free_more_memory(int async)
 {
 	balance_dirty();
 	wakeup_bdflush();
 	try_to_free_pages(GFP_NOIO);
+	if (async) {
+		shrink_dcache_memory(1, GFP_NOIO);
+		shrink_icache_memory(1, GFP_NOIO);
+#ifdef CONFIG_QUOTA
+		shrink_dqcache_memory(1, GFP_NOIO);
+#endif
+		shrink_other_caches(1, GFP_NOIO);
+		try_to_reclaim_buffers(0, GFP_NOIO);
+	}
 	run_task_queue(&tq_disk);
 	yield();
 }
@@ -1053,7 +1063,7 @@ struct buffer_head * getblk(kdev_t dev, int block, int size)
 		}
 
 		if (!grow_buffers(dev, block, size))
-			free_more_memory();
+			free_more_memory(0);
 	}
 }
 
@@ -1276,8 +1286,9 @@ struct buffer_head * get_unused_buffer_head(int async)
 
 	/*
 	 * If we need an async buffer, use the reserved buffer heads.
+	 * Non-PF_MEMALLOC tasks can just loop in create_buffers().
 	 */
-	if (async) {
+	if (async && (current->flags & PF_MEMALLOC)) {
 		spin_lock(&unused_list_lock);
 		if (unused_list) {
 			bh = unused_list;
@@ -1381,7 +1392,7 @@ no_grow:
 	 */
 	run_task_queue(&tq_disk);
 
-	free_more_memory();
+	free_more_memory(async);
 	goto try_again;
 }
 
@@ -2074,6 +2085,7 @@ int block_commit_write(struct page *page, unsigned from, unsigned to)
 	kunmap(page);
 	return 0;
 }
+EXPORT_SYMBOL(block_commit_write);
 
 int generic_commit_write(struct file *file, struct page *page,
 		unsigned from, unsigned to)

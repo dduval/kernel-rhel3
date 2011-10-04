@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_init.c 1.68.1.8 2004/06/01 14:38:28EDT jselx Exp  $
+ * $Id: lpfc_init.c 1.2 2004/11/01 09:48:33EST sf_support Exp  $
  */
 
 #include <linux/version.h>
@@ -456,9 +456,9 @@ lpfc_config_port_post(lpfcHBA_t * phba)
 	       (phba->num_disc_nodes) || (phba->fc_prli_sent) ||
 	       ((phba->fc_map_cnt == 0) && (i<2)) ||
 	       (psli->sliinit.sli_flag & LPFC_SLI_MBOX_ACTIVE)) {
-		/* Check every second for 30 retries. */
+		/* Check every second for 45 retries. */
 		i++;
-		if (i > 30) {
+		if (i > 45) {
 			break;
 		}
 		if ((i >= 15) && (phba->hba_state <= LPFC_LINK_DOWN)) {
@@ -557,15 +557,8 @@ lpfc_hba_down_prep(lpfcHBA_t * phba)
 	writel(0, phba->HCregaddr);
 	readl(phba->HCregaddr); /* flush */
 
-	/* Now cleanup posted buffers on each ring */
-	pring = &psli->ring[LPFC_ELS_RING];
-	list_for_each_safe(curr, next, &pring->postbufq) {
-		mp = list_entry(curr, DMABUF_t, list);
-		list_del(&mp->list);
-		pring->postbufq_cnt--;
-		lpfc_mbuf_free(phba, mp->virt, mp->phys);
-		kfree(mp);
-	}
+	lpfc_flush_disc_evtq(phba);
+	lpfc_els_flush_rscn(phba);
 
 	return (0);
 }
@@ -661,6 +654,7 @@ lpfc_handle_eratt(lpfcHBA_t * phba, uint32_t status)
 			status, status1, status2);
 
 	lpfc_offline(phba);
+	lpfc_unblock_requests(phba);
 	return;
 }
 
@@ -1036,35 +1030,22 @@ lpfc_cleanup(lpfcHBA_t * phba, uint32_t save_bind)
 	lpfc_can_disctmo(phba);
 	list_for_each_safe(pos, next, &phba->fc_nlpunmap_list) {
 		ndlp = list_entry(pos, LPFC_NODELIST_t, nlp_listp);
-		list_del(pos);
-		lpfc_nlp_free(phba, ndlp);
+		lpfc_nlp_remove(phba, ndlp);
 	}
 
 	list_for_each_safe(pos, next, &phba->fc_nlpmap_list) {
 		ndlp = list_entry(pos, LPFC_NODELIST_t, nlp_listp);
-		list_del(pos);
-		bdlp = ndlp->nlp_listp_bind;
-		ndlp->nlp_listp_bind = 0;
-		lpfc_nlp_free(phba, ndlp);
-		if (bdlp) {
-			if (save_bind == 0) {
-				lpfc_bind_free(phba, bdlp);
-			} else {
-				lpfc_nlp_bind(phba, bdlp);
-			}
-		}
+		lpfc_nlp_remove(phba, ndlp);
 	}
 
 	list_for_each_safe(pos, next, &phba->fc_plogi_list) {
 		ndlp = list_entry(pos, LPFC_NODELIST_t, nlp_listp);
-		list_del(pos);
-		lpfc_nlp_free(phba, ndlp);
+		lpfc_nlp_remove(phba, ndlp);
 	}
 
 	list_for_each_safe(pos, next, &phba->fc_adisc_list) {
 		ndlp = list_entry(pos, LPFC_NODELIST_t, nlp_listp);
-		list_del(pos);
-		lpfc_nlp_free(phba, ndlp);
+		lpfc_nlp_remove(phba, ndlp);
 	}
 
 	if (save_bind == 0) {
@@ -1122,6 +1103,7 @@ lpfc_online(lpfcHBA_t * phba)
 			return (0);
 		}
 		phba->reset_pending = 1;
+		phba->no_timer = 0;
 
 		/* Bring Adapter online */
 		lpfc_printf_log(phba->brd_no, &lpfc_msgBlk0458,
@@ -1137,13 +1119,14 @@ lpfc_online(lpfcHBA_t * phba)
 			return (1);
 		}
 
+   		phba->fc_flag &= ~FC_OFFLINE_MODE;
+		
 		timeout = (phba->fc_ratov << 1) > 5 ? (phba->fc_ratov << 1) : 5;
 		lpfc_start_timer(phba, timeout, &phba->scsi_tmofunc, 
 			lpfc_scsi_timeout_handler, (unsigned long)timeout, 
 			(unsigned long)0);
 
 		
-		phba->fc_flag &= ~FC_OFFLINE_MODE;
 		phba->reset_pending = 0;
 		lpfc_unblock_requests(phba);
 	}
@@ -1155,15 +1138,20 @@ lpfc_offline(lpfcHBA_t * phba)
 {
 	LPFC_SLI_RING_t *pring;
 	LPFC_SLI_t *psli;
+	LPFC_SCSI_BUF_t *lpfc_cmd;
 	unsigned long iflag;
 	int i;
 	struct clk_data *clkData;
 	struct list_head *curr, *next;
+	struct lpfc_dmabuf *cur_buf;
+	struct timer_list *ptimer;
+	LPFCSCSITARGET_t *targetp;
 
 	if (phba) {
 		if (phba->fc_flag & FC_OFFLINE_MODE) {
 			return (0);
 		}
+
 		phba->reset_pending = 1;
 		psli = &phba->sli;
 		pring = &psli->ring[psli->fcp_ring];
@@ -1172,21 +1160,63 @@ lpfc_offline(lpfcHBA_t * phba)
 
 		lpfc_linkdown(phba);
 
-		i = 0;
-		while (pring->txcmplq_cnt) {
-			LPFC_DRVR_UNLOCK(phba, iflag);
-			mdelay(10);
-			LPFC_DRVR_LOCK(phba, iflag);
-			if (i++ > 3000)	/* 30 secs */
-				break;
-		}
-
-		/* stop all timers associated with this hba */
+		phba->no_timer = 1;
 		list_for_each_safe(curr, next, &phba->timerList) {
 			clkData = list_entry(curr, struct clk_data, listLink);
 			if (clkData) {
-				lpfc_stop_timer(clkData);
+				ptimer = clkData->timeObj;
+				if (timer_pending(ptimer)) {
+					lpfc_stop_timer(clkData);	
+				}
 			}
+		}
+
+        	for (i = 0; i < MAX_FCP_TARGET; i++) {
+                	targetp = phba->device_queue_hash[i];
+                	if (targetp) {
+                        	targetp->targetFlags &= ~FC_NPR_ACTIVE;
+                        	targetp->tmofunc.function = 0;
+                                                                                
+                        	if(targetp->pcontext)
+                                	lpfc_disc_state_machine(phba, 
+					targetp->pcontext, 
+					0, NLP_EVT_DEVICE_RM);
+                                                                                
+                        	lpfc_sched_flush_target(phba, 
+					targetp, IOSTAT_LOCAL_REJECT,
+                                	IOERR_SLI_ABORTED);
+                	}
+        	}
+
+		/* If lpfc_offline is called from the interrupt, there is a
+           	   FW trap . Do not expect iocb completions here */
+		if (!in_interrupt()) {
+			i = 0;
+			while (pring->txcmplq_cnt) {
+				LPFC_DRVR_UNLOCK(phba, iflag);
+				mdelay(10);
+				LPFC_DRVR_LOCK(phba, iflag);
+				if (i++ > 3000)	/* 30 secs */
+					break;
+			}
+		}
+
+		LPFC_DRVR_UNLOCK(phba, iflag);
+		while (!list_empty(&phba->timerList)) {
+		}
+		LPFC_DRVR_LOCK(phba, iflag);
+
+		while(!list_empty(&phba->delay_list)) {
+			lpfc_cmd = list_entry(phba->delay_list.next, LPFC_SCSI_BUF_t, listentry);
+			list_del(&lpfc_cmd->listentry);
+			lpfc_iodone(phba, lpfc_cmd);
+		}
+
+		while(!list_empty(&phba->free_buf_list)) {
+			cur_buf = list_entry(phba->free_buf_list.next, DMABUF_t, list);
+			list_del(&cur_buf->list);
+			lpfc_mbuf_free(phba, cur_buf->virt, cur_buf->phys);
+			kfree((void *)cur_buf);
 		}
 
 		/* Bring Adapter offline */
@@ -1195,8 +1225,11 @@ lpfc_offline(lpfcHBA_t * phba)
 			       lpfc_msgBlk0460.msgPreambleStr);
 
 		lpfc_sli_hba_down(phba);	/* Bring down the SLI Layer */
-		lpfc_cleanup(phba, 1);	/* Save bindings */
+
 		phba->fc_flag |= FC_OFFLINE_MODE;
+ 
+		lpfc_cleanup(phba, 1);	/* Save bindings */
+ 
 		phba->reset_pending = 0;
 	}
 	return (0);
@@ -1344,9 +1377,10 @@ lpfc_parse_binding_entry(lpfcHBA_t * phba,
 	/* Convert from ddi instance number to adapter number */
       convert_instance:
 
-	if ((phba = lpfc_get_phba_by_inst(sumtmp)) == NULL) {
+	/* Check to see if this is the right board */
+	if(phba->brd_no != sumtmp) {
 		/* Skip this entry */
-		return (LPFC_SYNTAX_OK_BUT_NOT_THIS_BRD);
+		return(LPFC_SYNTAX_OK_BUT_NOT_THIS_BRD);
 	}
 
 	/* Parse 't' */

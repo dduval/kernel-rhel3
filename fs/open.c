@@ -71,6 +71,80 @@ out:
 	return error;
 }
 
+#ifdef __ARCH_HAS_STATFS64
+static int vfs_statfs64(struct super_block *sb, struct statfs64 *buf)
+{
+	int retval;
+
+	if (sb->s_flags & MS_HAS_STATFS64) {
+		memset(buf, 0, sizeof(struct statfs64));
+		lock_kernel();
+		retval = sb->s_op->statfs64(sb, buf);
+		unlock_kernel();
+		if (retval)
+			return retval;
+	} else {
+		struct statfs st;
+		/* Fall back to the 32 bit filesystem call. */
+		retval = vfs_statfs(sb, &st);
+		if (retval)
+			return retval;
+		/* Stuff the 32 bit values into the 64 bit struct */
+		buf->f_type = st.f_type;
+		buf->f_bsize = st.f_bsize;
+		buf->f_blocks = st.f_blocks;
+		buf->f_bfree = st.f_bfree;
+		buf->f_bavail = st.f_bavail;
+		buf->f_files = st.f_files;
+		buf->f_ffree = st.f_ffree;
+		buf->f_fsid = st.f_fsid;
+		buf->f_namelen = st.f_namelen;
+		memset(buf->f_spare, 0, sizeof(buf->f_spare));
+	}
+	return 0;
+}
+
+asmlinkage long sys_statfs64(const char *path, size_t sz, struct statfs64 *buf)
+{
+	struct nameidata nd;
+	long error;
+
+	if (sz != sizeof(*buf))
+		return -EINVAL;
+	error = user_path_walk(path, &nd);
+	if (!error) {
+		struct statfs64 tmp;
+		error = vfs_statfs64(nd.dentry->d_inode->i_sb, &tmp);
+		if (!error && copy_to_user(buf, &tmp, sizeof(tmp)))
+			error = -EFAULT;
+		path_release(&nd);
+	}
+	return error;
+}
+
+
+asmlinkage long sys_fstatfs64(unsigned int fd, size_t sz, struct statfs64 *buf)
+{
+	struct file * file;
+	struct statfs64 tmp;
+	int error;
+
+	if (sz != sizeof(*buf))
+		return -EINVAL;
+
+	error = -EBADF;
+	file = fget(fd);
+	if (!file)
+		goto out;
+	error = vfs_statfs64(file->f_dentry->d_inode->i_sb, &tmp);
+	if (!error && copy_to_user(buf, &tmp, sizeof(tmp)))
+		error = -EFAULT;
+	fput(file);
+out:
+	return error;
+}
+#endif /* __ARCH_HAS_STATFS64 */
+
 /*
  * Install a file pointer in the fd array.  
  *

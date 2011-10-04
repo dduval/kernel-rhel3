@@ -363,14 +363,11 @@ void die(const char * str, struct pt_regs * regs, long err)
 	}
 	die_owner = cpu; 
 	show_registers(regs);
-	if (netdump_func)
-		netdump_func(regs);
-	if (panic_on_oops) {
-		if (netdump_func)
-			netdump_func = NULL;
+	try_crashdump(regs);
+	if (panic_on_oops)
 		panic("Fatal exception");
-	}
 	bust_spinlocks(0);
+	die_owner = -1;
 	spin_unlock_irq(&die_lock);
 	do_exit(SIGSEGV);
 }
