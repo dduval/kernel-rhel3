@@ -318,6 +318,8 @@ static inline void prune_one_dentry(struct dentry * dentry)
 /**
  * prune_dcache - shrink the dcache
  * @count: number of entries to try and free
+ * @dispose_list: the list to go through and remove dentrys
+ *                from.  If null we use the dentry_unused list
  *
  * Shrink the dcache. This is done when we need
  * more memory, or simply when we need to unmount
@@ -328,36 +330,32 @@ static inline void prune_one_dentry(struct dentry * dentry)
  * all the dentries are in use.
  */
  
-void __prune_dcache(int count, struct super_block *sb)
+void __prune_dcache(int count, struct list_head *dispose_list)
 {
 	spin_lock(&dcache_lock);
 	for (;;) {
 		struct dentry *dentry;
 		struct list_head *tmp;
 
-		tmp = dentry_unused.prev;
-		if (unlikely(sb != NULL)) {
-			/* Try to find a dentry for this sb, but don't try
-			 * too hard, if they aren't near the tail they will
-			 * be moved down again soon.
-			 */
-			int skip = count;
-			while (skip > 0 &&
-			    tmp != &dentry_unused &&
-			    list_entry(tmp, struct dentry, d_lru)->d_sb != sb) {
-				skip--;
-				tmp = tmp->prev;
-			}
+		if (dispose_list) {
+			tmp = dispose_list->prev;
+			if (tmp == dispose_list)
+				break;
+		} else {
+			tmp = dentry_unused.prev;
+			if (tmp == &dentry_unused)
+				break;
 		}
-		if (tmp == &dentry_unused)
-			break;
 		list_del_init(tmp);
 		dentry = list_entry(tmp, struct dentry, d_lru);
 
 		/* If the dentry was recently referenced, don't free it. */
 		if (dentry->d_vfs_flags & DCACHE_REFERENCED) {
 			dentry->d_vfs_flags &= ~DCACHE_REFERENCED;
-			list_add(&dentry->d_lru, &dentry_unused);
+			if (dispose_list)
+				list_add(&dentry->d_lru, dispose_list);
+			else
+				list_add(&dentry->d_lru, &dentry_unused);
 			continue;
 		}
 		dentry_stat.nr_unused--;
@@ -521,12 +519,13 @@ static void wait_on_prunes(struct super_block *sb)
 
 /*
  * Search the dentry child list for the specified parent,
- * and move any unused dentries to the end of the unused
- * list for prune_dcache().  We descend to the next level
- * whenever the d_subdirs list is non-empty and continue
+ * and move any unused dentries to the end of the provided
+ * dispose_list for prune_dcache().  We descend to the next
+ * level whenever the d_subdirs list is non-empty and continue
  * searching.
  */
-static int select_parent(struct dentry * parent)
+static int select_parent(struct dentry * parent,
+			 struct list_head *dispose_list)
 {
 	struct dentry *this_parent = parent;
 	struct list_head *next;
@@ -544,7 +543,7 @@ resume:
 		next = tmp->next;
 		if (!atomic_read(&dentry->d_count)) {
 			list_del(&dentry->d_lru);
-			list_add(&dentry->d_lru, dentry_unused.prev);
+			list_add(&dentry->d_lru, dispose_list->prev);
 			found++;
 		}
 		/*
@@ -585,9 +584,14 @@ this_parent->d_parent->d_name.name, this_parent->d_name.name, found);
 void shrink_dcache_parent(struct dentry * parent)
 {
 	int found;
+	LIST_HEAD(dispose_list);
 
-	while ((found = select_parent(parent)) != 0)
-		__prune_dcache(found, parent->d_sb);
+	/*
+	 * select parent will populate dispose_list with the
+	 * dentry's that we are removing
+	 */
+	while ((found = select_parent(parent, &dispose_list)) != 0)
+	       __prune_dcache(found, &dispose_list);
 }
 
 /*

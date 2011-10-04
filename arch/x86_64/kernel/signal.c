@@ -464,6 +464,7 @@ handle_signal(unsigned long sig, siginfo_t *info, sigset_t *oldset, struct pt_re
 		recalc_sigpending();
 		spin_unlock_irq(&current->sighand->siglock);
 	}
+	regs->eflags &= ~X86_EFLAGS_DF;
 }
 
 /*

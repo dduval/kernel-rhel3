@@ -132,6 +132,7 @@ static void inline leave_mm (unsigned long cpu)
 	if (cpu_tlbstate[cpu].state == TLBSTATE_OK)
 		BUG();
 	clear_bit(cpu, &cpu_tlbstate[cpu].active_mm->cpu_vm_mask);
+	*read_pda(level4_pgt) = 0;
 	/* flush TLB before it goes away. this stops speculative prefetches */
 	__flush_tlb(); 
 }

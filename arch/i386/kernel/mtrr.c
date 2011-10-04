@@ -2143,45 +2143,32 @@ static int __init mtrr_setup(void)
 	mtrr_if = MTRR_IF_INTEL;
 	get_mtrr = intel_get_mtrr;
 	set_mtrr_up = intel_set_mtrr_up;
-	switch (boot_cpu_data.x86_vendor) {
+	size_or_mask = 0xff000000;	/* 36 bits */
+	size_and_mask = 0x00f00000;
 
-	case X86_VENDOR_AMD:
-		/* The original Athlon docs said that
-		   total addressable memory is 44 bits wide.
-		   It was not really clear whether its MTRRs
-		   follow this or not. (Read: 44 or 36 bits).
-		   However, "x86-64_overview.pdf" explicitly
-		   states that "previous implementations support
-		   36 bit MTRRs" and also provides a way to
-		   query the width (in bits) of the physical
-		   addressable memory on the Hammer family.
-		 */
-		if (boot_cpu_data.x86 == 15 && (cpuid_eax(0x80000000) >= 0x80000008)) {
-			u32	phys_addr;
-			phys_addr = cpuid_eax(0x80000008) & 0xff ;
-			size_or_mask = ~((1 << (phys_addr - PAGE_SHIFT)) - 1);
-			size_and_mask = ~size_or_mask & 0xfff00000;
-			break;
-		}
-		size_or_mask  = 0xff000000; /* 36 bits */
-		size_and_mask = 0x00f00000;
-		break;
+	/* This is an AMD specific MSR, but we assume(hope?) that
+	   Intel will implement it to when they extend the address
+	   bus of the Xeon. */
+	if (cpuid_eax(0x80000000) >= 0x80000008) {
+	     u32 phys_addr;
+	     phys_addr = cpuid_eax(0x80000008) & 0xff;
+	     /* CPUID workaround for Intel 0F33/0F34 CPU */
+	     if (boot_cpu_data.x86_vendor == X86_VENDOR_INTEL &&
+		 boot_cpu_data.x86 == 0xF &&
+		 boot_cpu_data.x86_model == 0x3 &&
+		 (boot_cpu_data.x86_mask == 0x3 ||
+		  boot_cpu_data.x86_mask == 0x4))
+		  phys_addr = 36;
 
-	case X86_VENDOR_CENTAUR:
-		/* VIA Cyrix family have Intel style MTRRs, but don't support PAE */
-		if (boot_cpu_data.x86 == 6) {
-			size_or_mask  = 0xfff00000; /* 32 bits */
-			size_and_mask = 0;
-		}
-		break;
-
-	default:
-		/* Intel, etc. */
-		size_or_mask  = 0xff000000; /* 36 bits */
-		size_and_mask = 0x00f00000;
-		break;
+	     size_or_mask = ~((1ULL << (phys_addr - PAGE_SHIFT)) - 1);
+	     size_and_mask = ~size_or_mask & 0xfff00000;
+	} else if (boot_cpu_data.x86_vendor == X86_VENDOR_CENTAUR &&
+		   boot_cpu_data.x86 == 6) {
+	     /* VIA C* family have Intel style MTRRs, but
+		don't support PAE */
+	     size_or_mask = 0xfff00000;	/* 32 bits */
+	     size_and_mask = 0;
 	}
-
     } else if ( test_bit(X86_FEATURE_K6_MTRR, &boot_cpu_data.x86_capability) ) {
 	/* Pre-Athlon (K6) AMD CPU MTRRs */
 	mtrr_if = MTRR_IF_AMD_K6;

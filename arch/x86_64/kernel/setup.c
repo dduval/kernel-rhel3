@@ -482,6 +482,11 @@ static void __init display_cacheinfo(struct cpuinfo_x86 *c)
 			cpuid(0x80000008, &eax, &dummy, &dummy, &dummy); 
 			c->x86_virt_bits = (eax >> 8) & 0xff;
 			c->x86_phys_bits = eax & 0xff;
+			/* CPUID workaround for Intel 0F34 CPU */
+			if (c->x86_vendor == X86_VENDOR_INTEL &&
+			    c->x86 == 0xF && c->x86_model == 0x3 &&
+			    c->x86_mask == 0x4)
+				c->x86_phys_bits = 36;
 		}
 	}
 }

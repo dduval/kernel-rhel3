@@ -320,7 +320,7 @@ static inline ssize_t do_pipe_write_aio(struct pipe_inode_info *pipe,
 
 	while (count > 0) {
 		size_t len;
-		len = min(iocb->this_size, count);
+		len = min(iocb->this_size - iocb->nr_transferred, count);
 		if (unlikely(copy_user_to_kvec(iocb->data, iocb->nr_transferred, buf, len))) {
 			pr_debug("EFAULT?\n");
 			break;
