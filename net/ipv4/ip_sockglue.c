@@ -624,6 +624,17 @@ int ip_setsockopt(struct sock *sk, int level, int optname, char *optval, int opt
 				kfree(msf);
 				break;
 			}
+			/* numsrc >= (1G-4) overflow in 32 bits */
+			if (msf->imsf_numsrc >= 0x3ffffffcU) {
+				kfree(msf);
+				err = -ENOBUFS;
+				break;
+			}
+			if (IP_MSFILTER_SIZE(msf->imsf_numsrc) > optlen) {
+				kfree(msf);
+				err = -EINVAL;
+				break;
+			}
 			err = ip_mc_msfilter(sk, msf, 0);
 			kfree(msf);
 			break;
@@ -762,7 +773,12 @@ int ip_setsockopt(struct sock *sk, int level, int optname, char *optval, int opt
 			if (copy_from_user(gsf, optval, optlen)) {
 				goto mc_msf_out;
 			}
-			if (GROUP_FILTER_SIZE(gsf->gf_numsrc) < optlen) {
+			/* numsrc >= (4G-140)/128 overflow in 32 bits */
+			if (gsf->gf_numsrc >= 0x1ffffffU) {
+				err = -ENOBUFS;
+				goto mc_msf_out;
+			}
+			if (GROUP_FILTER_SIZE(gsf->gf_numsrc) > optlen) {
 				err = EINVAL;
 				goto mc_msf_out;
 			}

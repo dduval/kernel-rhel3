@@ -153,6 +153,10 @@ ia64_mca_log_sal_error_record(int sal_info_type, int called_from_init)
 	salinfo_log_wakeup(sal_info_type);
 	platform_err = ia64_log_print(sal_info_type, (prfunc_t)printk);
 
+	/* Clear logs from corrected errors in case there's no user-level logger */
+	if (sal_info_type == SAL_INFO_TYPE_CPE || sal_info_type == SAL_INFO_TYPE_CMC)
+		ia64_sal_clear_state_info(sal_info_type);
+
 	return platform_err;
 }
 

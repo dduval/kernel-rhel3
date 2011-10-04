@@ -467,6 +467,17 @@ done:
 			kfree(gsf);
 			break;
 		}
+		/* numsrc >= (4G-140)/128 overflow in 32 bits */
+		if (gsf->gf_numsrc >= 0x1ffffffU) {
+			kfree(gsf);
+			retv = -ENOBUFS;
+			break;
+		}
+		if (GROUP_FILTER_SIZE(gsf->gf_numsrc) > optlen) {
+			kfree(gsf);
+			retv = -EINVAL;
+			break;
+		}
 		retv = ip6_mc_msfilter(sk, gsf);
 		kfree(gsf);
 
