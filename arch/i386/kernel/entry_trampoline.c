@@ -31,7 +31,7 @@ void __init init_entry_mappings(void)
 	 */
 	trap_init_virtual_IDT();
 
-	__set_fixmap(FIX_ENTRY_TRAMPOLINE, __pa((unsigned long)&entry_tramp_start), PAGE_KERNEL);
+	__set_fixmap(FIX_ENTRY_TRAMPOLINE, __pa((unsigned long)&entry_tramp_start), PAGE_KERNEL_EXEC);
 	tramp = (void *)fix_to_virt(FIX_ENTRY_TRAMPOLINE);
 
 	printk("mapped 4G/4G trampoline to %p.\n", tramp);

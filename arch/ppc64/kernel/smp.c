@@ -52,6 +52,7 @@
 #include <asm/ppcdebug.h>
 #include "open_pic.h"
 #include <asm/machdep.h>
+#include <asm/cputable.h>
 #if defined(CONFIG_DUMP) || defined(CONFIG_DUMP_MODULE)
 int (*dump_ipi_function_ptr)(struct pt_regs *);
 #include <linux/dump.h>
@@ -72,7 +73,10 @@ cycles_t cacheflush_time;
 unsigned long cache_decay_ticks = HZ/100;
 static int max_cpus __initdata = NR_CPUS;
 
-unsigned long cpu_online_map;
+
+/* These are initialized because we set them before BSS is cleared.  Sigh... */
+unsigned long cpu_available_map = 1;
+unsigned long cpu_online_map = 1;
 
 volatile unsigned long cpu_callin_map[NR_CPUS] = {0,};
 
@@ -348,8 +352,7 @@ smp_chrp_setup_cpu(int cpu_nr)
 	if (OpenPIC_Addr) {
 		do_openpic_setup_cpu();
 	} else {
-	  if (cpu_nr > 0)
-	    xics_setup_cpu();
+		xics_setup_cpu();
 	}
 }
 
@@ -372,6 +375,7 @@ smp_xics_message_pass(int target, int msg, unsigned long data, int wait)
 static int
 smp_xics_probe(void)
 {
+	xics_request_IPI();
 	return systemcfg->processorCount;
 }
 
@@ -435,7 +439,16 @@ void smp_message_recv(int msg, struct pt_regs *regs)
 
 void smp_send_reschedule(int cpu)
 {
-	smp_message_pass(cpu, PPC_MSG_RESCHEDULE, 0, 0);
+	if ((systemcfg->platform & PLATFORM_LPAR) &&
+	    (paca[cpu].yielded == 1)) {
+#ifdef CONFIG_PPC_ISERIES
+		HvCall_sendLpProd(cpu);
+#else
+		prod_processor(cpu);
+#endif
+	} else {
+		smp_message_pass(cpu, PPC_MSG_RESCHEDULE, 0, 0);
+	}
 }
 
 #ifdef CONFIG_XMON
@@ -565,6 +578,7 @@ int smp_call_function (void (*func) (void *info), void *info, int nonatomic,
 	ret = 0;
 
  out:
+	call_data = NULL;
 	HMT_medium();
 	spin_unlock_bh(&call_lock);
 	return ret;
@@ -572,9 +586,20 @@ int smp_call_function (void (*func) (void *info), void *info, int nonatomic,
 
 void smp_call_function_interrupt(void)
 {
-	void (*func) (void *info) = call_data->func;
-	void *info = call_data->info;
-	int wait = call_data->wait;
+	void (*func) (void *info);
+	void *info;
+	int wait;
+
+
+	/* call_data will be NULL if the sender timed out while
+	 * waiting on us to receive the call.
+	 */
+	if (!call_data)
+		return;
+
+	func = call_data->func;
+	info = call_data->info;
+	wait = call_data->wait;
 
 	/*
 	 * Notify initiating CPU that I've grabbed the data and am
@@ -780,15 +805,34 @@ void __init initialize_secondary(void)
 {
 }
 
+extern unsigned int default_distrib_server;
 /* Activate a secondary processor. */
 int start_secondary(void *unused)
 {
 	int cpu; 
+        unsigned long status = 0;
 
 	cpu = current->cpu;
 	atomic_inc(&init_mm.mm_count);
 	current->active_mm = &init_mm;
 	smp_callin();
+
+	get_paca()->yielded = 0;
+
+#ifdef CONFIG_PPC_PSERIES
+	if (cur_cpu_spec->firmware_features & FW_FEATURE_SPLPAR) {
+		vpa_init(cpu);
+	}
+
+#ifdef CONFIG_IRQ_ALL_CPUS
+	/* Put the calling processor into the GIQ.  This is really only 
+	 * necessary from a secondary thread as the OF start-cpu interface
+	 * performs this function for us on primary threads.
+	 */
+	rtas_call(rtas_token("set-indicator"), 3, 1, &status, 9005,
+                  default_distrib_server, 1UL);
+#endif
+#endif
 
 	/* Go into the idle loop. */
 	return cpu_idle(NULL);

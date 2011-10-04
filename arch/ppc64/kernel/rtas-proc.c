@@ -355,7 +355,7 @@ static ssize_t ppc_rtas_poweron_read(struct file * file, char * buf,
 	else
 		n = snprintf(timebuf, 40, "%lu\n", power_on_time);
 
-	if (pos != (unsigned)pos || pos >= n)
+	if (pos < 0 || pos >= n)
 		return 0;
 	n++;		/* Include the null terminator */
 	n -= pos;
@@ -405,7 +405,7 @@ static ssize_t ppc_rtas_progress_read(struct file * file, char * buf,
 	n = snprintf (tmpbuf, MAX_LINELENGTH, "%s\n", progress_led);
 	if (n > MAX_LINELENGTH) n = MAX_LINELENGTH;
 
-	if (pos != (unsigned)pos || pos >= n) {
+	if (pos < 0 || pos >= n) {
 		kfree (tmpbuf);
 		return 0;
 	}
@@ -483,7 +483,7 @@ static ssize_t ppc_rtas_clock_read(struct file * file, char * buf,
 				mktime(year, mon, day, hour, min, sec));
 	}
 
-	if (pos != (unsigned)pos || pos >= n)
+	if (pos < 0 || pos >= n)
 		return 0;
 	n++;		/* Include the null terminator */
 	n -= pos;
@@ -876,7 +876,7 @@ static ssize_t ppc_rtas_tone_freq_read(struct file * file, char * buf,
 	loff_t pos = *ppos;
 
 	n = snprintf(freqbuf, 30, "%lu\n", rtas_tone_frequency);
-	if (pos != (unsigned)pos || pos >= n)
+	if (pos < 0 || pos >= n)
 		return 0;
 	n++;		/* Include the null terminator */
 	n -= pos;
@@ -934,7 +934,7 @@ static ssize_t ppc_rtas_tone_volume_read(struct file * file, char * buf,
 	loff_t pos = *ppos;
 
 	n = snprintf(volbuf, 10, "%lu\n", rtas_tone_volume);
-	if (pos != (unsigned)pos || pos >= n)
+	if (pos < 0 || pos >= n)
 		return 0;
 	n++;		/* Include the null terminator */
 	n -= pos;
@@ -1065,7 +1065,7 @@ static ssize_t ppc_rtas_errinjct_read(struct file *file, char *buf,
 		n += cnt;
 	}
 
-	if (pos != (unsigned)pos || pos >= n) {
+	if (pos < 0 || pos >= n) {
 		kfree(buffer);
 		return 0;
 	}
@@ -1096,7 +1096,7 @@ static ssize_t ppc_rtas_rmo_buf_read(struct file *file, char *buf,
 
 	n = sprintf(kbuf, "%016lx %x\n", rtas_rmo_buf, RTAS_RMOBUF_MAX);
 
-	if (pos != (unsigned)pos || pos >= n)
+	if (pos < 0 || pos >= n)
 		return 0;
 	n -= pos;
 	if (n > count)

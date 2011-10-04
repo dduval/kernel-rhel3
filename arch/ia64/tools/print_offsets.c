@@ -20,6 +20,7 @@
 #include <asm-ia64/ptrace.h>
 #include <asm-ia64/siginfo.h>
 #include <asm-ia64/sigcontext.h>
+#include <asm-ia64/mca.h>
 
 #include "../kernel/sigframe.h"
 
@@ -176,6 +177,7 @@ tab[] =
     { "IA64_CPU_IRQ_COUNT_OFFSET",	offsetof (struct cpuinfo_ia64, irq_stat.f.irq_count) },
     { "IA64_CPU_BH_COUNT_OFFSET",	offsetof (struct cpuinfo_ia64, irq_stat.f.bh_count) },
     { "IA64_CPU_PHYS_STACKED_SIZE_P8_OFFSET",offsetof (struct cpuinfo_ia64, phys_stacked_size_p8)},
+    { "IA64_MCA_TLB_INFO_SIZE",                sizeof (struct ia64_mca_tlb_info) },
 };
 
 static const char *tabs = "\t\t\t\t\t\t\t\t\t\t";
@@ -199,7 +201,9 @@ main (int argc, char **argv)
      subtle ways should PT_PTRACED ever change.  Ditto for
      PT_TRACESYS_BIT. */
   printf ("#define PT_PTRACED_BIT\t\t\t%u\n", ffs (PT_PTRACED) - 1);
-  printf ("#define PT_TRACESYS_BIT\t\t\t%u\n\n", ffs (PT_TRACESYS) - 1);
+  printf ("#define PT_TRACESYS_BIT\t\t\t%u\n", ffs (PT_TRACESYS) - 1);
+  printf ("#define PT_AUDITED_BIT\t\t\t%u\n", ffs (PT_AUDITED) - 1);
+  printf ("#define PT_TRACEAUDITMASK\t\t0x%x\n\n", PT_TRACESYS|PT_AUDITED);
 
   for (i = 0; i < sizeof (tab) / sizeof (tab[0]); ++i)
     {

@@ -87,7 +87,7 @@ static void autofs4_put_super(struct super_block *sb)
 
 	kfree(sbi);
 
-	DPRINTK(("autofs: shutting down\n"));
+	DPRINTK(("autofs4: shutting down\n"));
 }
 
 static int autofs4_statfs(struct super_block *sb, struct statfs *buf);
@@ -181,12 +181,13 @@ struct super_block *autofs4_read_super(struct super_block *s, void *data,
 	struct file * pipe;
 	int pipefd;
 	struct autofs_sb_info *sbi;
+	struct autofs_info *ino;
 	int minproto, maxproto;
 
 	sbi = (struct autofs_sb_info *) kmalloc(sizeof(*sbi), GFP_KERNEL);
 	if ( !sbi )
 		goto fail_unlock;
-	DPRINTK(("autofs: starting up, sbi = %p\n",sbi));
+	DPRINTK(("autofs4: starting up, sbi = %p\n",sbi));
 
 	memset(sbi, 0, sizeof(*sbi));
 
@@ -198,8 +199,10 @@ struct super_block *autofs4_read_super(struct super_block *s, void *data,
 	sbi->sb = s;
 	sbi->version = 0;
 	sbi->sub_version = 0;
+	init_MUTEX(&sbi->wq_sem);
 	sbi->queues = NULL;
-	sbi->reghost_enabled = sbi->needs_reg = 0;
+	sbi->reghost_enabled = 0;
+	sbi->needs_reghost = 0;
 	s->s_blocksize = 1024;
 	s->s_blocksize_bits = 10;
 	s->s_magic = AUTOFS_SUPER_MAGIC;
@@ -208,7 +211,12 @@ struct super_block *autofs4_read_super(struct super_block *s, void *data,
 	/*
 	 * Get the root inode and dentry, but defer checking for errors.
 	 */
-	root_inode = autofs4_get_inode(s, autofs4_mkroot(sbi));
+	ino = autofs4_mkroot(sbi);
+	root_inode = autofs4_get_inode(s, ino);
+	kfree(ino);
+	if (!root_inode)
+		goto fail_free;
+
 	root_inode->i_op = &autofs4_root_inode_operations;
 	root_inode->i_fop = &autofs4_root_operations;
 	root = d_alloc_root(root_inode);
@@ -222,14 +230,14 @@ struct super_block *autofs4_read_super(struct super_block *s, void *data,
 			  &root_inode->i_uid, &root_inode->i_gid,
 			  &sbi->oz_pgrp,
 			  &minproto, &maxproto)) {
-		printk("autofs: called with bogus options\n");
+		printk("autofs4: called with bogus options\n");
 		goto fail_dput;
 	}
 
 	/* Couldn't this be tested earlier? */
 	if (maxproto < AUTOFS_MIN_PROTO_VERSION ||
 	    minproto > AUTOFS_MAX_PROTO_VERSION) {
-		printk("autofs: kernel does not match daemon version "
+		printk("autofs4: kernel does not match daemon version "
 		       "daemon (%d, %d) kernel (%d, %d)\n",
 			minproto, maxproto,
 			AUTOFS_MIN_PROTO_VERSION, AUTOFS_MAX_PROTO_VERSION);
@@ -239,11 +247,11 @@ struct super_block *autofs4_read_super(struct super_block *s, void *data,
 	sbi->version = maxproto > AUTOFS_MAX_PROTO_VERSION ? AUTOFS_MAX_PROTO_VERSION : maxproto;
 	sbi->sub_version =  AUTOFS_PROTO_SUBVERSION;
 
-	DPRINTK(("autofs: pipe fd = %d, pgrp = %u\n", pipefd, sbi->oz_pgrp));
+	DPRINTK(("autofs4: pipe fd = %d, pgrp = %u\n", pipefd, sbi->oz_pgrp));
 	pipe = fget(pipefd);
 	
 	if ( !pipe ) {
-		printk("autofs: could not open pipe file descriptor\n");
+		printk("autofs4: could not open pipe file descriptor\n");
 		goto fail_dput;
 	}
 	if ( !pipe->f_op || !pipe->f_op->write )
@@ -260,7 +268,7 @@ struct super_block *autofs4_read_super(struct super_block *s, void *data,
 	 * Failure ... clean up.
 	 */
 fail_fput:
-	printk("autofs: pipe file descriptor does not contain proper ops\n");
+	printk("autofs4: pipe file descriptor does not contain proper ops\n");
 	/*
 	 * fput() can block, so we clear the super block first.
 	 */
@@ -273,7 +281,7 @@ fail_dput:
 	dput(root);
 	goto fail_free;
 fail_iput:
-	printk("autofs: get root dentry failed\n");
+	printk("autofs4: get root dentry failed\n");
 	/*
 	 * iput() can block, so we clear the super block first.
 	 */

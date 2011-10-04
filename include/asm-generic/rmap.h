@@ -89,7 +89,7 @@ static inline chain_ptep_t ptep_to_paddr(pte_t *ptep)
 {
 	u64 paddr;
 	paddr = (u64)page_to_pfn(kmap_atomic_to_page(ptep)) << PAGE_SHIFT;
-	return PTE_ADDR_D2C(paddr + ((u64)ptep & ~PAGE_MASK));
+	return PTE_ADDR_D2C(paddr + ((u64)(unsigned long)ptep & ~PAGE_MASK));
 }
 #else
 static inline chain_ptep_t ptep_to_paddr(pte_t *ptep)

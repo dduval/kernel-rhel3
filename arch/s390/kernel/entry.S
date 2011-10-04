@@ -180,7 +180,8 @@ system_call:
         GET_CURRENT               # load pointer to task_struct to R9
         stosm   24(%r15),0x03     # reenable interrupts
         l       %r8,sys_call_table-entry_base(%r7,%r13) # get system call addr.
-        tm      __TASK_ptrace+3(%r9),0x22 # PT_TRACESYS|PT_AUDITED
+        l       %r1,__TASK_ptrace(%r9) # process ptrace flags
+        tml     %r1,0x802         # PT_TRACESYS|PT_AUDITED
         bnz     BASED(sysc_tracesys)
         basr    %r14,%r8          # call sys_xxxx
         st      %r2,SP_R2(%r15)   # store return value (change R2 on stack)
@@ -575,7 +576,7 @@ sys_call_table:
 	.long  sys_fremovexattr		/* 235 */
 	.long  sys_gettid
 	.long  sys_tkill
-	.long  sys_futex
+	.long  s390_futex
 	.long  sys_sched_setaffinity
 	.long  sys_sched_getaffinity	 /* 240 */
 	.long  sys_tgkill
@@ -681,7 +682,8 @@ pgm_svcper:
         sll     %r7,2
         stosm   24(%r15),0x03     # reenable interrupts
         l       %r8,sys_call_table-entry_base(%r7,%r13) # get system call addr.
-        tm      __TASK_ptrace+3(%r9),0x22 # PT_TRACESYS|PT_AUDITED
+        l       %r1,__TASK_ptrace(%r9) # process ptrace flags
+        tml     %r1,0x802         # PT_TRACESYS|PT_AUDITED
         bnz     BASED(pgm_tracesys)
         basr    %r14,%r8          # call sys_xxxx
         st      %r2,SP_R2(%r15)   # store return value (change R2 on stack)

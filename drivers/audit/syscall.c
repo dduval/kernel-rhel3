@@ -64,6 +64,7 @@
  * The only remaining problem is platforms with more than one
  * exec domain by default.
  */
+
 #define f(name, args...) [__NR_##name] = { 0, { args , { AUDIT_ARG_END } } }
 
 #define T_void		{ AUDIT_ARG_END }
@@ -102,12 +103,24 @@
 #define socklen_t	int	/* socklen_t is a user land thing */
 #define T_array(itype, index, max) \
 			{ AUDIT_ARG_ARRAY, sizeof(itype), index, max }
-#define T_opaque_t(idx)	{ AUDIT_ARG_ARRAY, 1, idx+1, 256 }
+#define T_opaque_t(idx)	{ AUDIT_ARG_ARRAY, 1, idx, 256 }
 #define T_argv		{ AUDIT_ARG_VECTOR, sizeof(char *), .sa_ref = AUDIT_ARG_STRING }
 
-struct sysent linux_sysent[NR_syscalls+1] = {
+/*
+ * This follows from the audit deamon.  32bit system calls have 0 based
+ * numbers as on x86 while the 64bit native calls on ia64 start at 1024.
+ */
+#ifdef __ia64__ 
+#define MAX_SYSCALLS 1300
+#else
+#define MAX_SYSCALLS NR_syscalls
+#endif
+
+struct sysent linux_sysent[MAX_SYSCALLS+1] = {
+#ifdef __NR_fork
 f(fork,		T_void),
 f(vfork,	T_void),
+#endif
 f(clone,	T_uint),
 f(execve,	T_path, T_argv, T_any_ptr),
 f(exit,		T_int),
@@ -208,7 +221,9 @@ f(mount,	T_string, T_path, T_string, T_long, T_any_ptr),
 #ifdef __NR_umount
 f(umount,	T_path),
 #endif
+#ifdef __NR_umount2
 f(umount2,	T_path, T_int),
+#endif
 f(swapon,	T_path, T_int),
 f(swapoff,	T_path),
 #ifdef __NR_ioperm
@@ -221,7 +236,9 @@ f(syslog,	T_int, T_any_ptr, T_int),
 #ifdef __NR_pciconfig_write
 f(pciconfig_read, T_ulong, T_ulong, T_ulong, T_ulong, T_any_ptr),
 f(pciconfig_write, T_ulong, T_ulong, T_ulong, T_ulong, T_any_ptr),
+#ifdef __NR_pciconfig_iobase
 f(pciconfig_iobase, T_long, T_ulong, T_ulong),
+#endif /* __NR_pciconfig_iobase */
 #endif
 
 /*
@@ -251,7 +268,9 @@ f(symlink,	T_string, T_path_parent),
 f(rename,	T_path_parent, T_path_parent),
 f(unlink,	T_path_parent),
 f(rmdir,	T_path_parent),
+#ifdef __NR_utime
 f(utime,	T_path, T_pointer(struct utimbuf)),
+#endif
 f(chmod,	T_path, T_mode_t),
 #ifdef __NR_chown32
 f(chown,	T_path, T_u16_t, T_u16_t),
@@ -323,6 +342,7 @@ f(shmdt,	T_any_ptr),
 f(shmctl,	T_int, T_int, T_int, T_any_ptr),
 f(semget,	T_int, T_int, T_int),
 f(semop,	T_int, T_array(struct sembuf, 2, SEMOPM), T_int),
+f(semtimedop,	T_int, T_array(struct sembuf, 2, SEMOPM), T_int, T_pointer(struct timespec)),
 f(semctl,	T_int, T_int, T_pointer(struct shmid_ds)),
 f(msgget,	T_int, T_int),
 f(msgsnd,	T_int, T_pointer(struct msgbuf), T_size_t, T_int),
@@ -348,7 +368,7 @@ audit_init_syscall_table(void)
 
 	/* Loop over list of syscalls and fill in the number of
 	 * arguments */
-	for (m = 0; m < NR_syscalls; m++) {
+	for (m = 0; m < MAX_SYSCALLS ; m++) {
 		struct sysent *entry = &linux_sysent[m];
 
 		for (n = 0; n < AUDIT_MAXARGS; n++) {
@@ -365,7 +385,8 @@ audit_init_syscall_table(void)
 struct sysent *
 audit_get_syscall_entry(int code)
 {
-	if (code < 0 || code >= NR_syscalls)
+
+	if (code < 0 || code >= MAX_SYSCALLS )
 		return NULL;
 
 	return &linux_sysent[code];
@@ -388,7 +409,7 @@ audit_get_syscall_entry(int code)
  * Note that the first argument (i.e. #cmd) remains unchanged; the
  * contents of the #args array are pasted after that.
  */
-#ifdef __NR_socketcall
+
 struct sysent	socketcall_sysent[MAX_SOCKETCALL] = {
 [SYS_SOCKET]		= sc(3, T_int, T_int, T_int),
 [SYS_BIND]		= sc(3, T_filedesc, T_opaque_t(2), T_socklen_t),
@@ -429,28 +450,46 @@ audit_get_socketargs(struct aud_syscall_data *sc)
 
 	entry = &socketcall_sysent[minor];
 
-	argsize = entry->sy_narg * sizeof(long);
-	if (copy_from_user(args, (void *)(unsigned long) sc->raw_args[1], argsize))
-		return 0;
+	if (audit_syscall_word_size(sc) == sizeof(long) * 8) {
+		/*  32bit call on 32bit platform, or 64bit call on 64bit platform */
+		argsize = entry->sy_narg * sizeof(long);
+		if (copy_from_user(args, (void *)(unsigned long) sc->raw_args[1], argsize))
+			return 0;
 
-	/* Can't memcpy here because raw_args is 64bit and args is a long,
-	 * which is not necessarily the same thing */
-	for (n = 0; n < entry->sy_narg; n++)
-		sc->raw_args[n] = args[n];
+		/* Can't memcpy here because raw_args is 64bit and args is a long,
+		 * which is not necessarily the same thing */
+		for (n = 0; n < entry->sy_narg; n++)
+			sc->raw_args[n] = args[n];
+	} else {
+		/* assume 32bit call on 64bit platform */
+		argsize = entry->sy_narg * sizeof(u_int32_t);
+		if (copy_from_user(args, (void *)(unsigned long) sc->raw_args[1], argsize))
+			return 0;
+
+		/* Can't memcpy here because raw_args is 64bit and args is a long,
+		 * which is not necessarily the same thing */
+		for (n = 0; n < entry->sy_narg; n++)
+			sc->raw_args[n] = ((u_int32_t *)args)[n];
+	}
+
 	sc->entry = entry;
 
 	return 0;
 }
-#endif
 
 
 /*
  * socketcall was almost too easy.
  * Here comes sys_ipc.
  */
-#ifdef __NR_ipc
+
+#ifndef __NR_ipc
+#include <asm-i386/ipc.h>
+#endif
+
 static int	ipc_reorder[MAX_IPCCALL+1][AUDIT_MAXARGS] = {
 [SEMOP]		= { 1, 4, 2 },
+[SEMTIMEDOP]	= { 1, 4, 2, 5 },
 [SEMGET]	= { 1, 2, 3 },
 [SEMCTL]	= { 1, 2, 3, 4 },
 [MSGSND]	= { 1, 4, 2, 3 },
@@ -465,6 +504,7 @@ static int	ipc_reorder[MAX_IPCCALL+1][AUDIT_MAXARGS] = {
 
 struct sysent	ipccall_sysent[MAX_IPCCALL+1] = {
 [SEMOP]			= sc(3, T_int, T_array(struct sembuf, 2, SEMOPM), T_int),
+[SEMTIMEDOP]		= sc(4, T_int, T_array(struct sembuf, 2, SEMOPM), T_int, T_pointer(struct timespec)),
 [SEMGET]		= sc(3, T_int, T_int, T_int),
 [SEMCTL]		= sc(4, T_int, T_int, T_int, T_any_ptr),
 [MSGSND]		= sc(4, T_int, T_pointer(struct msgbuf), T_size_t, T_int),
@@ -534,7 +574,6 @@ audit_get_ipcargs(struct aud_syscall_data *sc)
 	sc->entry = entry;
 	return 0;
 }
-#endif
 
 /*
  * Get ioctl arguments (well, basically we want the third argument's size,

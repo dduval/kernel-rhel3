@@ -554,6 +554,15 @@ struct cache_limits cache_limits = {
 	.max = 100,
 };
 
+int skip_mapped_pages = 0;
+
+static inline int check_mapping_inuse(struct page *page)
+{
+	if (!skip_mapped_pages)
+		return 1;
+	return page_mapping_inuse(page);
+}
+
 /**
  * refill_inactive_zone - scan the active list and find pages to deactivate
  * @priority: how much are we allowed to scan
@@ -633,7 +642,9 @@ int refill_inactive_zone(struct zone_struct * zone, int priority, int target)
 		 * Do aging on the pages.
 		 */
 		pte_chain_lock(page);
-		if (page_referenced(page, &over_rsslimit) && !over_rsslimit) {
+		if (page_referenced(page, &over_rsslimit)
+				&& !over_rsslimit
+				&& check_mapping_inuse(page)) {
 			pte_chain_unlock(page);
 			age_page_up_nolock(page, 0);
 			UnlockPage(page);
@@ -675,7 +686,9 @@ int refill_inactive_zone(struct zone_struct * zone, int priority, int target)
 		 * Do aging on the pages.
 		 */
 		pte_chain_lock(page);
-		if (page_referenced(page, &over_rsslimit) && !over_rsslimit) {
+		if (page_referenced(page, &over_rsslimit)
+				&& !over_rsslimit
+				&& check_mapping_inuse(page)) {
 			pte_chain_unlock(page);
 			age_page_up_nolock(page, 0);
 			UnlockPage(page);
@@ -735,7 +748,9 @@ static int scan_active_list(struct zone_struct * zone, int age,
 	list_for_each_safe(page_lru, next, list) {
 		page = list_entry(page_lru, struct page, lru);
 		pte_chain_lock(page);
-		if (page_referenced(page, &over_rsslimit) && !over_rsslimit)
+		if (page_referenced(page, &over_rsslimit)
+				&& !over_rsslimit
+				&& check_mapping_inuse(page))
 			age_page_up_nolock(page, age);
 		pte_chain_unlock(page);
 	}

@@ -80,8 +80,8 @@
 #ifndef _LVM_H_INCLUDE
 #define _LVM_H_INCLUDE
 
-#define LVM_RELEASE_NAME "1.0.5+"
-#define LVM_RELEASE_DATE "22/07/2002"
+#define LVM_RELEASE_NAME "1.0.8-2"
+#define LVM_RELEASE_DATE "26/05/2004"
 
 #define	_LVM_KERNEL_H_VERSION	"LVM "LVM_RELEASE_NAME" ("LVM_RELEASE_DATE")"
 
@@ -265,7 +265,7 @@ struct list_head {
 #define	LVM_LV_SIZE_MAX(a)	( ( long long) LVM_PE_T_MAX * (a)->pe_size > ( long long) 1024*1024/SECTOR_SIZE*1024*1024 ? ( long long) 1024*1024/SECTOR_SIZE*1024*1024 : ( long long) LVM_PE_T_MAX * (a)->pe_size)
 #define	LVM_MIN_PE_SIZE		( 8192L / SECTOR_SIZE) /* 8 KB in sectors */
 #define	LVM_MAX_PE_SIZE		( 16L * 1024L * 1024L / SECTOR_SIZE * 1024)	/* 16GB in sectors */
-#define	LVM_DEFAULT_PE_SIZE	( 4096L * 1024 / SECTOR_SIZE)	/* 4 MB in sectors */
+#define	LVM_DEFAULT_PE_SIZE	( 8 * 4096L * 1024 / SECTOR_SIZE)	/* 32 MB in sectors */
 #define	LVM_DEFAULT_STRIPE_SIZE	16L	/* 16 KB  */
 #define	LVM_MIN_STRIPE_SIZE	( PAGE_SIZE/SECTOR_SIZE)	/* PAGESIZE in sectors */
 #define	LVM_MAX_STRIPE_SIZE	( 512L * 1024 / SECTOR_SIZE)	/* 512 KB in sectors */

@@ -20,6 +20,19 @@
 #define MAX_ORDER CONFIG_FORCE_MAX_ZONEORDER
 #endif
 
+/*
+ * four large system hash tables (page, inode, dentry and buffer head) have
+ * been found to be somewhat more efficient at order 14 on larger systems (such
+ * as PPC64), so these hash tables are now allocated with the bootmem allocator
+ * so that a larger allocation size limit can be imposed than kmalloc() will
+ * support
+ */
+#if MAX_ORDER > 14
+#define MAX_SYS_HASH_TABLE_ORDER MAX_ORDER
+#else
+#define MAX_SYS_HASH_TABLE_ORDER 14
+#endif
+
 typedef struct free_area_struct {
 	struct list_head	free_list;
 	unsigned long		*map;

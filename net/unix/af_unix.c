@@ -1342,6 +1342,13 @@ static int unix_stream_sendmsg(struct socket *sock, struct msghdr *msg, int len,
 		 
 		skb=sock_alloc_send_skb(sk,size,msg->msg_flags&MSG_DONTWAIT, &err);
 
+		while ((err == -ENOBUFS) && (size > PAGE_SIZE)) {
+			size >>= 1;
+			err = 0;
+			skb = sock_alloc_send_skb(sk, size,
+				(msg->msg_flags & MSG_DONTWAIT), &err);
+		}
+
 		if (skb==NULL)
 			goto out_err;
 

@@ -37,7 +37,7 @@ int put_compat_timespec(struct timespec *ts, struct compat_timespec *cts)
 }
 
 asmlinkage int compat_sys_futex(u32 *uaddr, int op, int val,
-		struct compat_timespec *utime, u32 *uaddr2)
+		struct compat_timespec *utime, u32 *uaddr2, int val3)
 {
 	struct timespec t;
 	unsigned long timeout = MAX_SCHEDULE_TIMEOUT;
@@ -48,11 +48,11 @@ asmlinkage int compat_sys_futex(u32 *uaddr, int op, int val,
 			return -EFAULT;
 		timeout = timespec_to_jiffies(&t) + 1;
 	}
-	if (op == FUTEX_REQUEUE)
+	if (op >= FUTEX_REQUEUE)
 		val2 = (int) (long) utime;
 
 	return do_futex((unsigned long)uaddr, op, val, timeout,
-			(unsigned long)uaddr2, val2);
+			(unsigned long)uaddr2, val2, val3);
 }
 
 extern asmlinkage int sys_sched_setaffinity(pid_t pid, unsigned int len,

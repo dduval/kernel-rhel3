@@ -290,7 +290,7 @@ static int bios_handoff (struct ehci_hcd *ehci, int where, u32 cap)
 		int msec = 500;
 
 		/* request handoff to OS */
-		cap &= 1 << 24;
+		cap |= 1 << 24;
 		pci_write_config_dword (ehci->hcd.pdev, where, cap);
 
 		/* and wait a while for it to happen */
@@ -337,7 +337,8 @@ static int ehci_start (struct usb_hcd *hcd)
 	spin_lock_init (&ehci->lock);
 
 	ehci->caps = (struct ehci_caps *) hcd->regs;
-	ehci->regs = (struct ehci_regs *) (hcd->regs + ehci->caps->length);
+	ehci->regs = (struct ehci_regs *) (hcd->regs + 
+				HC_LENGTH (readl (&ehci->caps->hc_capbase)));
 	dbg_hcs_params (ehci, "ehci_start");
 	dbg_hcc_params (ehci, "ehci_start");
 
@@ -489,7 +490,7 @@ done2:
 
         /* PCI Serial Bus Release Number is at 0x60 offset */
 	pci_read_config_byte (hcd->pdev, 0x60, &tempbyte);
-	temp = readw (&ehci->caps->hci_version);
+	temp = HC_VERSION(readl (&ehci->caps->hc_capbase));
 	ehci_info (ehci,
 		"USB %x.%x enabled, EHCI %x.%02x, driver %s\n",
 		((tempbyte & 0xf0)>>4), (tempbyte & 0x0f),
@@ -545,7 +546,8 @@ static void ehci_stop (struct usb_hcd *hcd)
 
 	/* root hub is shut down separately (first, when possible) */
 	spin_lock_irq (&ehci->lock);
-	ehci_work (ehci, NULL);
+	if (ehci->async)
+		ehci_work (ehci, NULL);
 	spin_unlock_irq (&ehci->lock);
 	ehci_mem_cleanup (ehci);
 

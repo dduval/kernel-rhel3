@@ -28,6 +28,9 @@
 int nr_swap_pages;
 pg_data_t *pgdat_list;
 
+static unsigned long __initdata heuristic_lowmem_pages;
+static unsigned long __initdata heuristic_all_pages;
+
 /*
  *
  * The zone_table array is used to look up the address of the
@@ -518,31 +521,23 @@ struct page * __alloc_pages(unsigned int gfp_mask, unsigned int order, zonelist_
 
 try_again:
 	/*
-	 * First, see if we have any zones with lots of free memory.
-	 *
-	 * We allocate free memory first because it doesn't contain
-	 * any data we would want to cache.  Make sure to stay above
-	 * the watermark that triggers kswapd, otherwise we could
-	 * upset zone balancing.
+	 * First, refill the free list to at least the minimum watermark.
+	 * This needs to be done in order to fulfill allocations which
+	 * can't do direct reclaim, as well as higher order allocations.
 	 */
 	zone = zonelist->zones;
 	if (!*zone)
 		return NULL;
-	for (;;) {
-		zone_t *z = *(zone++);
-		if (!z)
-			break;
-		if (!z->size)
-			continue;
-		if (z->free_pages > ((wired && zone_is_highmem(z)) ? z->pages_min:z->pages_low)) {
-			page = rmqueue(z, order);
-			if (page)
-				return page;
-		} else if (z->free_pages < z->pages_min)
-			fixup_freespace(z, direct_reclaim);
-
-		if (wired)
-			break;
+	if (direct_reclaim) {
+		for (;;) {
+			zone_t *z = *(zone++);
+			if (!z)
+				break;
+			if (!z->size)
+				continue;
+			if (z->free_pages < z->pages_min)
+				fixup_freespace(z, direct_reclaim);
+		}
 	}
 
 	/*
@@ -1152,16 +1147,21 @@ void __init free_area_init_core(int nid, pg_data_t *pgdat, struct page **gmap,
 	if (zone_start_paddr & ~PAGE_MASK)
 		BUG();
 
-	totalpages = 0;
+	totalpages = realtotalpages = 0;
 	for (i = 0; i < MAX_NR_ZONES; i++) {
 		unsigned long size = zones_size[i];
+		unsigned long realsize = size;
+		if (zholes_size)
+			realsize -= zholes_size[i];
+
 		totalpages += size;
+		realtotalpages += realsize;
+
+		if (i == ZONE_DMA || i == ZONE_NORMAL)
+			heuristic_lowmem_pages += realsize;
+		heuristic_all_pages += realsize;
 	}
-	realtotalpages = totalpages;
-	if (zholes_size)
-		for (i = 0; i < MAX_NR_ZONES; i++)
-			realtotalpages -= zholes_size[i];
-			
+
 	printk("On node %d totalpages: %lu\n", nid, realtotalpages);
 
 	/*
@@ -1386,3 +1386,73 @@ void __init reset_highmem_zone(int highmempages) {
 
 }
 #endif
+
+static inline int long_log2(unsigned long x) __attribute__((pure));
+static inline int long_log2(unsigned long x)
+{
+	int r = 0;
+	for (x >>= 1; x > 0; x >>= 1)
+		r++;
+	return r;
+}
+
+/*
+ * allocate a large system hash table from bootmem
+ * - it is assumed that the hash table must contain an exact power-of-2
+ *   quantity of entries
+ */
+void *__init alloc_large_system_hash(const char *tablename,
+				     unsigned long bucketsize,
+				     int scale,
+				     int consider_highmem,
+				     unsigned int *_hash_shift,
+				     unsigned int *_hash_mask)
+{
+	unsigned long estimate, mem, max, log2qty, size;
+	void *table;
+
+	/* determine applicable memory size, rounded up to nearest megabyte */
+	mem = consider_highmem ? heuristic_all_pages : heuristic_lowmem_pages;
+	mem += (1UL << (20 - PAGE_SHIFT)) - 1;
+	mem >>= 20 - PAGE_SHIFT;
+	mem <<= 20 - PAGE_SHIFT;
+
+	/* estimate the number of buckets by requesting 1 bucket per 2^scale
+	 * bytes of memory (rounded up to nearest power of 2 in size) */
+	if (scale > PAGE_SHIFT)
+		estimate = mem >> (scale - PAGE_SHIFT);
+	else
+		estimate = mem << (PAGE_SHIFT - scale);
+
+	estimate = 1UL << (long_log2(estimate - 1UL) + 1);
+
+	/* limit the allocation size */
+	max = (1UL << (PAGE_SHIFT + MAX_SYS_HASH_TABLE_ORDER)) / bucketsize;
+	if (estimate > max)
+		estimate = max;
+
+	log2qty = long_log2(estimate);
+
+	do {
+		size = bucketsize << log2qty;
+
+		table = alloc_bootmem(size);
+
+	} while (!table && size > PAGE_SIZE && --log2qty);
+
+	if (!table)
+		panic("Failed to allocate %s hash table\n", tablename);
+
+	printk("%s hash table entries: %u (order: %d, %lu KB)\n",
+	       tablename,
+	       (1U << log2qty),
+	       long_log2(size) - PAGE_SHIFT,
+	       size / 1024);
+
+	if (_hash_shift)
+		*_hash_shift = log2qty;
+	if (_hash_mask)
+		*_hash_mask = (1 << log2qty) - 1;
+
+	return table;
+}

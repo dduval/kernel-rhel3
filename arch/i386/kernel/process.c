@@ -409,7 +409,7 @@ void machine_restart(char * __unused)
 	 * Stop all CPUs and turn off local APICs and the IO-APIC, so
 	 * other OSs see a clean IRQ state.
 	 */
-	if (!netdump_mode)
+	if (!crashdump_mode())
 		smp_send_stop();
 	disable_IO_APIC();
 #endif
@@ -1005,32 +1005,35 @@ asmlinkage int sys_get_thread_area(struct user_desc *u_info)
 }
 
 /*
- * In some cases (e.g. Hyper-Threading), we want to avoid L1 evictions
- * by the processes running on the same package. One thing we can do
- * is to shuffle the initial stack for them.
- *
- * (Plus, wiggling the stack a bit also makes it a bit harder for
- * attackers to guess the stack pointer.)
+ * Get a random word:
  */
-
 static inline unsigned int get_random_int(void)
 {
-	unsigned int jitter, tsc = 0;
-	/*
-	 * This is a pretty fast call, so no performance worries:
-	 */
-       	get_random_bytes(&jitter, sizeof(jitter));
-#ifdef CONFIG_X86_HAS_TSC
-	rdtscl(tsc);
-#endif
-	jitter += current->pid + (int)&tsc + jiffies + tsc;
+	unsigned int val = 0;
 
-	return jitter;
+	if (!exec_shield_randomize)
+		return 0;
+
+#ifdef CONFIG_X86_HAS_TSC
+	rdtscl(val);
+#endif
+	val += current->pid + jiffies + (int)&val;
+
+	/*
+	 * Use IP's RNG. It suits our purpose perfectly: it re-keys itself
+	 * every second, from the entropy pool (and thus creates a limited
+	 * drain on it), and uses halfMD4Transform within the second. We
+	 * also spice it with the TSC (if available), jiffies, PID and the
+	 * stack address:
+	 */
+	return secure_ip_id(val);
 }
 
 unsigned long arch_align_stack(unsigned long sp)
 {
-	return sp - ((get_random_int() % 1024) << 4);
+	if (current->flags & PF_RELOCEXEC)
+		sp -= ((get_random_int() % 1024) << 4);
+	return sp & ~0xf;
 }
 
 #if SHLIB_BASE >= 0x01000000
@@ -1041,22 +1044,28 @@ static unsigned long
 arch_get_unmapped_nonexecutable_area(struct mm_struct *mm, unsigned long addr, unsigned long len)
 {
 	struct vm_area_struct *vma, *prev_vma;
-	unsigned long stack_limit, reserved;
-	int first_time = 1;	
+	unsigned long stack_limit, mmap_top, reserved;
+	int first_time = 1;
 
 	/* requested length too big for entire address space */
 	if (len > TASK_SIZE) 
 		return -ENOMEM;
 
 	/* don't allow allocations above current stack limit */
+	mmap_top = (arch_align_stack(mm->start_stack) & PAGE_MASK);
 	reserved = current->rlim[RLIMIT_STACK].rlim_cur;
-	if (reserved < TASK_SIZE - STACK_BUFFER_SPACE)
+	if (mmap_top == 0UL || mmap_top > TASK_SIZE)
+		mmap_top = TASK_SIZE;
+	if (reserved < mmap_top - STACK_BUFFER_SPACE)
 		reserved += STACK_BUFFER_SPACE;
-	else if (reserved < TASK_SIZE)
-		reserved = TASK_SIZE;
+	else
+		reserved = mmap_top;
+
+	/* now convert "reserved" to be distance down from TASK_SIZE */
+	reserved += (TASK_SIZE - mmap_top);
 	if (reserved > current->rlim[RLIMIT_STACK].rlim_max)
 		reserved = current->rlim[RLIMIT_STACK].rlim_max;
-	if (reserved < TASK_SIZE - STACK_BUFFER_SPACE - current->mm->brk)
+	if (reserved < TASK_SIZE - STACK_BUFFER_SPACE - mm->brk)
 		stack_limit = TASK_SIZE - PAGE_ALIGN(reserved);
 	else
 		stack_limit = 0UL;
@@ -1157,7 +1166,10 @@ search_all:
 		if ((tmp = arch_get_unmapped_nonexecutable_area(mm, addr, len)) != -ENOMEM)
 			return tmp;
 
+		/* the following is like arch_align_stack(), but upwards */
 		addr = TASK_UNMAPPED_BASE;
+		if (current->flags & PF_RELOCEXEC)
+			addr += (((get_random_int() % 1024) << 4) & PAGE_MASK);
 	}
 
 	for (vma = find_vma(mm, addr); ; vma = vma->vm_next) {
@@ -1197,6 +1209,23 @@ search_all:
 void arch_add_exec_range(struct mm_struct *mm, unsigned long limit)
 {
 	if (limit > mm->context.exec_limit) {
+		mm->context.exec_limit = limit;
+		set_user_cs(&mm->context.user_cs, limit);
+		if (mm == current->mm)
+			load_user_cs_desc(smp_processor_id(), mm);
+	}
+}
+
+void arch_remove_exec_range(struct mm_struct *mm, unsigned long old_end)
+{
+	struct vm_area_struct *vma;
+	unsigned long limit = 0;
+
+	if (old_end == mm->context.exec_limit) {
+		for (vma = mm->mmap; vma; vma = vma->vm_next)
+			if ((vma->vm_flags & VM_EXEC) && (vma->vm_end > limit))
+				limit = vma->vm_end;
+
 		mm->context.exec_limit = limit;
 		set_user_cs(&mm->context.user_cs, limit);
 		if (mm == current->mm)

@@ -541,21 +541,24 @@ do_realpath(struct sysarg_data *target, void *arg, int arg_flags)
 	target->at_path.dentry = dget(nd.dentry);
 	target->at_path.exists = (slash == NULL);
 
-	name_len = 0;
-
 	if (nd.last.len) {
+		slash = (char *)nd.last.name;
 		name_len = nd.last.len;
-		slash = (char *) nd.last.name - 1;
+	} else if (slash) {
+		slash++;
+		name_len = strlen(slash);
+	} else {
+		/* slash is NULL */
+		name_len = 0;
 	}
+
+	/* slash now points to the beginning of the last pathname component */
 
 	/* If the file doesn't exist, we had to look up
 	 * a parent directory instead. Move the trailing
 	 * components out of the way so they don't get
 	 * clobbered by the d_path call below. */
 	if (slash) {
-		*slash = '/';
-		name_len = strlen(slash);
-
 		pathsize -= name_len;
 		memmove(pathbuf + pathsize, slash, name_len);
 		slash = pathbuf + pathsize;
@@ -576,8 +579,9 @@ do_realpath(struct sysarg_data *target, void *arg, int arg_flags)
 	 * sure above that the buffer space is sufficient */
 	if (name_len) {
 		DPRINTF("last=%.*s\n", name_len, slash);
-		memcpy(pathbuf + len, slash, name_len);
-		len += name_len;
+		*(pathbuf + len) = '/';
+		memcpy(pathbuf + len + 1, slash, name_len);
+		len += name_len + 1;
 		pathbuf[len] = '\0';
 	}
 	target->at_path.len = len;

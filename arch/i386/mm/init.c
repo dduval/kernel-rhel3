@@ -118,6 +118,26 @@ static void __init fixrange_init (unsigned long start, unsigned long end, pgd_t 
 		prepare_pagetables(pgd_base, vaddr);
 }
 
+extern char _stext, __init_end;
+
+/*
+ * Is there any kernel text byte between addr and addr+size?
+ */
+static inline int is_kernel_text(unsigned long addr, unsigned long size)
+{
+	unsigned long text_start = (unsigned long)&_stext;
+	unsigned long text_end = (unsigned long)&__init_end;
+
+	if (addr < 1024 * 1024)
+		return 1;
+	if (text_end < addr)
+		return 0;
+	if (addr + size <= text_start)
+		return 0;
+
+	return 1;
+}
+
 void setup_identity_mappings(pgd_t *pgd_base, unsigned long start, unsigned long end)
 {
 	unsigned long vaddr;
@@ -140,16 +160,21 @@ void setup_identity_mappings(pgd_t *pgd_base, unsigned long start, unsigned long
 			if (vaddr < start)
 				continue;
 			if (cpu_has_pse) {
-				unsigned long __pe;
+				unsigned long long __pe;
 
 				set_in_cr4(X86_CR4_PSE);
 				boot_cpu_data.wp_works_ok = 1;
 				__pe = _KERNPG_TABLE + _PAGE_PSE + vaddr - start;
+				if (use_nx && !is_kernel_text(vaddr, PMD_SIZE))
+					__pe += _PAGE_NX;
+
 				/* Make it "global" too if supported */
 				if (cpu_has_pge) {
 					set_in_cr4(X86_CR4_PGE);
 #if !CONFIG_X86_SWITCH_PAGETABLES
 					__pe += _PAGE_GLOBAL;
+					__PAGE_KERNEL |= _PAGE_GLOBAL;
+					__PAGE_KERNEL_EXEC |= _PAGE_GLOBAL;
 #endif
 				}
 				set_pmd(pmd, __pmd(__pe));
@@ -167,7 +192,10 @@ void setup_identity_mappings(pgd_t *pgd_base, unsigned long start, unsigned long
 					break;
 				if (vaddr < start)
 					continue;
-				*pte = mk_pte_phys(vaddr-start, PAGE_KERNEL);
+				if (is_kernel_text(vaddr, PAGE_SIZE)) 
+					*pte = mk_pte_phys(vaddr-start, PAGE_KERNEL_EXEC);
+				else
+					*pte = mk_pte_phys(vaddr-start, PAGE_KERNEL);
 			}
 			set_pmd(pmd, __pmd(_KERNPG_TABLE + __pa(pte_base)));
 		}
@@ -279,6 +307,10 @@ void __init zap_low_mappings(void)
 	clear_mappings(swapper_pg_dir, 0, 16*1024*1024);
 }
 
+
+unsigned long long __PAGE_KERNEL = _PAGE_KERNEL;
+unsigned long long __PAGE_KERNEL_EXEC = _PAGE_KERNEL_EXEC;
+
 #if CONFIG_HIGHMEM64G
 #define MIN_ZONE_DMA_PAGES 2048
 #else
@@ -330,6 +362,25 @@ static void __init zone_sizes_init(void)
  */
 void __init paging_init(void)
 {
+#ifdef CONFIG_X86_PAE
+	if (cpu_has_pae) {
+ 		if (cpuid_eax(0x80000000) > 0x80000001) {
+ 			u32 v[4];
+ 			u32 l,h;
+ 			cpuid(0x80000001, &v[0], &v[1], &v[2], &v[3]);
+ 			if ((v[3] & (1 << 20))) {
+ 				rdmsr(MSR_EFER, l, h);
+ 				l |= EFER_NX;
+ 				wrmsr(MSR_EFER, l, h);
+ 				printk("NX (Execute Disable) protection: active\n");
+				use_nx = 1;
+ 				__supported_pte_mask |= _PAGE_NX;
+ 			}
+ 		}
+ 	}
+#endif
+	if (!use_nx && exec_shield)
+		printk("NX protection not present; using segment protection\n");
 	pagetable_init();
 
 	load_cr3(swapper_pg_dir);	

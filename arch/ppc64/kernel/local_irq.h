@@ -20,7 +20,5 @@ void ppc_irq_dispatch_handler(struct pt_regs *regs, int irq);
 #define NR_MASK_WORDS	((NR_IRQS + 63) / 64)
 
 extern int ppc_spurious_interrupts;
-extern int ppc_second_irq;
-extern struct irqaction *ppc_irq_action[NR_IRQS];
 
 #endif /* _PPC_KERNEL_LOCAL_IRQ_H */

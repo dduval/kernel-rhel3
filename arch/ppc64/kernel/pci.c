@@ -531,6 +531,10 @@ pcibios_init(void)
 	if (ppc64_isabridge_dev != NULL )
 		printk("ISA bridge at %s\n", ppc64_isabridge_dev->slot_name);
 
+#ifdef CONFIG_PPC_PSERIES
+	pci_addr_cache_build();
+#endif
+
 	printk("PCI: Probing PCI hardware done\n");
 	PPCDBG(PPCDBG_BUSWALK,"PCI: Probing PCI hardware done.\n");
 	ppc64_boot_msg(0x41, "PCI Done");

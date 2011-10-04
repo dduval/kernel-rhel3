@@ -20,5 +20,6 @@ extern struct hw_interrupt_type xics_8259_pic;
 void xics_init_IRQ(void);
 int xics_get_irq(struct pt_regs *);
 void xics_isa_init(void);
+void xics_request_IPI(void);
 
 #endif /* _PPC_KERNEL_XICS_H */

@@ -313,6 +313,21 @@ oops:
 	spin_lock(&oops_lock);
 	bust_spinlocks(1);
 
+#ifdef CONFIG_X86_PAE
+	{
+		pgd_t *pgd;
+		pmd_t *pmd;
+
+		asm("movl %%cr3,%0":"=r" (pgd));
+
+		pgd = init_mm.pgd + pgd_index(address);
+		if (pgd_present(*pgd)) {
+			pmd = pmd_offset(pgd, address);
+			if (pmd_val(*pmd) & _PAGE_NX)
+				printk("kernel tried to access NX-protected page - exploit attempt? (uid: %d)\n", current->uid);
+		}
+	}
+#endif
 	if (address < PAGE_SIZE)
 		printk(KERN_ALERT "Unable to handle kernel NULL pointer dereference");
 	else

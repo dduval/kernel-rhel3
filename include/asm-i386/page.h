@@ -38,15 +38,18 @@
  * These are used to make use of C type-checking..
  */
 #if CONFIG_X86_PAE
+extern unsigned long long __supported_pte_mask;
 typedef struct { unsigned long pte_low, pte_high; } pte_t;
 typedef struct { unsigned long long pmd; } pmd_t;
 typedef struct { unsigned long long pgd; } pgd_t;
+typedef struct { unsigned long pgprot; } pgprot_t;
 #define pte_val(x)	((x).pte_low | ((unsigned long long)(x).pte_high << 32))
 #define HPAGE_SHIFT	21
 #else
 typedef struct { unsigned long pte_low; } pte_t;
 typedef struct { unsigned long pmd; } pmd_t;
 typedef struct { unsigned long pgd; } pgd_t;
+typedef struct { unsigned long pgprot; } pgprot_t;
 #define pte_val(x)	((x).pte_low)
 #define HPAGE_SHIFT	22
 #endif
@@ -58,11 +61,25 @@ typedef struct { unsigned long pgd; } pgd_t;
 #define HUGETLB_PAGE_ORDER	(HPAGE_SHIFT - PAGE_SHIFT)
 #endif
 
-typedef struct { unsigned long pgprot; } pgprot_t;
-
 #define pmd_val(x)	((x).pmd)
 #define pgd_val(x)	((x).pgd)
 #define pgprot_val(x)	((x).pgprot)
+
+/* Materialize both the hard and soft NX bits for a given PTE */
+#ifdef CONFIG_X86_PAE
+#define __PAGE_BIT_NX		9
+#define __PAGE_BIT_NX_PTE	63
+static inline unsigned long long pgprot_nx(pgprot_t x)
+{
+	unsigned long long 	p;
+
+	p = ((unsigned long long)(x).pgprot & __supported_pte_mask) & (1ULL << __PAGE_BIT_NX);
+
+	return p | (p << (__PAGE_BIT_NX_PTE - __PAGE_BIT_NX));
+}
+#else
+#define pgprot_nx(x)	(0ULL)
+#endif
 
 #define __pte(x) ((pte_t) { (x) } )
 #define __pmd(x) ((pmd_t) { (x) } )
@@ -167,8 +184,10 @@ static __inline__ int get_order(unsigned long size)
 #define virt_to_page(kaddr)     pfn_to_page(__pa(kaddr) >> PAGE_SHIFT)
 #define VALID_PAGE(page)	((page - mem_map) < max_mapnr)
 
-#define VM_DATA_DEFAULT_FLAGS	(VM_READ | VM_WRITE | \
-				 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
+#define VM_DATA_DEFAULT_FLAGS \
+		(VM_READ | VM_WRITE | \
+			((current->flags & PF_RELOCEXEC) ? 0 : VM_EXEC) | \
+				VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
 
 #endif /* __KERNEL__ */
 

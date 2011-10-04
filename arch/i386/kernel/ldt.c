@@ -142,7 +142,7 @@ static int read_ldt(void * ptr, unsigned long bytecount)
 		bytes = size - i;
 		if (bytes > PAGE_SIZE)
 			bytes = PAGE_SIZE;
-		if (copy_to_user(ptr + i, kaddr, size - i))
+		if (copy_to_user(ptr + i, kaddr, bytes))
 			err = -EFAULT;
 		kunmap(mm->context.ldt_pages[nr]);
 	}

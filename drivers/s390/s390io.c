@@ -8545,10 +8545,9 @@ chan_subch_read (struct file *file, char *user_buf, size_t user_len,
 {
 	loff_t len;
 	tempinfo_t *p_info = (tempinfo_t *) file->private_data;
-	loff_t n = *offset;
-	unsigned long pos = n;
+	loff_t pos = *offset;
 
-	if (pos != n || pos >= p_info->len) {
+	if (pos < 0 || pos >= p_info->len) {
 		return 0;
 	} else {
 		len = MIN (user_len, (p_info->len - pos));
@@ -9342,10 +9341,9 @@ cio_chpids_proc_read( struct file *file, char *user_buf, size_t user_len, loff_t
 {
      loff_t len;
      tempinfo_t *p_info = (tempinfo_t *) file->private_data;
-     loff_t n = *offset;
-     unsigned long pos = n;
+     loff_t pos = *offset;
      
-     if ( n != pos || pos >= p_info->len) {
+     if (pos < 0 || pos >= p_info->len) {
 	  return 0;
      } else {
 	  len = MIN(user_len, (p_info->len - pos));

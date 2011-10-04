@@ -2,11 +2,13 @@
  *
  *  linux/drivers/s390/misc/z90hardware.c
  *
- *  z90crypt 1.1.4
+ *  z90crypt 1.2.1
  *
- *    (C) COPYRIGHT IBM CORP. 2001, 2003
- *    Author(s): Robert Burroughs (burrough@us.ibm.com)
- *               Eric Rossman (edrossma@us.ibm.com)
+ *  Copyright (C)  2001, 2003 IBM Corporation
+ *  Author(s): Robert Burroughs (burrough@us.ibm.com)
+ *             Eric Rossman (edrossma@us.ibm.com)
+ *
+ *  Hotplug support: Jochen Roehrig (roehrig@de.ibm.com)
  *
  *    Support for S390 Crypto Devices
  *
@@ -34,13 +36,15 @@
 #include <linux/config.h>
 #include <linux/list.h>
 
-#define VERSION_Z90HARDWARE_C "$Revision: 1.7.6.4 $"
+#define UINT unsigned int
+#define USHORT unsigned short
+#define UCHAR unsigned char
+#define VERSION_Z90HARDWARE_C "$Revision: 1.7.6.7 $"
 static const char version[] =
-	"z90crypt.o: z90hardware.o ("
-	"z90hardware.c " VERSION_Z90HARDWARE_C "/"
-	"z90common.h "   VERSION_Z90COMMON_H   "/"
-	"z90crypt.h "    VERSION_Z90CRYPT_H    ")";
-
+       "z90crypt.o: z90hardware.o ("
+       "z90hardware.c " VERSION_Z90HARDWARE_C "/"
+       "z90common.h "   VERSION_Z90COMMON_H   "/"
+       "z90crypt.h "    VERSION_Z90CRYPT_H    ")";
 typedef struct z90c_cca_token_hdr {
   UCHAR z90c_cca_tkn_hdr_id;
   UCHAR z90c_cca_tkn_hdr_ver;
@@ -124,10 +128,8 @@ typedef struct z90c_cca_private_ext_CRT {
   struct z90c_cca_private_ext_CRT_sec pvtCrtSec;
   struct z90c_cca_public_sec pubCrtSec;
 } Z90C_CCA_PRIVATE_EXT_CRT;
-#define Z90C_LEEDS2_MAX_COUNT 16
-#define Z90C_LITE_MAX_COUNT 16
-#ifndef Z90C_LEEDS2_RESET
-#define Z90C_LEEDS2_RESET 45        
+#ifndef Z90C_PCICC_RESET
+#define Z90C_PCICC_RESET 45        
 #endif
 #ifndef Z90C_LITE_RESET
 #define Z90C_LITE_RESET 45          
@@ -287,6 +289,47 @@ typedef struct z90c_cprb {
    UCHAR           svr_namel[2];    
    UCHAR           svr_name[8];     
 }Z90C_CPRB;
+#pragma pack(1)
+typedef struct z90c_cprbx{
+   USHORT          cprb_len;        
+   UCHAR           cprb_ver_id;     
+   UCHAR           pad_000[3];      
+   UCHAR           func_id[2];      
+   UCHAR           cprb_flags[4];   
+   UINT            req_parml;       
+   UINT            req_datal;       
+   UINT            rpl_msgbl;       
+   UINT            rpld_parml;      
+   UINT            rpl_datal;       
+   UINT            rpld_datal;      
+   UINT            req_extbl;       
+   UCHAR           pad_001[4];      
+   UINT            rpld_extbl;      
+   UCHAR           req_parmb[16];   
+   UCHAR           req_datab[16];   
+   UCHAR           rpl_parmb[16];   
+   UCHAR           rpl_datab[16];   
+   UCHAR           req_extb[16];    
+   UCHAR           rpl_extb[16];    
+   USHORT          ccp_rtcode;      
+   USHORT          ccp_rscode;      
+   UINT            mac_data_len;    
+   UCHAR           logon_id[8];     
+   UCHAR           mac_value[8];    
+   UCHAR           mac_content_flgs;
+   UCHAR           pad_002;         
+   USHORT          domain;          
+   UCHAR           pad_003[12];     
+   UCHAR           pad_004[36];     
+}Z90C_CPRBX;
+#pragma pack()
+#define REPLY_ERROR_MACHINE_FAILURE  0x10
+#define REPLY_ERROR_PREEMPT_FAILURE  0x12
+#define REPLY_ERROR_CHECKPT_FAILURE  0x14
+#define REPLY_ERROR_MESSAGE_TYPE     0x20
+#define REPLY_ERROR_INVALID_COMM_CD  0x21  
+#define REPLY_ERROR_INVALID_MSG_LEN  0x23
+#define REPLY_ERROR_RESERVD_FIELD    0x24  
 typedef struct rule_block {
   UCHAR            rule_array_len[2];
   UCHAR            rule_array[0];   
@@ -408,6 +451,33 @@ static Z90C_TYPE6_HDR stat_type6_hdr = {
   0x00000000,                       
   0x00000000                        
 };
+static Z90C_TYPE6_HDR stat_type6_hdrX = {
+  0x00,                             
+  0x06,                             
+  {0x00,0x00},                      
+  {0x00,0x00,0x00,0x00},            
+  {0x00,0x00},                      
+  {0x00,0x00},                      
+  {0x00,0x00,0x00,0x00},            
+  0x00000058,                       
+  0x00000000,                       
+  0x00000000,                       
+  0x00000000,                       
+  {0x43,0x41,0x00,0x00,0x00,0x00,0x00,0x00,
+   0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}, 
+  {0x00,0x00},                      
+  {0x00,0x00},                      
+  {0x50,0x44},                      
+  {0x00,0x00},                      
+  0x00000000,                       
+  0x00000000,                       
+  0x00000000,                       
+  0x00000000,                       
+  0x00000000,                       
+  0x00000000,                       
+  0x00000000,                       
+  0x00000000                        
+};
 static Z90C_CPRB stat_cprb = {
   {0x70,0x00},                      
   0x41,                             
@@ -443,17 +513,17 @@ static Z90C_CPRB stat_cprb = {
   {0x08,0x00},                      
   {0x49,0x43, 0x53,0x46,0x20,0x20,0x20,0x20} 
   };
-struct pkd_function_and_rules_block {
+struct function_and_rules_block {
   UCHAR fc[2];
   UCHAR ulen[2];
   UCHAR only_rule[8];
 };
-static struct pkd_function_and_rules_block stat_pkd_function_and_rules= {
+static struct function_and_rules_block stat_pkd_function_and_rules= {
   {0x50,0x44},                       
   {0x0A,0x00},                       
   {'P','K','C','S','-','1','.','2'}
 } ;
-static struct pkd_function_and_rules_block stat_pke_function_and_rules= {
+static struct function_and_rules_block stat_pke_function_and_rules= {
   {0x50,0x4B},                       
   {0x0A,0x00},                       
   {'P','K','C','S','-','1','.','2'}
@@ -463,11 +533,124 @@ struct pkd_T6_keyBlock_hdr {
   UCHAR ulen[2];
   UCHAR flags[2];
 };
+struct pkd_T6_keyBlock_hdrX {
+  USHORT blen;
+  USHORT ulen;
+  UCHAR flags[2];
+};
 static struct pkd_T6_keyBlock_hdr stat_pkd_T6_keyBlock_hdr = {
   {0x89,0x01},       
   {0x87,0x01},       
   {0x00}
 } ;
+static Z90C_CPRBX stat_cprbx = {
+  0x00DC,                           
+  0x02,                             
+  {0x00,0x00,0x00},                 
+  {0x54,0x32},                      
+  {0x00,0x00,0x00,0x00},            
+  0x00000000,                       
+  0x00000000,                       
+  0x00000000,                       
+  0x00000000,                       
+  0x00000000,                       
+  0x00000000,                       
+  0x00000000,                       
+  {0x00,0x00,0x00,0x00},            
+  0x00000000,                       
+  {0x00,0x00,0x00,0x00,
+   0x00,0x00,0x00,0x00,
+   0x00,0x00,0x00,0x00,
+   0x00,0x00,0x00,0x00},            
+  {0x00,0x00,0x00,0x00,
+   0x00,0x00,0x00,0x00,
+   0x00,0x00,0x00,0x00,
+   0x00,0x00,0x00,0x00},            
+  {0x00,0x00,0x00,0x00,
+   0x00,0x00,0x00,0x00,
+   0x00,0x00,0x00,0x00,
+   0x00,0x00,0x00,0x00},            
+  {0x00,0x00,0x00,0x00,
+   0x00,0x00,0x00,0x00,
+   0x00,0x00,0x00,0x00,
+   0x00,0x00,0x00,0x00},            
+  {0x00,0x00,0x00,0x00,
+   0x00,0x00,0x00,0x00,
+   0x00,0x00,0x00,0x00,
+   0x00,0x00,0x00,0x00},            
+  {0x00,0x00,0x00,0x00,
+   0x00,0x00,0x00,0x00,
+   0x00,0x00,0x00,0x00,
+   0x00,0x00,0x00,0x00},            
+  0x0000,                           
+  0x0000,                           
+  0x00000000,                       
+  {0x00,0x00,0x00,0x00,
+   0x00,0x00,0x00,0x00},            
+  {0x00,0x00,0x00,0x00,
+   0x00,0x00,0x00,0x00},            
+  0x00,                             
+  0x00,                             
+  0x0000,                           
+  {0x00,0x00,0x00,0x00,
+   0x00,0x00,0x00,0x00,
+   0x00,0x00,0x00,0x00},            
+  {0x00,0x00,0x00,0x00,0x00,0x00,
+   0x00,0x00,0x00,0x00,0x00,0x00,
+   0x00,0x00,0x00,0x00,0x00,0x00,
+   0x00,0x00,0x00,0x00,0x00,0x00,
+   0x00,0x00,0x00,0x00,0x00,0x00,
+   0x00,0x00,0x00,0x00,0x00,0x00}   
+};
+static struct function_and_rules_block stat_pkd_function_and_rulesX= {
+  {0x50,0x44},                       
+  {0x00,0x0A},                       
+  {'P','K','C','S','-','1','.','2'}
+} ;
+static struct function_and_rules_block stat_pke_function_and_rulesX= {
+  {0x50,0x4B},                       
+  {0x00,0x0A},                       
+  {'Z','E','R','O','-','P','A','D'}
+} ;
+static struct pkd_T6_keyBlock_hdrX stat_pkd_T6_keyBlock_hdrX = {
+  0x0189,            
+  0x0187,            
+  {0x00}
+} ;
+static unsigned char stat_pad[256] = {
+0x1b,0x7b,0x5d,0xb5,0x75,0x01,0x3d,0xfd,
+0x8d,0xd1,0xc7,0x03,0x2d,0x09,0x23,0x57,
+0x89,0x49,0xb9,0x3f,0xbb,0x99,0x41,0x5b,
+0x75,0x21,0x7b,0x9d,0x3b,0x6b,0x51,0x39,
+0xbb,0x0d,0x35,0xb9,0x89,0x0f,0x93,0xa5,
+0x0b,0x47,0xf1,0xd3,0xbb,0xcb,0xf1,0x9d,
+0x23,0x73,0x71,0xff,0xf3,0xf5,0x45,0xfb,
+0x61,0x29,0x23,0xfd,0xf1,0x29,0x3f,0x7f,
+0x17,0xb7,0x1b,0xa9,0x19,0xbd,0x57,0xa9,
+0xd7,0x95,0xa3,0xcb,0xed,0x1d,0xdb,0x45,
+0x7d,0x11,0xd1,0x51,0x1b,0xed,0x71,0xe9,
+0xb1,0xd1,0xab,0xab,0x21,0x2b,0x1b,0x9f,
+0x3b,0x9f,0xf7,0xf7,0xbd,0x63,0xeb,0xad,
+0xdf,0xb3,0x6f,0x5b,0xdb,0x8d,0xa9,0x5d,
+0xe3,0x7d,0x77,0x49,0x47,0xf5,0xa7,0xfd,
+0xab,0x2f,0x27,0x35,0x77,0xd3,0x49,0xc9,
+0x09,0xeb,0xb1,0xf9,0xbf,0x4b,0xcb,0x2b,
+0xeb,0xeb,0x05,0xff,0x7d,0xc7,0x91,0x8b,
+0x09,0x83,0xb9,0xb9,0x69,0x33,0x39,0x6b,
+0x79,0x75,0x19,0xbf,0xbb,0x07,0x1d,0xbd,
+0x29,0xbf,0x39,0x95,0x93,0x1d,0x35,0xc7,
+0xc9,0x4d,0xe5,0x97,0x0b,0x43,0x9b,0xf1,
+0x16,0x93,0x03,0x1f,0xa5,0xfb,0xdb,0xf3,
+0x27,0x4f,0x27,0x61,0x05,0x1f,0xb9,0x23,
+0x2f,0xc3,0x81,0xa9,0x23,0x71,0x55,0x55,
+0xeb,0xed,0x41,0xe5,0xf3,0x11,0xf1,0x43,
+0x69,0x03,0xbd,0x0b,0x37,0x0f,0x51,0x8f,
+0x0b,0xb5,0x89,0x5b,0x67,0xa9,0xd9,0x4f,
+0x01,0xf9,0x21,0x77,0x37,0x73,0x79,0xc5,
+0x7f,0x51,0xc1,0xcf,0x97,0xa1,0x75,0xad,
+0x35,0x9d,0xd3,0xd3,0xa7,0x9d,0x5d,0x41,
+0x6f,0x65,0x1b,0xcf,0xa9,0x87,0x91,0x09
+};
 static Z90C_CCA_PRIVATE_EXT_ME stat_pvt_me_key = {
   {                               
     0x1E,                           
@@ -560,6 +743,8 @@ static Z90C_CCA_PUBLIC_KEY stat_pub_key = {
 };
 #define FIXED_TYPE6_ME_LEN 0x0000025F 
 #define FIXED_TYPE6_ME_EN_LEN 0x000000F0 
+#define FIXED_TYPE6_ME_LENX 0x000002CB 
+#define FIXED_TYPE6_ME_EN_LENX 0x0000015C 
 static Z90C_CCA_PUBLIC_SEC stat_cca_public_sec =
 {                               
   0x04,                           
@@ -572,10 +757,13 @@ static Z90C_CCA_PUBLIC_SEC stat_cca_public_sec =
   {0x01,0x00,0x01}                
 };                              
 #define FIXED_TYPE6_CR_LEN 0x00000177 
+#define FIXED_TYPE6_CR_LENX 0x000001E3 
 #ifndef MAX_RESPONSE_SIZE
 #define MAX_RESPONSE_SIZE 0x00000710
+#define MAX_RESPONSEX_SIZE 0x0000077C
 #endif
 #define RESPONSE_CPRB_SIZE 0x000005B8 
+#define RESPONSE_CPRBX_SIZE 0x00000724 
 static UCHAR stat_PE_function_code[2] = {0x50, 0x4B};
 static UCHAR testmsg[] = {
 0x00,0x00,0x00,0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x00,0x06,0x00,0x00,
@@ -891,52 +1079,57 @@ int test_reply(UCHAR * buffer)
 {
   return (memcmp(buffer, testrepl, 2));
 } 
-HDSTAT query_on_line (int deviceNr, int cdx, int resetNr, int *q_depth, 
+HDSTAT query_on_line (int deviceNr, int cdx, int resetNr, int *q_depth,
                       int *dev_type)
 {
   int q_nr;
   DEVSTAT ccode = 0;
   AP_STATUS_WORD stat_word;
   HDSTAT stat;
-  BOOL break_out;
+  BOOL break_out = FALSE;
   int i;
   int t_depth;
   int t_dev_type;
   q_nr =(deviceNr << (AP_MAX_CDX_BITL + AP_RQID_RESERVED_BITL)) + cdx;
   stat = HD_BUSY;
   ccode = testq(q_nr,&t_depth,&t_dev_type,&stat_word);
-  break_out = FALSE;
+  PDEBUG("query_on_line: testq returned ccode %d, response_code %d\n",
+         ccode, stat_word.ap_response_code);
   for (i=0;i<resetNr;i++){
     if (ccode > 3){                   
       stat = (HD_TSQ_EXCEPTION);
-      PRINTKC("Exception testing device %i\n",i);
+      PRINTKC("query_on_line: Exception testing device %i\n",i);
       break;
     }
     switch(ccode) {
       case(0):
+        PDEBUG("query_on_line: testq returned t_dev_type %d\n", t_dev_type);
 	break_out = TRUE;
-	stat = HD_ONLINE;
+        stat = HD_ONLINE;
 	*q_depth = t_depth + 1;
         switch (t_dev_type) {
-          case PCIXCC_HW:
           case OTHER_HW:
+          case OTHER2_HW:
             stat = HD_NOT_THERE;
             *dev_type = NILDEV;
             break;
-          case LEEDSLITE_HW:
-            *dev_type = LEEDSLITE;
+          case PCICA_HW:
+            *dev_type = PCICA;
             break;
-          case LEEDS2_HW:
-            *dev_type = LEEDS2;
+          case PCICC_HW:
+            *dev_type = PCICC;
+            break;
+          case PCIXCC_HW:
+            *dev_type = PCIXCC;
             break;
           default:
             *dev_type = NILDEV;
             break;
-        } 
-	PDEBUG("Found available device %i\n",deviceNr);
-	PDEBUG("Q depth: %i\n",*q_depth);
-        PDEBUG("Dev type: %d\n",*dev_type);
-	PDEBUG("Stat: %02x%02x%02x%02x\n",
+        }
+	PDEBUG("query_on_line: Found available device %i\n",deviceNr);
+	PDEBUG("query_on_line: Q depth: %i\n",*q_depth);
+        PDEBUG("query_on_line: Dev type: %d\n",*dev_type);
+	PDEBUG("query_on_line: Stat: %02x%02x%02x%02x\n",
 	       stat_word.ap_q_stat_flags,
 	       stat_word.ap_response_code,
 	       stat_word.ap_reserved[0],
@@ -949,16 +1142,16 @@ HDSTAT query_on_line (int deviceNr, int cdx, int resetNr, int *q_depth,
 	    break_out = TRUE;
 	    *q_depth = t_depth + 1;
             *dev_type = t_dev_type;
-	    PDEBUG("Found available device %i\n",deviceNr);
-	    PDEBUG("Q depth: %i\n",*q_depth);
-            PDEBUG("Dev type: %d\n",*dev_type);
+	    PDEBUG("query_on_line: Found available device %i\n",deviceNr);
+	    PDEBUG("query_on_line: Q depth: %i\n",*q_depth);
+            PDEBUG("query_on_line: Dev type: %d\n",*dev_type);
 	    break;
 	  case(AP_RESPONSE_Q_NOT_AVAIL):      
 	    stat = HD_NOT_THERE;
 	    break_out = TRUE;
 	    break;
 	  case(AP_RESPONSE_RESET_IN_PROGRESS):
-	    PDEBUG("Found device being reset %i\n",deviceNr);
+	    PDEBUG("query_on_line: Found device being reset %i\n",deviceNr);
 	    break;
 	  case(AP_RESPONSE_DECONFIGURED):     
 	    stat = HD_DECONFIGURED;
@@ -969,7 +1162,7 @@ HDSTAT query_on_line (int deviceNr, int cdx, int resetNr, int *q_depth,
 	    break_out = TRUE;
 	    break;
 	  case(AP_RESPONSE_BUSY):             
-	    PDEBUG("Found device busy %i\n",deviceNr);
+	    PDEBUG("query_on_line: Found device busy %i\n",deviceNr);
 	    break;
 	  default:
             break;
@@ -992,7 +1185,7 @@ DEVSTAT reset_device (int deviceNr, int cdx, int resetNr)
   int ccode = 0;
   struct ap_status_word stat_word;
   DEVSTAT stat;
-  BOOL break_out;
+  BOOL break_out = FALSE;
   int dummy_qdepth;
   int dummy_devType;
   int i;
@@ -1056,9 +1249,9 @@ DEVSTAT reset_device (int deviceNr, int cdx, int resetNr)
   return stat;
 }; 
 DEVSTAT send_to_AP(int dev_nr,
-		 int cdx,
-		 int msg_len,
-		 UCHAR * msg_ext_p)
+		   int cdx,
+		   int msg_len,
+		   UCHAR * msg_ext_p)
 {
   int ccode = 0;
   struct ap_status_word stat_word;
@@ -1070,9 +1263,31 @@ DEVSTAT send_to_AP(int dev_nr,
   PDEBUG("q number passed to sen: %02x%02x%02x%02x\n",
 	 msg_ext_p[0],msg_ext_p[1],msg_ext_p[2],msg_ext_p[3]);
   stat = DEV_GONE;
+#ifdef SPECIAL_DEBUG  
+  {
+    int i;
+    PRINTK(
+        "Request header: %02X%02X%02X%02X %02X%02X%02X%02X %02X%02X%02X%02X\n",
+        msg_ext_p[0], msg_ext_p[1], msg_ext_p[2], msg_ext_p[3],
+        msg_ext_p[4], msg_ext_p[5], msg_ext_p[6], msg_ext_p[7],
+        msg_ext_p[8], msg_ext_p[9], msg_ext_p[10], msg_ext_p[11]);
+    for (i = 0; i < msg_len; i += 16)
+    {
+      PRINTK(
+          "%04X: %02X%02X%02X%02X %02X%02X%02X%02X "
+          "%02X%02X%02X%02X %02X%02X%02X%02X\n",
+          i,
+          msg_ext_p[i+12], msg_ext_p[i+13], msg_ext_p[i+14], msg_ext_p[i+15],
+          msg_ext_p[i+16], msg_ext_p[i+17], msg_ext_p[i+18], msg_ext_p[i+19],
+          msg_ext_p[i+20], msg_ext_p[i+21], msg_ext_p[i+22], msg_ext_p[i+23],
+          msg_ext_p[i+24], msg_ext_p[i+25], msg_ext_p[i+26], msg_ext_p[i+27]);
+    }
+  }
+#endif
   ccode = sen(msg_len,msg_ext_p,&stat_word);
-  if (ccode > 3)
+  if (ccode > 3) {
     return (DEV_SEN_EXCEPTION);
+  }
   PDEBUG("ccode returned by sen:  %u\n",ccode);
   PDEBUG("stat word returned by sen: %02x%02x%02x%02x\n",
 	 stat_word.ap_q_stat_flags,
@@ -1142,6 +1357,7 @@ DEVSTAT receive_from_AP(int dev_nr,
   q_nr = (dev_nr << (AP_MAX_CDX_BITL + AP_RQID_RESERVED_BITL)) + cdx;
   stat = DEV_GONE;
   ccode = rec(q_nr, resp_len, response, psmid, &stat_word);
+  PDEBUG("Response length after dq: %d\n",resp_len);
   if (ccode > 3)
     return (DEV_REC_EXCEPTION);
   PDEBUG("dq cc: %u,  st: %02x%02x%02x%02x\n",
@@ -1153,6 +1369,22 @@ DEVSTAT receive_from_AP(int dev_nr,
   switch(ccode) {
     case(0):
       stat = DEV_ONLINE;
+#ifdef SPECIAL_DEBUG  
+      {
+        int i;
+        for (i = 0; i < resp_len; i += 16)
+        {
+          PRINTK(
+              "%04X: %02X%02X%02X%02X %02X%02X%02X%02X "
+              "%02X%02X%02X%02X %02X%02X%02X%02X\n",
+              i,
+              response[i+0], response[i+1], response[i+2], response[i+3],
+              response[i+4], response[i+5], response[i+6], response[i+7],
+              response[i+8], response[i+9], response[i+10], response[i+11],
+              response[i+12], response[i+13], response[i+14], response[i+15]);
+        }
+      }
+#endif
       break;
     case(3):
       switch (stat_word.ap_response_code){
@@ -1214,9 +1446,7 @@ int pad_msg(UCHAR * buffer, int  totalLength, int msgLength)
     return SEN_PADDING_ERROR;
   ptr[0] = 0x00;
   ptr[1] = 0x02;
-  get_random_bytes(ptr+2, padLen);
-  for (j=2;j<padLen+2;j++)
-    *(ptr+j) |= 1;
+  memcpy(ptr+2,stat_pad,padLen);
   ptr[padLen + 2] = 0x00;
   return OK;
 } 
@@ -1235,35 +1465,6 @@ int is_common_public_key (unsigned char * keyP, int keyL)
   if (((l == 1) && (p[0] == 3)) ||
       ((l == 3) && (p[0] == 1) && (p[1] == 0) && (p[2] == 1)))
     rv = 1;
-  return (rv);
-}
-int isPKCS1_1Padded (unsigned char * argP, int argL)
-{
-  int rv = 0;
-  int i,j;
-  unsigned char * p;
-  int l;
-  for (i=0;i<argL;i++) {
-    if (argP[i])
-      break;
-  }
-  p = argP + i;
-  l = argL - i;
-  do {
-    if (i != 1)
-      break;
-    if (p[0] != 1)
-      break;
-    for (j=1;j<l;j++) {
-      if (p[j] != 0xff)
-        break;
-    }
-    if (j < 9)
-      break;
-    if (p[j] != 0)
-      break;
-    rv = 1;
-  } while(0);
   return (rv);
 }
 int convert_ICAMEX_msg_to_type4MEX_msg (int icaMsg_l,
@@ -1536,8 +1737,8 @@ int convert_ICAMEX_msg_to_type6MEX_de_msg (int icaMsg_l,
     itoLe2((int *)&(tp6Hdr_p->z90c_type6_hdr_FrCardLen1),cprb_p->rpl_parml);
     tgt_p += sizeof(Z90C_CPRB);
     memcpy(tgt_p,(UCHAR *)&stat_pkd_function_and_rules,
-           sizeof(struct pkd_function_and_rules_block));
-    tgt_p += sizeof(struct pkd_function_and_rules_block);
+           sizeof(struct function_and_rules_block));
+    tgt_p += sizeof(struct function_and_rules_block);
     itoLe2(&vudLen,tgt_p); 
     tgt_p += 2;
     if ((rv=copy_from_user(tgt_p,icaMsg_p->inputdata,modLen))!=OK){
@@ -1546,10 +1747,6 @@ int convert_ICAMEX_msg_to_type6MEX_de_msg (int icaMsg_l,
     }
     if (!(isNotEmpty(tgt_p,modLen))){
       rv = SEN_USER_ERROR;
-      break;
-    }
-    if (isPKCS1_1Padded(tgt_p, modLen)) {
-      rv = SEN_NOT_AVAIL;
       break;
     }
     tgt_p += modLen;
@@ -1661,8 +1858,8 @@ int convert_ICAMEX_msg_to_type6MEX_en_msg (int icaMsg_l,
     itoLe2((int *)&(tp6Hdr_p->z90c_type6_hdr_FrCardLen1),cprb_p->rpl_parml);
     tgt_p += sizeof(Z90C_CPRB);
     memcpy(tgt_p,(UCHAR *)&stat_pke_function_and_rules,
-             sizeof(struct pkd_function_and_rules_block));
-    tgt_p += sizeof(struct pkd_function_and_rules_block);
+             sizeof(struct function_and_rules_block));
+    tgt_p += sizeof(struct function_and_rules_block);
     tgt_p += 2;
     if ((rv=copy_from_user(tgt_p,icaMsg_p->inputdata,modLen))!=OK){
       rv = SEN_RELEASED;
@@ -1670,10 +1867,6 @@ int convert_ICAMEX_msg_to_type6MEX_en_msg (int icaMsg_l,
     }
     if (!(isNotEmpty(tgt_p,modLen))){
       rv = SEN_USER_ERROR;
-      break;
-    }
-    if (isPKCS1_1Padded(tgt_p, modLen)) {
-      rv = SEN_NOT_AVAIL;
       break;
     }
     if (tgt_p[0] != 0 || tgt_p[1] != 0x02) {
@@ -1789,8 +1982,8 @@ int convert_ICACRT_msg_to_type6CRT_msg (int icaMsg_l,
            sizeof(cprb_p->req_parml));
     tgt_p += sizeof(Z90C_CPRB);
     memcpy(tgt_p,(UCHAR *)&stat_pkd_function_and_rules,
-           sizeof(struct pkd_function_and_rules_block));
-    tgt_p += sizeof(struct pkd_function_and_rules_block);
+           sizeof(struct function_and_rules_block));
+    tgt_p += sizeof(struct function_and_rules_block);
     itoLe2(&vudLen,tgt_p); 
     tgt_p += 2;
     if ((rv=copy_from_user(tgt_p,icaMsg_p->inputdata,modLen))!=OK){
@@ -1799,10 +1992,6 @@ int convert_ICACRT_msg_to_type6CRT_msg (int icaMsg_l,
     }
     if (!(isNotEmpty(tgt_p,modLen))){
       rv = SEN_USER_ERROR;
-      break;
-    }
-    if (isPKCS1_1Padded(tgt_p, modLen)) {
-      rv = SEN_NOT_AVAIL;
       break;
     }
     tgt_p += modLen;
@@ -1894,6 +2083,376 @@ int convert_ICACRT_msg_to_type6CRT_msg (int icaMsg_l,
   }
   return (rv);
 } 
+int convert_ICAMEX_msg_to_type6MEX_de_msgX (int icaMsg_l,
+                                   ica_rsa_modexpo_t * icaMsg_p,
+                                   int caller_hdr,
+                                   int cdx,
+                                   int * z90cMsg_l_p,
+                                   Z90C_TYPE6_MSG * z90cMsg_p)
+{
+  int rv = OK;
+  int modLen = 0;
+  int vudLen = 0;
+  int allocSize = 0;
+  int totCPRBLen = 0;
+  int parmBlock_l = 0;
+  Z90C_TYPE6_MSG * outMsg_p = NULL;
+  UCHAR * tgt_p;
+  UCHAR * tmpTgt_p;
+  int modBitLen = 0;
+  Z90C_TYPE6_HDR * tp6Hdr_p;
+  Z90C_CPRBX * cprbx_p;
+  Z90C_CCA_PRIVATE_EXT_ME * key_p;
+  modLen = icaMsg_p->inputdatalength;
+  modBitLen = 8*modLen;
+  allocSize = FIXED_TYPE6_ME_LENX + modLen;
+  totCPRBLen = allocSize - sizeof(struct z90c_type6_hdr);
+  parmBlock_l = totCPRBLen - sizeof(struct z90c_cprbx);
+  allocSize += caller_hdr;
+  vudLen = 2 + modLen;        
+  do {
+    outMsg_p = z90cMsg_p;
+    memset(outMsg_p,0,allocSize);
+    tgt_p = (UCHAR *)outMsg_p + caller_hdr; 
+    memcpy(tgt_p,(UCHAR *)&stat_type6_hdrX,sizeof(struct z90c_type6_hdr));
+    tp6Hdr_p = (Z90C_TYPE6_HDR *)tgt_p;
+    tp6Hdr_p->z90c_type6_hdr_ToCardLen1 = totCPRBLen;
+    tp6Hdr_p->z90c_type6_hdr_FrCardLen1 = RESPONSE_CPRBX_SIZE;
+    tgt_p += sizeof(struct z90c_type6_hdr);
+    memcpy(tgt_p,(UCHAR *)&stat_cprbx,sizeof(struct z90c_cprbx));
+    cprbx_p = (Z90C_CPRBX *) tgt_p;
+    cprbx_p->domain = (USHORT)cdx;
+    cprbx_p->req_parml = parmBlock_l;
+    cprbx_p->rpl_msgbl = RESPONSE_CPRBX_SIZE;
+    tgt_p += sizeof(Z90C_CPRBX);
+    memcpy(tgt_p,(UCHAR *)&stat_pkd_function_and_rulesX,
+           sizeof(struct function_and_rules_block));
+    tgt_p += sizeof(struct function_and_rules_block);
+    *((short *)tgt_p) = (short) vudLen;
+    tgt_p += 2;
+    if ((rv=copy_from_user(tgt_p,icaMsg_p->inputdata,modLen))!=OK){
+      rv = SEN_RELEASED;
+      break;
+    }
+    if (!(isNotEmpty(tgt_p,modLen))){
+      rv = SEN_USER_ERROR;
+      break;
+    }
+    tgt_p += modLen;
+    memcpy(tgt_p,(UCHAR *)&stat_pkd_T6_keyBlock_hdrX,
+           sizeof(struct pkd_T6_keyBlock_hdrX));
+    tgt_p += sizeof(struct pkd_T6_keyBlock_hdrX);
+    memcpy(tgt_p,(UCHAR *)&stat_pvt_me_key,
+           sizeof(struct z90c_cca_private_ext_ME));
+    key_p = (Z90C_CCA_PRIVATE_EXT_ME *)tgt_p;
+    tmpTgt_p = key_p->pvtMESec.z90c_cca_pvt_ext_ME_sec_pvt_exp +
+               sizeof(key_p->pvtMESec.z90c_cca_pvt_ext_ME_sec_pvt_exp) -
+               modLen;
+    if ((rv=copy_from_user(tmpTgt_p, icaMsg_p->b_key, modLen))!=OK){
+      rv = SEN_RELEASED;
+      break;
+    }
+    if (!(isNotEmpty(tmpTgt_p,modLen))){
+      rv = SEN_USER_ERROR;
+      break;
+    }
+    if (is_common_public_key(tmpTgt_p, modLen)) {
+      PRINTK("Common public key used for modex decrypt\n");
+      rv = SEN_NOT_AVAIL;
+      break;
+    }
+    tmpTgt_p = key_p->pvtMESec.z90c_cca_pvt_ext_ME_sec_mod +
+               sizeof(key_p->pvtMESec.z90c_cca_pvt_ext_ME_sec_mod) -
+               modLen;
+    if ((rv=copy_from_user(tmpTgt_p, icaMsg_p->n_modulus, modLen))!=OK){
+      rv = SEN_RELEASED;
+      break;
+    }
+    if (!(isNotEmpty(tmpTgt_p,modLen))){
+      rv = SEN_USER_ERROR;
+      break;
+    }
+    key_p->pubMESec.z90c_cca_pub_sec_mod_bit_len = modBitLen;
+  } while(0);
+  if (rv == OK) {
+    *z90cMsg_l_p = allocSize - caller_hdr;
+  }
+  return (rv);
+} 
+int convert_ICAMEX_msg_to_type6MEX_en_msgX (int icaMsg_l,
+                                   ica_rsa_modexpo_t * icaMsg_p,
+                                   int caller_hdr,
+                                   int cdx,
+                                   int * z90cMsg_l_p,
+                                   Z90C_TYPE6_MSG * z90cMsg_p)
+{
+  int rv = OK;
+  int modLen = 0;
+  int expLen = 0;
+  int vudLen = 0;
+  int allocSize = 0;
+  int totCPRBLen = 0;
+  int parmBlock_l = 0;
+  Z90C_TYPE6_MSG * outMsg_p = NULL;
+  UCHAR * tgt_p;
+  UCHAR * tmpTgt_p;
+  int modBitLen = 0;
+  Z90C_TYPE6_HDR * tp6Hdr_p;
+  Z90C_CPRBX * cprbx_p;
+  Z90C_CCA_PUBLIC_KEY * key_p;
+  int keyLen = 0;
+  UCHAR temp_exp[256];
+  UCHAR * exp_p;
+  struct pkd_T6_keyBlock_hdrX * keyb_p;
+  int i;
+  modLen = icaMsg_p->inputdatalength;
+  modBitLen = 8*modLen;
+  if ((rv=copy_from_user(temp_exp, icaMsg_p->b_key, modLen))!=0)
+    return SEN_RELEASED;
+  if (!(isNotEmpty(temp_exp,modLen)))
+    return SEN_USER_ERROR;
+  exp_p = temp_exp;
+  for (i=0;i<modLen;i++){
+    if (exp_p[i])
+      break;
+  }
+  if (i < modLen) {
+    expLen = modLen - i;
+    exp_p += i;
+  }
+  else {
+    return SEN_OPERAND_INVALID;
+  }
+  PDEBUG("expLen after computation: %08x\n",expLen);
+  allocSize = FIXED_TYPE6_ME_EN_LENX + 2*modLen + expLen;
+  totCPRBLen = allocSize - sizeof(struct z90c_type6_hdr);
+  parmBlock_l = totCPRBLen - sizeof(struct z90c_cprbx);
+  allocSize = allocSize + caller_hdr;
+  vudLen = 2 + modLen;        
+  do {
+    outMsg_p = z90cMsg_p;
+    memset(outMsg_p,0,allocSize);
+    tgt_p = (UCHAR *)outMsg_p + caller_hdr; 
+    memcpy(tgt_p,(UCHAR *)&stat_type6_hdrX,sizeof(struct z90c_type6_hdr));
+    tp6Hdr_p = (Z90C_TYPE6_HDR *)tgt_p;
+    tp6Hdr_p->z90c_type6_hdr_ToCardLen1 = totCPRBLen;
+    tp6Hdr_p->z90c_type6_hdr_FrCardLen1 = RESPONSE_CPRBX_SIZE;
+    memcpy(tp6Hdr_p->z90c_type6_scc_function,
+           stat_PE_function_code,
+           sizeof(stat_PE_function_code));
+    tgt_p += sizeof(struct z90c_type6_hdr);
+    memcpy(tgt_p,(UCHAR *)&stat_cprbx,sizeof(struct z90c_cprbx));
+    cprbx_p = (Z90C_CPRBX *) tgt_p;
+    cprbx_p->domain = (USHORT)cdx;
+    cprbx_p->rpl_msgbl = RESPONSE_CPRBX_SIZE;
+    tgt_p += sizeof(Z90C_CPRBX);
+    memcpy(tgt_p,(UCHAR *)&stat_pke_function_and_rulesX,
+             sizeof(struct function_and_rules_block));
+    tgt_p += sizeof(struct function_and_rules_block);
+    tgt_p += 2;
+    if ((rv=copy_from_user(tgt_p,icaMsg_p->inputdata,modLen))!=OK){
+      rv = SEN_RELEASED;
+      break;
+    }
+    if (!(isNotEmpty(tgt_p,modLen))){
+      rv = SEN_USER_ERROR;
+      break;
+    }
+    tgt_p -= 2;
+    *((short *)tgt_p) = (short) vudLen;
+    tgt_p += (vudLen);
+    keyb_p = (struct pkd_T6_keyBlock_hdrX *)tgt_p;
+    tgt_p += sizeof(struct pkd_T6_keyBlock_hdrX);
+    memcpy(tgt_p,(UCHAR *)&stat_pub_key,
+           sizeof(stat_pub_key));
+    key_p = (Z90C_CCA_PUBLIC_KEY *)tgt_p;
+    tmpTgt_p = key_p->pubSec.z90c_cca_pub_sec_expmod;
+    memcpy(tmpTgt_p, exp_p, expLen);
+    tmpTgt_p += expLen;
+    if ((rv=copy_from_user(tmpTgt_p, icaMsg_p->n_modulus, modLen))!=OK){
+      rv = SEN_RELEASED;
+      break;
+    }
+    if (!(isNotEmpty(tmpTgt_p,modLen))){
+      rv = SEN_USER_ERROR;
+      break;
+    }
+    key_p->pubSec.z90c_cca_pub_sec_mod_bit_len = modBitLen;
+    key_p->pubSec.z90c_cca_pub_sec_mod_byte_len = modLen;
+    key_p->pubSec.z90c_cca_pub_sec_exp_len = expLen;
+    key_p->pubSec.z90c_cca_pub_sec_length =
+                             12 +
+                             modLen + expLen;
+    keyLen = key_p->pubSec.z90c_cca_pub_sec_length +
+             sizeof(Z90C_CCA_TOKEN_HDR);
+    key_p->pubHdr.z90c_cca_tkn_length = keyLen;
+    keyLen += 4;
+    keyb_p->ulen = (USHORT)keyLen;
+    keyLen += 2;
+    keyb_p->blen = (USHORT)keyLen;
+    cprbx_p->req_parml = parmBlock_l;
+  } while(0);
+  if (rv == OK) {
+    *z90cMsg_l_p = allocSize - caller_hdr;
+  }
+  return (rv);
+} 
+int convert_ICACRT_msg_to_type6CRT_msgX (int icaMsg_l,
+                                   ica_rsa_modexpo_crt_t * icaMsg_p,
+                                   int caller_hdr,
+                                   int cdx,
+                                   int * z90cMsg_l_p,
+                                   Z90C_TYPE6_MSG * z90cMsg_p)
+{
+  int rv = OK;
+  int modLen = 0;
+  int vudLen = 0;
+  int allocSize = 0;
+  int totCPRBLen = 0;
+  int parmBlock_l = 0;
+  int shortLen = 0;
+  int longLen = 0;
+  int padLen = 0;
+  int keyPartsLen = 0;
+  Z90C_TYPE6_MSG * outMsg_p = NULL;
+  UCHAR * tgt_p;
+  UCHAR * tmpTgt_p;
+  int tmp_l;
+  int modBitLen = 0;
+  Z90C_TYPE6_HDR * tp6Hdr_p;
+  Z90C_CPRBX * cprbx_p;
+  Z90C_CCA_TOKEN_HDR * keyHdr_p;
+  Z90C_CCA_PRIVATE_EXT_CRT_SEC * pvtSec_p;
+  Z90C_CCA_PUBLIC_SEC * pubSec_p;
+  modLen = icaMsg_p->inputdatalength;
+  modBitLen = 8*modLen;
+  shortLen = modLen / 2;
+  longLen = 8 + shortLen;
+  keyPartsLen = 3*longLen + 2*shortLen;  
+  padLen = (8 - (keyPartsLen % 8)) % 8;
+  keyPartsLen += padLen + modLen;
+  allocSize = FIXED_TYPE6_CR_LENX + keyPartsLen + modLen;
+  totCPRBLen = allocSize -  sizeof(struct z90c_type6_hdr);
+  parmBlock_l = totCPRBLen - sizeof(struct z90c_cprbx);
+  vudLen = 2 + modLen;     
+  allocSize = allocSize + caller_hdr;
+  do {
+    outMsg_p = z90cMsg_p;
+    memset(outMsg_p,0,allocSize);
+    tgt_p = (UCHAR *)outMsg_p + caller_hdr; 
+    memcpy(tgt_p,(UCHAR *)&stat_type6_hdrX,sizeof(struct z90c_type6_hdr));
+    tp6Hdr_p = (Z90C_TYPE6_HDR *)tgt_p;
+    tp6Hdr_p->z90c_type6_hdr_ToCardLen1 = totCPRBLen;
+    tp6Hdr_p->z90c_type6_hdr_FrCardLen1 = RESPONSE_CPRBX_SIZE;
+    tgt_p += sizeof(struct z90c_type6_hdr);
+    cprbx_p = (Z90C_CPRBX *) tgt_p;
+    memcpy(tgt_p,(UCHAR *)&stat_cprbx,sizeof(struct z90c_cprbx));
+    cprbx_p->domain = (USHORT)cdx;
+    cprbx_p->req_parml = parmBlock_l;
+    cprbx_p->rpl_msgbl = parmBlock_l;
+    tgt_p += sizeof(Z90C_CPRBX);
+    memcpy(tgt_p,(UCHAR *)&stat_pkd_function_and_rulesX,
+           sizeof(struct function_and_rules_block));
+    tgt_p += sizeof(struct function_and_rules_block);
+    *((short *)tgt_p) = (short) vudLen;
+    tgt_p += 2;
+    if ((rv=copy_from_user(tgt_p,icaMsg_p->inputdata,modLen))!=OK){
+      rv = SEN_RELEASED;
+      break;
+    }
+    if (!(isNotEmpty(tgt_p,modLen))){
+      rv = SEN_USER_ERROR;
+      break;
+    }
+    tgt_p += modLen;
+    tmp_l = sizeof(struct pkd_T6_keyBlock_hdr) +
+            sizeof(struct z90c_cca_token_hdr) +
+            sizeof(struct z90c_cca_private_ext_CRT_sec) +
+            0x0f +          
+            keyPartsLen;
+    *((short *)tgt_p) = (short) tmp_l;
+    tmpTgt_p = tgt_p + 2;
+    tmp_l -= 2;
+    *((short *)tmpTgt_p) = (short) tmp_l;
+    tgt_p += sizeof(struct pkd_T6_keyBlock_hdr);
+    keyHdr_p = (Z90C_CCA_TOKEN_HDR *)tgt_p;
+    keyHdr_p->z90c_cca_tkn_hdr_id = Z90C_CCA_TKN_HDR_ID_EXT;
+    tmp_l -= 4;
+    keyHdr_p->z90c_cca_tkn_length = tmp_l;
+    tgt_p += sizeof(struct z90c_cca_token_hdr);
+    pvtSec_p = (Z90C_CCA_PRIVATE_EXT_CRT_SEC *)tgt_p;
+    pvtSec_p->z90c_cca_pvt_ext_CRT_sec_id = Z90C_CCA_PVT_EXT_CRT_SEC_ID_PVT;
+    pvtSec_p->z90c_cca_pvt_ext_CRT_sec_length =
+                    sizeof(struct z90c_cca_private_ext_CRT_sec)+keyPartsLen;
+    pvtSec_p->z90c_cca_pvt_ext_CRT_sec_fmt = Z90C_CCA_PVT_EXT_CRT_SEC_FMT_CL;
+    pvtSec_p->z90c_cca_pvt_ext_CRT_sec_usage = Z90C_CCA_PVT_USAGE_ALL;
+    pvtSec_p->z90c_cca_pvt_ext_CRT_sec_p_len = longLen;
+    pvtSec_p->z90c_cca_pvt_ext_CRT_sec_q_len = shortLen;
+    pvtSec_p->z90c_cca_pvt_ext_CRT_sec_dp_len = longLen;
+    pvtSec_p->z90c_cca_pvt_ext_CRT_sec_dq_len = shortLen;
+    pvtSec_p->z90c_cca_pvt_ext_CRT_sec_u_len = longLen;
+    pvtSec_p->z90c_cca_pvt_ext_CRT_sec_mod_len = modLen;
+    pvtSec_p->z90c_cca_pvt_ext_CRT_sec_pad_len = padLen;
+    tgt_p += sizeof(struct z90c_cca_private_ext_CRT_sec);
+    if ((copy_from_user(tgt_p,icaMsg_p->np_prime,longLen))!=OK){  
+      rv = SEN_RELEASED;
+      break;
+    }
+    if (!(isNotEmpty(tgt_p,longLen))){
+      rv = SEN_USER_ERROR;
+      break;
+    }
+    tgt_p += longLen;
+    if ((rv=copy_from_user(tgt_p,icaMsg_p->nq_prime,shortLen))!=OK){ 
+      rv = SEN_RELEASED;
+      break;
+    }
+    if (!(isNotEmpty(tgt_p,shortLen))){
+      rv = SEN_USER_ERROR;
+      break;
+    }
+    tgt_p += shortLen;
+    if ((rv=copy_from_user(tgt_p,icaMsg_p->bp_key,longLen))!=OK){    
+      rv = SEN_RELEASED;
+      break;
+    }
+    if (!(isNotEmpty(tgt_p,longLen))){
+      rv = SEN_USER_ERROR;
+      break;
+    }
+    tgt_p += longLen;
+    if ((rv=copy_from_user(tgt_p,icaMsg_p->bq_key,shortLen))!=OK){   
+      rv = SEN_RELEASED;
+      break;
+    }
+    if (!(isNotEmpty(tgt_p,shortLen))){
+      rv = SEN_USER_ERROR;
+      break;
+    }
+    tgt_p += shortLen;
+    if ((rv=copy_from_user(tgt_p,icaMsg_p->u_mult_inv,longLen))!=OK){  
+      rv = SEN_RELEASED;
+      break;
+    }
+    if (!(isNotEmpty(tgt_p,longLen))){
+      rv = SEN_USER_ERROR;
+      break;
+    }
+    tgt_p += longLen;
+    if (padLen != 0)
+      tgt_p += padLen;
+    memset(tgt_p,0xFF,modLen);
+    tgt_p += modLen;
+    memcpy(tgt_p,(UCHAR *)&stat_cca_public_sec,
+                 sizeof(struct z90c_cca_public_sec));
+    pubSec_p = (Z90C_CCA_PUBLIC_SEC *) tgt_p;
+    pubSec_p->z90c_cca_pub_sec_mod_bit_len = modBitLen;
+  } while(0);
+  if (rv == OK) {
+    *z90cMsg_l_p = allocSize - caller_hdr;
+  }
+  return (rv);
+} 
 int convert_request (UCHAR * buffer,
                     int func,
                     HWRD  function,
@@ -1906,7 +2465,7 @@ int convert_request (UCHAR * buffer,
   int rv = OK;
   int caller_hdr = 12;    
   switch(dev_type) {
-    case LEEDSLITE:
+    case PCICA:
       if (func==ICARSAMODEXPO)
         rv = convert_ICAMEX_msg_to_type4MEX_msg(sizeof(ica_rsa_modexpo_t),
                                            (ica_rsa_modexpo_t *)buffer,
@@ -1924,7 +2483,7 @@ int convert_request (UCHAR * buffer,
                                            msg_l_p,
                                            (Z90C_TYPE4_MSG *)msg_p);
       break;
-    case LEEDS2:
+    case PCICC:
       if (func==ICARSAMODEXPO)
         if (function == PCI_FUNC_KEY_ENCRYPT)
           rv = convert_ICAMEX_msg_to_type6MEX_en_msg(sizeof(ica_rsa_modexpo_t),
@@ -1948,6 +2507,34 @@ int convert_request (UCHAR * buffer,
                                            msg_l_p,
                                            (Z90C_TYPE6_MSG *)msg_p);
       break;
+    case PCIXCC:
+      if (func==ICARSAMODEXPO) {
+        if (function == PCI_FUNC_KEY_ENCRYPT) {
+          rv = convert_ICAMEX_msg_to_type6MEX_en_msgX(sizeof(ica_rsa_modexpo_t),
+                                               (ica_rsa_modexpo_t *)buffer,
+                                               caller_hdr,
+                                               cdx,
+                                               msg_l_p,
+                                               (Z90C_TYPE6_MSG *)msg_p);
+        }
+        else {
+          rv = convert_ICAMEX_msg_to_type6MEX_de_msgX(sizeof(ica_rsa_modexpo_t),
+                                               (ica_rsa_modexpo_t *)buffer,
+                                               caller_hdr,
+                                               cdx,
+                                               msg_l_p,
+                                               (Z90C_TYPE6_MSG *)msg_p);
+        }
+      }
+      else {
+        rv = convert_ICACRT_msg_to_type6CRT_msgX(sizeof(ica_rsa_modexpo_crt_t),
+                                           (ica_rsa_modexpo_crt_t *)buffer,
+                                           caller_hdr,
+                                           cdx,
+                                           msg_l_p,
+                                           (Z90C_TYPE6_MSG *)msg_p);
+      }
+      break;
     default:
       break;
   }; 
@@ -1966,6 +2553,7 @@ int convert_response (UCHAR * response,
   UCHAR * src_p = NULL;
   int     src_l = 0;
   struct z90c_cprb * cprb_p;
+  struct z90c_cprbx * cprbx_p;
   Z90C_TYPE86_HDR * t86h_p;
   Z90C_TYPE84_HDR * t84h_p;
   Z90C_TYPE82_HDR * t82h_p;
@@ -2004,19 +2592,37 @@ int convert_response (UCHAR * response,
         if (reply_code == OK) {
           cprb_p = (Z90C_CPRB *)(response +
                                  sizeof(struct z90c_type86_fmt2_msg));
-          le2toI(cprb_p->ccp_rtcode, &service_rc);
-          if (service_rc == OK) {
-            src_p = (UCHAR *)cprb_p + sizeof(struct z90c_cprb);
-            src_p += 4;
-            le2toI(src_p, &src_l); 
-            src_l -= 2;            
-            src_p += 2;            
-          }
-          else {
-            le2toI(cprb_p->ccp_rscode, &service_rs);
-            PDEBUG("service rc: %d; service rs: %d\n", service_rc, service_rs);
-            rv = 8;
-          }
+	  if (cprb_p->cprb_ver_id != 0x02) {  
+            le2toI(cprb_p->ccp_rtcode, &service_rc);
+            if (service_rc == OK) {
+              src_p = (UCHAR *)cprb_p + sizeof(struct z90c_cprb);
+              src_p += 4;
+              le2toI(src_p, &src_l); 
+              src_l -= 2;            
+              src_p += 2;            
+            }
+            else {
+              le2toI(cprb_p->ccp_rscode, &service_rs);
+              PDEBUG("service rc:%d; service rs:%d\n",service_rc,service_rs);
+              rv = 8;
+	    }
+	  }
+	  else {  
+            cprbx_p = (Z90C_CPRBX *) cprb_p;
+	    service_rc = (int)(cprbx_p->ccp_rtcode);
+            if (service_rc == OK) {
+              src_p = (UCHAR *)cprbx_p + sizeof(struct z90c_cprbx);
+              src_p += 4;
+	      src_l = (int)(*((short *)src_p)); 
+              src_l -= 2;            
+              src_p += 2;            
+            }
+            else {
+	      service_rs = (int)(cprbx_p->ccp_rscode);
+              PRINTK("service rc:%d; service rs:%d\n",service_rc,service_rs);
+              rv = 8;
+	    }
+	  }
         }
         else                           
           rv = 4;                      
@@ -2030,7 +2636,6 @@ int convert_response (UCHAR * response,
   if (rv == OK)
     if (service_rc == OK)
       do {
-        PDEBUG("Output length after successful receive: %d\n",src_l);
         if (src_l > icaMsg_p->outputdatalength){
           rv = REC_OPERAND_SIZE;
           break;
@@ -2043,8 +2648,9 @@ int convert_response (UCHAR * response,
           rv = REC_OPERAND_SIZE;
           break;
         }
+        PDEBUG("Length returned in convert response: %d\n",src_l);
         tgt_p = respbuff + icaMsg_p->outputdatalength - src_l;
-        memcpy(tgt_p ,src_p, src_l);
+        memcpy(tgt_p, src_p, src_l);
         if ((t82h_p->z90c_type82_hdr_type == Z90C_TYPE86_RSP_CODE) &&
             (respbuff < tgt_p)) {
           memset(respbuff, 0, icaMsg_p->outputdatalength - src_l);

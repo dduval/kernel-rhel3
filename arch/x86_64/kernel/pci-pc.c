@@ -634,7 +634,7 @@ void __devinit pcibios_init(void)
 		pcibios_config_init();
 
 	/* Only probe blindly if ACPI didn't tell us about root bridges */
-	if (acpi_root_bridges) {
+	if (!acpi_noirq && acpi_root_bridges) {
 #ifdef CONFIG_ACPI_PCI
 		if(!acpi_pci_irq_init()) 
 			printk(KERN_INFO "PCI: Using ACPI for IRQ routing\n");

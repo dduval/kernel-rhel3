@@ -8,6 +8,9 @@
 #include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/pci.h>
+#if defined(CONFIG_DISKDUMP) || defined(CONFIG_DISKDUMP_MODULE)
+#include <linux/diskdumplib.h>
+#endif
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
 
@@ -250,6 +253,14 @@ static __inline__ int __get_order(unsigned long size)
                 spin_unlock_irqrestore(&io_request_lock, flags)
 #endif
 
+#if defined(CONFIG_DISKDUMP) || defined(CONFIG_DISKDUMP_MODULE)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,1)
+	#define MPT_HOST_LOCK_INIT()
+#else
+	#define MPT_HOST_LOCK_INIT()	spin_lock_init(&io_request_lock)
+#endif
+#endif
+
 /*
  *  We use our new error handling code if the kernel version is 2.4.18 or newer.
  *  Remark: 5/5/03 use old EH code with 2.4 kernels as it runs in a background thread
@@ -285,6 +296,19 @@ static __inline__ int __get_order(unsigned long size)
 #define mpt_dec_use_count() MOD_DEC_USE_COUNT
 #endif
 
+/*
+ *  Wrap timer functions to make them function after crash.
+ */
+#if defined(CONFIG_DISKDUMP) || defined(CONFIG_DISKDUMP_MODULE)
+#undef	add_timer
+#define	add_timer	diskdump_add_timer
+#undef	del_timer_sync
+#define	del_timer_sync	diskdump_del_timer
+#undef	del_timer
+#define	del_timer	diskdump_del_timer
+#undef	mod_timer
+#define	mod_timer	diskdump_mod_timer
+#endif
 
 /*}-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
 #endif /* _LINUX_COMPAT_H */

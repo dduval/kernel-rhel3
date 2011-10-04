@@ -692,6 +692,7 @@ ENTRY(break_fault)
 	mov rp=r15				// set the real return addr
 	;;
 	ld8 r2=[r2]				// r2 = current->ptrace
+	mov r19=PT_TRACEAUDITMASK		// r19 = PT_TRACESYS|PT_AUDITED
 	mov b6=r16
 
 	// arrange things so we skip over break instruction when returning:
@@ -700,9 +701,10 @@ ENTRY(break_fault)
 	adds r17=24,sp				// get pointer to cr_iip
 	;;
 	ld8 r18=[r16]				// fetch cr_ipsr
-	tbit.z p8,p0=r2,PT_TRACESYS_BIT		// (current->ptrace & PF_TRACESYS) == 0?
+	and r2=r2,r19				// mask current->ptrace
 	;;
 	ld8 r19=[r17]				// fetch cr_iip
+	cmp.eq p8,p0=r2,r0			// (current->ptrace & PT_TRACESYS|PT_AUDITED) == 0? 
 	extr.u r20=r18,41,2			// extract ei field
 	;;
 	cmp.eq p6,p7=2,r20			// isr.ei==2?
@@ -893,6 +895,7 @@ ENTRY(dispatch_to_ia32_handler)
 	;;
 	ld4 out3=[r14],8	// r14 == esi
 	adds r2=IA64_TASK_PTRACE_OFFSET,r13	// r2 = &current->ptrace
+	mov r3=PT_TRACEAUDITMASK
 	;;
 	ld4 out4=[r14]		// r15 == edi
 	movl r16=ia32_syscall_table
@@ -901,10 +904,11 @@ ENTRY(dispatch_to_ia32_handler)
 	ld8 r2=[r2]		// r2 = current->ptrace
 	;;
 	ld8 r16=[r16]
-	tbit.z p8,p0=r2,PT_TRACESYS_BIT	// (current->ptrace & PT_TRACESYS) == 0?
+	and r2=r2,r3		// mask PT_TRACESYS|PT_AUDIT
 	;;
 	mov b6=r16
 	movl r15=ia32_ret_from_syscall
+	cmp.eq p8,p0=r2,r0			// (current->ptrace & PT_TRACESYS|PT_AUDITED) == 0? 
 	;;
 	mov rp=r15
 (p8)	br.call.sptk.many b6=b6

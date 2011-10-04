@@ -399,7 +399,7 @@ static hfs_rwret_t hdr_read(struct file * filp, char * buf,
 	}
 
 	/* Adjust count to fit within the bounds of the file */
-	if (pos != (unsigned)pos || pos >= inode->i_size || count <= 0) {
+	if (pos < 0 || pos >= inode->i_size || count <= 0) {
 		return 0;
 	} else if (count > inode->i_size - pos) {
 		count = inode->i_size - pos;
@@ -640,17 +640,18 @@ static hfs_rwret_t hdr_write(struct file *filp, const char *buf,
         int left, lcv, written = 0;
 	struct hdr_hdr meta;
 	int built_meta = 0;
-        off_t pos;
+	loff_t pos;
 
 	if (!S_ISREG(inode->i_mode)) {
 		hfs_warn("hfs_hdr_write: mode = %07o\n", inode->i_mode);
 		return -EINVAL;
 	}
-	if (count <= 0 || pos != (unsigned)pos) {
-		return 0;
-	}
 
 	pos = (filp->f_flags & O_APPEND) ? inode->i_size : *ppos;
+
+	if (count <= 0 || pos < 0) {
+		return 0;
+	}
 
 	if (!HFS_I(inode)->layout) {
 		HFS_I(inode)->layout = dup_layout(HFS_I(inode)->default_layout);

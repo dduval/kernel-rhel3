@@ -5,1231 +5,193 @@
  *
  * Revision History
  *
- *    Rev  6.07.02          Feb 21, 2004    RA
- *	- Updated the QLA23XX Firmware to v3.02.24.
- *
- *    Rev  6.07.01          Feb 10, 2004    DG
- *	- release version
- *
- *    Rev  6.07.00b18       Feb 09, 2004    RA
- *	- Upgraded to the latest Firmware- v3.02.22
- *
- *    Rev  6.07.00b17       Jan 20, 2004    RA
- *	- Upgraded to the latest Firmware- v3.02.21
- *
- *    Rev  6.07.00b16       Dec 19, 2003    RA
- *	- Hold the io_request_lock after the qla2x00_cfg_remap() call to
- *	  avoid potential system hang.Since mbx cmd fn wait on semaphore
- *	  for completion after interrupt is enabled.	
- *
- *    Rev  6.07.00b15       Dec 19, 2003    DG/RA/AV
- *      - Revisit fixed were non of the data luns were exported
- *        to the OS, if the active path was on the second HBA and
- *        it has multiple luns assigned to it.
- *      - Fixed RHEL 3.0 compile issue in list_ops.
- *      - Fixed issue were non of the data luns is exported,
- *        if the active path is on the second HBA.
- *	- Included the ioctl timeout value change
- *	- Fixed the swapping of portname to LE on BE machine.
- *
- *
- *  Rev  6.07.00b12	October 28, 2003	DG
- * 	- Added comandlune option "ql2xioctltimeout" to change
- *	  the default of 66 seconds for ioctl pass-thur commands.
- *	- Fixed issue where the controller lun was not exported 
- *	  when the active path was not the first path.
- *
- *  Rev  6.07.00b9plus	September 22, 2003	DG/RA
- *	- Added msa1000 support.
- *	
- *  Rev  6.07.00b9	September 15, 2003	DG/RL/AV/RA
- *	- Update 2300 IP/TP firmware (3.02.16).
- *	- Generic handling of SCSI host template members (i.e.
- *	  can_dma_32, highmem_io, vary_io, single_sg_ok).
- *	- Fix problem where a disk geometry would not be set
- *	  correctly due to the conditional usage (__386__) of
- *	  qla2x00_biosparam().
- *	- Fix problem where new devices would not be added to the
- *	  driver's database during fabric discovery.
- *	- Return busy status for SCSI passthru commands when a
- *	  failover/failback event is scheduled, so the caller
- *	  can retry later.
- *	- Added ioctl SCSI passthru command timeout clean-up code
- *	  for the case when the command is still in active queue,
- *	  and the code to handle SCSI passthru command timeout
- *	  via calling standard qla2x00_add_timer_to_cmd function,
- *	  which uses the qla2x00_cmd_timeout function to perform
- *	  timeout clean-up.
- *	- Fix EH/backdoor device-reset logic which would incorrect
- *	  elevate error-contitions to a loop-reset.
- *	- Changed order of emptying response queue in mailbox
- *	  processing to avoid command timeout when the cmd is
- *	  already completed but no interrupt is sent yet.  Also
- *	  increased mailbox timeout to 60 seconds.
- *	- Add support module parameter qlogin_retry_count to
- *	  explicitily set the count during module load-time.
- *	- Add failover support for XP type storage.
- *	- Allows for the proper compilation options to be set when
- *	  build on x86_64.
- *	- IOCTL support on AMD Opteron.
- *	- Add fdmi registration support.
- *	- Change all references of Qlogic to QLogic.
- *
- *  Rev  6.07.00b8	August 13, 2003		RL/AV/RA
- *	- Updated 2200 and 2300 TP firmware per app group request.
- *	- Corrected usage of rval in find_all_fabric_devs() so
- *	  the function does not return error when the last device
- *	  from the switch's device list is not found in fc_db
- *	  database when some persistent entries have been specified
- *	  for standard driver.
- *	- Added driver support for additional statistics values
- *	  to support new ioctl statistics fields.
- *	- Added module parameter 'ql2xplogiabsentdevice' which is a
- *	  boolean flag (0, 1) that instructs the driver to perform
- *	  a PLOGI to a device that does not reappear after a fabric
- *	  scan.  The default value is 0 -- perform *NO* PLOGI.
- *  	- Additional logic to support the new flag:
- *	  - Modify semantics of and parameters passed to 
- *	    qla2x00_mark_device_lost().
- *    	  - Modify all appropriate places within the code where we 
- *	    directly/indirectly call qla2x00_mark_device_lost().
- *	    We now always call qla2x00_mark_device_lost() directly.
- *	(following changes from between 6.06b12 and 6.06b15)
- *	- Backs-out some changes made in 6.06.00b12 with respect
- *	  to the operating semantics of qla2x00_eh_device_reset().
- *	  The code fails to operate when the backdoor 'device
- *	  reset' occurs.
- *	- Added return of dummy lun data entries for unconfigured
- *	  devices, so the number and order of entries returned would
- *	  match that are returned from port summary list and target
- *	  data list.
- *	- Added checking of target online state and whether it is
- *	  specified in persistent binding before deciding whether
- *	  to return a target/lun data entry for it.
- *	- Added return of target online and persistent binding
- *	  state in the Status field of the query_disc_tgt ioctl.
- *	- Added support for new qla2xxx addon directory in RedHat AS.
- *	- Added pause between successive flash reads.
- *	- Don't modify a command's 'allowed' count (in queuecommand)
- *	  if the device is found to be a tape device.
- *	- Fixed a compile problem when DEBUG option is enabled.
- *	  Also fixed a compile problem for 2100.
- *	- Updated README.qla2x00 and SUPPORTED_KERNEL_VERSION.txt.
- *
- *  Rev  6.07.00b7	July 16, 2003	RA/AV/DG
- *	(merged changes between 6.06b11 and 6.06b12)
- *	- Return a more correct status while determining a port's
- *	  state (qla2x00_check_port_status()).
- *	- Ensure a completed command is returned to the mid-layer
- *	  before returning from qla2x00_eh_wait_on_command().
- *	- Use proper fcport during SRB referencing:
- *	  - Fix qla2x00_abort_command().
- *	  - Fix qla2x00_eh_device_reset().
- *	  - Modify qla2x00_device_reset() to take an explicit
- *	    fcport rather than indirect determination via a 
- *	    possibly incorrect Target/Lun key.
- *	- Properly schedule DPC routine if a port relogin is
- *	  required (qla2x00_timer()).
- *	- Process the response queue regardless of state of mailbox
- *	  command execution (qla2x00_isr()).
- *	- Process a response entry before declaring it processed.
- *	- Return a proper BUSY status during an FC IOCTL passthru.
- *	- Fixed direction in spinup CDB and uncomment target notify call
- *	  in FAILBACK.
- *	- Added option to send a spinup to port as a notify type.
- *	- Added the cmdline parameter- qlFailoverNotifyType.
- *	- Added the check for PORT_SCAN_NEEDED in timer-To wakeup the dpc 
- *	  thread to do probing for luns added after the OS scan.
- *	- Added the code to issue big hammer after the flash memory is updated.
- *
- *  Rev  6.07.00b6	June 24, 2003  RL/RA
- *	- Release PCI IO space registers when driver failed to
- *	  load.
- *	- Eliminated more compile warning messages.
- *	- Removed chip version check for recognition of any
- *	  version of 2312 chip.
- *	- Updated 2300 firmware to 3.02.13.
- *
- *  Rev  6.07.00b5	June 20, 2003  RA
- *	- Fixed issue of referencing the wrong ha in qla2x00_done.
- *	- Eliminated some compile warning messages.
- *
- *  Rev  6.07.00b4	June 17, 2003  RL/AV/RA
- *	- Fixed endian issue with update_nvram function.
- *	- Fixed problem of not adding target ports when using
- *	  gnn_ft to scan due to incorrect reporting of new device
- *	  list count.
- *
- *  Rev  6.07.00b3	June 16, 2003  RL/AV/DG/RA
- *	- Fixed panic in qla2x00_mem_free when kernel is unable
- *	  to allocate ioctl memory. The code tried to deallocate
- *	  memory from sp pool, but the list was never initialized
- *	  until later.
- *	- Fixed scsi_lock deadlock when unable to allocate
- *	  ioctl memory
- *	- Fixed problem of not getting out of loop when LIP happened
- *	  while we were discovering devices.
- *	- Modified read_nvram code to always return buffer in
- *	  little endian format.
- *	- Modified scsi passthru code to return data underrun
- *	  status only if the target device indicated it. Error
- *	  is returned if only the firmware sees the condition.
- *
- *  Rev  6.07.00b2	June 11, 2003  RL/RA
- *	- Added code to return zero lun_data entry when mp_host
- *	  was not created for the specified HA.
- *	- Modified persistent binding table structure definitions
- *	  and other related changes to work on ppc-64 bit platforms.
- *	- Fixed bugs in selective failover implementation code.
- *
- *  Rev  6.07.00b1	June 05, 2003  RL/AV
- *	- Added non-fo device support on fo driver (selective
- *	  failover configuration).
- *	- Added 32bit ioctl conversion code to support 64bit
- *	  kernel on PPC64.
- *
- *   Rev  6.06.00b8	June 05, 2003  RL/AV/RA
- *      - Setup the flash before reading the option_rom in internal ioct.
- *      - Dont turnoff the Config required flag if no configuration
- *        is found.
- *	- Fixed the path mp_byte getting over-written when no config 
- *	  data specified.
- *	- Initliaize all the list heads before calling mem_alloc during init.
- *	- Append "post-remove" stuff during install in modules.conf for
- *	  automatic removal of conf modules whenever driver is loaded.
- *
- *  Rev  6.06.00b7	June 04, 2003  DG
- *	- Fixed panic in qla2x00_mem_free if unable to allocate
- *	ioctl memory. ha->fcinitiators was not initialized.
- *
- *  Rev  6.06.00b6	June 02, 2003  RL/AV/RA
- *	- Modified configure_fabric code so after the GNN_FT call 
- *	  the non-target devices are ignored.
- *	- Added code to return all fcports of an ha as Unconfigured
- *	  if there is no mp_host struct associated with it.
- *
- *  Rev  6.06.00b5	May 30, 2003  DG/RL/AV/RA
- *	- Added the support for link_down_timeout NVRAM parameter.
- *	- Added the support in the driver to allow the user to 
- *	  enable a rescan of the luns attached to ports already configured.
- *	  The Command "scsi-qla-scan" issue to /proc/scsi/qla2300/x invokes
- *	  this function.
- *	- Fixed a typo for Model Name in the driver
- *	- Added the support to enable extended error logging for DEBUG_QLA2100
- *	  if enabled .
- *	- Added issuing of diag "ECHO" command only for QLA23xx.
- *	- Return the Model Name for ioctl calls old way as of now.
- *	- Fixed the panic in qla2x00_mem_alloc() caused as a result of fcport
- *	  memory in "ha" being freed twice.
- *
- *  Rev  6.06.00b4	May 29, 2003  DG/RL/AV/RA
- *	- Update qla2300 firmware to v3.02.12.
- *	- properly configures PCI I/O space (PIO and/or MMIO) on
- *	  both 32 and 64bit platforms.
- *	- Fixed a problem where scsi_unregister() would not get
- *	  called if qla2x00_mem_alloc() failed.
- *	- Added handling for QUEUE FULL from the target. We will
- *	  suspend I/O traffic for qfull_retry_delay (2 secs) up
- *	  to qfull_retry_count times (16);
- *	- Added extended_error_logging.
- *	- Fixed request reordering in qla2x00_retry_command().
- *	- Fixed incorrect conversion of endianess used in
- *	  IOCB command type 2/3 patch.
- *	- Added issuing of diag. Echo command for F port topology.
- *	- Added support for reporting Unconfigured Devices
- *	  in get_port_summary and get_target_data ioctl commands.
- *	- Fixed NVRAM ioctl problem on 2312 chips.
- *	- Added logic to get the model number of the HBA.
- *	- Created "qla_devtbl.h" file which contains the Model
- * 	  Number of 2312 devices and forthcoming one's.
- *
- *  Rev  6.06.00b3	May 19, 2003  DG/RL/RA
- *	- Added support for abbreviated persistent binding
- *	  configuration statements.
- *	- Replaced use of IOCB command type 2 with type 3 to enable
- *	  handling for possible 64bit DMA addresses.
- *	- Cast all size_t to ulong in print arguments to eliminate
- *	  compile warnings on PPC64 platform.
- *	- Consolidated ioctl passthru commands to use a separate
- *	  queue_command function so it won't be confused with
- *	  normal IOs.
- *	- Removed the static EXT_IOCTL struct used in qla2x00_fo_ioctl.
- *	- Corrected request buffer address used in start_ms_cmd.
- *	- Updated searching of device ports for all applicable
- *	  ioctl commands.
- *	- Added support for MP_MASK_OVERRIDE bit in mp_byte of
- *	  target ports. This includes new case for get/set path
- *	  function to handle.
- *	- Fixed problem with alloc_path saving temporary port ptr
- *	  to the path.
- *	- More consolidation of driver version string define.
- *	- Update qla2200 firmware to v2.02.04.
- *
- *  Rev  6.06.00b2	May 16, 2003  DG
- *	- Fixed the issue that cause the error message "Failed to
- *	  initialize adapter" which can occur in a Loop environment
- *	  when multiple nodes start powering up in 30 secs increments.
- *	  This issue was cause by Lip resets occurring in the middle
- *	  of port discovery.
- *
- *  Rev  6.06.00b1	May 12, 2003  DG/RL/RA
- *	- Update qla2300 firmware to v3.02.10.
- *      - Updated README.qla2x00.
- *      - Added MODULE_DESCRIPTION.
- *      - Register with Linux for 16 byte CDBs.
- *      - Wait for MAX_LOOP_TIMEOUT for loop to be ready before
- *	  issuing device/bus reset in the respective driver error handler 
- *	  routines.
- *      - Added logic to handle concurrent processing of big hammer
- *	  and scsi mid layer error recovery or resets issued through backdoor.
- *      - Check for loop_state etc for individual qla2x00_set_host_data() 
- *	  operation in ioctl path.
- *      - Sync up the exioct.h file with the one checked in VSS for the led 
- *	  change.
- *      - Added the ZIO support	
- *      - Added the beacon change(blink green LED on/off every sec apart)
- *      - Added the GNNFT and GPN_ID change and incorporated the retry logic.
- *      - Fixed the potential problem of new_dev_list getting corrupted
- *        for different HBA in qla2x00_configure_fabric() by allocating 
- *	  the new_dev_list dynamically (instead of static).
- *      - Wait for the max_time for firmware to be ready if the firm_state is
- *        < FW_STATE_READY ie trying to login,waiting for al_pa etc
- *	- Clear the device flag -DFLG_NO_CABLE during fw_ready if firm_state
- *	  is < FSTATE_LOSS_OF_SYNC indicating cable is there.
- *	  
- *
- *  Rev  6.05.00	April 30, 2003  DG
- *      - Fixed issue ER25748 with SG_ALL in sg_tablesize. We
- *        now calculated sg_tablesize based on the number of
- *        request queues.
- *      - Fixed qla2x00_get_retry_cnt() logic to get the ELS
- *        timeout value from mbox3 - qla_mbx.c.
- *      - Change min time we wait for F/W to become ready
- *        before declaring the Cable unplug from 20secs to
- *        60 secs.
- *
- *  Rev  6.05.00b10	April 25, 2003	AV/RL
- *	- Added support of new persistent binding configuration
- *	  mechanism for large configurations which would exceed
- *	  the max string limit of modutil. This includes the
- *	  qla_opts utility.
- *
- *  Rev  6.05.00b9	March 31, 2003	RA/AV/DG/RL
- *	- Process the port database update (async event-0x8014)
- *	  for login and logout only if its "Global"-any async
- *	  prevent recieved prior to 8014 indicating loop is down
- *	  like LIP_RESET,LIP_OCCURED etc.
- *	- Honor previous firmware option settings before updating
- *	  swing and emphasis.
- *	- Display *all* scanned luns via the /proc interface.
- *	- If the device does not support the SCSI Report Luns
- *	  command, the driver will now only scan from 0 to the
- *	  max#-luns as defined in the NVRAM (BIOS), rather than
- *	  blindly scanning from 0 to 255 -- which could result in
- *	  an increase in initialization time when running against slow
- *	  (JBOD) devices.
- *	- Fixed the  FC-4 feature registration code.
- * 	- Fixed the driver version string by building a static string 
- *	  during driver load, then change all references of driver version
- *	  to use that static string.
- *	- Wait for half a second instead of a tick before trying again 
- *	  to get fw_state.
- *
- *  Rev  6.05.00b8	March 20, 2003	AV/DG
- *	- Corrected issuing FC4 feature for hba.
- *	- Added support for serial link controls: swing and emphasis.
- *
- *  Rev  6.05.00b7	March 13, 2003	RA/DG/AV
- *	- Corrected compile problem of can_do_varyio and can_dma_32
- *	  on different kernel versions.
- *	- Reduced ioctl context structure size.
- *
- *  Rev  6.05.00b6	March 6, 2003	DG/AV
- *	- Added support for can_do_varyio.
- *	- Change sg_talesize to SG_ALL
- *	- Fixed logic to properly set highmem_io or can_dma_32.
- *	- increase queue_depth to 32.
- *	- Increase max_sectors to 8192.
- *	- Add module parameter ql2xsuspendcount.
- *    	- Always enable fc4 regsiter device and features.
- *
- *  Rev  6.05.00b5	February 28, 2003	RL/AV
- *	- Added check for a paused RISC in ISR -- dump HCCR for reason
- *	- Fix improper nodename/portname construction in 
- *	  qla2x00_nvram_config() by honoring the node_name_option
- *	  bit in NVRAM.
- *	- Correct parity check enables for 23xx ISPs.
- *	- Add helper function qla2x00_local_device_login() to mimic
- *	  fabric login logic.
- *	- Reschedule a local-loop update if a loop-resync needed
- *	  in qla2x00_local_loop_update() -- this will fix a small
- *	  windows where a target-device state would become out-of-
- *	  sync.
- *	- Add debug function qla2x00_get_fcal_position_map() to
- *	  return from the firmware the current negotiated LILP map.
- *	- Fix endianess issues in direct connect environment
- *	  (Mark Bellon mbellon@mvista.com):
- *	- Add endian-safe bitmap structures for nvram
- *	  and init_cb_t usage.
- *	- Fix endianess problem in qla2x00_configure_local_loop().
- *	- Add special_options structure for data rate and 
- *	  termination settings.
- *	- Fixed data corruption problem when issuing ioctl commands
- *	  concurrently to multiple HBAs by using a per ha scrap buf.
- *	- Added new ioctl command for returning driver specific data.
- *	  This is used to allow API implementation to be backward
- *	  compatible with driver.
- *	- Reset adapter current_speed when loop is down.
- *
- *  Rev  6.05.00b4	February 06, 2003	RL/AV
- *	- Fixed the checking of DEV_PUBLIC flag before setting
- *	  the FC_FABRIC_DEVICE flag. The flag is now checked
- *	  using bitwise AND everywhere.  This fixes problem
- *	  with devices that are both initiator and target.
- *	- Added checking of tape device so we don't logout from
- *	  tape devices.
- *	- Fixed the driver hang in get_target_data of non-fo driver
- *	  by correctly store fcport value to target queue in
- *	  fcport_bind.
- *	- Fixed invalid configuration problem when displaying
- *	  target LUNs via non-fo driver by correctly assign
- *	  the only path as preferred path.
- *	- Added ioctl support for non-fo driver to return path and
- *	  system parameters information.
- *	- Corrected the return values of fo ioctl functions
- *	  and added checking of return value of copy_to/from_user
- *	  calls.
- *	- Fixed debug prints, some of which access invalid pointer.
- *
- *  Rev  6.05.00b3	January 27, 2003	RA/DG
- *	- Added support for can_dma_32 and highmem_io.
- *
- *  Rev  6.05.00b2	January 24, 2003	RL/RA/AV/DG
- *	- Added the use of HbaSelect to determine the ha context
- *	  of each ioctl command.
- *	- Corrected ioctl wait_q handling when timeout happened.
- *	- Dynamically allocate EXT_IOCTL structure in order to
- *	  make the main ioctl function reentrant.
- *	- Corrected the return values of all non-fo ioctl functions
- *	  and added checking of return value of copy_to/from_user
- *	  calls in places that matter.
- *	- Made proc_info reentrant by directly writing to the
- *	  buffer supplied by the caller.
- *
- *  Rev  6.05.00b1	December 20, 2002	RL
- *	- Added send_els_passthru function and modified start_ms_cmd
- *	  to be used by both send_fcct and send_els_passthru.
- *	- Modified ms_iocb definition to comply with latest 2300 spec. 
- *
- *  Rev  6.04.00b8	January 16, 2003	RA/DG/AV
- *	- Use proper compiler flags when built with later GCC
- *	  versions (3.x).
- *	- Rewrite initiator handling code:
- *	  - Use linked lists rather than a fixed-size array.
- *	  - Properly logout of intiator devices if found to be lost.
- *	  - Changes in qla2x00.c and qla2x00_ioctl.c.
- *	- Fix lun suspension logic:
- *	  - Remove code in qla2x00_lun_alloc() which incorrectly
- *	    trashes a lun queue's q_count and q_max members.
- *	  - Properly move from a lun_queue NOT-ready state to a 
- *	    ready state when a command successfully completes in
- *	    qla2x00_callback().
- *	  - Add 'delay' logic to handle throttling scenario required
- *	    during a failback operation.
- *	- Return a byte statistical quantity not mega-bytes in
- *	  qla2x00_get_(fc_)statistics() -- this change did not go
- *	  into 6.03.00b6 as indicated by the release notes. 
- *	- Handle a SCSI_DATA_NONE data direction for a SCSI command.
- *
- *  Rev  6.04.00b7	Jan. 10 2003	DG/RA
- *	- Added VMWARE support.
- *	- fixed the bus reset and host reset when issued through
- *	  the backdoor by not waiting for commands which we dont own.
- *
- *  Rev  6.04.00b6	Jan. 8 2003	DG/RA
- *	- Fixed hardware_lock hierarchy in qla2x00_cmd_timeout
- *	  routine to fix deadlock with interrupt handler. 
- *
- *  Rev  6.04.00b5	Jan. 8 2003	DG/AV
- *	- Fix incorrect sizing of mbx_cmd_flags in structure
- *	  scsi_qla_host since bit-operators function on unsigned
- *	  long variables - in qla2x00.c.
- *
- *  Rev  6.04.00b4	December 19, 2002	RL/RA/DG/AV
- *	- Increase IOCTL-passthru command timeout value (30->60).
- *	- Update local definition of pci_set_dma_mask() to take an
- *	  u64 type rather than an dma_addr_t.
- *	- Fix qla2100_nvram_config() to set the high-water IOCB limit
- *	  while configuring an QLA2100 HBA.
- *	- Fixed potential panic in qla2x00_failback_luns() routine -
- *	  dereference a NULL fclun.
- *
- *  Rev  6.04.00b3	December 06, 2002	AV
- *	- Fix binding algorithm in qla2x00_cfg_build_path_tree() to
- *	  support sparse targetIDs.
- *	- Extend maximum number of failover paths to eight.
- *
- *  Rev  6.04.00b2	November 27, 2002	DG/RA/AV
- *	- Pass portID information up to FO_CC_GET_TARGET_DATA ioctl
- *	  callers.
- *	- Add support for PortID persistent binding:
- *	  - Module parameter name: Bind
- *		o 0 by Portname (default)
- *		o 1 by PortID
- *		o 2 by Nodename
- *	  - Default behaviour is to bind by Portname.
- *	  - Update qla2x00_display_fc_names() to support new binding
- *	    methods -- varies by Bind type.
- *	  - Large #defing usage cleanup to more flexible module
- *	    parameter.
- *	- Use various PCI/SCSI/endianess macros defined by the kernel
- *	  to reduce duplication.
- *	- Streamline qla2x00_response_packet():
- *	  - Reduce multiple Register I/O writes to just one after
- *	    ring processing.
- *	- Cleanup qla2x00_status_entry():
- *	  - Move common cases to the top of the switch statement
- *	    (CS_COMPLETE and CS_DATA_UNDERRUN).
- *	  - Refine data underrun handling, since it appears the
- *	    mid-layer underflow structure member for SCSI commands is
- *	    not consistently populated by the various upper-layers.
- *	- Cleanup qla2x00_error_entry() to use pre-defined
- *	  descriptive values while interrogating a packet's
- *	  entry_status rather than raw BIT_* defines.
- *	- Maintain 'RLC supported' state for an fcport, to limit
- *	  extraneous RLC commands.
- *	- Initial qla2x00_isr() sanitization -- formating and
- *	  readability.
- *	- In qla2x00_queuecommand(), return a command immediately, if
- *	  the port is found to be DEAD.
- *	- Fix a dead-lock (logic) problem in
- *	  qla2x00_mailbox_command() where the code would attempt to
- *	  acquire a lock which had never been released.
- *	- Add support for status continuation IOCB entries (extended
- *	  sense data).
- *	- During loop transition, report back successfully completed
- *	  commands rather than blindly retry --
- *	  qla2x00_status_entry().
- *	- Export ql2xretrycount as a module parameter.  Default value
- *	  in non-failover mode is 20, in failover mode, 30.
- *	- Update Makefile to use 'install' rather than 'cp' as to
- *	  preserve uid/gid (Austin Gonyou).
- *	- Consolidate duplicate code to set DMA mask --
- *	  qla2x00_config_dma_mask().
- *	- Fix copy-error in qla2x00_send_fo_notification() where the
- *	  SCSI CDB would not be populated with the proper
- *	  notification CDB.
- *	- In qla2x00_proc_info(), do not clear our buffer in case
- *	  another application is using it.
- *	- Export a MODULE parameter, ql2xfailover, to allow failover
- *	  to be configured in at load time.
- *
- *	    NOTE: Default behaviour is still based on the
- *		  compile-time option MPIO_SUPPORT.
- *
- *	- Add additional checks to ensure that the DPC routine has
- *	  already been created before trying to 'wake' it up.
- *	- Add new 2300 IP/TP firmware (3.01.18).
- *
- *  Rev  6.04.00b1	November 4, 2002	DG
- *	- Fixed ISP abort retry logic to retry the abort_ISP().
- *	- Fixed port login logic to retry the login on ports that are
- *	  marked DEAD.
- *	- Fixed issue of not loging in after loop is down for more than
- *	  4 mins.
- *
- *  Rev  6.03.00b10	October 31, 2002	DG
- * 	- Fixed the logic in qla2x00_mark_device_lost to not change the
- * 	  state of the port if it is mark DEAD, but still schedule port
- * 	  login retries.
- *
- *  Rev  6.03.00b9	October 30, 2002	DG
- *	- Change LOOP DOWN timer to 4 mins and do a ISP abort if the f/w
- *	  never indicated that the cable is unplug and the timer expire. 
- *
- *  Rev  6.03.00	November 1, 2002	RA
- *	- Changed the  message for SYS_ERR(0x8002) to log to message file
- *	  instead on the console.
- *	- Formal release.  
- *
- *  Rev  6.03.00b8	October 28, 2002	RA/DG/AV
- *	- Correct qla2x00_loopback_test() to return the proper mailbox
- *	  register values, additionally, the statistical values returned
- *	  are only valid upon a good loopback execution.
- *	- Perform the INT_CC_READ_OPTION_ROM ioctl, only if the response
- *	  length is specified correctly -- as to limit reading partial
- *	  data.
- *	- Move backdoor RESET handling to qla2x00_done() for proper 
- *	  processing.
- *	- Given the two variants pci_set_dma_mask(), allow the
- *	  compiler to assist in setting the proper dma mask.
- *	- Complete re-write of qla2x00_32bit_start_scsi():
- *	  - Provide similiar benefits as in 6.03.00b3-pre3.
- *	- Add additional kernel 2.5 support (resync with 2.5.44):
- *	  - Header file cleanup.
- *	  - SCSI host template updates.
- *	  - Queue depth interface updates.
- *	- Fix computation of normalized segment length in
- *	  qla2x00_normalize_dma_addr().
- *	- Fix incorrect usage of head tag queueing while issuing an
- *	  RLC command during driver scan.
- *	- Fix incorrect assignment of an fcport as LOST when it is
- *	  already in a DEAD state.
- *	- Revert to OLD command data-direction determination (large,
- *	  and ineffiecient switch statement of recognized commands,
- *	  else check data-direction specified by command), since it
- *	  appears that a lldd cannot depend on the upper-layers to set
- *	  it correctly.
- *
- *	  NOTE: This will *NOT* be the default behavior in the formal
- *	  	release of the 6.03.00 driver.  From then on, the lldd
- *	  	*will* depend on the upper-layers to specify the proper
- *	  	data-direction in the SCSI command.
- *
- *  Rev  6.03.00b7	October 14, 2002	AV
- *	- Enable flash operations before attempting read flash memory.
- *	- Correct qla2x00_update_option_rom() to properly verify flash
- *	  buffer length.
- *	- Correct additional little-endian assumptions in FC/IP driver
- *	  paths.
- *
- *  Rev  6.03.60	November 08, 2002	AV
- *	- Special OEM release based on 6.03.00b6.
- *
- *  Rev  6.03.00b6	October 11, 2002	AV/DG
- *	- Fix incorrect sizing of mbx_cmd_flags in structure
- *	  scsi_qla_host since bit-operators function on unsigned
- *	  long variables.
- *	- Correct little-endian assumptions (across the board):
- *	  - ISP detection and intialization.
- *	  - SCSI I/O posting, receiving, and processing.
- *	  - IP command processing.
- *	- Add support for PowerPC64 platform.
- *	- Add flash image retrieval support:
- *	  - Flash manipulation code.
- *	  - Internal IOCTL support routine for application callers.
- *	- Return a byte statistical quantity not mega-bytes in
- *	  qla2x00_get_(fc_)statistics(). 
- *	- Fix failover during initialization limitation.  In
- *	  qla2x00_map_os_luns(), try any alternate paths if the 
- *	  preferred path is unavailable. 
- *	- Remove extraneous logic that attempted to failback luns that
- *	  were found to be disconnected.
- *
- *  Rev  6.03.00b6-pre1	October 05, 2002	AV
- *	- Fix qla2xxx_eh_device_reset() misuse of cmd->sp, since
- *	  there is no guarantee the command followed our standard
- *	  queuing path.
- *	- Add flash update support:
- *	  - Retool flash read/write routines to work with
- *	    different flash manufacturers.
- *	- Add additional kernel 2.5 support:
- *	  - no reparent_to_init() (Mike Anderson).
- *	- Fix assignment bug in qla2x00_mbx_q_add() (Rick Cooper).
- *	  (ER20982)
- *
- *  Rev  6.03.00b5	October 02 2002		RA
- *	- Added the logic to try to login in non fabric enviornment
- *        (Direct Connect) by issuing login loop port mbx cmd. For
- *        targets which silently go away and firmware has no way to
- *        log back.
- *
- *  Rev  6.03.00b4	October 02 2002		AV
- *	- Fix qla2x00_abort_command() to not issue an ISP abort if
- *	  the command abort fails.
- *
- *  Rev  6.03.00b3	October 02 2002		AV
- *	- Formal beta release.
- *	- Remove debug codes from EH and callback routines.
- *	- The LOGOUT_AFTER_DEVICE_RESET function is still a work
- *	  in progress.
- *
- *  Rev  6.03.00b3-pre3	September 29 2002       AV
- *	- Correct endian-ness issues while preparing an IOCB in
- *	  qla2x00_send_packet() -- should now work on
- *	  non little-endian machines.
- * 	- Cleanup definitions for ??_64BITS() macros.
- *	- Complete re-write of qla2x00_64bit_start_scsi():
- *	  - Correct endian-ness issues while preparing IOCBs.
- *	  - Add fix to correct data segment 32bit page boundary
- *	    (hardware) limitations.
- *	  - Correct inefficiencies in IOCB preparation.
- *	  - Update firmware command timeout calculation.
- *	- Makefile update -- during an install, the makefile will
- *	  now rename any qla2200 'addon' binaries to "*_rh.o"
- *	- Update qla2x00_load_ram() to always use MBC_LOAD_RAM_A64
- *	  since previous code was needlessly ISP specific and
- *	  could potentially truncate a valid highmem address.
- *	- Add additional kernel 2.5 support:
- *	  - MKDEV() -> mk_kdev() (Mike Anderson).
- *	  - MAJOR/MINOR() -> major/minor() (Mike Anderson).
- *	  - Remove emulated member from host template (Lincoln Dale).
- *	- Fix qla2x00_status_entry() to not retry IOCTL generated 
- *	  commands.
- *	- Update qla2x00_issue_iocb() to use MBC_IOCB_EXECUTE_A64
- *	  as to not truncate a valid highmem address.
- *	- Fix pci_set_dma_mask() invocations as to not downcast
- *	  64-bit literals to a potential 32-bit type (dma_addr_t).
- *	- In qla2x00_rpt_lun_discovery() do not retry the command if
- *	  the target does not support the REPORT LUNS cdb.
- *	- In qla2x00_lun_discovery() clear fc_lun_t structure upon
- *	  allocation (incorrect stale data in fields).
- *	- Update display of luns in /proc to not show 'disconnected'
- *	  (non-existent) luns.
- *	- The check for 'ready' state in
- *	  qla2x00_check_for_devices_online() is too strict.  Loosen
- *	  restriction to allow a failback on all ONLINE ports.
- *	- In qla2x00_failback_luns() do not try to failback to a DEAD
- *	  port.
- *	- Add option (LOGOUT_AFTER_DEVICE_RESET) to explicitly logout
- *	  of a device after a device reset has been successfully 
- *	  issued -- a login will occur shortly after.  This is need
- *	  for some storage subsystems.
- *
- *  Rev  6.03b2		Sept 24, 2002       RA
- *	- Fixed the compilation warnings on RedHat Dist.
- *	- Added check not to wait for the commands to be returned by
- *	  the firmware if device_reset etc is issued through the backdoor.
- *	- Do relogin for non-public devices also when firmware reports
- *	  command timeout along with logo(compl status=0x6 and logout(0x2000))
- *
- *  Rev  6.01/6.02b2/6.03b1	Sept 16, 2002       AV
- *	- Corrected wrong setting in qla_setting.h file to
- *	  fix compile error with RH-AV. 
- *
- *  Rev  6.01/6.02b1	Sept 11, 2002       AV
- *	- Fixed issue 225984 - Fixed reset logic to flush done queue
- *	  before returning to OS and retry an ABORT ISP call if it fails. 
- *	  Serialized the done processing when not using a tasklet. 
- *	- Fixed 2200 performance issue using fastposting.
- *	- Fix target reset logic to use the correct mailbox command. 
- *
- *  Rev  6.01		August 29, 2002       AV
- *	- Formal release.
- *	- Update README to reflect support of later Redhat releases.
- *
- *  Rev  6.1b5		August 20, 2002       AV/DG
- *	- Fix mis-use of stale SP after re-addition to the free
- *	  queue -- qla2x00_callback().
- *	- Fix mis-use of invalid loop id during a LIP caused by
- *	  an initiator device -- qla2x00_device_resync().
- *	- Update IOCTL passthru code to fully support CBD lengths
- *	  of 16 bytes with later kernels.  Earlier kernels supported
- *	  CDB sizes of 12 bytes only -- thus the workaround.
- *	- Add initial kernel 2.5 support:
- *	  - Removal of io_request_lock in favor of host->host_lock
- *	    (Mike Anderson).
- *	- Return -EINVAL for all non-EXIOCT ioctls (Mike Anderson).
- *	- Remove extra 'continue' statement in qla2x00_proc_info()
- *	  which effectively disabled the display of luns.
- *	- Remove dead-code from qla_ip.c.
- *
- *  Rev  6.1b4		August 09, 2002       AV/DG
- *	- Remove qla_dbg.h and qla_def.h files from driver
- *	  distribution.
- *	- Remove all virt_to_* calls in both SCSI/IP driver sources.
- *	  - 64bit DMA addressing through dma_addr_t.
- *	- Cleanup structure names/member variables from IP sources.
- *	- Add QL_DEBUG_LEVEL_12 for IP debugging.
- *	- Add transmission timeout callback for IP driver.
- *	- Enable SRAM, Instruction RAM and GP RAM parity checks on
- *	  ISP2300s.
- *	- Display all luns recognized by driver in /proc, not just
- *	  SCSI mid-layer scanned luns.  Luns not scanned by the mid-
- *	  layer are marked with an asterisk (*).
- *	  - Add FC_SUPPORT_RPT_LUNS flag to the struct fc_port.flags.
- *	    Set, if the device supported the report luns command.
- *	- Increase Inquiry request buffer to 36 rather than 4.  Some
- *	  target devices have problems with the small transfer.
- *	- Fix assignment of current_speed during an asyncronous event
- *	  MBA_LOOP_UP.  Improper connection speed was being reported
- *	  to EXIOCTs and IP driver.
- *	- Add ISP2100 support:
- *	  - QLogic provides no support for the ISP2100.
- *	  - compiled binary name qla2100.o.
- *	  - Forward-port chip support from 5.[2|3]x series driver.
- *	  - Update Makefile.kernel and Config.in.
- *	  - add new 2100 TP firmware (1.19.24).
- *	- Fix copy-error in qla2x00_fo_get_params() where the
- *	  qla_fo_params notification CDB would be zero'd-out.
- *	- Fix kernel-oops when DEBUG level 5 is enabled and a command
- *	  is sent to a non-existent lun.
- *	- Fix in-kernel compilation problem (Veritas).
- *	- Remove superfluous KMALLOC*/KMFREE/BZERO/BCOPY/
- *	  BCMP/qla_bcopy defines and functions.
- *	- Remove unused ql_list_link structures and functions.
- *	- Consistent use of copy_to/from_user() functions (RH).
- *	- Consistent use of struct scsi_qla_host instead of
- *	  several aliases (RH).
- *	- Remove illegal usage of caddr_t (RH).
- *	- Remove Target-Mode support from driver.
- *	- Cleanup qla_fo.c file:
- *	  - Remove old debugging code.
- *	  - General sanitizing.
- *	- Modify SCSI template name (QLogic)
- *	- Cleanup compiler warnings during debug builds.
- *	- Add new 2300 IP/TP firmware (3.01.13).
- *
- *  Rev  6.1b3		June 12, 2002       RA
- *	- Non-released driver - version number skipped due to Combo
- *	  package release to OEM.
- *
- *  Rev  6.1b2 		June 08, 2002       AV/DG
- *	- Fix issue where the report-luns logic would interpret
- *	  data on an incorrect status from the device.
- *	- Fix issue where a loopback request was not being issued
- *	  if the HBA loop status was not ready -- Callers of the 
- *	  IOCTL expect the FW to handle this condition and return 
- *	  the proper status.
- *	- Clean-up IP support callback mechanism -- explicit
- *	  export of a single *_ip_inquiry() call that returns
- *	  specific interface function pointers. Each ISP driver
- *	  now has its own *_ip_inquiry() function
- *	  (qla2200_ip_inquiry() and qla2300_ip_inquiry()).
- *	- Remove inter-dependencies between 2200/2300 compiled
- *	  drivers.
- *	- Fix issue where del_timer()/add_timer() combination in 
- *	  RESTART_TIMER macro would cause a race condition during
- *	  module unloading -- use mod_timer().
- *	- Cleanup spinlock initialisation -- spin_lock_init()
- *	  macro (FalconStor).
- *	- Add CONFIG_MD_MULTIHOST support (FalconStor).
- *	- Add SCSI add-single-device support (FalconStor).
- *	- Added new 2300 IP/TP firmware (3.01.11).
- *	- Added new 2200 IP/TP firmware (2.02.03).
- *
- *  Rev  6.1b1		June 14, 2002       AV/DG
- *	- Integrate IP backdoor updates.
- *	- Add CACHE_LINE flush before updating request-ring
- *	  indexes to address spurious hardware hangs.
- *	- Add hardware_lock'ed qla2x00_marker() function for
- *	  IP integration layer.
- *	- Remove busy-wait during qla2x00_fw_ready().
- *	- Remove extraneous display of adapter node/port
- *	  information.
- *	- Fix issue with the register_fc4 function not sending
- *	  the appropriate amount of data to the firmware.
- *	- Ip_inquiry should query off the ha's instance number,
- *	  not host_no during IP capable scan of HBAs.
- *	- Add 'hardware locked' logic to IP integration functions:
- *	  qla2x00_add_buffers(), qla2x00_ip_send_login_port_iocb(),
- *	  and qla2x00_ip_send_logout_port_iocb() functions.
- *	- Add IP /proc file information text.
- *	- Indentation and debug-level cleanup.
+ *  Rev  7.00.00b27/7.00.03	Apr 23, 2004	RA/DG/AV
+ *	- Fixed recursive logic in ZIO code.
+ *	- Add module parameters to allow adjustment of 
+ *	 of performance parameters sg_tablesize and max_sectors 
+ *	 in driver template.
+ *	- Alignment issue in /proc display on IA64.
+ *
+ *  Rev  7.00.00b26		Apr 20, 2004	RA/DG
+ *	- In failover mode copy the portname to tgt struct as well.
+ *	- Always display the target info in proc.
+ *
+ *  Rev  7.00.00b25		Apr 16, 2004	RA/AV/DG
+ *	- Fixed issue where qla2x00_fo_get_tgt() returns
+ *	  target not found during discovery as unconfigured 
+ *	  even though its in the configuration : ER(36561)
+ *	- Fixed qla2x00_get_port_summary() to return configured
+ *	  as well as unconfigured devices correctly.
+ *	- Honour port_down_retry read from NVRAM for values
+ *	  greater than 30.
+ *	- ISP200 defines removed
+ *  	- Boot code versions (another interface defined in Ying's word
+ *  	  doc.) 
+ *	- Flash support (untested, but no APIs are calling the code)
+ * 	- Compilation warning fix for SLES 8 SP3
+ *	- Included the latest Readme.qla2x00 and readme.txt
+ *
+ *
+ *  Rev  7.00.00b24		Apr 9, 2004	RA
+ *	- Check against HBA portname instead of
+ *	  NODENAME in qla2x00_find_host_by_name() and 
+ *        renamed it to qla2x00_find_host_by_portname().
+ *	  Mezanine card has same node name but different portname
+ *	  (ER36717) 
+ *
+ *  Rev  7.00.00b23		Apr 9, 2004	AV
+ *	- RHEL 3 build fixes for IA64 and PPC64.
+ *	- Additional FPC2 (tape) handling fixes added.
+ *
+ *  Rev  7.00.00b22		Apr 2, 2004	RA,DG,AV
+ *	- Remove TASK_INTERRUPTIBLE to TASK_UNINTERRUPTIBLE
+ *	- Remove incorrect assignment of ha->retry_count to 
+ *	  login retry count;
+ *	- RHEL/SLES8 differences when compiling the driver
+ *	  on x86_64 and PPC64
+ *	- Fixed boundary check for queuedepth value.
+ *	- ER36592:Fixed the query_hba_port() ioctl call to check
+ *	  for LOOP_DEAD state to report correct hba port state
+ *	  when link down timeout is non zero.
+ *	- Updated the QLA23XX Firmware to v3.02.28
+ *
+ *  Rev  7.00.00b21		Mar 30, 2004	RA
+ *	- Updated the QLA23XX Firmware to v3.02.27
+ *
+ *  Rev  7.00.00b21test		Mar 17, 2004	DG,RA,AV
+ *	- Add feature to initiate a LIP via /proc interface.
+ *	  Similiar to rescan.
+ *	- DEBUG3 fixes when qla2x00_allocate_path() fails.  I
+ *	  hope RA is ok with this version :)
+ *	- Revert to old method of returning BIOS version until
+ *        some concensus has been formed on where the driver
+ *	  should return the information.
+ *	- Fixed target information in proc info rouitne, so it displays
+ *	  the correct target.
+ *
+ *  Rev  7.00.00b20		Mar 9, 2004	DG
+ *	- PortID binding
+ *	- 2100/2200 panic during firmware load
+ *	- qla2x00_get_link_status() loop_id fix
+ *	- INQ fix to not assume a fabric device when fw
+ *	- returns CS_PORT_LOGGED_OUT
+ *	- Return true nodename for XP device during
+ *	 get_port_summary.
+ *	- Tape command handling forward-ported from 6.06.64
+ *	- Dereference a NULL pointer after allocate_path().
+ *	- Perform proper check of START_STOP command in 
+ *	- qla2x00_queuecommand(), dereference a command's cmnd[]
+ *	 array, not its sc_data_direction.
+ *	- Response ring check refinement in qla2x00_queuecommand().
+ *	- As per RH comments, back-out PLUG-TIMER and scsi-affine
+ *	 'performace patches'
+ *
+ *  Rev  7.00.00b19		Mar 9, 2004	DG
+ *  Rev  7.00.00b19-test1	Mar 9, 2004	DG
+ *	- Added logic to detect "NOT READY" when a different host failover a 
+ *	  shared port on the EVA.
+ *	 
+ *  Rev  7.00.00b18	Mar 4, 2004	DG
+ *	- Skip trying to failover a controller lun this causes the no matching
+ *	 lun error.
+ *	- Eliminate the temporary failover queue. 
+ *	- Enhance the logic for finding active paths to speed up failover. 
+ *
+ *  Rev  7.00.00b17	Feb 24, 2004	RA
+ *	- Fixed Oops with multiple FO targets when we can't find
+ *	a matching lun.
+ *	- Fixed issue cause by LOOP going DEAD before port.
  * 
- *  Rev	 6.0		June 13, 2002		DG
- *	- Released
+ *  Rev  7.00.00b16	Feb 20, 2004	RA
+ *	- Updated the QLA23XX FW to v3.02.24
  *
- *  Rev  6.0b26-PLUS/b27   May   23, 2002       ??/??/??
- *	- Correct IOCTL return code when an invalid signature is
- *	  passed in the EXT_IOCTL request.
- *	- Remove unused defines KERNEL_SEM_BUG and NEW_EH_CODE.
- *	- Added new 2300 IP/TP firmware (3.01.09).
+ *  Rev  7.00.00b15	Feb 11, 2004	DG/RA/AV
+ *	- Fix endianess issues while preparing command IOCBs.
+ *	- Only perform lun discovery on target-type fcports.
+ *	- Build qla_opts with proper host CC.
  *
- *  Rev  6.0b26        May   23, 2002       RA/DG/AV
- *	- Fixed issue with device_reset so it uses the
- *	  correct adapter in failover mode. 
- *	- Add logic to track usage of the iocb and prevent
- *	  the firmware from running short.
- *	- Increase suspend time for LUN "Not Ready" conditions
- *	  from 18 secs to a max of 30 secs.
- *	- Added option to display the configuraation info in
- *	  failover mode.
- *	- Fix FC passthru IOCTL interface to only return the
- *	  low-order byte of the scsi status.
+ *  Rev  7.00.00b14	Feb 10, 2004	DG
+ *	- Added logic to detect and failover the port when a shared 
+ *	  port on the MSA1000 is switched to the standby port by a 
+ *	  different host. 
+ *	- Always export HSG80 ports in failover mode.
+ *	- Added support to reset luns on EVA after failover.
+ *	- qla2x00_configure_loop() fix when an RSCN occurs 
+ *	  during the configure_loop routine.
+ *	- FCP protocol error check during qla2x00_status_entry() 
+ * 	- Added code review changes (RH) 
  *
- *  Rev  6.0b25        May   20, 2002       RA/DG/AV/RL
- *	- Issue RLC command immediately to determine lun list.
- *	- Remove extraneous logic that removes commands from the
- *	  pending queue when the loop is down or a destination device
- *        is found to be off-line.
- *	- In failover mode, add an extra second to the command timeout
- *	  for additional internal processing.
- *	- Add descriptions for module options. 
- *	- Simplify locking in qla2x00_cmd_timeout().
- *	- Fix memory-mapped I/O usage. 
- *	- Fix the potential panic during error recovery when a command
- *	  is not returned during an abort resulting in dual instances
- *	  of a command's SRB.
- *	- Clean-up processing of interrupts during error-recovery
- *	  mode.
- *	- Changed back get_disc_port IOCTL behaviour so now it returns
- *	  next available device instance info when a port/target
- *	  device is disconnected.  The change was added and now
- *	  removed by customer request.  This is now pre-b13 behaviour.
- *	- Added new 2300 IP/TP firmware (3.01.08).
+ *  Rev  7.00.00b13	Feb 4, 2004	DG
+ *	- RIO fix for big endian platforms.
+ *	- Eliminate checking initiators while processing fcport list. 
+ *	- New 23xx ip/flx firmware version  3.02.22
+ *	- Increase driver timeout value to (2.5 * RATOV) for RATOV events.
+ *	- Honoring "ConfigRequired=1" in mon-failover mode. 
+ *	- Added logic to block i/o during failoer mapping.
  *
- *  Rev  6.0b24-test1  May   07, 2002       TWT
- *	- Added IPFC support.
+ *  Rev  7.00.00b12	January 30, 2004	DG
+ *	Fixed issue in port scan logic with adding luns dynamically.
  *
- *  Rev  6.0b24	       May   06, 2002       DG
- *	- Fix potential panic when configuration data exists for a device
- *	  that is off-line.
+ *  Rev  7.00.00b11	January 26, 2004	DG
+ *	Updated to Firmware Version 3.21.04 (16:56 Jan 23, 2004) (flx)
  *
- *  Rev  6.0b23	       May   06, 2002       RA/RL
- *	- Added the new setup() routine for lk>=2.4 and above to handle the 
- *	  kernel command line parameter.
- *	- Set BIT_1 when issuing login_fabric() from the ioctl to take
- *	  care of McData issue.		
+ *  Rev  7.00.00b10	January 20, 2004	DG
+ *	- Updated f/w to v3.02.21
  *
- *  Rev  6.0b22-test2  April 30, 2002       DG
- *	- Made tasklet a compile time option.
- *	- Fixed mailbox timeouts on first mailbox command after polling.
- *	- Fixed MPIO issue of requests setting in pending queue after 
- *	  resync of second adapter.
+ *  Rev  7.00.00b9	January 13, 2004	DG
+ *	- Fixed panic in select_next_path() 
  *
- *  Rev  6.0b22-test1  April 29, 2002       RA/AV
- *	- Updated makefile to add the support for all the arch-i386/i486/i586
- *	  /i686 -especially to address the skipjack issue.
- * 	- Set the right host status when device returns queue full.
+ *  Rev  7.00.00b7,b8	January 5, 2004		DG
+ *	- Added EVA support to failover code.
+ *	- Improve smart failover to know when port
+ *	  has run-out-of HBAs paths.
  *
- *  Rev  6.0b22        April 26, 2002       RL/AV
- *	- Corrected usage of pci info by directly getting it from ha->pdev.
- *	  This fixes problem with referencing the now uninitialized
- *	  fields of ha->pci_bus and ha->pci_device_fn from various
- *	  places including ioctl calls.
- *	- Corrected HBA port state value returned in ioctl call.
- *	- Corrected saving of failover path ID.
- *	- Added passing of SRB_IOCTL flag via the CMD_RESID_LEN(cmd) field
- *	  from scsi passthru ioctl so the passthru IO won't get retried.
- *	- Added checking of SRB_IOCTL in regular IO path so we do not
- *	  retry these IOs.
- *	- Enabled ABORT_TARGET mailbox command to clear reservation.
- *	- Replaced set_cache_line function with RedHat implementation.
- *	- Cleaned up variable names in cmd_timeout.
+ *  Rev  7.00.00b6	January 5, 2004		AV
+ *	- Add backed-out changes from beta 3 to 5.
+ *	- Remove unused 63xx functions (check_topology()).
  *
- *  Rev  6.0b21-test2  April 24, 2002       DG
- * 	- Fixed Oops in qla2x00_next() when starting new command 
- *	  after a resync. 
- *	- Fixed issues in failover code.
- *	- Added back suspend lun support.
+ *  Rev  7.00.00b5	December 22, 2003	DG
+ *	- merge 63xx 
  *
- *  Rev  6.0b21-test1  April 18, 2002       AV
- *	- Remove per-lun pending queues in favor of a simplified
- *	  single adapter pending queue for all queued commands
- *	  issued to the adapter.
- *	- Cleanup global detect semaphore name usage.
- *	- Simplify the queue command process by postponing expensive
- *	  backend checks to the qla2x00_next() function. 
- *	- Remove all NOP *_LOCK/UNLOCK macros.  These macros are no
- *	  longer needed with the 6.x series drivers. 
- *	- Removed all OLD error-handling code. 
- *	- Simplify the SCSI host template -- remove references to
- *	  OLD error-handling routines.
+ *  Rev  7.00.00b3	December 10, 2003	DG/AG
+ *	- Resync with 6.07.00b14.
+ *	- PCI Posting fixes.
+ *	- Configure DMA addressing before issuing any allocations.
+ *	- Add support for RHEL3 specific Scsi_Host members.
+ *	- Remove unused HOTSWAP/GAMAP/FLASH_DATABASE functions.
+ *	- Fix for infinite loop in qla2x00_wait_for _hba_online()
+ *	- Fix to purge all requests for a given target from retry_q
+ *	  on eh_resets.
+ *	- Changes for common qla2x00.c for qla200
+ *	- Merge several patches from Mark Bellon
+ *	  [mbellon@mvista.com]:
+ *	  - Interrupt latency rework.
+ *	  - Add extended information to /proc (Ohm Terminations and
+ *	    Data Rate).
+ *	  - Convert little-endian firmware data from Get Link
+ *	    Statistics mailbox call to appropriate host endianess.
+ *	- Add support for FDMI 'Host Name' port attribute.
  *
- *  Rev  6.0b21        April 17, 2002       RL
- *	- Added more error handling code for send_fcct ioctl command,
- *	  and fixed a panic problem by using dummy tgt/lun q structures.
- *	- Added get/set RNID related mailbox commands and ioctl support.
- *	- Fixed compile warning by defining pci_set_dma_mask function
- *	  for kernel version < 2.4.3.
- *	- Moved sp_get and sp_put back to qla2x00.c.
- *	- Some indentation clean up and ioctl debug level clean up.
+ *  Rev  7.00.00b2	Nov14, 2003 RA
+ *	- Fixed the issue where port id was overwritten when
+ *	  switched to gan
+ *	- Zero out the swl buffer when doing fabric discovery
+ *	- Removed the leftover fabricid array causing buffer
+ *	  overflow
+ *	- Consolidated the code to compile acroos v7.x and v1.x
+ *	  driver.
+ *	- Added the support for qla200 in qla_opts.
+ *	- Wait for 60 sec during F/W ready during init time only.
+ *	- Added the support for ISP200.
  *
- *  Rev  6.0b20        April 15, 2002       RA
- *	- Added HSG80 flag in makefile to define COMPAQ(-DCOMPAQ) compilation
- *	  flag.
- *	- Added HSG80_PORT_RETRY_COUNT macro for COMPAQ-HSG80.
+ *  Rev  7.00.00b1	Oct 28, 2003 AV/RA
+ *	- Consolidated the fabric device list 
+ *	- Added the 16 bit loop id support
+ *	- Added the support for 2300/2322 Extended F/w interface.
+ *	- Added the support to compile without failover module as 
+ *	  source pkg.	
+ *	- Fixed bug in configure_loop where it will loop forever.
+ *	- Separated the Port state used for routing of I/O's from
+ *	- port mgmt-login retry etc.
+ *	- Based on 6.07.00b9plus
  *
- *  Rev  6.0b19        April 10, 2002       RA
- *      - Use pci_set_dma_mask() to set up 64bit/32bit instead of
- *	  CONFIG_HIGHMEM.
- *      - Renamed RETRY_FOR_NOT_READY back to COMPAQ-By default disabled.
- *
- *  Rev  6.0b18        April 10, 2002       AV/RA
- *	- With Indent-8 tabs formatted all of the driver files.
- *	- Removed the left over serial console support.
- *	- Changed the debug routines to  linux style.	  
- *	- Change places where we use SYS_DELAY to udelay/barrier()
- *	- Fix bugs wwrt to >> 32 of 32 bit variables.
- *	- Cleaned up the support for lk < 2.4  kernel. 
- *	- Fixed missing wakeups of the  dpc thread  
- *	- Added barrier() between subsequent reads in
- *  	   qla2x00_debounce_register();  
- *	  
- *  Rev  6.0b17        April 09, 2002       AV/RL/RA
- *	- Deleted all direct references to qla2x00_callback outside
- *	  of sp_put and __sp_put functions, so the sp->ref_count
- *	  is decremented correctly before going back to free pool.
- *	  This fixed IO timeout/hang after some direct qla2x00_callback
- *	  calls are invoked.
- *	- Fixed panic from ioctl passthru command which makes separate call
- *	  to allocate new sp by deleting the zeroing out of sp content after
- *	  calling get_new_sp.  We should not overwrite sp content
- *	  because get_new_sp initializes some fields to non-zero. 
- *	- Moved the call to rpt_lun_discovery to later so that LUN 0 will
- *	  always be allocated regardless of the actual LUN list
- *	  returned. This allows kernel to continue scanning past
- *	  a non-existent LUN 0.
- *	- Added output of the following to proc_info per customer
- *	  request:
- *	  'Number of reqs in scsi_retry_q', 'Number of reqs in failover_q',
- *	  'Device queue depth'.
- *	- Added qlport_down_retry as a new driver parameter per customer
- *	  request.
- *	- Changed ioctl busy polling interval to 1 second instead of
- *	  1 tick.  1 tick is unrealistic.
- *	- Added more ioctl function description headers.
- *
- *  Rev  6.0b16        April 08, 2002       RA/AV/RL
- *	 - Added the support to recognise medium changer type
- *	   as Tape devive(inq[0] == 8).
- *	 - For Not Ready case suspend the lun only for Hard Disk Device 
- *	   type.		
- *	 - Nuked the support for FC_VI.
- *	 - Before examining the scsi status Mask of the reserved bits 12-15.
- *	 - Added the CONFIG_HIGHMEM support for 64bit dma addresing on 32bit
- *         platform.
- *	 - Renamed file- settings.h as qla_settings.h
- *	 - Debug macros moved from qla2x00.c to qla_debug.h and made
- *	   statement like.
- * 	 - Removed serial console code.        
- *	 - Added the missing hardware lock in eh_abort when searching the "sp"
- *	   in the active array. 
- *	 - Added  loop state and number of free srb's in the /proc
- *	 - Changed to use kernel interface or routines(ex-readb())
- *	   for Memory Mapped I/O.
- *	 - Cleaned up qla2x00_pci_config() routine.
- *	 - Renamed COMPAQ flag to G80. 
- *	 - Set the port_down_retry_count to 30 if in the nvram its  configured
- *	   less than 30.Need enough time to try and get the port back 	 
- *	 - Get  rid of the lun_list field in the inq_cmd_rsp structure.
- *	 - Check for abort_active/reconfiguration/recovery active state
- *	   before issuing get_link_status mbx cmd.
- *	 - Renamed qla2200_nvram_config() to qla2x00_nvram_config()
- *	 - Need to get rid of caddr_t as its illegal in the kernel-????
- *	 - Add ref_count to the "sp" structure, needed to keep locking sane
- *	   over functions that sleep.Added sp_get() and sp_put() .	 
- *	 - Use Report Luns (RLC) for lun discovery process.
- *	 - Use a consistent set of command structures during SNS queries --
- *	   add sns_cmd_rsp_t structure.
- *	 - Fix issue where SNS query would return too much data for
- *	   the firmware to handle -- explicitely define the maximum amount
- *	   of double-words in the SNS request.
- *	 - Changed VIRT_TO_BUS/KMALLOC to pci_alloc_consistent() in qla_fo.c
- *	 - Updated README.qla2x00
- * 
- *  Rev  6.0b15        April 05, 2002       DG/RA/RL
- *	 - Corrected more local dpc flag checking in configure_loop.
- *	   This fixed problem not calling correct functions based
- *	   on correct flags.
- *	 - Deleted hardcoded port_down_retry_count.
- *	 - Corrected macros used to split up dma physical address
- *	   for use by registers. Now the macros work on both 32bit
- *	   and 64 bit platforms.
- *	 - More dma_addr_t function parameter type correction.
- *	 - Added update of port_id in build_fcport_list function
- *	   when updating a pre-existed port. This fixed problem
- *	   of not able to login after the port location has been
- *	   changed.
- *	 - Return a different status for 4006 error from login fabric
- *	   mbx cmd so we don't retry anymore.
- *
- *  Rev  6.0b14        April 04, 2002       DG/RA/RL/AV
- *	 - Fixed query_disc_port ioctl not returning correct port
- *	   state.
- *	 - Changed port_down_retry_count to 32.
- *	 - Corrected local dpc flag variable checking in configure_loop
- *	   to use bit manipulation functions instead of C style bit
- *	   checking.  This results in correctly log out lost 
- *	   fabric ports.
- *	 - Corrected qla2x00_send_sns function parameter type for
- *	   physical address to use dma_addr_t.
- *	 - Added PCI module device table.
- *	 - Updated README file with Suse ramdisk info.
- *
- *  Rev  6.0b13        April 03, 2002       DG/RA/RL/AV
- *	- Fixed the makefile issue: corrected documentation,
- *	  and makefile syntax problem (making both drivers when
- *	  only one is asked for).
- *	- Reduced stack size in functions using over 0x200 bytes
- *	  stack space: qla2x00_set_lun_data_from_config,
- *	  qla2x00_cfg_build_path_tree, qla2x00_aen_get,
- *	  qla2x00_query_hba_node, qla2x00_get_port_summary,
- *	  qla2x00_send_fcct.
- *	- Changed get_disc_port ioctl behavior which returns next
- *	  available device instance info when a port/target is
- *	  disconnected. Now return error when query for lost port.
- *	- Moved the allocation of host database to outside of the adapter
- *	  structure allocation to avoid the allocation size limitation in
- *	  the scsi_register function.
- *	- Changed qla2100_ function names to qla2x00_ prefix.
- *	- Changed previous qla2100_print calls to use printk.
- *	- Cleaned up compile warnings.
- *	- Added the support in README.qla2x00 to build the driver as part of the
- *	  kernel.
- 
- *         
- *  Rev  6.0b12        April 01, 2002       DG/RA QLogic
- *       - Fixed the port login stuff-not trying to login even the port was
- *         marked as lost unless RSCN happens and we do a loop resync.
- *       - Copy the done queue into local queue in qla2x00_done() such that we
- *         do not wind up calling done queue takslet for the same IOs from DPC
- *	   or any other place.
- * 
- *  Rev  6.0b11        April 01, 2002       RL/RA QLogic
- *	- Added initialization of the new lun q lock for ioctl_lq.
- *	  This fixes passthru ioctl hanging problem.
- *      - Added the missing hardware lock in qla2x00_process_risc_intrs()
- *        when we call qla2100_isr().
- *
- *  Rev  6.0b10        March 29, 2002       DG QLogic
- *	- Added new support for suspending the lun on "not ready"
- *	  conditions.
- *	- Deleted extra usage of io_request lock in fc_scsi and
- *	  scsi3 passthru ioctl functions.
- *	- Updated README file.
- *
- *  Rev  6.0b9         March 28, 2002       RA/DG/RL/JJ QLogic
- *	- Added use of additional fields in Scsi_Cmnd to save IO
- *	  status related values for ioctl SCSI/FCCT passthru cmd
- *	  processing.
- *	- Added scsi3_passthru function to process 16 byte CDBs
- *	  whose fclun value can be in either VSA or PDA format.
- *	- Added device and bus reset new error handling functions.
- *	- Added option and code to handle register_fc4.
- *
- *  Rev  6.0b8         March 27,2002        RA/DG/RL QLogic
- *      - Set the host_byte status correctly in process_completed_request().
- *	- Fixed the stack overflow in configure_fabric() qla2x00_ioctl()
- *	  and qla2x00_fo_ioctl() routine.
- *      - Cover the case in eh_host_reset() where abort_isp is already active.
- *	- Release the hardware lock before we return in reset_chip() routine.
- *      - Added the support to grab the io_request_lock back in the queuecommand
- *	  after adding the request to scsi_retry_queue.
- *      - Fixed the issue in the detect routine where we dont hang around for 
- *	  the  devices to come online. 
- *      -Implemented scsi_retry_queue stuff.
- *  	-Added the function headers for qla2x00_process_risc_intrs
- *       and qla2x00_process_completed_requests
- *  	-Got rid of abort_q_put() ,abort_q_get() cmd_wait(),
- *	 qla2100_return_status()  routines and ABORT lock.
- *      -Added the support for  2.5.7>lk>=2.4.8 in Scsi Host TEMPLATE.
-
- *  Rev  6.0b7          March 20, 2002       JJ QLogic
- *	- Change not to use the first slot (0) of the outstanding_cmd
- *	  array, since we will put NULL handle for a completed cmd.
- *	- Implement new hardware lock in place of io_request_lock
- *	  in order to improve performance.
- *	- Save ha in srb_t when being inserted into the failover
- *	  queue so we know which ha to look for when that cmd is
- *	  timed out.
- *	- Add aborting isp if abort command failed.
- *	- Fix cmd_timeout routine to get the valid ha for the
- *	  fail-over driver.
- *
- * Rev  6.0b6           March 20, 2002		RL QLogic
- *	- New PCI device registration and API support for 2.4.0 and
- *	  above only.
- *	- Template change (previously done).
- *	- Remove explicit virt_to_* calls in foavor of
- *	  *_alloc_consistent.
- *	- Only allow compilation on 2.4.0 machines and above.
- *	- Corrected ioctl hang due to SETINSTANCE command.
- *	- Added io_request lock in FCCT passthru function when issuing
- *	  login_fabric mbx cmd.
- *	- Corrected issue_iocb parameter as referenced in qla_fo.c.
- *
- * Rev  6.0b5           March 14, 2002		RL QLogic
- *	- Added qla2200.c and qla2300.c files to enable separate
- *	  driver make in RedHat kernel source directory.
- *	- Added/enabled two new error handling functions: eh_abort and
- *	  eh_host_reset.
- *	- Changed issue_iocb prototype to pass in the buffer physical address
- *	  value.
- *	- Changed request_region function (in register_with_Linux) to use
- *	  correct driver name string.
- *	- Added release_region if request_irq function failed (in
- *	  register_with_Linux).
- *	- Moved the enabling of host interrupt (in mbx cmd issuing) to just
- *	  before going to sleep waiting for completion.
- *
- * Rev  6.0b4           March 11, 2002		RA QLogic
- *       - Fixed the panic in the loop reset routine where we trying to
- *         derefernce tgt queue even if its NULL. 
- *       - Changed the MAX_SRBS count to 4096.
- *       - Changed to dma_addr_t instead of depending on BITS_PER_LONG
- *	   macro in get_port_database.
- *       - Changed README.qla2x00-Support for 2.4.x only.
- *
- * Rev  6.0b3           March    08,2002       RA QLogic
- *       - Fixed the panic in abort routine- where we try to dereference  
- *         "sp" even its NULL causing to panic.
- *       - Partially cleaned up compiler warning.
- *         
- * Rev  6.0b2           March    07,2002       RA QLogic
- *       - Update 2200(v2.02.01) and 2300(v3.1.02) firmware. 
- *       - Instead of depending on BITS_PER_LONG macro to 
- *	   figure out whether address will be 64 bit or 32 bit
- *	   ,changed it to dma_addr_t data type .Even on 32bit system
- *	   if there is high memory support it will be 64bit instead of 32bit.
- *       - Earlier we used to call qla2100_callback directly in qla2x00_ms_entry
- * 	   routine.But now its dangerous to do so.As we zero out the
- *         sp pointer in the cmd just before calling scsi_done().So we just
- *         the "sp" in done_queue  and let the tasklet process it later.
- * Rev  6.0b1           March    06,2002       RA,DG QLogic
- *       - Started with Driver Version-5.38b16 as the base.
- *       - Initial release of the 6 series driver, with all the
- *	   changes ported from the  4.x series driver(mentioned below).	
- *       - Now we keep track of the loop_id, so that we can log
- *	   into that port successfully when it comes back.
- *       - All the options setting has been moved from qla2x00.c to settings.h
- *         file.
- *	 -Added the support from NEW Error Handling Code perspective.
- *        Right now the  macro(NEW_EH_CODE) is turned off till we 
- *        completely fix all the issue related to  NEW_EH_CODE in the driver.
-
-/****************************************************************************
- *	Changes Ported from 4.x Driver:
-
-        -Changed malloc.h to use slab.h to get rid of the compiler warning 
-         message.
-	-Use del_timer_sync to delete qla2100_timer for lk > 2.4.0
-	-Send marker only at one place ie when we are about to send out
-	 the commands to  the ISP except during initialize_adapter().
-	-Added the marker support for 64bit_start_scsi.
-	-Initialized the different queues.
-                PENDING QUEUE:-Initialized in lun_alloc()
-                RETRY   QUEUE:- ""         in detect()
-                DONE    QUEUE :- ""        in detect()
-                ACTIVE    QUEUE :
-                FAILOVER QUEUE  : ""       in detect()
-                FREE     QUEUE:- Initialised in allocate_sp_pool()
-	-Got rid of udelay in mem_alloc() routine.
-	-Got rid of support for lk<2.4 in mem_alloc() and mem_free() routines.
-	-Allocating sp during initialisation instead of on the fly.
-	-Added the timer for each command.
-
-        -Modified the different queues to use kernel list macro for
-         queue management.Using one lock ie "list_lock" to protect 
-         different queues.
-        -Added qla2x00_free_sp_pool() routine to release the sp_pool memory
-         when we unload the driver. 
-        - Modified the qla2x00_next() prototype to pass vis_ha except in done.
-	-Introduced Port state:DEAD,LOST and ONLINE .
-	-Fixed the QLA2X00_FAILURE macro.
-	-Fixed the abort routine-retry queue or failoever queue will be on the 
-         real HBA.
-	-Added the ql2xlogintimeout stuff-Instead of 4sec,firmware will be using
-         20 secs initially(2*ratov value) to login into the switch for ED1032.
-	-Added the retry logic to login into the switch.
-	-Added the code to kick off port_down_retry timer when we get 28-29 
-  	 compl status but the firmware is not quick enough to report
-         that the device is missing.
-	-Now using macros to fix the wraparound situation for jiffies.
-	-Fixed the qla2x00_abort_queue().Instead of calling callback directly,
-         all the requests after being deleted from the lun_queue will be put 
-	 in the done_queue().
-	-Fixed port logic in dpc to restore loop id in the fcport structure.
-	-Changed fcport->state to atomic.
-	-Changed the status_entry rotuine to check for completion first and then
-         scsi status.
-	- Change state of "sp" to ACTIVE STATE when we issue it to RISC.
-
-******************************************************************************/
-
-
-
-
-
-

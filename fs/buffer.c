@@ -48,6 +48,7 @@
 #include <linux/module.h>
 #include <linux/completion.h>
 #include <linux/mm_inline.h>
+#include <linux/bootmem.h>
 
 #include <asm/uaccess.h>
 #include <asm/io.h>
@@ -3006,50 +3007,18 @@ void show_buffers(void)
  */
 void __init buffer_init(unsigned long mempages)
 {
-	int order, i;
-	unsigned int nr_hash;
+	hash_table =
+		alloc_large_system_hash("Buffer cache",
+					sizeof(struct buffer_head *),
+					14,
+					1,
+					&bh_hash_shift,
+					&bh_hash_mask);
 
-	/* The buffer cache hash table is less important these days,
-	 * trim it a bit.
-	 */
-	mempages >>= 14;
-
-	mempages *= sizeof(struct buffer_head *);
-
-	for (order = 0; (1 << order) < mempages; order++)
-		;
-
-	/* try to allocate something until we get it or we're asking
-	   for something that is really too small */
-
-	do {
-		unsigned long tmp;
-
-		nr_hash = (PAGE_SIZE << order) / sizeof(struct buffer_head *);
-		bh_hash_mask = (nr_hash - 1);
-
-		tmp = nr_hash;
-		bh_hash_shift = 0;
-		while((tmp >>= 1UL) != 0UL)
-			bh_hash_shift++;
-
-		hash_table = (struct buffer_head **)
-		    __get_free_pages(GFP_ATOMIC, order);
-	} while (hash_table == NULL && --order > 0);
-	printk(KERN_INFO "Buffer cache hash table entries: %d (order: %d, %ld bytes)\n",
-	       nr_hash, order, (PAGE_SIZE << order));
-
-	if (!hash_table)
-		panic("Failed to allocate buffer hash table\n");
-
-	/* Setup hash chains. */
-	for(i = 0; i < nr_hash; i++)
-		hash_table[i] = NULL;
+	memset(hash_table, 0, sizeof(struct buffer_head *) << bh_hash_shift);
 
 	/* Setup lru lists. */
-	for(i = 0; i < NR_LIST; i++)
-		lru_list[i] = NULL;
-
+	memset(lru_list, 0, sizeof(lru_list[0]) * NR_LIST);
 }
 
 

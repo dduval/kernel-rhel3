@@ -32,7 +32,7 @@
  * errno which is not an exported symbol. (but removing it
  * breaks old userspace tools.)
  */
-#ifdef CONFIG_X86
+#ifdef __i386__
 
 static int tux_execve (const char *file, char **argv, char **envp)
 {
@@ -94,7 +94,7 @@ static int tux_execve (const char *arg1, char **arg2, char **arg3)
 			: "0"   (__sc_3), "1"   (__sc_0),
 			  "r"   (__sc_4),
 			  "r"   (__sc_5)
-			: __syscall_clobbers);
+			: "r8", "r9", "r10", "r11", "r12");
 		__sc_ret = __sc_3;
 		__sc_err = __sc_0;
 	}

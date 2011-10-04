@@ -103,6 +103,7 @@ extern struct cpuinfo_x86 cpu_data[];
 #define cpu_has_xmm	(test_bit(X86_FEATURE_XMM,  boot_cpu_data.x86_capability))
 #define cpu_has_fpu	(test_bit(X86_FEATURE_FPU,  boot_cpu_data.x86_capability))
 #define cpu_has_apic	(test_bit(X86_FEATURE_APIC, boot_cpu_data.x86_capability))
+#define cpu_has_nx	(test_bit(X86_FEATURE_NX, boot_cpu_data.x86_capability))
 
 extern char ignore_irq13;
 
@@ -284,18 +285,11 @@ extern unsigned int mca_pentium_flag;
 extern unsigned long __TASK_SIZE;
 #define TASK_SIZE (current->active_mm->task_size)
 
-/*
- * Magic addresses to return to the kernel from signal handlers. These two
- * should be beyond user code segment limit, adjacent, and MAGIC_SIGRETURN
- * should be even.
- */
-#define MAGIC_SIGRETURN		(PAGE_OFFSET + 0xDE0000)
-#define MAGIC_RT_SIGRETURN	(PAGE_OFFSET + 0xDE0001)
-
 /* This decides where the kernel will search for a free chunk of vm
  * space during mmap's.
  */
 #define TASK_UNMAPPED_BASE	PAGE_ALIGN(TASK_SIZE/3)
+
 #define SHLIB_BASE		0x00111000
  
 #define __HAVE_ARCH_ALIGN_STACK
@@ -445,6 +439,8 @@ struct thread_struct {
 	0, INVALID_IO_BITMAP_OFFSET, /* tace, bitmap */		\
 	{~0, } /* ioperm */					\
 }
+
+extern int use_nx;
 
 #define start_thread(regs, new_eip, new_esp) do {		\
 	__asm__("movl %0,%%fs ; movl %0,%%gs": :"r" (0));	\

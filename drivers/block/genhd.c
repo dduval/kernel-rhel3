@@ -45,8 +45,9 @@ void
 add_gendisk(struct gendisk *gp)
 {
 	struct gendisk *sgp;
+	unsigned long flags;
 
-	br_write_lock(BR_GENHD_LOCK);
+	br_write_lock_irqsave(BR_GENHD_LOCK, flags);
 
 	/*
  	 *	In 2.5 this will go away. Fix the drivers who rely on
@@ -66,7 +67,7 @@ add_gendisk(struct gendisk *gp)
 	gp->next = gendisk_head;
 	gendisk_head = gp;
 out:
-	br_write_unlock(BR_GENHD_LOCK);
+	br_write_unlock_irqrestore(BR_GENHD_LOCK, flags);
 }
 
 EXPORT_SYMBOL(add_gendisk);
@@ -83,15 +84,16 @@ void
 del_gendisk(struct gendisk *gp)
 {
 	struct gendisk **gpp;
+	unsigned long flags;
 
-	br_write_lock(BR_GENHD_LOCK);
+	br_write_lock_irqsave(BR_GENHD_LOCK, flags);
 	gendisk_array[gp->major] = NULL;
 	for (gpp = &gendisk_head; *gpp; gpp = &((*gpp)->next))
 		if (*gpp == gp)
 			break;
 	if (*gpp)
 		*gpp = (*gpp)->next;
-	br_write_unlock(BR_GENHD_LOCK);
+	br_write_unlock_irqrestore(BR_GENHD_LOCK, flags);
 }
 
 EXPORT_SYMBOL(del_gendisk);

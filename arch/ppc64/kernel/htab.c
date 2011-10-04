@@ -48,6 +48,29 @@
 #include <asm/iSeries/HvCallHpt.h>
 #include <asm/cputable.h>
 
+#define HPTE_LOCK_BIT 3
+
+static inline void pSeries_lock_hpte(HPTE *hptep)
+{
+	unsigned long *word = &hptep->dw0.dword0;
+
+	while (1) {
+		if (!test_and_set_bit(HPTE_LOCK_BIT, word))
+			break;
+		while(test_bit(HPTE_LOCK_BIT, word))
+			cpu_relax();
+	}
+}
+
+static inline void pSeries_unlock_hpte(HPTE *hptep)
+{
+	unsigned long *word = &hptep->dw0.dword0;
+
+	asm volatile("lwsync":::"memory");
+	clear_bit(HPTE_LOCK_BIT, word);
+}
+
+
 /*
  * Note:  pte   --> Linux PTE
  *        HPTE  --> PowerPC Hashed Page Table Entry
@@ -64,6 +87,7 @@ HTAB htab_data = {NULL, 0, 0, 0, 0};
 
 extern unsigned long _SDR1;
 extern unsigned long klimit;
+extern rwlock_t pte_hash_lock[] __cacheline_aligned_in_smp;
 
 void make_pte(HPTE *htab, unsigned long va, unsigned long pa,
 	      int mode, unsigned long hash_mask, int large);
@@ -303,11 +327,11 @@ pte_t *find_linux_pte(pgd_t *pgdir, unsigned long ea)
 
 static inline unsigned long computeHptePP(unsigned long pte)
 {
-	return (pte & _PAGE_USER) |
+	return ((pte & _PAGE_USER) |
 		(((pte & _PAGE_USER) >> 1) &
 		 ((~((pte >> 2) &	/* _PAGE_RW */
 		     (pte >> 7))) &	/* _PAGE_DIRTY */
-		  1));
+		  1))) & 0x7;
 }
 
 /*
@@ -320,51 +344,67 @@ int __hash_page(unsigned long ea, unsigned long access,
 	unsigned long va, vpn;
 	unsigned long newpp, prpn;
 	unsigned long hpteflags, lock_slot;
+	unsigned long access_ok, tmp;
 	long slot;
 	pte_t old_pte, new_pte;
+	int ret = 0;
 
 	/* Search the Linux page table for a match with va */
 	va = (vsid << 28) | (ea & 0x0fffffff);
 	vpn = va >> PAGE_SHIFT;
 	lock_slot = get_lock_slot(vpn); 
 
-	/* Acquire the hash table lock to guarantee that the linux
-	 * pte we fetch will not change
-	 */
-	spin_lock(&hash_table_lock[lock_slot].lock);
-	
 	/* 
 	 * Check the user's access rights to the page.  If access should be
 	 * prevented then send the problem up to do_page_fault.
 	 */
-#ifdef CONFIG_SHARED_MEMORY_ADDRESSING
 	access |= _PAGE_PRESENT;
-	if (unlikely(access & ~(pte_val(*ptep)))) {
+
+	/* We'll do access checking and _PAGE_BUSY setting in assembly, since
+	 * it needs to be atomic. 
+	 */
+
+	__asm__ __volatile__ ("\n
+	1:	ldarx	%0,0,%3\n
+		# Check if PTE is busy\n
+		andi.	%1,%0,%4\n
+		bne-	1b\n
+		ori	%0,%0,%4\n
+		# Write the linux PTE atomically (setting busy)\n
+		stdcx.	%0,0,%3\n
+		bne-	1b\n
+		# Check access rights (access & ~(pte_val(*ptep)))\n
+		andc.	%1,%2,%0\n
+		bne-	2f\n
+		li      %1,1\n
+		b	3f\n
+	2:      li      %1,0\n
+	3:	isync"
+	: "=r" (old_pte), "=r" (access_ok)
+	: "r" (access), "r" (ptep), "i" (_PAGE_BUSY)
+        : "cr0", "memory");
+
+#ifdef CONFIG_SHARED_MEMORY_ADDRESSING
+	if (unlikely(!access_ok)) {
 		if(!(((ea >> SMALLOC_EA_SHIFT) == 
 		      (SMALLOC_START >> SMALLOC_EA_SHIFT)) &&
 		     ((current->thread.flags) & PPC_FLAG_SHARED))) {
-			spin_unlock(&hash_table_lock[lock_slot].lock);
-			return 1;
+			ret = 1;
+			goto out_unlock;
 		}
 	}
 #else
-	access |= _PAGE_PRESENT;
-	if (unlikely(access & ~(pte_val(*ptep)))) {
-		spin_unlock(&hash_table_lock[lock_slot].lock);
-		return 1;
+	if (unlikely(!access_ok)) {
+		ret = 1;
+		goto out_unlock;
 	}
 #endif
 
 	/* 
-	 * We have found a pte (which was present).
-	 * The spinlocks prevent this status from changing
-	 * The hash_table_lock prevents the _PAGE_HASHPTE status
-	 * from changing (RPN, DIRTY and ACCESSED too)
-	 * The page_table_lock prevents the pte from being 
-	 * invalidated or modified
-	 */
-
-	/*
+	 * We have found a proper pte. The hash_table_lock protects
+	 * the pte from deallocation and the _PAGE_BUSY bit protects
+	 * the contents of the PTE from changing.
+	 *
 	 * At this point, we have a pte (old_pte) which can be used to build
 	 * or update an HPTE. There are 2 cases:
 	 *
@@ -385,7 +425,7 @@ int __hash_page(unsigned long ea, unsigned long access,
 	else
 		pte_val(new_pte) |= _PAGE_ACCESSED;
 
-	newpp = computeHptePP(pte_val(new_pte));
+	newpp = computeHptePP(pte_val(new_pte) & ~_PAGE_BUSY);
 	
 	/* Check if pte already has an hpte (case 2) */
 	if (unlikely(pte_val(old_pte) & _PAGE_HASHPTE)) {
@@ -406,6 +446,7 @@ int __hash_page(unsigned long ea, unsigned long access,
 			pte_val(old_pte) &= ~_PAGE_HPTEFLAGS;
 		} else {
 			if (!pte_same(old_pte, new_pte)) {
+				/* _PAGE_BUSY is still set in new_pte */
 				*ptep = new_pte;
 			}
 		}
@@ -425,12 +466,19 @@ int __hash_page(unsigned long ea, unsigned long access,
 		pte_val(new_pte) |= ((slot<<12) & 
 				     (_PAGE_GROUP_IX | _PAGE_SECONDARY));
 
+		smp_wmb();
+		/* _PAGE_BUSY is not set in new_pte */
 		*ptep = new_pte;
+
+		return 0;
 	}
 
-	spin_unlock(&hash_table_lock[lock_slot].lock);
+out_unlock:
+	smp_wmb();
 
-	return 0;
+	pte_val(*ptep) &= ~_PAGE_BUSY;
+
+	return ret;
 }
 
 /*
@@ -497,11 +545,14 @@ int hash_page(unsigned long ea, unsigned long access)
 	pgdir = mm->pgd;
 	if (pgdir == NULL) return 1;
 
-	/*
-	 * Lock the Linux page table to prevent mmap and kswapd
-	 * from modifying entries while we search and update
+	/* The pte_hash_lock is used to block any PTE deallocations
+	 * while we walk the tree and use the entry. While technically
+	 * we both read and write the PTE entry while holding the read
+	 * lock, the _PAGE_BUSY bit will block pte_update()s to the
+	 * specific entry.
 	 */
-	spin_lock(&mm->page_table_lock);
+	
+	read_lock(&pte_hash_lock[smp_processor_id()]);
 
 	ptep = find_linux_pte(pgdir, ea);
 	/*
@@ -514,8 +565,7 @@ int hash_page(unsigned long ea, unsigned long access)
 		/* If no pte, send the problem up to do_page_fault */
 		ret = 1;
 	}
-
-	spin_unlock(&mm->page_table_lock);
+	read_unlock(&pte_hash_lock[smp_processor_id()]);
 
 	return ret;
 }
@@ -540,9 +590,12 @@ void flush_hash_page(unsigned long context, unsigned long ea, pte_t *ptep)
 	lock_slot = get_lock_slot(vpn); 
 	hash = hpt_hash(vpn, large);
 
-	spin_lock_irqsave(&hash_table_lock[lock_slot].lock, flags);
+	/* Need to disable interrupts so we don't deadlock with a faulting
+	 * interrupt handler.
+	 */
+	local_irq_save(flags);
 
-	pte = __pte(pte_update(ptep, _PAGE_HPTEFLAGS, 0));
+	pte = __pte(pte_update(ptep, _PAGE_HPTEFLAGS, _PAGE_BUSY));
 	secondary = (pte_val(pte) & _PAGE_SECONDARY) >> 15;
 	if (secondary) hash = ~hash;
 	slot = (hash & htab_data.htab_hash_mask) * HPTES_PER_GROUP;
@@ -552,7 +605,9 @@ void flush_hash_page(unsigned long context, unsigned long ea, pte_t *ptep)
 		ppc_md.hpte_invalidate(slot, secondary, va, large, local);
 	}
 
-	spin_unlock_irqrestore(&hash_table_lock[lock_slot].lock, flags);
+	pte_val(*ptep) &= ~_PAGE_BUSY;
+
+	local_irq_restore(flags);
 }
 
 long plpar_pte_enter(unsigned long flags,
@@ -787,6 +842,8 @@ static void hpte_invalidate(unsigned long slot,
 
 	avpn = vpn >> 11;
 
+	pSeries_lock_hpte(hptep);
+
 	dw0 = hptep->dw0.dw0;
 
 	/*
@@ -794,9 +851,13 @@ static void hpte_invalidate(unsigned long slot,
 	 * the AVPN, hash group, and valid bits.  By doing it this way,
 	 * it is common with the pSeries LPAR optimal path.
 	 */
-	if (dw0.bolted) return;
+	if (dw0.bolted) {
+		pSeries_unlock_hpte(hptep);
 
-	/* Invalidate the hpte. */
+		return;
+	}
+
+	/* Invalidate the hpte. This clears the lock as well. */
 	hptep->dw0.dword0 = 0;
 
 	/* Invalidate the tlb */
@@ -875,9 +936,21 @@ static long hpte_updatepp(unsigned long slot,
 
 	avpn = vpn >> 11;
 
+	pSeries_lock_hpte(hptep);
+
 	dw0 = hptep->dw0.dw0;
 	if ((dw0.avpn == avpn) && 
 	    (dw0.v) && (dw0.h == secondary)) {
+		/* No need to do any of the below if there's no change to
+		 * the pp bits. This might happen if two CPUs fault at the
+		 * same time, and the other cpu already has resolved it.
+		 */
+
+		if (hptep->dw1.dw1.pp == newpp) {
+			pSeries_unlock_hpte(hptep);
+			return 0;
+		}
+
 		/* Turn off valid bit in HPTE */
 		dw0.v = 0;
 		hptep->dw0.dw0 = dw0;
@@ -900,9 +973,13 @@ static long hpte_updatepp(unsigned long slot,
 		hptep->dw0.dw0 = dw0;
 		
 		__asm__ __volatile__ ("ptesync" : : : "memory");
+
+		pSeries_unlock_hpte(hptep);
 		
 		return 0;
 	}
+
+	pSeries_unlock_hpte(hptep);
 
 	return -1;
 }
@@ -1062,9 +1139,11 @@ repeat:
 		dw0 = hptep->dw0.dw0;
 		if (!dw0.v) {
 			/* retry with lock held */
+			pSeries_lock_hpte(hptep);
 			dw0 = hptep->dw0.dw0;
 			if (!dw0.v)
 				break;
+			pSeries_unlock_hpte(hptep);
 		}
 		hptep++;
 	}
@@ -1079,9 +1158,11 @@ repeat:
 			dw0 = hptep->dw0.dw0;
 			if (!dw0.v) {
 				/* retry with lock held */
+				pSeries_lock_hpte(hptep);
 				dw0 = hptep->dw0.dw0;
 				if (!dw0.v)
 					break;
+				pSeries_unlock_hpte(hptep);
 			}
 			hptep++;
 		}
@@ -1179,7 +1260,7 @@ repeat:
                 "mr    5, %3\n"
                 "mr    6, %4\n"
                 "mr    7, %5\n"
-                HSC    
+		HVSC
                 "mr    %0, 3\n"
                 "mr    %1, 4\n"
 		: "=r" (lpar_rc), "=r" (slot)
@@ -1200,7 +1281,7 @@ repeat:
 			      "mr    5, %3\n"
 			      "mr    6, %4\n"
 			      "mr    7, %5\n"
-			      HSC    
+			      HVSC
 			      "mr    %0, 3\n"
 			      "mr    %1, 4\n"
 			      : "=r" (lpar_rc), "=r" (slot)
@@ -1304,9 +1385,11 @@ static long hpte_remove(unsigned long hpte_group)
 
 		if (dw0.v && !dw0.bolted) {
 			/* retry with lock held */
+			pSeries_lock_hpte(hptep);
 			dw0 = hptep->dw0.dw0;
 			if (dw0.v && !dw0.bolted)
 				break;
+			pSeries_unlock_hpte(hptep);
 		}
 
 		slot_offset++;

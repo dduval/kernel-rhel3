@@ -1320,6 +1320,7 @@ MODULE_AUTHOR("(C) 2001 IBM Deutschland Entwicklung GmbH by Carsten Otte and "
 	      "Michael Holzheu (cotte@de.ibm.com,holzheu@de.ibm.com)");
 MODULE_DESCRIPTION("Linux on zSeries channel attached "
 		   "tape device driver ($Revision: 1.6 $)");
+MODULE_LICENSE("GPL");
 
 module_init(tape_init);
 module_exit(tape_exit);

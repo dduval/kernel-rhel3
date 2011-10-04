@@ -275,6 +275,10 @@ if [ "$CONFIG_PPC_ISERIES" = "y" ]; then
    dep_tristate 'iSeries Virtual Ethernet driver support' CONFIG_VETH $CONFIG_PPC_ISERIES
 fi
 
+if [ "$CONFIG_PPC_PSERIES" = "y" ]; then
+   dep_tristate 'IBM PowerPC Virtual Ethernet driver support' CONFIG_IBMVETH $CONFIG_PPC_PSERIES
+fi
+
 bool 'FDDI driver support' CONFIG_FDDI
 if [ "$CONFIG_FDDI" = "y" ]; then
    if [ "$CONFIG_PCI" = "y" -o "$CONFIG_EISA" = "y" ]; then

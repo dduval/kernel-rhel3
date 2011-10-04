@@ -74,7 +74,6 @@ struct mm_struct btmalloc_mm = {pgd             : bolted_dir,
                                 page_table_lock : SPIN_LOCK_UNLOCKED};
 
 extern spinlock_t hash_table_lock[];
-extern inline unsigned long get_lock_slot(unsigned long vpn);
 
 char *
 ppc64_pmc_stab(int file)

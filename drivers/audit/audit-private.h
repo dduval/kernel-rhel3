@@ -147,6 +147,9 @@ struct aud_syscall_data {
 	struct pt_regs *	regs;
 	u_int64_t		raw_args[AUDIT_MAXARGS];
 	struct sysarg_data	args[AUDIT_MAXARGS];
+#ifdef __ia64__
+	unsigned long *		bsp;
+#endif
 };
 
 struct aud_event_data {
@@ -308,7 +311,11 @@ extern int		audit_unregister_ioctl_converters(void);
  */
 #ifdef CONFIG_AUDIT_MODULE
 struct audit_hooks {
+#ifdef __ia64__
+	int		(*intercept)(struct pt_regs *, unsigned long *);
+#else
 	int		(*intercept)(struct pt_regs *);
+#endif
 	void		(*result)(struct pt_regs *);
 	void		(*fork)(struct task_struct *, struct task_struct *);
 	void		(*exit)(struct task_struct *, long);
@@ -347,7 +354,7 @@ audit_syscall_word_size(struct aud_syscall_data *sc)
 		return 64;
 #elif defined(CONFIG_X86_64)
 	if (sc->arch == AUDIT_ARCH_X86_64)
-		return 64;
+		return (current->thread.flags & THREAD_IA32) ? 32 : 64;
 #elif defined(CONFIG_S390X)
 	if (sc->arch == AUDIT_ARCH_S390X)
 		return 64;

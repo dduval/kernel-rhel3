@@ -863,6 +863,15 @@ struct usb_device {
 
 	int maxchild;			/* Number of ports if hub */
 	struct usb_device *children[USB_MAXCHILDREN];
+
+/*
+ * The __GENKSYMS__ works here because usb_device is allocated by HCDs with
+ * the help of usb_dev_alloc and passed to drivers as an argument to ->probe
+ */
+#ifndef __GENKSYMS__ /* preserve KMI/ABI ksyms compatibility for mod linkage */
+	struct semaphore exclusive_access; /* prevent driver & proc accesses  */
+					   /* from overlapping cmds at device */
+#endif
 };
 
 extern int usb_ifnum_to_ifpos(struct usb_device *dev, unsigned ifnum);

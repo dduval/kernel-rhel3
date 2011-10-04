@@ -186,6 +186,7 @@ static int
 qla2x00_fo_get_lun_data(EXT_IOCTL *pext, FO_LUN_DATA_INPUT *bp, int mode)
 {
 	scsi_qla_host_t  *ha;
+	struct list_head	*fcports;
 	fc_port_t        *fcport;
 	int              ret = 0;
 	mp_host_t        *host = NULL;
@@ -220,9 +221,9 @@ qla2x00_fo_get_lun_data(EXT_IOCTL *pext, FO_LUN_DATA_INPUT *bp, int mode)
 
 	if (ha->flags.failover_enabled) {
 		if ((host = qla2x00_cfg_find_host(ha)) == NULL) {
-			if (ha->fcport) {
-
-				/* Since all ports are unconfigured, return
+			if (!list_empty(&ha->fcports)) {
+				/*
+				 * Since all ports are unconfigured, return
 				 * a dummy entry for each of them.
 				 */
 				if ((list = (FO_LUN_DATA_LIST *)kmem_zalloc(
@@ -241,9 +242,11 @@ qla2x00_fo_get_lun_data(EXT_IOCTL *pext, FO_LUN_DATA_INPUT *bp, int mode)
 				u_list = (FO_LUN_DATA_LIST *)pext->ResponseAdr;
 				u_entry = &u_list->DataEntry[0];
 
-				for (fcport = ha->fcport; (fcport);
-				    fcport = fcport->next) {
-
+				list_for_each_entry(fcport, &ha->fcports,
+				    list) {
+					if (fcport->port_type != FCT_TARGET)
+						continue;
+	
 					memcpy(entry->NodeName,
 					    fcport->node_name,
 					    EXT_DEF_WWN_NAME_SIZE);
@@ -274,21 +277,6 @@ qla2x00_fo_get_lun_data(EXT_IOCTL *pext, FO_LUN_DATA_INPUT *bp, int mode)
 					    entry->TargetId);)
 
 					list->EntryCount++;
-
-					ret = verify_area(VERIFY_WRITE,
-					    (void *)u_entry,
-					    sizeof(FO_EXTERNAL_LUN_DATA_ENTRY));
-					if (ret) {
-						/* error */
-						DEBUG2_9_10(printk(
-						    "%s: u_entry %p verify "
-						    "wrt err. EntryCount=%d.\n",
-						    __func__, u_entry,
-						    list->EntryCount);)
-						pext->Status =
-						    EXT_STATUS_COPY_ERR;
-						break;
-					}
 
 					ret = copy_to_user(u_entry, entry,
 					    sizeof(FO_EXTERNAL_LUN_DATA_ENTRY));
@@ -335,12 +323,15 @@ qla2x00_fo_get_lun_data(EXT_IOCTL *pext, FO_LUN_DATA_INPUT *bp, int mode)
 
 	/* find the correct fcport list */
 	if (!ha->flags.failover_enabled)
-		fcport = ha->fcport;
+		fcports = &ha->fcports;
 	else
-		fcport = host->fcport;
+		fcports = host->fcports;
 
 	/* Check thru this adapter's fcport list */
-	for ( ; (fcport); fcport = fcport->next) {
+	fcport = NULL;
+	list_for_each_entry(fcport, fcports, list) {
+		if (fcport->port_type != FCT_TARGET)
+			continue;
 
 		if ((atomic_read(&fcport->state) != FC_ONLINE) &&
 		    !qla2x00_is_fcport_in_config(ha, fcport)) {
@@ -380,17 +371,6 @@ qla2x00_fo_get_lun_data(EXT_IOCTL *pext, FO_LUN_DATA_INPUT *bp, int mode)
 			    entry->TargetId);)
 
 			list->EntryCount++;
-
-			ret = verify_area(VERIFY_WRITE, (void *)u_entry,
-			    sizeof(FO_EXTERNAL_LUN_DATA_ENTRY));
-			if (ret) {
-				/* error */
-				DEBUG2_9_10(printk("%s: u_entry %p "
-				    "verify wrt err. EntryCount=%d.\n",
-				    __func__, u_entry, list->EntryCount);)
-				pext->Status = EXT_STATUS_COPY_ERR;
-				break;
-			}
 
 			ret = copy_to_user(u_entry, entry,
 			    sizeof(FO_EXTERNAL_LUN_DATA_ENTRY));
@@ -466,17 +446,6 @@ qla2x00_fo_get_lun_data(EXT_IOCTL *pext, FO_LUN_DATA_INPUT *bp, int mode)
 			DEBUG9(qla2x00_dump_buffer((char *)&(fcport->lun_mask),
 			    sizeof(lun_bit_mask_t));)
 
-			ret = verify_area(VERIFY_WRITE, (void *)u_entry,
-			    sizeof(FO_EXTERNAL_LUN_DATA_ENTRY));
-			if (ret) {
-				/* error */
-				DEBUG9_10(printk("%s: u_entry %p verify write"
-				    " error. list->EntryCount=%d.\n",
-				    __func__, u_entry, list->EntryCount);)
-				pext->Status = EXT_STATUS_COPY_ERR;
-				break;
-			}
-
 			ret = copy_to_user(u_entry, entry,
 			    sizeof(FO_EXTERNAL_LUN_DATA_ENTRY));
 
@@ -549,24 +518,14 @@ qla2x00_fo_get_lun_data(EXT_IOCTL *pext, FO_LUN_DATA_INPUT *bp, int mode)
 					    path->lun_data.data[lun];
 				}
 
-				ret = verify_area(VERIFY_WRITE, (void *)u_entry,
-				    sizeof(FO_EXTERNAL_LUN_DATA_ENTRY));
-				if (ret) {
-					/* error */
-					DEBUG2_9_10(printk("%s: u_entry %p "
-					    "verify wrt err. EntryCount=%d.\n",
-					    __func__, u_entry, list->EntryCount);)
-					pext->Status = EXT_STATUS_COPY_ERR;
-					break;
-				}
-
 				ret = copy_to_user(u_entry, entry,
 				    sizeof(FO_EXTERNAL_LUN_DATA_ENTRY));
 				if (ret) {
 					/* error */
 					DEBUG2_9_10(printk("%s: u_entry %p "
 					    "copy out err. EntryCount=%d.\n",
-					    __func__, u_entry, list->EntryCount);)
+					    __func__, u_entry,
+					    list->EntryCount);)
 					pext->Status = EXT_STATUS_COPY_ERR;
 					break;
 				}
@@ -598,20 +557,10 @@ qla2x00_fo_get_lun_data(EXT_IOCTL *pext, FO_LUN_DATA_INPUT *bp, int mode)
 	    __func__, list->EntryCount);)
 
 	if (ret == 0) {
-		ret = verify_area(VERIFY_WRITE, (void *)&u_list->EntryCount,
+		/* copy number of entries */
+		ret = copy_to_user(&u_list->EntryCount, &list->EntryCount,
 		    sizeof(list->EntryCount));
-		if (ret) {
-			/* error */
-			DEBUG2_9_10(printk("%s: u_list->EntryCount %p verify "
-			    " write error. list->EntryCount=%d.\n",
-			    __func__, u_entry, list->EntryCount);)
-			pext->Status = EXT_STATUS_COPY_ERR;
-		} else {
-			/* copy number of entries */
-			ret = copy_to_user(&u_list->EntryCount, &list->EntryCount,
-			    sizeof(list->EntryCount));
-			pext->ResponseLen = FO_LUN_DATA_LIST_MAX_SIZE;
-		}
+		pext->ResponseLen = FO_LUN_DATA_LIST_MAX_SIZE;
 	}
 
 	KMEM_FREE(list, sizeof(FO_LUN_DATA_LIST));
@@ -701,17 +650,6 @@ qla2x00_fo_set_lun_data(EXT_IOCTL *pext, FO_LUN_DATA_INPUT  *bp, int mode)
 	u_list = &(com_iter->foLunDataList);
 	u_entry = &u_list->DataEntry[0];
 
-	ret = verify_area(VERIFY_READ, (void *)u_list,
-	    sizeof(FO_LUN_DATA_LIST));
-	if (ret) {
-		/* error */
-		DEBUG2_9_10(printk("%s: u_list %p verify read error.\n",
-		    __func__, u_list);)
-		pext->Status = EXT_STATUS_COPY_ERR;
-		KMEM_FREE(list, FO_LUN_DATA_LIST);
-		return (ret);
-	}
-
 	ret = copy_from_user(list, u_list, sizeof(FO_LUN_DATA_LIST));
 	if (ret) {
 		/* error */
@@ -730,16 +668,6 @@ qla2x00_fo_set_lun_data(EXT_IOCTL *pext, FO_LUN_DATA_INPUT  *bp, int mode)
 
 	for (i = 0; i < list->EntryCount; i++, u_entry++) {
 
-		ret = verify_area(VERIFY_READ, (void *)u_entry,
-		    sizeof(FO_EXTERNAL_LUN_DATA_ENTRY));
-		if (ret) {
-			/* error */
-			DEBUG2_9_10(printk("%s: u_entry %p verify "
-			    " read error.\n",
-			    __func__, u_entry);)
-			pext->Status = EXT_STATUS_COPY_ERR;
-			break;
-		}
 		ret = copy_from_user(entry, u_entry,
 		    sizeof(FO_EXTERNAL_LUN_DATA_ENTRY));
 		if (ret) {
@@ -871,7 +799,7 @@ qla2x00_fo_get_target_data(EXT_IOCTL *pext, FO_TARGET_DATA_INPUT *bp, int mode)
 
 	if (ha->flags.failover_enabled)
 		if ((host = qla2x00_cfg_find_host(ha)) == NULL &&
-		    ha->fcport == NULL) {
+		    list_empty(&ha->fcports)) {
 			DEBUG2_9_10(printk("%s: no HOST for ha inst %ld.\n",
 			    __func__, ha->instance);)
 			pext->Status = EXT_STATUS_DEV_NOT_FOUND;
@@ -911,7 +839,6 @@ qla2x00_std_get_tgt(scsi_qla_host_t *ha, EXT_IOCTL *pext, FO_DEVICE_DATA *entry)
 	uint16_t 	i, cnt;
 	uint32_t	b;
 
-	fcdev_t		*pdev;
 	fc_port_t 	*fcport;
 	os_tgt_t 	*ostgt;
 
@@ -920,8 +847,6 @@ qla2x00_std_get_tgt(scsi_qla_host_t *ha, EXT_IOCTL *pext, FO_DEVICE_DATA *entry)
 	DEBUG9(printk("%s(%ld): entered.\n", __func__, ha->host_no);)
 
 	u_entry = (FO_DEVICE_DATA *) pext->ResponseAdr;
-	/* Failover disabled. Check thru this adapter's fcport list */
-	fcport = ha->fcport;
 
 	if (pext->ResponseLen < sizeof(FO_DEVICE_DATA)) {
 		pext->Status = EXT_STATUS_BUFFER_TOO_SMALL;
@@ -935,7 +860,15 @@ qla2x00_std_get_tgt(scsi_qla_host_t *ha, EXT_IOCTL *pext, FO_DEVICE_DATA *entry)
 	    __func__, ha->host_no, pext->ResponseLen);)
 
 	/* Loop through and return ports found. */
-	for (i = 0; fcport && i < MAX_TARGETS; i++, fcport = fcport->next) {
+	/* Check thru this adapter's fcport list */
+	i = 0;
+	fcport = NULL;
+	list_for_each_entry(fcport, &ha->fcports, list) {
+		if (fcport->port_type != FCT_TARGET)
+			continue;
+	
+		if (i >= MAX_TARGETS)
+			break;
 
 		/* clear for a new entry */
 		memset(entry, 0, sizeof(FO_DEVICE_DATA));
@@ -1003,19 +936,7 @@ qla2x00_std_get_tgt(scsi_qla_host_t *ha, EXT_IOCTL *pext, FO_DEVICE_DATA *entry)
 			entry->MultipathControl = 0; /* always configured */
 		}
 
-		ret = verify_area(VERIFY_WRITE, (void *)u_entry,
-		    sizeof(FO_DEVICE_DATA));
-		if (ret) {
-			/* error */
-			DEBUG2_9_10(printk("%s(%ld): u_entry %p verify "
-			    " wrt err. tgt id=%d.\n",
-			    __func__, ha->host_no, u_entry, cnt);)
-			pext->Status = EXT_STATUS_COPY_ERR;
-			break;
-		}
-
-		ret = copy_to_user(u_entry, entry,
-		    sizeof(FO_DEVICE_DATA));
+		ret = copy_to_user(u_entry, entry, sizeof(FO_DEVICE_DATA));
 		if (ret) {
 			/* error */
 			DEBUG2_9_10(printk("%s(%ld): u_entry %p copy "
@@ -1026,73 +947,9 @@ qla2x00_std_get_tgt(scsi_qla_host_t *ha, EXT_IOCTL *pext, FO_DEVICE_DATA *entry)
 		}
 
 		u_entry++;
-
-		continue;
 	}
 
 	DEBUG9(printk("%s(%ld): done copying fcport list entries.\n",
-	    __func__, ha->host_no);)
-
-	/* For ports not found but were in config file, return unconfigured
-	 * status so agent will try to issue commands to it and GUI will display
-	 * them as missing.
-	 */
-	for (cnt = 0; cnt < MAX_FIBRE_DEVICES; cnt++) {
-		pdev = &ha->fc_db[cnt];
-
-		if (pdev->loop_id == PORT_UNUSED)
-			continue;
-
-		DEBUG9(printk("%s(%ld): found valid loop id %d for tgt %d.\n",
-		    __func__, ha->host_no, pdev->loop_id, cnt);)
-
-		if (pdev->loop_id == PORT_AVAILABLE) {
-			DEBUG9(printk(
-			    "%s(%ld): returning tgt %d as unconfigured.\n",
-			    __func__, ha->host_no, cnt);)
-
-			/* clear for a new entry */
-			memset(entry, 0, sizeof(FO_DEVICE_DATA));
-
-			/* Return unconfigured */
-			memcpy(entry->WorldWideName,
-			    pdev->name, EXT_DEF_WWN_NAME_SIZE);
-			memcpy(entry->PortName,
-			    pdev->wwn, EXT_DEF_WWN_NAME_SIZE);
-
-			for (b = 0; b < 3 ; b++)
-				entry->PortId[b] = pdev->d_id.r.d_id[2-b];
-
-			entry->TargetId = cnt;
-			entry->MultipathControl = MP_MASK_UNCONFIGURED;
-
-			ret = verify_area(VERIFY_WRITE, (void *)u_entry,
-			    sizeof(FO_DEVICE_DATA));
-			if (ret) {
-				/* error */
-				DEBUG2_9_10(printk("%s(%ld): u_entry %p verify "
-				    " wrt err. tgt id=%d.\n",
-				    __func__, ha->host_no, u_entry, cnt);)
-				pext->Status = EXT_STATUS_COPY_ERR;
-				break;
-			}
-
-			ret = copy_to_user(u_entry, entry,
-			    sizeof(FO_DEVICE_DATA));
-			if (ret) {
-				/* error */
-				DEBUG2_9_10(printk("%s(%ld): u_entry %p copy "
-				    "out err. tgt id=%d.\n",
-				    __func__, ha->host_no, u_entry, cnt);)
-				pext->Status = EXT_STATUS_COPY_ERR;
-				break;
-			}
-
-			u_entry++;
-		}
-	}
-
-	DEBUG9(printk("%s(%ld): done copying unconfigured dev entries.\n",
 	    __func__, ha->host_no);)
 
 	DEBUG9(printk("%s(%ld): exiting. ret = %d.\n",
@@ -1106,7 +963,6 @@ qla2x00_fo_get_tgt(mp_host_t *host, scsi_qla_host_t *ha,
     EXT_IOCTL *pext, FO_DEVICE_DATA *entry)
 {
 	int		ret = 0;
-	uint8_t 	i;
 	uint8_t 	path_id;
 	uint16_t	dev_no;
 	uint32_t	b;
@@ -1127,14 +983,14 @@ qla2x00_fo_get_tgt(mp_host_t *host, scsi_qla_host_t *ha,
 	 * ha as unconfigured devices.  ha should never be NULL.
 	 */
 	if (host == NULL) {
-		fcport = ha->fcport;
-
-		/* Check thru fcport list and return Unconfigured on all
-		 * ports found.
-		 */
-		for (i = 0; fcport && i < MAX_TARGETS;
-		    i++, fcport = fcport->next, cnt++) {
-
+		/* Loop through and return ports found. */
+		/* Check thru this adapter's fcport list */
+		cnt = 0;
+		fcport = NULL;
+		list_for_each_entry(fcport, &ha->fcports, list) {
+			if (fcport->port_type != FCT_TARGET)
+				continue;
+	
 			if (atomic_read(&fcport->state) != FC_ONLINE) {
 				/* no need to report */
 				DEBUG2_9_10(printk("%s(%ld): not reporting "
@@ -1149,6 +1005,10 @@ qla2x00_fo_get_tgt(mp_host_t *host, scsi_qla_host_t *ha,
 				    fcport->flags);)
 				continue;
 			}
+
+			cnt++;
+			if (cnt >= MAX_TARGETS)
+				break;
 
 			/* clear for a new entry */
 			memset(entry, 0, sizeof(FO_DEVICE_DATA));
@@ -1186,17 +1046,6 @@ qla2x00_fo_get_tgt(mp_host_t *host, scsi_qla_host_t *ha,
 			    entry->TargetId, entry->Dev_No,
 			    entry->MultipathControl);)
 
-			ret = verify_area(VERIFY_WRITE, (void *)u_entry,
-			    sizeof(FO_DEVICE_DATA));
-			if (ret) {
-				/* error */
-				DEBUG2_9_10(printk("%s(%ld): u_entry %p "
-				    "verify wrt err. no tgt id.\n",
-				    __func__, host->ha->host_no, u_entry);)
-				pext->Status = EXT_STATUS_COPY_ERR;
-				break;
-			}
-
 			ret = copy_to_user(u_entry, entry,
 			    sizeof(FO_DEVICE_DATA));
 			if (ret) {
@@ -1219,12 +1068,14 @@ qla2x00_fo_get_tgt(mp_host_t *host, scsi_qla_host_t *ha,
 	}
 
 	/* Check thru fcport list on host */
-	fcport = host->fcport;
-
-	/* Check thru fcport list and return data on online ports found. */
-	for (i = 0; fcport && i < MAX_TARGETS; i++, fcport = fcport->next,
-	    cnt++) {
-
+	/* Loop through and return online ports found. */
+	/* Check thru this adapter's fcport list */
+	cnt = 0;
+	fcport = NULL;
+	list_for_each_entry(fcport, host->fcports, list) {
+		if (fcport->port_type != FCT_TARGET)
+			continue;
+	
 		if ((atomic_read(&fcport->state) != FC_ONLINE) &&
 		    !qla2x00_is_fcport_in_config(ha, fcport)) {
 			/* no need to report */
@@ -1240,6 +1091,10 @@ qla2x00_fo_get_tgt(mp_host_t *host, scsi_qla_host_t *ha,
 			    fcport->flags);)
 			continue;
 		}
+
+		cnt++;
+		if (cnt >= MAX_TARGETS)
+			break;
 
 		/* clear for a new entry */
 		memset(entry, 0, sizeof(FO_DEVICE_DATA));
@@ -1281,18 +1136,6 @@ qla2x00_fo_get_tgt(mp_host_t *host, scsi_qla_host_t *ha,
 			DEBUG9_10(printk("tgtid=%d dev_no=%d, mpdata=0x%x.\n",
 			    entry->TargetId, entry->Dev_No,
 			    entry->MultipathControl);)
-
-			ret = verify_area(VERIFY_WRITE, (void *)u_entry,
-			    sizeof(FO_DEVICE_DATA));
-			if (ret) {
-				/* error */
-				DEBUG2_9_10(printk("%s(%ld): u_entry %p "
-				    "verify wrt err. tgt id=%d.\n",
-				    __func__, host->ha->host_no, u_entry,
-				    fcport->dev_id);)
-				pext->Status = EXT_STATUS_COPY_ERR;
-				break;
-			}
 
 			ret = copy_to_user(u_entry, entry,
 			    sizeof(FO_DEVICE_DATA));
@@ -1342,12 +1185,18 @@ qla2x00_fo_get_tgt(mp_host_t *host, scsi_qla_host_t *ha,
 					memcpy(entry->WorldWideName,
 					    dp->nodename,
 					    EXT_DEF_WWN_NAME_SIZE);
-DEBUG4(printk(KERN_INFO "%s XP device:copy the node name from mp_dev:%0x\n",__func__,dp->nodename[7]);)
+					DEBUG4(printk(KERN_INFO "%s XP device"
+					    " :copy the node name from " 
+					    "mp_dev:%0x\n",__func__,
+					    dp->nodename[7]);)
 				} else {
 					memcpy(entry->WorldWideName,
 					    fcport->node_name,
 					    EXT_DEF_WWN_NAME_SIZE);
-DEBUG4(printk(KERN_INFO "%s :copy the node name from fcport:%0x\n",__func__,dp->nodename[7]);)
+					DEBUG4(printk(KERN_INFO "%s :" 
+					    " copy the node name from " 
+					    " fcport:%0x\n",__func__, 
+					      dp->nodename[7]);)
 				}
 
 				entry->TargetId = dp->dev_id;
@@ -1365,18 +1214,6 @@ DEBUG4(printk(KERN_INFO "%s :copy the node name from fcport:%0x\n",__func__,dp->
 				    "= %d, target/mpbyte data = 0x%02x.\n",
 				    __func__, host->ha->host_no,
 				    path->id, entry->MultipathControl);)
-
-				ret = verify_area(VERIFY_WRITE, (void *)u_entry,
-				    sizeof(FO_DEVICE_DATA));
-				if (ret) {
-					/* error */
-					DEBUG2_9_10(printk("%s(%ld): u_entry %p"
-					    " verify wrt err. tgt id=%d.\n",
-					    __func__, host->ha->host_no,
-					    u_entry, dp->dev_id);)
-					pext->Status = EXT_STATUS_COPY_ERR;
-					break;
-				}
 
 				ret = copy_to_user(u_entry, entry,
 				    sizeof(FO_DEVICE_DATA));
@@ -1402,7 +1239,7 @@ DEBUG4(printk(KERN_INFO "%s :copy the node name from fcport:%0x\n",__func__,dp->
 	DEBUG9(printk("%s(%ld): after checking fcport list. got %d entries.\n",
 	    __func__, host->ha->host_no, cnt);)
 
-	/* For ports not found but were in config file, return unconfigured
+	/* For ports not found but were in config file, return configured
 	 * status so agent will try to issue commands to it and GUI will display
 	 * them as missing.
 	 */
@@ -1451,11 +1288,7 @@ DEBUG4(printk(KERN_INFO "%s :copy the node name from fcport:%0x\n",__func__,dp->
 
 				entry->TargetId = dp->dev_id;
 				entry->Dev_No = path->id;
-				/*
-				entry->MultipathControl = path->mp_byte
-				    | MP_MASK_UNCONFIGURED;
-				    */
-				entry->MultipathControl = MP_MASK_UNCONFIGURED;
+				entry->MultipathControl = path->mp_byte;
 				cnt++;
 
 				DEBUG9_10(printk("%s: found missing device. "
@@ -1467,17 +1300,6 @@ DEBUG4(printk(KERN_INFO "%s :copy the node name from fcport:%0x\n",__func__,dp->
 				    path->portname[2], path->portname[3],
 				    path->portname[4], path->portname[5],
 				    path->portname[6], path->portname[7]);)
-
-				ret = verify_area(VERIFY_WRITE, (void *)u_entry,
-				    sizeof(FO_DEVICE_DATA));
-				if (ret) {
-					/* error */
-					DEBUG2_9_10(printk("%s: u_entry %p "
-					    "verify wrt err. tgt id=%d.\n",
-					    __func__, u_entry, dp->dev_id);)
-					pext->Status = EXT_STATUS_COPY_ERR;
-					break;
-				}
 
 				ret = copy_to_user(u_entry, entry,
 				    sizeof(FO_DEVICE_DATA));
@@ -1571,18 +1393,7 @@ qla2x00_fo_set_target_data(EXT_IOCTL *pext, FO_TARGET_DATA_INPUT  *bp, int mode)
 	    sizeof(FO_TARGET_DATA_INPUT));
 
 	for (i = 0; i < MAX_TARGETS; i++, u_entry++) {
-		ret = verify_area(VERIFY_READ, (void *)u_entry,
-		    sizeof(FO_DEVICE_DATA));
-		if (ret) {
-			/* error */
-			DEBUG2_9_10(printk("%s: u_entry %p verify read err.\n",
-			    __func__, u_entry);)
-			pext->Status = EXT_STATUS_COPY_ERR;
-			break;
-		}
-
 		ret = copy_from_user(entry, u_entry, sizeof(FO_DEVICE_DATA));
-
 		if (ret) {
 			/* error */
 			DEBUG2_9_10(printk("%s: u_entry %p copy error.\n",
@@ -1726,19 +1537,7 @@ qla2x00_fo_ioctl(scsi_qla_host_t *ha, int ioctl_code, EXT_IOCTL *pext, int mode)
 			    __func__, pext->RequestLen);)
 
 		} else {
-
-			rval = verify_area(VERIFY_READ,
-			    (void *)pext->RequestAdr, in_size);
-			if (rval) {
-				/* error */
-				DEBUG2_9_10(printk("%s: req buf verify read "
-				    "error. size=%ld.\n",
-				    __func__, (ulong)in_size);)
-				pext->Status = EXT_STATUS_COPY_ERR;
-			}
-			rval = copy_from_user(&buff,
-			    (void *)pext->RequestAdr, in_size);
-
+			rval = copy_from_user(&buff, pext->RequestAdr, in_size);
 			if (rval) {
 				DEBUG2_9_10(printk("%s: req buf copy error. "
 				    "size=%ld.\n",
@@ -1835,21 +1634,9 @@ qla2x00_fo_ioctl(scsi_qla_host_t *ha, int ioctl_code, EXT_IOCTL *pext, int mode)
 
 	}
 
-	if (rval == 0 && (pext->ResponseLen = out_size) != 0) {
-		rval = verify_area(VERIFY_WRITE, (void *)pext->ResponseAdr,
-		    out_size);
-		if (rval != 0) {
-			DEBUG10(printk("%s: resp buf very write error.\n",
-			    __func__);)
-			pext->Status = EXT_STATUS_COPY_ERR;
-		}
-	}
-
 	if (rval == 0) {
-		rval = copy_to_user((void *)pext->ResponseAdr,
-		    &buff, out_size);
-
-		if (rval != 0) {
+		rval = copy_to_user(pext->ResponseAdr, &buff, out_size);
+		if (rval) {
 			DEBUG10(printk("%s: resp buf copy error. size=%ld.\n",
 			    __func__, (ulong)out_size);)
 			pext->Status = EXT_STATUS_COPY_ERR;
@@ -1891,6 +1678,7 @@ qla2x00_fo_count_retries(scsi_qla_host_t *ha, srb_t *sp)
 	BOOL		retry = TRUE;
 	os_lun_t	*lq;
 	os_tgt_t	*tq;
+	scsi_qla_host_t	*vis_ha;
 
 	DEBUG9(printk("%s: entered.\n", __func__);)
 
@@ -1930,7 +1718,9 @@ qla2x00_fo_count_retries(scsi_qla_host_t *ha, srb_t *sp)
 			sp->f_start=jiffies;/*ra 10/29/01*/
 			/* Now queue it on to be failover */
 			sp->ha = ha;
-			add_to_failover_queue(ha,sp);
+			/* we can only failover using the visible HA */
+		 	vis_ha = (scsi_qla_host_t *) sp->cmd->host->hostdata;
+			add_to_failover_queue(vis_ha,sp);
 		}
 	}
 
@@ -1939,6 +1729,53 @@ qla2x00_fo_count_retries(scsi_qla_host_t *ha, srb_t *sp)
 	return retry ;
 }
 
+BOOL
+qla2x00_fo_check_device(scsi_qla_host_t *ha, srb_t *sp)
+{
+	
+	BOOL		retry = FALSE;
+	os_lun_t	*lq;
+	Scsi_Cmnd 	 *cp;
+	fc_port_t 	 *fcport;
+	
+	if ( !(sp->flags & SRB_GOT_SENSE) )
+		return retry;
+
+	cp = sp->cmd;
+	lq = sp->lun_queue;
+	fcport = lq->fclun->fcport;
+	switch (cp->sense_buffer[2] & 0xf) {
+
+		case NOT_READY:
+			if ( (fcport->flags & (FC_MSA_DEVICE|FC_EVA_DEVICE)) ) {
+				/*
+				 * if we can't access port 
+				 */
+				if ((cp->sense_buffer[12] == 0x4 &&
+					cp->sense_buffer[13] == 0x0)) {
+				 	sp->err_id = SRB_ERR_DEVICE;
+					return (TRUE);
+				}
+			} 
+			break;
+
+		case UNIT_ATTENTION:
+			if ( (fcport->flags & FC_EVA_DEVICE) ) {
+				if ((cp->sense_buffer[12] == 0xa &&
+					cp->sense_buffer[13] == 0x8)) {
+				 	sp->err_id = SRB_ERR_DEVICE;
+					return (TRUE);
+				}
+				if ((cp->sense_buffer[12] == 0xa &&
+					cp->sense_buffer[13] == 0x9)) {
+					/* failback lun */
+				}
+			} 
+			break;
+
+	} /* end of switch */
+	return (retry);
+}
 
 /*
  * qla2x00_fo_check
@@ -1986,7 +1823,9 @@ qla2x00_fo_check(scsi_qla_host_t *ha, srb_t *sp)
 
 	/* we failover on selction timeouts only */
 	host_status = CMD_RESULT(sp->cmd) >>16;
-	if( host_status == DID_NO_CONNECT) {
+	if( host_status == DID_NO_CONNECT ||
+		qla2x00_fo_check_device(ha, sp) ) {
+			
 		if( qla2x00_fo_count_retries(ha,sp) ) {
 			/* Force a retry  on this request, it will
 			 * cause the LINUX timer to get reset, while we
@@ -2001,6 +1840,12 @@ qla2x00_fo_check(scsi_qla_host_t *ha, srb_t *sp)
 				sp->cmd->serial_number,
 				sp, sp->fo_retry_cnt,
 				retry, reason[host_status]);)
+		DEBUG(printk("qla2x00_fo_check: pid= %ld sp %p "
+				"retry count=%d, retry flag = %d, "
+				"host status=%d\n\r",
+				sp->cmd->serial_number,
+				sp, sp->fo_retry_cnt,
+				retry, host_status);)
 	}
 
 	DEBUG9(printk("%s: exiting. retry = %d.\n", __func__, retry);)
@@ -2168,10 +2013,11 @@ static int
 qla2x00_spinup(scsi_qla_host_t *ha, fc_port_t *fcport, uint16_t lun) 
 {
 	inq_cmd_rsp_t	*pkt;
-	int		rval, count, retry;
+	int		rval = QLA2X00_SUCCESS;
+	int		count, retry;
 	dma_addr_t	phys_address = 0;
-	uint16_t	comp_status;
-	uint16_t	scsi_status;
+	uint16_t	comp_status = CS_COMPLETE;
+	uint16_t	scsi_status = 0;
 
 	ENTER(__func__);
 
@@ -2182,17 +2028,27 @@ qla2x00_spinup(scsi_qla_host_t *ha, fc_port_t *fcport, uint16_t lun)
 		printk(KERN_WARNING
 			"scsi(%ld): Memory Allocation failed - INQ\n",
 			ha->host_no);
+		return( QLA2X00_FAILED);
 	}
 
 	count = 5; 
 	retry = 5;
-	do {
+	if (atomic_read(&fcport->state) != FC_ONLINE){
+		DEBUG2(printk("scsi(%ld) %s leaving: Port 0x%02x is not ONLINE\n",
+			ha->host_no,__func__,fcport->loop_id);)
+		rval =  QLA2X00_FAILED;
+	}
+	else do {
 		/* issue spinup */
 		memset(pkt, 0, sizeof(inq_cmd_rsp_t));
 		pkt->p.cmd.entry_type = COMMAND_A64_TYPE;
 		pkt->p.cmd.entry_count = 1;
 		pkt->p.cmd.lun = cpu_to_le16(lun);
+#if defined(EXTENDED_IDS)
+		pkt->p.cmd.target = cpu_to_le16(fcport->loop_id);
+#else
 		pkt->p.cmd.target = (uint8_t)fcport->loop_id;
+#endif
 		/* no direction for this command */
 		pkt->p.cmd.control_flags =
 			__constant_cpu_to_le16(CF_SIMPLE_TAG);
@@ -2213,8 +2069,9 @@ qla2x00_spinup(scsi_qla_host_t *ha, fc_port_t *fcport, uint16_t lun)
 			comp_status == CS_PORT_CONFIG_CHG ||
 			comp_status == CS_PORT_BUSY ||
 			comp_status == CS_INCOMPLETE ||
-			comp_status == CS_PORT_UNAVAILABLE )
+			comp_status == CS_PORT_UNAVAILABLE ) {
 			break;
+		}
 
 		if ( (scsi_status & SS_CHECK_CONDITION) ) {
 				DEBUG2(printk("%s(%ld): SS_CHECK_CONDITION "
@@ -2276,6 +2133,7 @@ qla2x00_spinup(scsi_qla_host_t *ha, fc_port_t *fcport, uint16_t lun)
 				comp_status,
 				scsi_status, 
 				fcport->loop_id);)
+				rval =  QLA2X00_FAILED;
 	}
 
 	pci_free_consistent(ha->pdev, sizeof(inq_cmd_rsp_t),
@@ -2316,6 +2174,11 @@ qla2x00_send_fo_notification(fc_lun_t *old_lp, fc_lun_t *new_lp)
 	ENTER("qla2x00_send_fo_notification");
 	DEBUG3(printk("%s: entered.\n", __func__);)
 
+	if( new_lp->fcport == NULL ){
+		DEBUG2(printk("qla2x00_send_fo_notification: No "
+			    "new fcport for lun pointer\n");)
+		return QLA2X00_FAILED;
+	}
 	loop_id = new_lp->fcport->loop_id;
 	lun = new_lp->lun;
 
@@ -2348,7 +2211,8 @@ qla2x00_send_fo_notification(fc_lun_t *old_lp, fc_lun_t *new_lp)
 
 	if (qla_fo_params.FailoverNotifyType == FO_NOTIFY_TYPE_SPINUP ||
 		new_lp->fcport->notify_type == FO_NOTIFY_TYPE_SPINUP ) {
-		qla2x00_spinup(new_lp->fcport->ha, new_lp->fcport, new_lp->lun); 
+		rval = qla2x00_spinup(new_lp->fcport->ha, new_lp->fcport, 
+			new_lp->lun); 
 	}
 
 	if (qla_fo_params.FailoverNotifyType == FO_NOTIFY_TYPE_CDB) {
@@ -2365,7 +2229,11 @@ qla2x00_send_fo_notification(fc_lun_t *old_lp, fc_lun_t *new_lp)
 		pkt->p.cmd.entry_type = COMMAND_A64_TYPE;
 		pkt->p.cmd.entry_count = 1;
 		pkt->p.cmd.lun = cpu_to_le16(lun);
+#if defined(EXTENDED_IDS)
+		pkt->p.cmd.target = cpu_to_le16(loop_id);
+#else
 		pkt->p.cmd.target = (uint8_t)loop_id;
+#endif
 		/* FIXME: How do you know the direction ???? */
 		/* This has same issues as passthur commands - you 
 		 * need more than just the CDB.
@@ -2377,9 +2245,9 @@ qla2x00_send_fo_notification(fc_lun_t *old_lp, fc_lun_t *new_lp)
 		pkt->p.cmd.dseg_count = __constant_cpu_to_le16(1);
 		pkt->p.cmd.byte_count = __constant_cpu_to_le32(0);
 		pkt->p.cmd.dseg_0_address[0] = cpu_to_le32(
-		      pci_dma_lo32(phys_address + sizeof(sts_entry_t)));
+		      LSD(phys_address + sizeof(sts_entry_t)));
 		pkt->p.cmd.dseg_0_address[1] = cpu_to_le32(
-		      pci_dma_hi32(phys_address + sizeof(sts_entry_t)));
+		      MSD(phys_address + sizeof(sts_entry_t)));
 		pkt->p.cmd.dseg_0_length = __constant_cpu_to_le32(0);
 
 		rval = qla2x00_issue_iocb(old_ha, pkt, phys_address,
@@ -2581,19 +2449,6 @@ qla2x00_fo_missing_port_summary(scsi_qla_host_t *ha,
 				    sizeof(EXT_DEVICEDATAENTRY);
 
 				transfer_size = sizeof(EXT_DEVICEDATAENTRY);
-				ret = verify_area(VERIFY_WRITE,
-				    (void *)(pstart_of_entry_list +
-				    current_offset), transfer_size);
-
-				if (ret) {
-					*ret_status = EXT_STATUS_COPY_ERR;
-					DEBUG10(printk("%s(%ld): inst=%ld "
-					    "ERROR verify wrt rsp bufaddr=%p\n",
-					    __func__, ha->host_no, ha->instance,
-					    (void *)(pstart_of_entry_list +
-					    current_offset));)
-					break;
-				}
 
 				/* now copy up this dd_entry to user */
 				usr_temp = (uint8_t *)pstart_of_entry_list +

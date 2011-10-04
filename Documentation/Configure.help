@@ -11589,6 +11589,16 @@ CONFIG_TIGON3
   say M here and read <file:Documentation/modules.txt>.  This is
   recommended.  The module will be called tg3.o.
 
+IBM PowerPC Virtual SCSI
+CONFIG_SCSI_IBMVSCSI
+  This driver supports virtual SCSI adapters on newer IBM iSeries 
+  and pSeries systems.  
+
+  If you want to compile the driver as a module ( = code which can be
+  inserted in and removed from the running kernel whenever you want),
+  say M here and read <file:Documentation/modules.txt>.  The module
+  will be called ibmvscsic.o.
+
 MyriCOM Gigabit Ethernet support
 CONFIG_MYRI_SBUS
   This driver supports MyriCOM Sbus gigabit Ethernet cards.
@@ -16778,7 +16788,7 @@ CONFIG_AUTOFS4_FS
   automounter (amd), which is a pure user space daemon.
 
   To use the automounter you need the user-space tools from
-  <ftp://ftp.kernel.org/pub/linux/daemons/autofs/testing-v4/>; you also
+  <ftp://ftp.kernel.org/pub/linux/daemons/autofs/v4/>; you also
   want to answer Y to "NFS file system support", below.
 
   If you want to compile this as a module ( = code which can be

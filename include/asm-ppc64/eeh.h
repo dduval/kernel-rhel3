@@ -83,11 +83,14 @@ extern void *memset(void *,int, unsigned long);
  * If this macro yields TRUE, the caller relays to eeh_check_failure()
  * which does further tests out of line.
  */
-/* #define EEH_POSSIBLE_IO_ERROR(val) (~(val) == 0) */
-/* #define EEH_POSSIBLE_ERROR(addr, vaddr, val) ((vaddr) != (addr) && EEH_POSSIBLE_IO_ERROR(val) */
-/* This version is rearranged to collect some profiling data */
-#define EEH_POSSIBLE_IO_ERROR(val) (~(val) == 0 && ++eeh_total_mmio_ffs)
-#define EEH_POSSIBLE_ERROR(addr, vaddr, val) (EEH_POSSIBLE_IO_ERROR(val) && (vaddr) != (addr))
+#define EEH_POSSIBLE_IO_ERROR(val, type) ((val) == (type)~0)
+
+/* The vaddr will equal the addr if EEH checking is disabled for
+ * this device.  This is because eeh_ioremap() will not have
+ * remapped to 0xA0, and thus both vaddr and addr will be 0xE0...
+ */
+#define EEH_POSSIBLE_ERROR(addr, vaddr, val, type) \
+	((vaddr) != (addr) && EEH_POSSIBLE_IO_ERROR(val, type))
 
 /* 
  * MMIO read/write operations with EEH support.
@@ -106,7 +109,7 @@ extern void *memset(void *,int, unsigned long);
 static inline u8 eeh_readb(void *addr) {
 	volatile u8 *vaddr = (volatile u8 *)IO_TOKEN_TO_ADDR(addr);
 	u8 val = in_8(vaddr);
-	if (EEH_POSSIBLE_ERROR(addr, vaddr, val))
+	if (EEH_POSSIBLE_ERROR(addr, vaddr, val, u8))
 		return eeh_check_failure(addr, val);
 	return val;
 }
@@ -117,7 +120,7 @@ static inline void eeh_writeb(u8 val, void *addr) {
 static inline u16 eeh_readw(void *addr) {
 	volatile u16 *vaddr = (volatile u16 *)IO_TOKEN_TO_ADDR(addr);
 	u16 val = in_le16(vaddr);
-	if (EEH_POSSIBLE_ERROR(addr, vaddr, val))
+	if (EEH_POSSIBLE_ERROR(addr, vaddr, val, u16))
 		return eeh_check_failure(addr, val);
 	return val;
 }
@@ -128,7 +131,7 @@ static inline void eeh_writew(u16 val, void *addr) {
 static inline u16 eeh_raw_readw(void *addr) {
 	volatile u16 *vaddr = (volatile u16 *)IO_TOKEN_TO_ADDR(addr);
 	u16 val = in_be16(vaddr);
-	if (EEH_POSSIBLE_ERROR(addr, vaddr, val))
+	if (EEH_POSSIBLE_ERROR(addr, vaddr, val, u16))
 		return eeh_check_failure(addr, val);
 	return val;
 }
@@ -139,7 +142,7 @@ static inline void eeh_raw_writew(u16 val, void *addr) {
 static inline u32 eeh_readl(void *addr) {
 	volatile u32 *vaddr = (volatile u32 *)IO_TOKEN_TO_ADDR(addr);
 	u32 val = in_le32(vaddr);
-	if (EEH_POSSIBLE_ERROR(addr, vaddr, val))
+	if (EEH_POSSIBLE_ERROR(addr, vaddr, val, u32))
 		return eeh_check_failure(addr, val);
 	return val;
 }
@@ -150,7 +153,7 @@ static inline void eeh_writel(u32 val, void *addr) {
 static inline u32 eeh_raw_readl(void *addr) {
 	volatile u32 *vaddr = (volatile u32 *)IO_TOKEN_TO_ADDR(addr);
 	u32 val = in_be32(vaddr);
-	if (EEH_POSSIBLE_ERROR(addr, vaddr, val))
+	if (EEH_POSSIBLE_ERROR(addr, vaddr, val, u32))
 		return eeh_check_failure(addr, val);
 	return val;
 }
@@ -201,7 +204,7 @@ static inline u8 eeh_inb(unsigned long port) {
 	if (_IO_IS_ISA(port) && !_IO_HAS_ISA_BUS)
 		return ~0;
 	val = in_8((u8 *)(port+pci_io_base));
-	if (!_IO_IS_ISA(port) && EEH_POSSIBLE_IO_ERROR(val))
+	if (!_IO_IS_ISA(port) && EEH_POSSIBLE_IO_ERROR(val, u8))
 		return eeh_check_failure((void*)(port+pci_io_base), val);
 	return val;
 }
@@ -216,7 +219,7 @@ static inline u16 eeh_inw(unsigned long port) {
 	if (_IO_IS_ISA(port) && !_IO_HAS_ISA_BUS)
 		return ~0;
 	val = in_le16((u16 *)(port+pci_io_base));
-	if (!_IO_IS_ISA(port) && EEH_POSSIBLE_IO_ERROR(val))
+	if (!_IO_IS_ISA(port) && EEH_POSSIBLE_IO_ERROR(val, u16))
 		return eeh_check_failure((void*)(port+pci_io_base), val);
 	return val;
 }
@@ -231,7 +234,7 @@ static inline u32 eeh_inl(unsigned long port) {
 	if (_IO_IS_ISA(port) && !_IO_HAS_ISA_BUS)
 		return ~0;
 	val = in_le32((u32 *)(port+pci_io_base));
-	if (!_IO_IS_ISA(port) && EEH_POSSIBLE_IO_ERROR(val))
+	if (!_IO_IS_ISA(port) && EEH_POSSIBLE_IO_ERROR(val, u32))
 		return eeh_check_failure((void*)(port+pci_io_base), val);
 	return val;
 }

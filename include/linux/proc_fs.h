@@ -25,7 +25,7 @@ enum {
 /* Finally, the dynamically allocatable proc entries are reserved: */
 
 #define PROC_DYNAMIC_FIRST 4096
-#define PROC_NDYNAMIC      16384 
+#define PROC_NDYNAMIC      (65536 - PROC_DYNAMIC_FIRST)
 
 #define PROC_SUPER_MAGIC 0x9fa0
 

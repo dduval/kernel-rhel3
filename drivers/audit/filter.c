@@ -434,13 +434,13 @@ __audit_get_target(unsigned int n,
 
 		if (parent_target == NULL
 		 || parent_target->at_type != AUDIT_ARG_PATH)
-			goto invalid;
+			return ERR_PTR(-ENOENT);
 
 		dentry = parent_target->at_path.dentry;
 		while (!(inode = dentry->d_inode)) {
 			up = dentry->d_parent;
 			if (dentry == up)
-				goto invalid;
+				return ERR_PTR(-ENOENT);
 			dentry = up;
 		}
 

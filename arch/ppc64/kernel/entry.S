@@ -408,6 +408,11 @@ END_FTR_SECTION_IFSET(CPU_FTR_ALTIVEC)
 	std	r0,THREAD+KSP(r13)	/* save kernel stack pointer */
 	std	r1,PACAKSAVE(r4)	/* save exception stack pointer */
 1:
+	mfmsr	r0
+	li	r2, MSR_RI
+	andc	r0,r0,r2
+	mtmsrd	r0,1
+
 	ld	r0,_MSR(r1)
 	mtspr	SRR1,r0
 	ld	r2,_CCR(r1)
@@ -499,6 +504,12 @@ _STATIC(rtas_return_loc)
 	mfspr	r4,SPRG3	        /* Get PACA */
 	SET_REG_TO_CONST(r5, KERNELBASE)
         sub     r4,r4,r5                /* RELOC the PACA base pointer */
+
+	mfmsr	r6			/* Clear RI while SRR0/1 are live */
+	li	r0,MSR_RI
+	andc	r6,r6,r0
+	sync
+	mtmsrd	r6
         
         ld	r1,PACAR1(r4)           /* Restore our SP */
 	LOADADDR(r3,.rtas_restore_regs)

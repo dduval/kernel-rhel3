@@ -1407,16 +1407,14 @@ acpi_bus_add (
 	switch (type) {
 	case ACPI_BUS_TYPE_DEVICE:
 		result = acpi_bus_get_status(device);
-		if (result)
-			goto end;
-		break;
+		if (!result)
+			break;
+		if (!device->status.present)
+			result = -ENOENT;
+		goto end;
 	default:
 		STRUCT_TO_INT(device->status) = 0x0F;
 		break;
-	}
-	if (!device->status.present) {
-		result = -ENOENT;
-		goto end;
 	}
 
 	/*
@@ -1878,9 +1876,14 @@ acpi_bus_init (void)
 
 #ifdef CONFIG_X86
         /* Ensure the SCI is set to level-triggered, active-low */
-        if (acpi_ioapic)
-         	mp_config_ioapic_for_sci(acpi_fadt.sci_int);
-	else
+	if (acpi_ioapic) {
+		extern int acpi_sci_override_gsi;
+		/*
+		 * now that acpi_fadt is initialized,
+		 * update it with result from INT_SRC_OVR parsing
+		 */
+		acpi_fadt.sci_int = acpi_sci_override_gsi;
+	} else
                 eisa_set_level_irq(acpi_fadt.sci_int);
 #endif
 

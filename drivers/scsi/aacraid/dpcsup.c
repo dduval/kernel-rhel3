@@ -29,7 +29,6 @@
  *
  */
 
-#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/types.h>
@@ -38,10 +37,8 @@
 #include <linux/spinlock.h>
 #include <linux/slab.h>
 #include <linux/completion.h>
-#include <linux/blk.h>
+#include <linux/blkdev.h>
 #include <asm/semaphore.h>
-#include "scsi.h"
-#include "hosts.h"
 
 #include "aacraid.h"
 
@@ -65,7 +62,6 @@ unsigned int aac_response_normal(struct aac_queue * q)
 	unsigned long flags;
 
 	spin_lock_irqsave(q->lock, flags);	
-
 	/*
 	 *	Keep pulling response QEs off the response queue and waking
 	 *	up the waiters until there are no more QEs. We then return
@@ -74,12 +70,12 @@ unsigned int aac_response_normal(struct aac_queue * q)
 	 */
 	while(aac_consumer_get(dev, q, &entry))
 	{
-		u32 fast ;
-		fast = (entry->addr & cpu_to_le32(0x01));
-//		fib = &dev->fibs[(entry->addr >> 1)];
-//		hwfib = fib->hw_fib;
-		hwfib = bus_to_virt(le32_to_cpu(entry->addr & cpu_to_le32(~0x01)));
-		fib = &dev->fibs[hwfib->header.SenderData];
+		int fast;
+		u32 index;
+		index = le32_to_cpu(entry->addr);
+		fast = index & 0x01;
+		fib = &dev->fibs[index >> 2];
+		hwfib = fib->hw_fib;
 
 		aac_consumer_free(dev, q, HostNormRespQueue);
 		/*
@@ -95,6 +91,7 @@ unsigned int aac_response_normal(struct aac_queue * q)
 			dev->queues->queue[AdapNormCmdQueue].numpending--;
 		} else {
 			printk(KERN_WARNING "aacraid: FIB timeout (%x).\n", fib->flags);
+			printk(KERN_DEBUG"aacraid: hwfib=%p index=%i fib=%p\n",hwfib, hwfib->header.SenderData,fib);
 			continue;
 		}
 		spin_unlock_irqrestore(q->lock, flags);
@@ -138,8 +135,9 @@ unsigned int aac_response_normal(struct aac_queue * q)
 		spin_lock_irqsave(q->lock, flags);
 	}
 
-	if (consumed > aac_config.peak_fibs)
+	if (consumed > aac_config.peak_fibs) {
 		aac_config.peak_fibs = consumed;
+	}
 	if (consumed == 0) 
 		aac_config.zero_fibs++;
 
@@ -171,36 +169,37 @@ unsigned int aac_command_normal(struct aac_queue *q)
 	 *	up the waiters until there are no more QEs. We then return
 	 *	back to the system.
 	 */
-	dprintk((KERN_INFO
-	  "dev=%p, dev->comm_phys=%x, dev->comm_addr=%p, dev->comm_size=%u\n",
-	  dev, (u32)dev->comm_phys, dev->comm_addr, (unsigned)dev->comm_size));
-
 	while(aac_consumer_get(dev, q, &entry))
 	{
 		struct fib fibctx;
+		struct hw_fib * hw_fib;
+		u32 index;
 		struct fib *fib = &fibctx;
-		u32 hw_fib_pa = le32_to_cpu(entry->addr & cpu_to_le32(~0x01));
-		struct hw_fib * hw_fib_va = ((dev->comm_phys <= hw_fib_pa)
-		 && (hw_fib_pa < (dev->comm_phys + dev->comm_size)))
-		  ? dev->comm_addr + (hw_fib_pa - dev->comm_phys)
-		  : /* inconceivable */ bus_to_virt(hw_fib_pa);
-		dprintk((KERN_INFO "hw_fib_pa=%x hw_fib_va=%p\n", hw_fib_pa, hw_fib_va));
 
 		/*
-		 *	Allocate a FIB at all costs. For non queued stuff
-		 *	we can just use the stack so we are happy. We need
-		 *	a fib object in order to manage the linked lists
+		 *	Allocate a FIB. For non queued stuff we can just use
+		 * the stack so we are happy. We need a fib object in order to
+		 * manage the linked lists.
 		 */
-		if (dev->aif_thread)
-			if((fib = kmalloc(sizeof(struct fib), GFP_ATOMIC))==NULL)
+		if (dev->aif_thread) {
+			/* Limit the number we retreive from fib pool */
+			struct list_head * each;
+			int i = (dev->init->AdapterFibsSize / sizeof(struct hw_fib)) - 1;
+			list_for_each(each, &(q->cmdq))
+				if (--i <= 0)
+					break;
+			if ((i <= 0) || (!(fib = kmalloc(sizeof(struct fib),GFP_ATOMIC))))
 				fib = &fibctx;
-			
+		}
+
+		index = le32_to_cpu(entry->addr / sizeof(struct hw_fib));
+		hw_fib = &dev->aif_base_va[index];
 		memset(fib, 0, sizeof(struct fib));
 		INIT_LIST_HEAD(&fib->fiblink);
 		fib->type = FSAFS_NTC_FIB_CONTEXT;
 		fib->size = sizeof(struct fib);
-		fib->hw_fib = hw_fib_va;
-		fib->data = hw_fib_va->data;
+		fib->hw_fib = hw_fib;
+		fib->data = hw_fib->data;
 		fib->dev = dev;
 		
 		if (dev->aif_thread && fib != &fibctx)
@@ -214,11 +213,120 @@ unsigned int aac_command_normal(struct aac_queue *q)
 			/*
 			 *	Set the status of this FIB
 			 */
-			*(u32 *)hw_fib_va->data = cpu_to_le32(ST_OK);
+			*(u32 *)hw_fib->data = cpu_to_le32(ST_OK);
 			fib_adapter_complete(fib, sizeof(u32));
 			spin_lock_irqsave(q->lock, flags);
 		}		
 	}
 	spin_unlock_irqrestore(q->lock, flags);
 	return 0;
+}
+
+
+/**
+ *	aac_intr_normal	-	Handle command replies
+ *	@dev: Device
+ *	@index: completion reference
+ *
+ *	This DPC routine will be run when the adapter interrupts us to let us
+ *	know there is a response on our normal priority queue. We will pull off
+ *	all QE there are and wake up all the waiters before exiting.
+ */
+
+unsigned int aac_intr_normal(struct aac_dev * dev, u32 Index)
+{
+	int index = le32_to_cpu(Index);
+
+	dprintk((KERN_INFO "aac_intr_normal(%p,%x)\n", dev, Index));
+	if ((index & 0x00000002L)) {
+		struct hw_fib * hw_fib;
+		struct fib * fib;
+		struct aac_queue *q = &dev->queues->queue[HostNormCmdQueue];
+		unsigned long flags;
+
+		if (index == 0xFFFFFFFEL) /* Special Case */
+			return 0;	  /* Do nothing */
+		/*
+		 *	Allocate a FIB. For non queued stuff we can just use
+		 * the stack so we are happy. We need a fib object in order to
+		 * manage the linked lists.
+		 */
+		if ((!dev->aif_thread)
+		 || (!(fib = kmalloc(sizeof(struct fib),GFP_ATOMIC))))
+			return 1;
+
+		hw_fib = (struct hw_fib *)(((char *)(dev->regs.sa)) + (index & ~0x00000002L));
+		memset(fib, 0, sizeof(struct fib));
+		INIT_LIST_HEAD(&fib->fiblink);
+		fib->type = FSAFS_NTC_FIB_CONTEXT;
+		fib->size = sizeof(struct fib);
+		fib->hw_fib = hw_fib;
+		fib->data = hw_fib->data;
+		fib->dev = dev;
+		
+		spin_lock_irqsave(q->lock, flags);
+		list_add_tail(&fib->fiblink, &q->cmdq);
+	        wake_up_interruptible(&q->cmdready);
+		spin_unlock_irqrestore(q->lock, flags);
+		return 1;
+	} else {
+		int fast = index & 0x01;
+		struct fib * fib = &dev->fibs[index >> 2];
+		struct hw_fib * hwfib = fib->hw_fib;
+
+		/*
+		 *	Remove this fib from the Outstanding I/O queue.
+		 *	But only if it has not already been timed out.
+		 *
+		 *	If the fib has been timed out already, then just 
+		 *	continue. The caller has already been notified that
+		 *	the fib timed out.
+		 */
+		if ((fib->flags & FIB_CONTEXT_FLAG_TIMED_OUT)) {
+			printk(KERN_WARNING "aacraid: FIB timeout (%x).\n", fib->flags);
+			printk(KERN_DEBUG"aacraid: hwfib=%p index=%i fib=%p\n",hwfib, hwfib->header.SenderData,fib);
+			return 0;
+		}
+
+		list_del(&fib->queue);
+		dev->queues->queue[AdapNormCmdQueue].numpending--;
+
+		if (fast) {
+			/*
+			 *	Doctor the fib
+			 */
+			*(u32 *)hwfib->data = cpu_to_le32(ST_OK);
+			hwfib->header.XferState |= cpu_to_le32(AdapterProcessed);
+		}
+
+		FIB_COUNTER_INCREMENT(aac_config.FibRecved);
+
+		if (hwfib->header.Command == cpu_to_le16(NuFileSystem))
+		{
+			u32 *pstatus = (u32 *)hwfib->data;
+			if (*pstatus & cpu_to_le32(0xffff0000))
+				*pstatus = cpu_to_le32(ST_OK);
+		}
+		if (hwfib->header.XferState & cpu_to_le32(NoResponseExpected | Async)) 
+		{
+	        	if (hwfib->header.XferState & cpu_to_le32(NoResponseExpected))
+				FIB_COUNTER_INCREMENT(aac_config.NoResponseRecved);
+			else 
+				FIB_COUNTER_INCREMENT(aac_config.AsyncRecved);
+			/*
+			 *	NOTE:  we cannot touch the fib after this
+			 *	    call, because it may have been deallocated.
+			 */
+			fib->callback(fib->callback_data, fib);
+		} else {
+			unsigned long flagv;
+	  		dprintk((KERN_INFO "event_wait up\n"));
+			spin_lock_irqsave(&fib->event_lock, flagv);
+			fib->done = 1;
+			up(&fib->event_wait);
+			spin_unlock_irqrestore(&fib->event_lock, flagv);
+			FIB_COUNTER_INCREMENT(aac_config.NormalRecved);
+		}
+		return 0;
+	}
 }

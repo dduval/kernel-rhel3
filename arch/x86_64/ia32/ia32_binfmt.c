@@ -305,7 +305,7 @@ int ia32_setup_arg_pages(struct linux_binprm *bprm, int executable_stack)
 		if (executable_stack) 
 			mpnt->vm_flags = vm_stack_flags32; 
 		else
-			mpnt->vm_flags = vm_stack_flags32 & ~(VM_MAYEXEC|VM_EXEC); 
+			mpnt->vm_flags = vm_stack_flags32 & ~VM_EXEC; 
 		mpnt->vm_page_prot = (mpnt->vm_flags & VM_EXEC) ? 
 			PAGE_COPY_EXEC : PAGE_COPY;
 		mpnt->vm_ops = NULL;
@@ -329,18 +329,22 @@ int ia32_setup_arg_pages(struct linux_binprm *bprm, int executable_stack)
 	
 	return 0;
 }
+
 static unsigned long
-elf32_map (struct file *filep, unsigned long addr, struct elf_phdr *eppnt, int prot, int type)
+elf32_map (struct file *filep, unsigned long addr, struct elf_phdr *eppnt, int prot, int type, unsigned long total_size)
 {
 	unsigned long map_addr;
 	struct task_struct *me = current; 
+	unsigned long size = eppnt->p_filesz + ELF_PAGEOFFSET(eppnt->p_vaddr);
 
 	if (prot & PROT_READ) 
 		prot |= PROT_EXEC; 
 
+	if (total_size)
+		size = total_size;
+
 	down_write(&me->mm->mmap_sem);
-	map_addr = do_mmap(filep, ELF_PAGESTART(addr),
-			   eppnt->p_filesz + ELF_PAGEOFFSET(eppnt->p_vaddr), prot, 
+	map_addr = do_mmap(filep, ELF_PAGESTART(addr), size, prot, 
 			   type|MAP_32BIT,
 			   eppnt->p_offset - ELF_PAGEOFFSET(eppnt->p_vaddr));
 	up_write(&me->mm->mmap_sem);

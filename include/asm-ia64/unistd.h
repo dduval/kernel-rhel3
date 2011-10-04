@@ -227,7 +227,9 @@
 #define __NR_exit_group                 1236
 #define __NR_lookup_dcookie		1237
 /* 1238-1242: reserved for io_{setup,destroy,getevents,submit,cancel} */
+#define __NR_io_setup			1238
 #define __NR_semtimedop			1247
+
 
 #if !defined(__ASSEMBLY__) && !defined(ASSEMBLER)
 

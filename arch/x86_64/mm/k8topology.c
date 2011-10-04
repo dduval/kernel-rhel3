@@ -90,6 +90,7 @@ int __init k8_scan_nodes(unsigned long start, unsigned long end)
 { 
 	unsigned long prevbase;
 	struct node nodes[MAXNODE];
+	u32 reg;
 	int nodeid, numnodes, maxnode, i, nb; 
 
 	nb = find_northbridge(); 
@@ -98,7 +99,9 @@ int __init k8_scan_nodes(unsigned long start, unsigned long end)
 
 	printk(KERN_INFO "Scanning NUMA topology in Northbridge %d\n", nb); 
 
-	numnodes = (read_pci_config(0, nb, 0, 0x60 ) >> 4) & 3; 
+	reg = read_pci_config(0, nb, 0, 0x60);
+	numnodes = ((reg >> 4) & 7) + 1;
+	printk(KERN_INFO "Number of nodes: %d (%x)\n", numnodes, reg);
 
 	memset(&nodes,0,sizeof(nodes)); 
 	prevbase = 0;
@@ -109,7 +112,19 @@ int __init k8_scan_nodes(unsigned long start, unsigned long end)
 		base = read_pci_config(0, nb, 1, 0x40 + i*8);
 		limit = read_pci_config(0, nb, 1, 0x44 + i*8);
 
-		nodeid = limit & 3; 
+		nodeid = limit & 7;
+
+		if ((base & 3) == 0) {
+			if (i < numnodes)
+				printk(KERN_INFO "Skipping disabled node %d\n", i);
+			continue;
+		}
+		if (nodeid >= numnodes) {
+			printk(KERN_INFO "Ignoring excess node %d (%lx:%lx)\n", nodeid,
+				base, limit);
+			continue;
+		}
+
 		if (!limit) { 
 			printk(KERN_INFO "Skipping node entry %d (base %lx)\n", i,			       base);
 			continue;

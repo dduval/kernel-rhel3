@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   
-  Copyright(c) 1999 - 2003 Intel Corporation. All rights reserved.
+  Copyright(c) 1999 - 2004 Intel Corporation. All rights reserved.
   
   This program is free software; you can redistribute it and/or modify it 
   under the terms of the GNU General Public License as published by the Free 
@@ -46,20 +46,23 @@
 
 /* Change Log
  * 
- * 2.3.30       09/21/03
- * o Bug fix (Bugzilla 97908): Loading e100 was causing crash on Itanium2
- *   with HP chipset
- * o Bug fix (Bugzilla 101583): e100 can't pass traffic with ipv6
- * o Bug fix (Bugzilla 101360): PRO/10+ can't pass traffic
+ * 2.3.40       2/13/04
+ * o Updated microcode for D102 rev 15 and rev 16 to include fix
+ *   for TCO issue.  NFS packets would be misinterpreted as TCO packets
+ *   and incorrectly routed to the BMC over SMBus.  The microcode fix
+ *   checks the fragmented IP bit in the NFS/UDP header to distinguish
+ *   between NFS and TCO.
+ * o Bug fix: don't strip MAC header count from Rx byte count.
+ *   Ben Greear (greear@candeltech.com).
+ *
+ * 2.3.38	12/14/03
+ * o Added netpoll support.
+ * o Added ICH6 device ID support
+ * o Moved to 2.6 APIs: pci_name() and free_netdev().
+ * o Removed some __devinit from some functions that shouldn't be marked
+ *   as such (Anton Blanchard [anton@samba.org]).
  * 
- * 2.3.27       08/08/03
- * o Bug fix: read skb->len after freeing skb
- *   [Andrew Morton] akpm@zip.com.au
- * o Bug fix: 82557 (with National PHY) timeout during init
- *   [Adam Kropelin] akropel1@rochester.rr.com
- * o Feature add: allow to change Wake On LAN when EEPROM disabled
- * 
- * 2.3.13       05/08/03
+ * 2.3.33       10/21/03
  */
  
 #include <linux/config.h>
@@ -80,7 +83,14 @@ static char e100_gstrings_stats[][ETH_GSTRING_LEN] = {
 	"rx_frame_errors", "rx_fifo_errors", "rx_missed_errors",
 	"tx_aborted_errors", "tx_carrier_errors", "tx_fifo_errors",
 	"tx_heartbeat_errors", "tx_window_errors",
+	/* device-specific stats */
+	"tx_late_collision_errors", "tx_deferred", 
+	"tx_single_collisions", "tx_multi_collisions", 
+	"rx_collision_detected_errors", "tx_flow_control_pause",
+	"rx_flow_control_pause", "rx_flow_control_unsupported",
+	"tx_tco_packets", "rx_tco_packets",
 };
+#define E100_NET_STATS_LEN	21
 #define E100_STATS_LEN	sizeof(e100_gstrings_stats) / ETH_GSTRING_LEN
 
 static int e100_do_ethtool_ioctl(struct net_device *, struct ifreq *);
@@ -124,8 +134,8 @@ static void e100_free_nontx_list(struct e100_private *);
 static void e100_non_tx_background(unsigned long);
 static inline void e100_tx_skb_free(struct e100_private *bdp, tcb_t *tcb);
 /* Global Data structures and variables */
-char e100_copyright[] __devinitdata = "Copyright (c) 2003 Intel Corporation";
-char e100_driver_version[]="2.3.30-k1";
+char e100_copyright[] __devinitdata = "Copyright (c) 2004 Intel Corporation";
+char e100_driver_version[]="2.3.43-k1";
 const char *e100_full_driver_name = "Intel(R) PRO/100 Network Driver";
 char e100_short_driver_name[] = "e100";
 static int e100nics = 0;
@@ -133,6 +143,11 @@ static void e100_vlan_rx_register(struct net_device *netdev, struct vlan_group
 		*grp);
 static void e100_vlan_rx_add_vid(struct net_device *netdev, u16 vid);
 static void e100_vlan_rx_kill_vid(struct net_device *netdev, u16 vid);
+
+#ifdef HAVE_POLL_CONTROLLER
+/* for netdump / net console */
+static void e100_netpoll (struct net_device *dev);
+#endif
 
 #ifdef CONFIG_PM
 static int e100_notify_reboot(struct notifier_block *, unsigned long event, void *ptr);
@@ -208,9 +223,6 @@ static void e100_set_bool_option(struct e100_private *bdp, int, u32, int,
 				 char *);
 unsigned char e100_wait_exec_cmplx(struct e100_private *, u32, u8, u8);
 void e100_exec_cmplx(struct e100_private *, u32, u8);
-
-/* for netdump / net console */
-static void e100_netpoll (struct net_device *dev);
 
 /**
  * e100_get_rx_struct - retrieve cell to hold skb buff from the pool
@@ -573,6 +585,7 @@ e100_found1(struct pci_dev *pcid, const struct pci_device_id *ent)
 	bdp->device = dev;
 
 	pci_set_drvdata(pcid, dev);
+	SET_NETDEV_DEV(dev, &pcid->dev);
 
 	bdp->flags = 0;
 	bdp->ifs_state = 0;
@@ -601,6 +614,8 @@ e100_found1(struct pci_dev *pcid, const struct pci_device_id *ent)
 	       && (bdp->pdev->device < 0x103F))
 	    || ((bdp->pdev->device >= 0x1050)
 	       && (bdp->pdev->device <= 0x1057))
+	    || ((bdp->pdev->device >= 0x1064)
+	       && (bdp->pdev->device <= 0x106B))
 	    || (bdp->pdev->device == 0x2449)
 	    || (bdp->pdev->device == 0x2459)
 	    || (bdp->pdev->device == 0x245D)) {
@@ -634,13 +649,13 @@ e100_found1(struct pci_dev *pcid, const struct pci_device_id *ent)
 	dev->set_mac_address = &e100_set_mac;
 	dev->do_ioctl = &e100_ioctl;
 
-	if (bdp->flags & USE_IPCB)
-	dev->features = NETIF_F_SG | NETIF_F_IP_CSUM |
-			NETIF_F_HW_VLAN_TX | NETIF_F_HW_VLAN_RX;
-
 #ifdef HAVE_POLL_CONTROLLER
 	dev->poll_controller = e100_netpoll;
 #endif
+
+	if (bdp->flags & USE_IPCB)
+	dev->features = NETIF_F_SG | NETIF_F_IP_CSUM |
+			NETIF_F_HW_VLAN_TX | NETIF_F_HW_VLAN_RX;
 		
 	if ((rc = register_netdev(dev)) != 0) {
 		goto err_dealloc;
@@ -702,7 +717,7 @@ err_pci:
 	pci_disable_device(pcid);
 err_dev:
 	pci_set_drvdata(pcid, NULL);
-	kfree(dev);
+	free_netdev(dev);
 out:
 	return rc;
 }
@@ -724,7 +739,7 @@ e100_clear_structs(struct net_device *dev)
 
 	e100_dealloc_space(bdp);
 	pci_set_drvdata(bdp->pdev, NULL);
-	kfree(dev);
+	free_netdev(dev);
 }
 
 static void __devexit
@@ -753,7 +768,7 @@ e100_remove1(struct pci_dev *pcid)
 	--e100nics;
 }
 
-static struct pci_device_id e100_id_table[] __devinitdata = {
+static struct pci_device_id e100_id_table[] = {
 	{0x8086, 0x1229, PCI_ANY_ID, PCI_ANY_ID, 0, 0, },
 	{0x8086, 0x2449, PCI_ANY_ID, PCI_ANY_ID, 0, 0, },
 	{0x8086, 0x1059, PCI_ANY_ID, PCI_ANY_ID, 0, 0, },
@@ -777,6 +792,14 @@ static struct pci_device_id e100_id_table[] __devinitdata = {
 	{0x8086, 0x1053, PCI_ANY_ID, PCI_ANY_ID, 0, 0, },
 	{0x8086, 0x1054, PCI_ANY_ID, PCI_ANY_ID, 0, 0, },
 	{0x8086, 0x1055, PCI_ANY_ID, PCI_ANY_ID, 0, 0, },
+	{0x8086, 0x1064, PCI_ANY_ID, PCI_ANY_ID, 0, 0, },
+	{0x8086, 0x1065, PCI_ANY_ID, PCI_ANY_ID, 0, 0, },
+	{0x8086, 0x1066, PCI_ANY_ID, PCI_ANY_ID, 0, 0, },
+	{0x8086, 0x1067, PCI_ANY_ID, PCI_ANY_ID, 0, 0, },
+	{0x8086, 0x1068, PCI_ANY_ID, PCI_ANY_ID, 0, 0, },
+	{0x8086, 0x1069, PCI_ANY_ID, PCI_ANY_ID, 0, 0, },
+	{0x8086, 0x106A, PCI_ANY_ID, PCI_ANY_ID, 0, 0, },
+	{0x8086, 0x106B, PCI_ANY_ID, PCI_ANY_ID, 0, 0, },
 	{0x8086, 0x2459, PCI_ANY_ID, PCI_ANY_ID, 0, 0, },
 	{0x8086, 0x245D, PCI_ANY_ID, PCI_ANY_ID, 0, 0, },
 	{0,} /* This has to be the last entry*/
@@ -1324,7 +1347,7 @@ e100_sw_init(struct e100_private *bdp)
 	return 1;
 }
 
-static void __devinit
+static void
 e100_tco_workaround(struct e100_private *bdp)
 {
 	int i;
@@ -2043,6 +2066,8 @@ e100_rx_srv(struct e100_private *bdp)
 		else
 			skb_put(skb, (int) data_sz);
 
+		bdp->drv_stats.net_stats.rx_bytes += skb->len;
+
 		/* set the protocol */
 		skb->protocol = eth_type_trans(skb, dev);
 
@@ -2056,8 +2081,6 @@ e100_rx_srv(struct e100_private *bdp)
 		} else {
 			skb->ip_summed = CHECKSUM_NONE;
 		}
-
-		bdp->drv_stats.net_stats.rx_bytes += skb->len;
 
 		if(bdp->vlgrp && (rfd_status & CB_STATUS_VLAN)) {
 			vlan_hwaccel_rx(skb, bdp->vlgrp, be16_to_cpu(rfd->vlanid));
@@ -2514,7 +2537,7 @@ e100_cmd_complete_location(struct e100_private *bdp)
  *      true: if successfully cleared stat counters
  *      false: otherwise
  */
-static unsigned char __devinit
+static unsigned char
 e100_clr_cntrs(struct e100_private *bdp)
 {
 	volatile u32 *pcmd_complete;
@@ -2812,6 +2835,11 @@ e100_load_microcode(struct e100_private *bdp)
 		  D102_C_CPUSAVER_BUNDLE_DWORD,
 		  D102_C_CPUSAVER_MIN_SIZE_DWORD },
 		{ D102E_REV_ID,
+		  D102_E_RCVBUNDLE_UCODE,
+		  D102_E_CPUSAVER_TIMER_DWORD,
+		  D102_E_CPUSAVER_BUNDLE_DWORD,
+		  D102_E_CPUSAVER_MIN_SIZE_DWORD },
+		{ D102E_A1_REV_ID,
 		  D102_E_RCVBUNDLE_UCODE,
 		  D102_E_CPUSAVER_TIMER_DWORD,
 		  D102_E_CPUSAVER_BUNDLE_DWORD,
@@ -3183,9 +3211,19 @@ e100_do_ethtool_ioctl(struct net_device *dev, struct ifreq *ifr)
 		void *addr = ifr->ifr_data;
 		int i;
 
-		for(i = 0; i < E100_STATS_LEN; i++)
+		for(i = 0; i < E100_NET_STATS_LEN; i++)
 			stats.data[i] =
 				((unsigned long *)&bdp->drv_stats.net_stats)[i];
+		stats.data[i++] = bdp->drv_stats.tx_late_col;
+		stats.data[i++] = bdp->drv_stats.tx_ok_defrd;
+		stats.data[i++] = bdp->drv_stats.tx_one_retry;
+		stats.data[i++] = bdp->drv_stats.tx_mt_one_retry;
+		stats.data[i++] = bdp->drv_stats.rcv_cdt_frames;
+		stats.data[i++] = bdp->drv_stats.xmt_fc_pkts;
+		stats.data[i++] = bdp->drv_stats.rcv_fc_pkts;
+		stats.data[i++] = bdp->drv_stats.rcv_fc_unsupported;
+		stats.data[i++] = bdp->drv_stats.xmt_tco_pkts;
+		stats.data[i++] = bdp->drv_stats.rcv_tco_pkts;
 		if(copy_to_user(addr, &stats, sizeof(stats)))
 			return -EFAULT;
 		return 0;
@@ -3589,7 +3627,7 @@ e100_ethtool_get_drvinfo(struct net_device *dev, struct ifreq *ifr)
 	strncpy(info.version, e100_driver_version, sizeof (info.version) - 1);
 	strncpy(info.fw_version, "N/A",
 		sizeof (info.fw_version) - 1);
-	strncpy(info.bus_info, bdp->pdev->slot_name,
+	strncpy(info.bus_info, pci_name(bdp->pdev),
 		sizeof (info.bus_info) - 1);
 	info.n_stats = E100_STATS_LEN;
 	info.regdump_len  = E100_REGS_LEN * sizeof(u32);

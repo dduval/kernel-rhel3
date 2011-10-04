@@ -98,8 +98,7 @@ vcs_read(struct file *file, char *buf, size_t count, loff_t *ppos)
 {
 	struct inode *inode = file->f_dentry->d_inode;
 	unsigned int currcons = MINOR(inode->i_rdev);
-	loff_t n = *ppos;
-	unsigned pos = n;
+	loff_t pos = *ppos;
 	long viewed, attr, read;
 	int col, maxcol;
 	unsigned short *org = NULL;
@@ -125,10 +124,12 @@ vcs_read(struct file *file, char *buf, size_t count, loff_t *ppos)
 	if (!vc_cons_allocated(currcons))
 		goto unlock_out;
 
+	ret = -EINVAL;
+	if (pos < 0)
+		goto unlock_out;
+
 	read = 0;
 	ret = 0;
-	if (pos != n)
-		goto unlock_out;
 	while (count) {
 		char *con_buf0, *con_buf_start;
 		long this_round, size;
@@ -266,8 +267,7 @@ vcs_write(struct file *file, const char *buf, size_t count, loff_t *ppos)
 {
 	struct inode *inode = file->f_dentry->d_inode;
 	unsigned int currcons = MINOR(inode->i_rdev);
-	loff_t n = *ppos;
-	unsigned pos = n;
+	loff_t pos = *ppos;
 	long viewed, attr, size, written;
 	char *con_buf0;
 	int col, maxcol;
@@ -297,7 +297,7 @@ vcs_write(struct file *file, const char *buf, size_t count, loff_t *ppos)
 
 	size = vcs_size(inode);
 	ret = -EINVAL;
-	if (pos != n || pos > size)
+	if (pos < 0 || pos > size)
 		goto unlock_out;
 	if (count > size - pos)
 		count = size - pos;

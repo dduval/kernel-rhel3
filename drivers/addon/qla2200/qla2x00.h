@@ -90,18 +90,14 @@ extern "C" {
 #define BIT_30  0x40000000
 #define BIT_31  0x80000000
 
-#define LS_64BITS(x)	((uint32_t)(0xffffffff & ((u64)(x))))
-#define MS_64BITS(x)	((uint32_t)(0xffffffff & (((u64)(x))>>16>>16)))
+#define LSB(x)	((uint8_t)(x))
+#define MSB(x)	((uint8_t)((uint16_t)(x) >> 8))
 
-#define MSB(x)          (uint8_t)(((uint16_t)(x) >> 8) & 0xff)
-#define LSB(x)          (uint8_t)(x & 0xff)
-#define MSW(x)          (uint16_t)(((uint32_t)(x) >> 16) & 0xffff)
-#define LSW(x)          (uint16_t)(x & 0xffff)
-#define QL21_64BITS_3RDWD(x)   ((uint16_t) (( (x) >> 16) >> 16) & 0xffff)
-#define QL21_64BITS_4THWD(x)   ((uint16_t) ((( (x) >>16)>>16)>>16) & 0xffff)
+#define LSW(x)	((uint16_t)(x))
+#define MSW(x)	((uint16_t)((uint32_t)(x) >> 16))
 
-#define LSD(x)  ((uint32_t)((uint64_t)(x)))
-#define MSD(x)  ((uint32_t)((uint64_t)(x) >> 32))
+#define LSD(x)	((uint32_t)((uint64_t)(x)))
+#define MSD(x)	((uint32_t)((((uint64_t)(x)) >> 16) >> 16))
 
 
 
@@ -189,14 +185,25 @@ typedef char BOOL;
 /*
  * Fibre Channel device definitions.
  */
+#if defined(EXTENDED_IDS)
+#define SNS_LAST_LOOP_ID	0x7ff
+#else
+#define SNS_LAST_LOOP_ID	0xfe
+#endif
+
 #define LAST_LOCAL_LOOP_ID  0x7d
 #define SNS_FL_PORT         0x7e
 #define FABRIC_CONTROLLER   0x7f
 #define SIMPLE_NAME_SERVER  0x80
 #define SNS_FIRST_LOOP_ID   0x81
-#define LAST_SNS_LOOP_ID    0xfe
 #define MANAGEMENT_SERVER   0xfe
 #define BROADCAST           0xff
+
+#define RESERVED_LOOP_ID(x)	((x > LAST_LOCAL_LOOP_ID && \
+				 x < SNS_FIRST_LOOP_ID) || \
+				 x == MANAGEMENT_SERVER || \
+				 x == BROADCAST)
+
 #define SNS_ACCEPT          0x0280      /* 8002 swapped */
 #define SNS_REJECT          0x0180      /* 8001 swapped */
 
@@ -246,8 +253,6 @@ typedef char BOOL;
 #define SGDATA_PER_REQUEST	2 
 #define SGDATA_PER_CONT		7
 
-//#define SG_SEGMENTS 	(SGDATA_PER_REQUEST + (SGDATA_PER_CONT * REQUEST_ENTRY_CNT - 2))     
-
 /*
  * SCSI Request Block 
  */
@@ -289,12 +294,14 @@ typedef struct srb
 	/* Target/LUN queue pointers. */
     struct os_tgt		*tgt_queue;	/* ptr to visible ha's target */
     struct os_lun		*lun_queue;	/* ptr to visible ha's lun */
-	struct fc_lun		*fclun;		/* FC LUN context pointer. */
+    struct fc_lun		*fclun;		/* FC LUN context pointer. */
 	/* Raw completion info for use by failover ? */
     uint8_t	fo_retry_cnt;	/* Retry count this request */
     uint8_t	err_id;		/* error id */
 #define SRB_ERR_PORT       1    /* Request failed because "port down" */
 #define SRB_ERR_LOOP       2    /* Request failed because "loop down" */
+#define SRB_ERR_DEVICE     3    /* Request failed because "device error" */
+#define SRB_ERR_OTHER      4
 
     uint8_t	cmd_length;		/* command length */
     uint8_t	qfull_retry_count;
@@ -305,7 +312,7 @@ typedef struct srb
     u_long      e_start;             /* jiffies at start of extend timeout */
     u_long      r_start;             /* jiffies at start of request */
     u_long      u_start;             /* jiffies when sent to F/W    */
-    u_long      f_start;            /*ra 10/29/01*/ /*jiffies when put in failov					er queue*/
+    u_long      f_start;            /*ra 10/29/01*/ /*jiffies when put in failover queue*/
     uint32_t    resid;              /* Residual transfer length */
     uint16_t    sense_len;          /* Sense data length */
     uint32_t    request_sense_length;
@@ -334,6 +341,7 @@ typedef struct srb
 
 #define	SRB_ISP_COMPLETED    BIT_12	/* ISP finished with command */
 #define	SRB_FDMI_CMD	     BIT_13	/* MSIOCB/non-ioctl command. */
+#define	SRB_TAPE		BIT_14	/* TAPE command. */
 
 
 /*
@@ -445,7 +453,7 @@ typedef volatile struct
 
 #else
 /*
- *  I/O Register Set structure definitions for ISP2300.
+ *  I/O Register Set structure definitions for ISP2300/ISP200.
  */
 typedef volatile struct
 {
@@ -602,11 +610,22 @@ typedef struct {
 #define MBS_TEST_FAILED     0x4003      /* Test Failed. */
 #define MBS_CMD_ERR         0x4005      /* Command Error. */
 #define MBS_CMD_PARAM_ERR   0x4006      /* Command Parameter Error. */
+#define MBS_PORT_ID_USED	0x4007
+#define MBS_LOOP_ID_USED	0x4008
+#define MBS_ALL_IDS_IN_USE	0x4009 /* For ISP200 if host tries to log
+    					  into more than 8 targets */
+#define MBS_NOT_LOGGED_IN	0x400A
+
 #define MBS_FATAL_ERROR     0xF000      /* Command Fatal Error. */
 
 #define MBS_FIRMWARE_ALIVE          0x0000 
 #define MBS_COMMAND_COMPLETE        0x4000 
 #define MBS_INVALID_COMMAND         0x4001 
+
+/* F/W will return mbx0:0x4005 and mbx1:0x16 if
+ * HBA tries to log into a target through FL Port
+ */ 
+#define MBS_SC_TOPOLOGY_ERR	0x16  
 
 /* QLogic subroutine status definitions */
 #define QL_STATUS_SUCCESS           0
@@ -700,7 +719,7 @@ typedef struct {
 #define	MBC_INITIALIZE_RECEIVE_QUEUE	0x77	/* Initialize receive queue */
 #define	MBC_SEND_FARP_REQ_COMMAND	0x78	/* FARP request. */
 #define	MBC_SEND_FARP_REPLY_COMMAND	0x79	/* FARP reply. */
-#define	MBC_PORT_LOOP_NAME_LIST		0x7C	/* Get port/node name list. */
+#define	MBC_GET_ID_LIST			0x7C	/* Get Port ID list. */
 #define	MBC_SEND_LFA_COMMAND		0x7D	/* Send Loop Fabric Address */
 #define	MBC_LUN_RESET			0x7E	/* Send LUN reset */
 
@@ -1420,8 +1439,12 @@ typedef struct
     uint8_t  sys_define;                /* System defined. */
     uint8_t  entry_status;              /* Entry Status. */
     uint32_t handle;                    /* System handle. */
+#if defined(EXTENDED_IDS)
+    uint16_t  target;                    /* SCSI ID */
+#else
     uint8_t  reserved;
     uint8_t  target;                    /* SCSI ID */
+#endif
     uint16_t lun;                       /* SCSI LUN */
     uint16_t control_flags;             /* Control flags. */
 #define CF_HEAD_TAG		BIT_1
@@ -1453,8 +1476,12 @@ typedef struct
     uint8_t  sys_define;                /* System defined. */
     uint8_t  entry_status;              /* Entry Status. */
     uint32_t handle;                    /* System handle. */
+#if defined(EXTENDED_IDS)
+    uint16_t  target;                    /* SCSI ID */
+#else
     uint8_t  reserved;
     uint8_t  target;                    /* SCSI ID */
+#endif
     uint16_t lun;                       /* SCSI LUN */
     uint16_t control_flags;             /* Control flags. */
     uint16_t reserved_1;
@@ -1570,8 +1597,12 @@ typedef struct
     uint8_t  sys_define;                /* System defined. */
     uint8_t  entry_status;              /* Entry Status. */
     uint32_t sys_define_2;              /* System defined. */
+#if defined(EXTENDED_IDS)
+    uint16_t  target;                    /* SCSI ID */
+#else
     uint8_t  reserved;
     uint8_t  target;                    /* SCSI ID */
+#endif
     uint8_t  modifier;                  /* Modifier (7-0). */
         #define MK_SYNC_ID_LUN      0   /* Synchronize ID/LUN */
         #define MK_SYNC_ID          1   /* Synchronize ID */
@@ -1649,8 +1680,12 @@ typedef struct
     uint32_t sys_define_2;              /* System defined. */
     uint8_t  reserved_8;
     uint8_t  initiator_id;
+#if defined(EXTENDED_IDS)
+    uint16_t  target;                    
+#else
     uint8_t  reserved_1;
     uint8_t  target_id;
+#endif
     uint32_t reserved_2;
     uint16_t status;
     uint16_t task_flags;
@@ -1673,8 +1708,12 @@ typedef struct
     uint32_t sys_define_2;              /* System defined. */
     uint8_t  reserved_8;
     uint8_t  initiator_id;
+#if defined(EXTENDED_IDS)
+    uint16_t  target;                    
+#else
     uint8_t  reserved_1;
     uint8_t  target_id;
+#endif
     uint16_t flags;
     uint16_t reserved_2;
     uint16_t status;
@@ -1694,8 +1733,12 @@ typedef struct
     uint8_t  sys_define;                /* System defined. */
     uint8_t  entry_status;              /* Entry Status. */
     uint32_t sys_define_2;              /* System defined. */
+#if defined(EXTENDED_IDS)
+    uint16_t initiator_id;
+#else
     uint8_t  reserved_8;
     uint8_t  initiator_id;
+#endif
     uint16_t exchange_id;
     uint16_t flags;
     uint16_t status;
@@ -1723,8 +1766,12 @@ typedef struct
     uint8_t  sys_define;                /* System defined. */
     uint8_t  entry_status;              /* Entry Status. */
     uint32_t sys_define_2;              /* System defined. */
+#if defined(EXTENDED_IDS)
+    uint16_t initiator_id;
+#else
     uint8_t  reserved_8;
     uint8_t  initiator_id;
+#endif
     uint16_t exchange_id;
     uint16_t flags;
     uint16_t status;
@@ -1754,8 +1801,12 @@ typedef struct
     uint8_t  sys_define;                /* System defined. */
     uint8_t  entry_status;              /* Entry Status. */
     uint32_t sys_define_2;              /* System defined. */
+#if defined(EXTENDED_IDS)
+    uint16_t initiator_id;
+#else
     uint8_t  reserved_8;
     uint8_t  initiator_id;
+#endif
     uint16_t exchange_id;
     uint16_t flags;
     uint16_t status;
@@ -1779,8 +1830,12 @@ typedef struct
     uint8_t  sys_define;                /* System defined. */
     uint8_t  entry_status;              /* Entry Status. */
     uint32_t sys_define_2;              /* System defined. */
+#if defined(EXTENDED_IDS)
+    uint16_t initiator_id;
+#else
     uint8_t  reserved_8;
     uint8_t  initiator_id;
+#endif
     uint16_t exchange_id;
     uint16_t flags;
     uint16_t status;
@@ -1808,8 +1863,12 @@ typedef struct
     uint8_t  sys_define;                /* System defined. */
     uint8_t  entry_status;              /* Entry Status. */
     uint32_t sys_define_2;              /* System defined. */
+#if defined(EXTENDED_IDS)
+    uint16_t initiator_id;
+#else
     uint8_t  reserved_8;
     uint8_t  initiator_id;
+#endif
     uint16_t exchange_id;
     uint16_t flags;
     uint16_t status;
@@ -1899,8 +1958,12 @@ typedef struct
     uint8_t  sys_define;                /* System defined. */
     uint8_t  entry_status;              /* Entry Status. */
     uint32_t handle1;                   /* System handle. */
+#if defined(EXTENDED_IDS)
+    uint16_t loop_id;
+#else
     uint8_t  reserved;
     uint8_t  loop_id;
+#endif
     uint16_t status;
     uint16_t control_flags;             /* Control flags. */
 #define CF_ELS_PASSTHRU		BIT_15
@@ -1931,7 +1994,7 @@ struct rio_iocb_type1_entry
     uint8_t  entry_count;               /* Entry count. */
     uint8_t  handle_count;              /* # of valid handles. */
     uint8_t  entry_status;              /* Entry Status. */
-    uint32_t handle[15];		/* handles finished */
+    uint32_t handle[14];		/* handles finished */
 }; 
 
 /* 4.16
@@ -1944,7 +2007,7 @@ struct rio_iocb_type2_entry
     uint8_t  entry_count;               /* Entry count. */
     uint8_t  handle_count;              /* # of valid handles. */
     uint8_t  entry_status;              /* Entry Status. */
-    uint16_t handle[30];		/* handles finished */
+    uint16_t handle[29];		/* handles finished */
 }; 
 
 /*
@@ -1983,11 +2046,7 @@ struct rio_iocb_type2_entry
 #define SS_RESIDUAL_UNDER       BIT_11
 #define SS_RESIDUAL_OVER        BIT_10
 #define SS_SENSE_LEN_VALID      BIT_9
-#if defined(ISP2100)
-#define SS_RESIDUAL_LEN_VALID   BIT_8
-#else
 #define SS_RESPONSE_INFO_LEN_VALID BIT_8
-#endif
 
 #define SS_RESERVE_CONFLICT     (BIT_4 | BIT_3)
 #define SS_BUSY_CONDITION       BIT_3
@@ -2036,36 +2095,18 @@ typedef union {
 	}b;
 } port_id_t;
 
-typedef struct
-{
-    port_id_t d_id;
-    uint8_t   name[WWN_SIZE];
-    uint8_t   wwn[WWN_SIZE];          /* port name */
-    uint16_t  loop_id;
-    uint16_t   flag;
-  /* flags bits defined as follows */
-#define DEV_PUBLIC          BIT_0
-#define DEV_LUNMASK_SET     BIT_1  /* some LUNs masked for this device */
-#define	DEV_TAPE_DEVICE		BIT_2
-#define	DEV_RELOGIN	        BIT_3
-#define	DEV_PORT_DOWN	    BIT_4
-#define	DEV_CONFIGURED    	BIT_5
-#define	DEV_ABSENCE    		BIT_6
-#define	DEV_RETURN    		BIT_7
-#define	DEV_INITIATOR  		BIT_8
-#define	DEV_FLAG_VSA  		BIT_9
-	int			port_login_retry_count;
-    uint8_t  port_timer;
-}fcdev_t;
+/*
+ * Switch info gathering structure.
+ */
+typedef struct {
+	port_id_t d_id;
+	uint8_t node_name[WWN_SIZE];
+	uint8_t port_name[WWN_SIZE];
+	uint32_t type;
+#define SW_TYPE_SCSI	BIT_0
+#define SW_TYPE_IP	BIT_1
+} sw_info_t;
 
-/* New device name list struct; used in configure_fabric. */
-struct new_dev {
-    port_id_t  d_id;
-    uint8_t    name[WWN_SIZE];		/* node name */
-    uint8_t    wwn[WWN_SIZE];          /* port name */
-    uint16_t   ignore;
-};
-#define LOGOUT_PERFORMED  0x01
 /*
  * Inquiry command structure.
  */
@@ -2203,18 +2244,31 @@ typedef struct lun_bit_mask {
 } lun_bit_mask_t;
 
 /*
+ * Fibre channel port type.
+ */
+ typedef enum {
+	FCT_UNKNOWN,
+	FCT_RSCN,
+	FCT_SWITCH,
+	FCT_BROADCAST,
+	FCT_INITIATOR,
+	FCT_TARGET
+} fc_port_type_t;
+
+/*
  * Fibre channel port structure.
  */
 typedef struct fc_port {
-	struct fc_port		*next;
-	struct fc_lun		*fclun;
+ 	struct list_head list;
+ 	struct list_head fcluns;
+
 	struct scsi_qla_host	*ha;
 	struct scsi_qla_host	*vis_ha; /* only used when suspending lun */
 	port_id_t		d_id;
 	uint16_t		loop_id;
 	uint16_t		old_loop_id;
 	int16_t			lun_cnt;
-	int16_t			dev_id;	/* index in fc_dev table */
+	uint16_t		dev_id;
 #define FC_NO_LOOP_ID		0x100
 	uint8_t			node_name[WWN_SIZE];	/* Big Endian. */
 	uint8_t			port_name[WWN_SIZE];	/* Big Endian. */
@@ -2222,12 +2276,11 @@ typedef struct fc_port {
     	uint8_t			cur_path;	/* current path id */
 	int			port_login_retry_count;
 	int			login_retry;
-	atomic_t		state;		/* port state */
+	atomic_t		state;		/* state for I/O routing */
 #define FC_DEVICE_DEAD		1		/* Device has been missing for the expired time */
 									/* "port timeout" */
 #define FC_DEVICE_LOST		2		/* Device is missing */
 #define FC_ONLINE		3		/* Device is ready and online */
-#define FC_LOGIN_NEEDED		4
 
 	uint16_t		flags;
 #define	FC_FABRIC_DEVICE	BIT_0
@@ -2242,6 +2295,9 @@ typedef struct fc_port {
 #define FC_MSA_DEVICE            BIT_9
 #define FC_MSA_PORT_ACTIVE     BIT_10
 #define FC_FAILBACK_DISABLE    	BIT_11
+#define FC_LOGIN_NEEDED		BIT_12
+#define FC_EVA_DEVICE            BIT_13
+#define FC_FAILOVER_DISABLE    	BIT_14
 	int16_t		 	cfg_id;		/* index into cfg device table */
 	uint16_t	notify_type;
 	atomic_t		port_down_timer;
@@ -2250,6 +2306,9 @@ typedef struct fc_port {
 	int	(*fo_detect)(void);
 	int	(*fo_notify)(void);
 	int	(*fo_select)(void);
+
+	fc_port_type_t	port_type;
+
 	lun_bit_mask_t	lun_mask;
 } fc_port_t;
 
@@ -2257,13 +2316,15 @@ typedef struct fc_port {
  * Fibre channel LUN structure.
  */
 typedef struct fc_lun {
-	struct fc_lun		*next;
+        struct list_head	list;
+
 	fc_port_t		*fcport;
 	uint16_t		lun;
 	uint8_t			max_path_retries;
 	uint8_t			flags;
 #define	FC_DISCON_LUN		BIT_0
 #define	FC_VISIBLE_LUN		BIT_2
+#define	FC_ACTIVE_LUN		BIT_3
 	uint8_t			inq0;
 	u_long			kbytes;
 	void			*mplun;	
@@ -2271,19 +2332,6 @@ typedef struct fc_lun {
 	int			mplen;
 } fc_lun_t;
 
-typedef struct
-{
-    uint8_t   in_use;
-}fabricid_t;
-
-typedef struct {
-	struct list_head	list;
-
-	uint8_t		node_name[WWN_SIZE];
-	uint8_t		port_name[WWN_SIZE];
-	port_id_t	d_id;
-	uint16_t	loop_id;
-} fc_initiator_t;
 
 /*
  * Registered State Change Notification structures.
@@ -2743,21 +2791,15 @@ typedef struct scsi_qla_host
 	uint16_t        max_targets;
 	
 	/* Fibre Channel Device List. */
-	fc_port_t		*fcport;
+        struct list_head	fcports;
 
 	/* OS target queue pointers. */
 	os_tgt_t		*otgt[MAX_FIBRE_DEVICES];
 
-	/* Fibre Channel Device Database and LIP sequence. */
-	fcdev_t           fc_db[MAX_FIBRE_DEVICES]; /* Driver database. */
 	uint32_t          flash_db;         /* Flash database address in use. */
-	fabricid_t        fabricid[MAX_FIBRE_DEVICES]; /* Fabric ids table . */
 	uint32_t          flash_seq;        /* Flash database seq # in use. */
 	volatile uint16_t lip_seq;          /* LIP sequence number. */
 	
-	/* Tracks host adapters we find */	
-	struct list_head	fcinitiators;	/* Initiator database */
-    
 	  /* RSCN queue. */
 	rscn_t rscn_queue[MAX_RSCN_COUNT];
 	uint8_t rscn_in_ptr;
@@ -2942,8 +2984,6 @@ typedef struct scsi_qla_host
                 uint32_t     enable_ip               :1;   /* 27 */
 #endif
 		uint32_t     process_response_queue  :1;   /* 28 */
-
-
 	} flags;
 
 	uint32_t     device_flags;
@@ -3013,13 +3053,13 @@ typedef struct scsi_qla_host
 	uint8_t		interrupts_on;
 	uint8_t		init_done;
 
-	atomic_t 	loop_state;
-#define LOOP_TIMEOUT 0x01
-#define LOOP_DOWN    0x02
-#define LOOP_UP      0x04
-#define LOOP_UPDATE  0x08
-#define LOOP_READY   0x10
-#define LOOP_DEAD    0x20  /* Link Down Timer expires */
+	atomic_t		loop_state;
+#define LOOP_TIMEOUT 1
+#define LOOP_DOWN    2
+#define LOOP_UP      3
+#define LOOP_UPDATE  4
+#define LOOP_READY   5
+#define LOOP_DEAD    6  /* Link Down Timer expires */
 
 	mbx_cmd_t 	mc;
 	uint32_t	mbx_flags;
@@ -3035,8 +3075,15 @@ typedef struct scsi_qla_host
 	hba_ioctl_context *ioctl;
 	uint8_t     node_name[WWN_SIZE];
 
-	uint8_t     optrom_major; 
-	uint8_t     optrom_minor; 
+	/* PCI expansion ROM image information. */
+	unsigned long	code_types;
+#define ROM_CODE_TYPE_BIOS	0
+#define ROM_CODE_TYPE_FCODE	1
+#define ROM_CODE_TYPE_EFI	3
+
+	uint8_t		bios_revision[2];
+	uint8_t		efi_revision[2];
+	uint8_t		fcode_revision[16];
 
 	uint8_t     nvram_version; 
 
@@ -3065,6 +3112,7 @@ typedef struct scsi_qla_host
 	uint32_t failback_delay;
 	unsigned long   cfg_flags;
 #define	CFG_ACTIVE	0	/* CFG during a failover, event update, or ioctl */
+#define	CFG_FAILOVER	1	/* CFG during path change */
 	/* uint8_t	cfg_active; */
 	int	eh_start;
 
@@ -3080,7 +3128,6 @@ typedef struct scsi_qla_host
 	uint32_t	binding_type;
 #define BIND_BY_PORT_NAME	0
 #define BIND_BY_PORT_ID		1
-#define BIND_BY_NODE_NAME	2
 
 	srb_t	*status_srb;    /* Keep track of Status Continuation Entries */
 
@@ -3109,9 +3156,9 @@ typedef struct scsi_qla_host
 	uint8_t		hw_id_version[16];
 	/* Model description string from our table based on NVRAM spec */
 	uint8_t		model_desc[80];
-#if LINUX_VERSION_CODE > KERNEL_VERSION(2,5,0)  || defined(SCSI_HAS_HOST_LOCK)
+
+ 	/* Scsi midlayer lock */
  	spinlock_t		host_lock ____cacheline_aligned;
-#endif
 } scsi_qla_host_t;
 
 #if defined(__BIG_ENDIAN)
@@ -3157,8 +3204,6 @@ typedef struct scsi_qla_host
 #define	TGT_Q(ha, t)		(ha->otgt[t])
 #define	LUN_Q(ha, t, l)		(TGT_Q(ha, t)->olun[l])
 #define GET_LU_Q(ha, t, l)  ( (TGT_Q(ha,t) != NULL)? TGT_Q(ha, t)->olun[l] : NULL)
-#define PORT_DOWN_TIMER(ha, t)    ((ha)->fc_db[(t)].port_timer)
-#define PORT(ha, t)    		((ha)->fc_db[(t)])
 #define PORT_LOGIN_RETRY(fcport)    ((fcport)->port_login_retry_count)
 
 #define MBOX_TRACE(ha,b)		{(ha)->mbox_trace |= (b);}
@@ -3200,6 +3245,14 @@ static int __init qla2100_setup (char *s);
 void qla2x00_setup(char *s);
 #endif
 
+/* It seems we cannot depend on CONFIG_COMPAT (RH) since it is 
+ * defined for the ia64 platform, yet does not define the 
+ * (un)register_ioctl32_*() functions.
+ */
+#if defined(CONFIG_PPC64) || defined(CONFIG_X86_64)
+#define	QLA_CONFIG_COMPAT
+#endif
+
 /*
  * Scsi_Host_template (see hosts.h) 
  * Device driver Interfaces to mid-level SCSI driver.
@@ -3230,47 +3283,27 @@ void qla2x00_setup(char *s);
  * use_new_eh_code
  *
  */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,0)
-#define TEMPLATE_USE_NEW_EH_CODE
-#else
 #define TEMPLATE_USE_NEW_EH_CODE use_new_eh_code: 1,
-#endif
 /*
  * emulated
  *
  */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,0)
-#define TEMPLATE_EMULATED
-#else
 #define TEMPLATE_EMULATED emulated: 0,
-#endif
 /*
  * next
  *
  */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,0)
-#define TEMPLATE_NEXT
-#else
 #define TEMPLATE_NEXT next: NULL,
-#endif
 /*
  * module
  *
  */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,0)
-#define TEMPLATE_MODULE
-#else
 #define TEMPLATE_MODULE module: NULL,
-#endif
 /*
  * proc_dir
  *
  */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,0)
-#define TEMPLATE_PROC_DIR
-#else
 #define TEMPLATE_PROC_DIR proc_dir: NULL,
-#endif
 
 #define QLA2100_LINUX_TEMPLATE {				\
 TEMPLATE_NEXT 	 	 	 	 	 	 	\

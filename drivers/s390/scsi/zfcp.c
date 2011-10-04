@@ -5819,7 +5819,7 @@ ssize_t zfcp_parm_proc_read(struct file *file,
           user_len,
           (unsigned long)pos);
 
-	if (pos != (unsigned long)pos || pos >= pbuf->len) {
+	if (pos < 0 || pos >= pbuf->len) {
 		return 0;
 	} else {
 		len = min(user_len, (unsigned long)(pbuf->len - pos));
@@ -7621,7 +7621,7 @@ ssize_t zfcp_unit_proc_read(struct file *file,
           user_len,
           (unsigned long)pos);
 
-        if (pos != (unsigned long)pos || pos >= pbuf->len) {
+        if (pos < 0 || pos >= pbuf->len) {
                 return 0;
         } else {
                 len = min(user_len, (unsigned long)(pbuf->len - pos));

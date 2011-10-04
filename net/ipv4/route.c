@@ -1275,9 +1275,6 @@ static void rt_set_nexthop(struct rtable *rt, struct fib_result *res, u32 itag)
 			rt->rt_gateway = FIB_RES_GW(*res);
 		memcpy(rt->u.dst.metrics, fi->fib_metrics,
 		       sizeof(rt->u.dst.metrics));
-		if (rt->u.dst.metrics[RTAX_HOPLIMIT-1] == 0)
-			rt->u.dst.metrics[RTAX_HOPLIMIT-1] =
-				sysctl_ip_default_ttl;
 		if (fi->fib_mtu == 0) {
 			rt->u.dst.metrics[RTAX_MTU-1] = rt->u.dst.dev->mtu;
 			if (rt->u.dst.metrics[RTAX_LOCK-1] & (1 << RTAX_MTU) &&
@@ -1291,6 +1288,8 @@ static void rt_set_nexthop(struct rtable *rt, struct fib_result *res, u32 itag)
 	} else
 		rt->u.dst.metrics[RTAX_MTU-1]= rt->u.dst.dev->mtu;
 
+	if (rt->u.dst.metrics[RTAX_HOPLIMIT-1] == 0)
+		rt->u.dst.metrics[RTAX_HOPLIMIT-1] = sysctl_ip_default_ttl;
 	if (rt->u.dst.metrics[RTAX_MTU-1] > IP_MAX_MTU)
 		rt->u.dst.metrics[RTAX_MTU-1] = IP_MAX_MTU;
 	if (rt->u.dst.metrics[RTAX_ADVMSS-1] == 0)

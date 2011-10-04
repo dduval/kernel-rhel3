@@ -382,7 +382,7 @@ static ssize_t slm_read( struct file *file, char *buf, size_t count,
 		count = length;
 		goto out;
 	}
-	if (pos != (unsigned)pos || pos >= length) {
+	if (pos < 0 || pos >= length) {
 		count = 0;
 		goto out;
 	}

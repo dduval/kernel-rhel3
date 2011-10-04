@@ -433,6 +433,7 @@ MODULE_PARM(aic79xx, "s");
 MODULE_PARM_DESC(aic79xx,
 "period delimited, options string.\n"
 "	verbose			Enable verbose/diagnostic logging\n"
+"	attach_HostRAID:<int>	Attach to controllers in HostRAID mode\n"
 "	allow_memio		Allow device registers to be memory mapped\n"
 "	debug			Bitmask of debug values to enable\n"
 "	no_reset		Supress initial bus resets\n"
@@ -786,6 +787,8 @@ static int	   ahd_linux_biosparam(Disk *, kdev_t, int[]);
 static int	   ahd_linux_bus_reset(Scsi_Cmnd *);
 static int	   ahd_linux_dev_reset(Scsi_Cmnd *);
 static int	   ahd_linux_abort(Scsi_Cmnd *);
+static int	   ahd_linux_sanity_check(Scsi_Device *);
+static void	   ahd_linux_poll(Scsi_Device *);
 
 /*
  * Calculate a safe value for AHD_NSEG (as expressed through ahd_linux_nseg).
@@ -1665,7 +1668,13 @@ ahd_linux_bus_reset(Scsi_Cmnd *cmd)
 	return (SUCCESS);
 }
 
-Scsi_Host_Template aic79xx_driver_template = {
+static struct scsi_dump_ops ahd_dump_ops = {
+	.sanity_check	= ahd_linux_sanity_check,
+	.poll		= ahd_linux_poll,
+};
+
+Scsi_Host_Template_dump aic79xx_driver_template_dump = {
+	.hostt = {
 	.module			= THIS_MODULE,
 	.name			= "aic79xx",
 	.proc_info		= ahd_linux_proc_info,
@@ -1709,6 +1718,10 @@ Scsi_Host_Template aic79xx_driver_template = {
 	.use_new_eh_code	= 1,
 #endif
 	.vary_io                = 1,
+
+	.disk_dump		= 1,
+	},
+	.dump_ops		= &ahd_dump_ops,
 };
 
 /**************************** Tasklet Handler *********************************/
@@ -2012,6 +2025,7 @@ aic79xx_setup(char *s)
 		{ "extended", &aic79xx_extended },
 		{ "no_reset", &aic79xx_no_reset },
 		{ "verbose", &aic79xx_verbose },
+		{ "attach_HostRAID", &ahd_attach_to_HostRAID_controllers },
 		{ "allow_memio", &aic79xx_allow_memio},
 #ifdef AHD_DEBUG
 		{ "debug", &ahd_debug },
@@ -4206,6 +4220,39 @@ ahd_linux_isr(int irq, void *dev_id, struct pt_regs * regs)
 	ahd_linux_run_complete_queue(ahd);
 	ahd_unlock(ahd, &flags);
 	return IRQ_RETVAL(ours);
+}
+
+static int
+ahd_linux_sanity_check(Scsi_Device *device)
+{
+	struct	ahd_softc *ahd;
+	struct	ahd_linux_device *dev;
+
+	ahd = *(struct ahd_softc **)device->host->hostdata;
+	dev = ahd_linux_get_device(ahd, device->channel,
+				   device->id, device->lun,
+					   /*alloc*/FALSE);
+	if (dev == NULL)
+		return -ENXIO;
+	if (ahd->platform_data->qfrozen || dev->qfrozen)
+		return -EBUSY;
+	if (spin_is_locked(&ahd->platform_data->spin_lock))
+		return -EBUSY;
+	return 0;
+}
+
+static void
+ahd_linux_poll(Scsi_Device *device)
+{
+	struct	ahd_softc *ahd;
+	struct  ahc_linux_device *dev;
+	int	ours;
+
+	ahd = *(struct ahd_softc **)device->host->hostdata;
+	ours = ahd_intr(ahd);
+	if (ahd_linux_next_device_to_run(ahd) != NULL)
+		ahd_schedule_runq(ahd);
+	ahd_linux_run_complete_queue(ahd);
 }
 
 void

@@ -191,6 +191,7 @@ void create_valid_hpte( unsigned long slot, unsigned long vpn,
 			unsigned long prpn, unsigned hash,
 			void * ptep, unsigned hpteflags,
 			unsigned bolted );
+unsigned long get_lock_slot(unsigned long vpn);
 
 #define PD_SHIFT (10+12)		/* Page directory */
 #define PD_MASK  0x02FF

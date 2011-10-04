@@ -70,6 +70,9 @@ running once the system is up.
 
 	acpi=		[HW,ACPI] Advanced Configuration and Power Interface 
 
+	acpi_sci=	[HW,ACPI] ACPI System Control Interrupt trigger mode
+			Format: { level | edge |  high | low
+
 	acpismp=force	[IA-32] Early setup parse and use ACPI SMP table.
  
 	ad1816=		[HW,SOUND]

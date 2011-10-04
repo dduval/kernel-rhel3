@@ -10,7 +10,7 @@
 
 O_TARGET := block.o
 
-export-objs	:= ll_rw_blk.o blkpg.o elevator.o loop.o DAC960.o genhd.o acsi.o
+export-objs	:= ll_rw_blk.o blkpg.o elevator.o loop.o DAC960.o genhd.o acsi.o diskdump.o diskdumplib.o
 
 obj-y	:= ll_rw_blk.o blkpg.o genhd.o elevator.o
 
@@ -31,6 +31,8 @@ obj-$(CONFIG_BLK_CPQ_CISS_DA)  += cciss.o
 obj-$(CONFIG_BLK_DEV_DAC960)	+= DAC960.o
 obj-$(CONFIG_BLK_DEV_UMEM)	+= umem.o
 obj-$(CONFIG_BLK_DEV_NBD)	+= nbd.o
+obj-$(CONFIG_BLK_DEV_SX8)	+= sx8.o
+obj-$(CONFIG_DISKDUMP)		+= diskdump.o diskdumplib.o
 
 subdir-$(CONFIG_PARIDE) += paride
 

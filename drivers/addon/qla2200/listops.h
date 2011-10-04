@@ -31,6 +31,22 @@
 		pos = n, n = pos->next )
 #endif
 
+
+#if !defined(list_for_each_entry)
+#define list_for_each_entry(pos, head, member)                          \
+	for (pos = list_entry((head)->next, typeof(*pos), member);      \
+	    &pos->member != (head);                                    \
+	    pos = list_entry(pos->member.next, typeof(*pos), member))
+
+#endif
+#if !defined(list_for_each_entry_safe)
+#define list_for_each_entry_safe(pos, n, head, member)			\
+	for (pos = list_entry((head)->next, typeof(*pos), member),	\
+	    n = list_entry(pos->member.next, typeof(*pos), member);	\
+	    &pos->member != (head);					\
+	    pos = n, n = list_entry(n->member.next, typeof(*n), member))
+#endif
+
 /* Non-standard definitions. */
 static inline void __qla_list_splice(struct list_head *list,
     struct list_head *head)
@@ -421,4 +437,4 @@ del_from_pending_queue(struct scsi_qla_host * ha, srb_t * sp)
 
         spin_unlock_irqrestore(&ha->list_lock, flags);
 }
-
+ 

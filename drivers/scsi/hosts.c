@@ -88,7 +88,27 @@ void
 scsi_unregister(struct Scsi_Host * sh){
     struct Scsi_Host * shpnt;
     Scsi_Host_Name *shn;
-        
+    char name[10];
+
+    /* kill error handling thread */
+    if (sh->hostt->use_new_eh_code
+        && sh->ehandler != NULL) {
+        DECLARE_MUTEX_LOCKED(sem);
+
+        sh->eh_notify = &sem;
+        send_sig(SIGHUP, sh->ehandler, 1);
+        down(&sem);
+        sh->eh_notify = NULL;
+    }
+
+    /* remove proc entry */
+#ifdef CONFIG_PROC_FS
+    sprintf(name, "%d", sh->host_no);
+    remove_proc_entry(name, sh->hostt->proc_dir);
+#endif
+       
+    sh->hostt->present--;
+ 
     if(scsi_hostlist == sh)
 	scsi_hostlist = sh->next;
     else {
@@ -117,11 +137,13 @@ scsi_unregister(struct Scsi_Host * sh){
  * pain to reverse this, so we try to avoid it 
  */
 extern int blk_nohighio;
+extern int scsi_in_detection;
+extern void scsi_setup_host(struct Scsi_Host *);
 struct Scsi_Host * scsi_register(Scsi_Host_Template * tpnt, int j){
     struct Scsi_Host * retval, *shpnt, *o_shp;
     Scsi_Host_Name *shn, *shn2;
     int flag_new = 1;
-    const char * hname;
+    const char * hname, * name;
     size_t hname_len;
     retval = (struct Scsi_Host *)kmalloc(sizeof(struct Scsi_Host) + j,
 					 (tpnt->unchecked_isa_dma && j ? 
@@ -251,6 +273,12 @@ struct Scsi_Host * scsi_register(Scsi_Host_Template * tpnt, int j){
 	    if (! shpnt)
 		o_shp->next = retval;
         }
+    }
+
+    tpnt->present++;
+
+    if (!scsi_in_detection) {
+	scsi_setup_host(retval);
     }
     
     return retval;

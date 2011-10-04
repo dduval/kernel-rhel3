@@ -214,7 +214,7 @@ return_string:
 		      "Non-error misses: %lu\n"
 		      "Error misses\t: %lu\n",
 		      pte_misses, pte_errors);
-	if (pos != (unsigned)pos || pos >= strlen(buffer))
+	if (pos < 0 || pos >= strlen(buffer))
 		return 0;
 	if (n > strlen(buffer) - pos)
 		n = strlen(buffer) - pos;

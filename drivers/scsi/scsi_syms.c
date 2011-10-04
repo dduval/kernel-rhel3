@@ -37,6 +37,7 @@ EXPORT_SYMBOL(scsi_free);
 EXPORT_SYMBOL(scsi_malloc);
 EXPORT_SYMBOL(scsi_register);
 EXPORT_SYMBOL(scsi_unregister);
+EXPORT_SYMBOL(scsi_scan_host);
 EXPORT_SYMBOL(scsicam_bios_param);
 EXPORT_SYMBOL(scsi_partsize);
 EXPORT_SYMBOL(scsi_allocate_device);
@@ -105,3 +106,5 @@ extern void scsi_add_timer(Scsi_Cmnd *, int, void ((*) (Scsi_Cmnd *)));
 extern int scsi_delete_timer(Scsi_Cmnd *);
 EXPORT_SYMBOL(scsi_add_timer);
 EXPORT_SYMBOL(scsi_delete_timer);
+
+EXPORT_SYMBOL(scsi_decide_disposition);

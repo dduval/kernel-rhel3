@@ -55,6 +55,7 @@
 #include <asm/checksum.h>
 #include <linux/unistd.h>
 #include <linux/netdevice.h>
+#include <linux/diskdump.h>
 
 
 #if defined(CONFIG_PROC_FS)
@@ -223,6 +224,7 @@ EXPORT_SYMBOL(invalidate_bdev);
 EXPORT_SYMBOL(invalidate_inodes);
 EXPORT_SYMBOL(invalidate_device);
 EXPORT_SYMBOL(invalidate_inode_pages);
+EXPORT_SYMBOL(invalidate_inode_pages2);
 EXPORT_SYMBOL(truncate_inode_pages);
 EXPORT_SYMBOL(fsync_dev);
 EXPORT_SYMBOL_GPL(fsync_dev_lockfs);
@@ -470,6 +472,7 @@ EXPORT_SYMBOL(map_user_kiobuf);
 EXPORT_SYMBOL(unmap_kiobuf);
 EXPORT_SYMBOL(lock_kiovec);
 EXPORT_SYMBOL(unlock_kiovec);
+EXPORT_SYMBOL(mark_dirty_kiobuf);
 EXPORT_SYMBOL(brw_kiovec);
 EXPORT_SYMBOL(kiobuf_wait_for_io);
 
@@ -598,7 +601,10 @@ EXPORT_SYMBOL(event);
 EXPORT_SYMBOL(brw_page);
 EXPORT_SYMBOL(__inode_dir_notify);
 
-#ifdef CONFIG_UID16
+/* Always export these for x86_64 for compatibility with previous 
+ * RHEL3 kernels 
+ */
+#if defined(CONFIG_UID16) || defined(__x86_64__)
 EXPORT_SYMBOL(overflowuid);
 EXPORT_SYMBOL(overflowgid);
 #endif
@@ -662,3 +668,7 @@ EXPORT_SYMBOL_GPL(netdump_func);
 EXPORT_SYMBOL_GPL(netdump_mode);
 EXPORT_SYMBOL_GPL(netdump_register_hooks);
 EXPORT_SYMBOL_GPL(netdump_unregister_hooks);
+EXPORT_SYMBOL_GPL(diskdump_func);
+EXPORT_SYMBOL_GPL(diskdump_mode);
+EXPORT_SYMBOL_GPL(diskdump_register_hook);
+EXPORT_SYMBOL_GPL(diskdump_unregister_hook);

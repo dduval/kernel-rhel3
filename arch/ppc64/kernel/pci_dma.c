@@ -97,11 +97,8 @@ void free_tce_range_nolock(struct TceTable *,
 			   unsigned order );
 
 /* allocates a range of tces and sets them to the pages  */
-static inline dma_addr_t get_tces( struct TceTable *, 
-				   unsigned order, 
-				   void *page, 
-				   unsigned numPages,
-				   int direction );
+dma_addr_t get_tces(struct TceTable *, unsigned order, void *page,
+		    unsigned numPages, int direction);
 
 static long test_tce_range( struct TceTable *, 
 			    long tcenum, 
@@ -219,7 +216,7 @@ static void tce_build_pSeries(struct TceTable *tbl, long tcenum,
  * Build a TceTable structure.  This contains a multi-level bit map which
  * is used to manage allocation of the tce space.
  */
-static struct TceTable *build_tce_table( struct TceTable * tbl )
+struct TceTable *build_tce_table(struct TceTable * tbl)
 {
 	unsigned long bits, bytes, totalBytes;
 	unsigned long numBits[NUM_TCE_LEVELS], numBytes[NUM_TCE_LEVELS];
@@ -527,7 +524,8 @@ static long test_tce_range( struct TceTable *tbl, long tcenum, unsigned order )
 	return retval;
 }
 
-static inline dma_addr_t get_tces( struct TceTable *tbl, unsigned order, void *page, unsigned numPages, int direction )
+inline dma_addr_t get_tces(struct TceTable *tbl, unsigned order,
+			   void *page, unsigned numPages, int direction)
 {
 	long tcenum;
 	unsigned long uaddr;
@@ -587,8 +585,8 @@ static void tce_free_one_pSeries( struct TceTable *tbl, long tcenum )
 
 }
 
-static void tce_free(struct TceTable *tbl, dma_addr_t dma_addr, 
-			     unsigned order, unsigned num_pages)
+void tce_free(struct TceTable *tbl, dma_addr_t dma_addr,
+	      unsigned order, unsigned num_pages)
 {
 	long tcenum, total_tces, free_tce;
 	unsigned i;
@@ -714,12 +712,6 @@ void create_tce_tables_for_busesLP(struct list_head *bus_list)
 	for (ln=bus_list->next; ln != bus_list; ln=ln->next) {
 		bus = pci_bus_b(ln);
 		busdn = PCI_GET_DN(bus);
-		/* NOTE: there should never be a window declared on a bus when
-		 * child devices also have a window.  If this should ever be
-		 * architected, we probably want children to have priority.
-		 * In reality, the PHB containing ISA has the property, but otherwise
-		 * it is the pci-bridges that have the property.
-		 */
 		dma_window = (u32 *)get_property(busdn, "ibm,dma-window", 0);
 		if (dma_window) {
 			/* Busno hasn't been copied yet.
@@ -728,6 +720,7 @@ void create_tce_tables_for_busesLP(struct list_head *bus_list)
 			busdn->busno = bus->number;
 			create_pci_bus_tce_table((unsigned long)busdn);
 		}
+		/* look for a window on a bridge even if the PHB had one */
 		create_tce_tables_for_busesLP(&bus->children);
 	}
 }
@@ -1066,7 +1059,7 @@ void pci_free_consistent(struct pci_dev *hwdev, size_t size,
  	/* Client asked for way to much space.  This is checked later anyway */
 	/* It is easier to debug here for the drivers than in the tce tables.*/
  	if(order >= NUM_TCE_LEVELS) {
- 		printk("PCI_DMA: pci_free_consistent size to large: 0x%lx \n",size);
+ 		printk("PCI_DMA: pci_free_consistent size too large: 0x%lx \n",size);
  		return;
  	}
 	
@@ -1105,13 +1098,14 @@ dma_addr_t pci_map_single(struct pci_dev *hwdev, void *vaddr,
  	/* Client asked for way to much space.  This is checked later anyway */
 	/* It is easier to debug here for the drivers than in the tce tables.*/
  	if(order >= NUM_TCE_LEVELS) {
- 		panic("PCI_DMA: pci_map_single size too large: 0x%lx \n", size);
+		panic("PCI_DMA: pci_map_single size too large: 0x%lx \n", size);
  		return dma_handle;
  	}
 
 	tbl = get_tce_table(hwdev); 
 
 	if ( tbl ) {
+		/* get_tces panics if there are no entries available */
 		dma_handle = get_tces( tbl, order, vaddr, nPages, direction );
 		dma_handle |= ( uaddr & ~PAGE_MASK );
 	} else {
@@ -1138,7 +1132,7 @@ void pci_unmap_single( struct pci_dev *hwdev, dma_addr_t dma_handle, size_t size
  	/* Client asked for way to much space.  This is checked later anyway */
 	/* It is easier to debug here for the drivers than in the tce tables.*/
  	if(order >= NUM_TCE_LEVELS) {
- 		printk("PCI_DMA: pci_unmap_single size to large: 0x%lx \n",size);
+ 		printk("PCI_DMA: pci_unmap_single size too large: 0x%lx \n",size);
  		return;
  	}
 	
@@ -1305,7 +1299,8 @@ static dma_addr_t create_tces_sg( struct TceTable *tbl, struct scatterlist *sg,
  	/* Client asked for way to much space.  This is checked later anyway */
 	/* It is easier to debug here for the drivers than in the tce tables.*/
  	if(order >= NUM_TCE_LEVELS) {
-		printk("PCI_DMA: create_tces_sg size to large: 0x%x \n",(numTces << PAGE_SHIFT));
+		printk("PCI_DMA: create_tces_sg size too large: 0x%llx \n",(numTces << PAGE_SHIFT));
+		panic("numTces is off");
  		return NO_TCE;
  	}
 
@@ -1356,7 +1351,7 @@ static dma_addr_t create_tces_sg( struct TceTable *tbl, struct scatterlist *sg,
 		   		numTces, (unsigned)(tcenum - starttcenum));
 
 	} else {
-		panic("PCI_DMA: TCE allocation failure in create_tces_sg. 0x%p 0x%lx\n",
+		panic("PCI_DMA: TCE allocation failure in create_tces_sg. 0x%p 0x%x\n",
 		      tbl, order);
 	}
 
@@ -1371,8 +1366,6 @@ int pci_map_sg( struct pci_dev *hwdev, struct scatterlist *sg, int nents, int di
 	dma_addr_t dma_handle;
 	void *address;
 
-	PPCDBG(PPCDBG_TCE, "pci_map_sg:\n");
-	PPCDBG(PPCDBG_TCE, "\thwdev = 0x%16.16lx, sg = 0x%16.16lx, direction = 0x%16.16lx, nents = 0x%16.16lx\n", hwdev, sg, direction, nents);	
 	/* Fast path for a single entry scatterlist */
 	if ( nents == 1 ) {
 		address = sg->address ? sg->address :
@@ -1435,7 +1428,7 @@ void pci_unmap_sg( struct pci_dev *hwdev, struct scatterlist *sg, int nelms, int
 	/* It is easier to debug here for the drivers than in the tce tables.*/
  	if(order >= NUM_TCE_LEVELS) {
 		printk("PCI_DMA: dma_start_page:0x%lx  dma_end_page:0x%lx\n",dma_start_page,dma_end_page);
-		printk("PCI_DMA: pci_unmap_sg size to large: 0x%x \n",(numTces << PAGE_SHIFT));
+		printk("PCI_DMA: pci_unmap_sg size too large: 0x%x \n",(numTces << PAGE_SHIFT));
  		return;
  	}
 	

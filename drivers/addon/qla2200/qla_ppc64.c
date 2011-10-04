@@ -16,7 +16,6 @@
  * General Public License for more details.
  *
  ******************************************************************************/
-
 /* fs/ioctl.c */
 extern asmlinkage long sys_ioctl(unsigned int fd, unsigned int cmd, void *);
 
@@ -165,9 +164,7 @@ qla2x00_ioctl32(unsigned int fd, unsigned int cmd, unsigned long arg,
 	pext32->VendorSpecificData = (u32)(u64)pext->VendorSpecificData;
 
 	/* Always try to copy values back regardless what happened before. */
-	tmp_rval = copy_to_user((void *)arg, (void *)pext32,
-	    sizeof(EXT_IOCTL_32));
-
+	tmp_rval = copy_to_user((char *)arg, pext32, sizeof(EXT_IOCTL_32));
 	if (ret == 0)
 		ret = tmp_rval;
 
@@ -371,30 +368,12 @@ qla2x00_xfr_to_64loopback(EXT_IOCTL *pext, void **preq_32, void **prsp_32)
 		return QL_STATUS_ERROR;
 	}
 
-	status = verify_area(VERIFY_READ, (void *)pext->RequestAdr,
-	    pext->RequestLen);
-	if (status) {
-		pext->Status = EXT_STATUS_COPY_ERR;
-		DEBUG9_10(printk("%s: ERROR verify read of "
-		    "request buffer.\n", __func__);)
-		return QL_STATUS_ERROR;
-	}
-
 	status = copy_from_user(plb_req_32, pext->RequestAdr,
 	    pext->RequestLen);
 	if (status) {
 		pext->Status = EXT_STATUS_COPY_ERR;
 		DEBUG9_10(printk("%s: ERROR copy "
 		    "request buffer.\n", __func__);)
-		return QL_STATUS_ERROR;
-	}
-
-	status = verify_area(VERIFY_READ, (void *)pext->ResponseAdr,
-	    pext->ResponseLen);
-	if (status) {
-		pext->Status = EXT_STATUS_COPY_ERR;
-		DEBUG9_10(printk("%s: ERROR verify read of "
-		    "response buffer.\n", __func__);)
 		return QL_STATUS_ERROR;
 	}
 
@@ -474,17 +453,7 @@ qla2x00_xfr_from_64loopback(EXT_IOCTL *pext, void **preq_32, void **prsp_32)
 	pext->RequestLen = sizeof(INT_LOOPBACK_REQ_32);
 	pext->ResponseLen = sizeof(INT_LOOPBACK_RSP_32);
 
-	status = verify_area(VERIFY_WRITE, (void *)pext->RequestAdr,
-	    pext->RequestLen);
-	if (status) {
-		pext->Status = EXT_STATUS_COPY_ERR;
-		DEBUG9_10(printk("%s: ERROR verify "
-		    "write of request data buffer.\n", __func__);)
-		return QL_STATUS_ERROR;
-	}
-
-	status = copy_to_user((uint8_t *)pext->RequestAdr,
-	    (uint8_t *)plb_rsp_32, pext->RequestLen);
+	status = copy_to_user(pext->RequestAdr, plb_rsp_32, pext->RequestLen);
 	if (status) {
 		pext->Status = EXT_STATUS_COPY_ERR;
 		DEBUG9_10(printk("%s: ERROR "
@@ -492,18 +461,8 @@ qla2x00_xfr_from_64loopback(EXT_IOCTL *pext, void **preq_32, void **prsp_32)
 		return QL_STATUS_ERROR;
 	}
 
-	status = verify_area(VERIFY_WRITE, (void *)pext->ResponseAdr,
-	    pext->ResponseLen);
-	if (status) {
-		pext->Status = EXT_STATUS_COPY_ERR;
-		DEBUG9_10(printk("%s: ERROR verify "
-		    "write of response data buffer.\n", __func__);)
-		return QL_STATUS_ERROR;
-	}
-
 	/* put loopback return data in user buffer */
-	status = copy_to_user((uint8_t *)pext->ResponseAdr,
-	    (uint8_t *)plb_rsp_32, pext->ResponseLen);
+	status = copy_to_user(pext->ResponseAdr, plb_rsp_32, pext->ResponseLen);
 	if (status) {
 		pext->Status = EXT_STATUS_COPY_ERR;
 		DEBUG9_10(printk("%s: ERROR "

@@ -2,30 +2,50 @@
 #if (!defined(dprintk))
 # define dprintk(x)
 #endif
+//#define AAC_DEBUG_INSTRUMENT_TIMING
 
+/* if (nblank(dprintk(x))) */
+#define _nblank(x) #x
+#define nblank(x) _nblank(x)[0]
+
+#include "compat.h"
 /*------------------------------------------------------------------------------
  *              D E F I N E S
  *----------------------------------------------------------------------------*/
 
-#define MAXIMUM_NUM_CONTAINERS	31
-#define MAXIMUM_NUM_ADAPTERS	8
+//#define AAC_EXTENDED_TIMEOUT	120
 
-#define AAC_NUM_FIB		578
-//#define AAC_NUM_IO_FIB	512
-#define AAC_NUM_IO_FIB		100
+#ifndef AAC_DRIVER_BUILD
+# define AAC_DRIVER_BUILD 2340
+#endif
+#define MAXIMUM_NUM_CONTAINERS	32
+#define MAXIMUM_NUM_ADAPTERS	32
 
-#define AAC_MAX_TARGET		(MAXIMUM_NUM_CONTAINERS+1)
-//#define AAC_MAX_TARGET 	(16)
+#define AAC_NUM_IO_FIB		512
+#define AAC_NUM_FIB		(AAC_NUM_IO_FIB+64)
+
 #define AAC_MAX_LUN		(8)
+
+#define AAC_MAX_HOSTPHYSMEMPAGES (0xfffff)
+/*
+ *  max_sectors is an unsigned short, otherwise limit is 0x100000000 / 512
+ * Linux has starvation problems if we permit larger than 4MB I/O ...
+ */
+#define AAC_MAX_32BIT_SGBCOUNT	((unsigned short)8192)
 
 /*
  * These macros convert from physical channels to virtual channels
  */
 #define CONTAINER_CHANNEL	(0)
+#define	ID_LUN_TO_CONTAINER(id, lun)	(id)
+#define CONTAINER_TO_CHANNEL(cont)	(CONTAINER_CHANNEL)
+#define CONTAINER_TO_ID(cont)		((cont))
+#define CONTAINER_TO_LUN(cont)		(0)
 #define aac_phys_to_logical(x)  (x+1)
 #define aac_logical_to_phys(x)  (x?x-1:0)
 
-#define AAC_DETAILED_STATUS_INFO
+/* #define AAC_DETAILED_STATUS_INFO */
+#define AAC_LM_SENSOR
 
 struct diskparm
 {
@@ -70,7 +90,7 @@ struct diskparm
 #define		FT_SOCK		6	/* socket */
 #define		FT_FIFO		7	/* fifo */
 #define		FT_FILESYS	8	/* ADAPTEC's "FSA"(tm) filesystem */
-#define		FT_DRIVE	9	/* physical disk - addressable in scsi by bus/target/lun */
+#define		FT_DRIVE	9	/* physical disk - addressable in scsi by bus/id/lun */
 #define		FT_SLICE	10	/* virtual disk - raw volume - slice */
 #define		FT_PARTITION	11	/* FSA partition - carved out of a slice - building block for containers */
 #define		FT_VOLUME	12	/* Container - Volume Set */
@@ -82,7 +102,7 @@ struct diskparm
 /*
  *	Host side memory scatter gather list
  *	Used by the adapter for read, write, and readdirplus operations
- *	We have seperate 32 and 64 bit version because even
+ *	We have separate 32 and 64 bit version because even
  *	on 64 bit systems not all cards support the 64 bit version
  */
 struct sgentry {
@@ -93,6 +113,14 @@ struct sgentry {
 struct sgentry64 {
 	u32	addr[2];	/* 64-bit addr. 2 pieces for data alignment */
 	u32	count;	/* Length. */
+};
+
+struct sgentryraw {
+	u32		next;	/* reserved for F/W use */
+	u32		prev;	/* reserved for F/W use */
+	u32		addr[2];
+	u32		count;
+	u32		flags;	/* reserved for F/W use */
 };
 
 /*
@@ -110,6 +138,11 @@ struct sgmap {
 struct sgmap64 {
 	u32		count;
 	struct sgentry64 sg[1];
+};
+
+struct sgmapraw {
+	u32		  count;
+	struct sgentryraw sg[1];
 };
 
 struct creation_info
@@ -252,11 +285,11 @@ enum aac_queue_types {
 #define		FsaNormal	1
 #define		FsaHigh		2
 
+
 /*
  * Define the FIB. The FIB is the where all the requested data and
  * command information are put to the application on the FSA adapter.
  */
-
 struct aac_fibhdr {
 	u32 XferState;			// Current transfer state for this CCB
 	u16 Command;			// Routing information for the destination
@@ -272,18 +305,12 @@ struct aac_fibhdr {
 		    u32 _ReceiverTimeStart; 	// Timestamp for receipt of fib
 		    u32 _ReceiverTimeDone;	// Timestamp for completion of fib
 		} _s;
-//		struct aac_list_head _FibLinks;	// Used to link Adapter Initiated Fibs on the host
 	} _u;
 };
 
-//#define FibLinks			_u._FibLinks
-
-#define FIB_DATA_SIZE_IN_BYTES (512 - sizeof(struct aac_fibhdr))
-
-
 struct hw_fib {
 	struct aac_fibhdr header;
-	u8 data[FIB_DATA_SIZE_IN_BYTES];		// Command specific data
+	u8 data[512-sizeof(struct aac_fibhdr)];	// Command specific data
 };
 
 /*
@@ -327,6 +354,7 @@ struct hw_fib {
  */
 #define		ContainerCommand		500
 #define		ContainerCommand64		501
+#define		ContainerRawIo			502
 /*
  *	Cluster Commands
  */
@@ -347,9 +375,9 @@ struct hw_fib {
 #define		SendHostTime			705
 #define		LastMiscCommand			706
 
-//
-// Commands that will target the failover level on the FSA adapter
-//
+/*
+ * Commands that will target the failover level on the FSA adapter
+ */
 
 enum fib_xfer_state {
 	HostOwned 			= (1<<0),
@@ -382,6 +410,7 @@ enum fib_xfer_state {
  */
 
 #define ADAPTER_INIT_STRUCT_REVISION		3
+#define ADAPTER_INIT_STRUCT_REVISION_4		4 // rocket science
 
 struct aac_init
 {
@@ -398,32 +427,39 @@ struct aac_init
 	u32	printfbufsiz;
 	u32	HostPhysMemPages;		// number of 4k pages of host physical memory
 	u32	HostElapsedSeconds;		// number of seconds since 1970.
+	// ADAPTER_INIT_STRUCT_REVISION_4 begins here
+	u32	InitFlags;			// flags for supported features
+#	define INITFLAGS_NEW_COMM_SUPPORTED	0x00000001
+	u32	MaxIoCommands;			// max outstanding commands
+	u32	MaxIoSize;			// largest I/O command
+	u32	MaxFibSize;			// largest FIB to adapter
 };
 
 enum aac_log_level {
-	LOG_INIT			= 10,
-	LOG_INFORMATIONAL		= 20,
-	LOG_WARNING			= 30,
-	LOG_LOW_ERROR			= 40,
-	LOG_MEDIUM_ERROR		= 50,
-	LOG_HIGH_ERROR			= 60,
-	LOG_PANIC			= 70,
-	LOG_DEBUG			= 80,
-	LOG_WINDBG_PRINT		= 90
+	AAC_LOG_INIT			= 10,
+	AAC_LOG_INFORMATIONAL		= 20,
+	AAC_LOG_WARNING			= 30,
+	AAC_LOG_LOW_ERROR		= 40,
+	AAC_LOG_MEDIUM_ERROR		= 50,
+	AAC_LOG_HIGH_ERROR		= 60,
+	AAC_LOG_PANIC			= 70,
+	AAC_LOG_DEBUG			= 80,
+	AAC_LOG_WINDBG_PRINT		= 90
 };
 
 #define FSAFS_NTC_GET_ADAPTER_FIB_CONTEXT	0x030b
 #define FSAFS_NTC_FIB_CONTEXT			0x030c
 
 struct aac_dev;
+struct fib;
 
 struct adapter_ops
 {
 	void (*adapter_interrupt)(struct aac_dev *dev);
 	void (*adapter_notify)(struct aac_dev *dev, u32 event);
-	void (*adapter_enable_int)(struct aac_dev *dev, u32 event);
-	void (*adapter_disable_int)(struct aac_dev *dev, u32 event);
-	int  (*adapter_sync_cmd)(struct aac_dev *dev, u32 command, u32 p1, u32 *status);
+	int  (*adapter_sync_cmd)(struct aac_dev *dev, u32 command, u32 p1, u32 p2, u32 p3, u32 p4, u32 p5, u32 p6, u32 p7, u32 *status, u32 *r1, u32 *r2, u32 *r3, u32 *r4);
+	int  (*adapter_check_health)(struct aac_dev *dev);
+	int  (*adapter_send)(struct fib * fib);
 };
 
 /*
@@ -432,23 +468,25 @@ struct adapter_ops
 
 struct aac_driver_ident
 {
-	u16	vendor;
-	u16	device;
-	u16	subsystem_vendor;
-	u16	subsystem_device;
-	int 	(*init)(struct aac_dev *dev, unsigned long num);
+	int 	(*init)(struct aac_dev *dev);
 	char *	name;
 	char *	vname;
 	char *	model;
 	u16	channels;
 	int	quirks;
-#define AAC_QUIRK_31BIT			1
 };
+/*
+ * Some adapter firmware needs communication memory 
+ * below 2gig. This tells the init function to set the
+ * dma mask such that fib memory will be allocated where the
+ * adapter firmware can get to it.
+ */
+#define AAC_QUIRK_31BIT	1
 
 /*
  *	The adapter interface specs all queues to be located in the same
  *	physically contigous block. The host structure that defines the
- *	commuication queues will assume they are each a seperate physically
+ *	commuication queues will assume they are each a separate physically
  *	contigous memory region that will support them all being one big
  *	contigous block. 
  *	There is a command and response queue for each level and direction of
@@ -465,9 +503,7 @@ struct aac_queue {
                                         		/* This is only valid for adapter to host command queues. */                      
 	spinlock_t	 	*lock;		     	/* Spinlock for this queue must take this lock before accessing the lock */
 	spinlock_t		lockdata;		/* Actual lock (used only on one side of the lock) */
-	unsigned long		SavedIrql;      	/* Previous IRQL when the spin lock is taken */
-	u32			padding;		/* Padding - FIXME - can remove I believe */
-	struct list_head 	cmdq;		   	/* A queue of FIBs which need to be prcessed by the FS thread. This is */
+	struct list_head 	cmdq;		   	/* A queue of FIBs which need to be processed by the FS thread. This is */
                                 		        /* only valid for command queues which receive entries from the adapter. */
 	struct list_head	pendingq;		/* A queue of outstanding fib's to the adapter. */
 	unsigned long		numpending;		/* Number of entries on outstanding queue. */
@@ -531,6 +567,7 @@ struct sa_drawbridge_CSR {
 #define Mailbox3	SaDbCSR.MAILBOX3
 #define Mailbox4	SaDbCSR.MAILBOX4
 #define Mailbox5	SaDbCSR.MAILBOX5
+#define Mailbox6	SaDbCSR.MAILBOX6
 #define Mailbox7	SaDbCSR.MAILBOX7
 	
 #define DoorbellReg_p SaDbCSR.PRISETIRQ
@@ -581,6 +618,10 @@ struct rx_mu_registers {
 	u32	ODR;				//	132Ch	|	2Ch	|	Outbound Doorbell Register
 	u32	OISR;				//	1330h	|	30h	|	Outbound Interrupt Status Register
 	u32	OIMR;				//	1334h	|	34h	|	Outbound Interrupt Mask Register
+	u32	reserved2;			//	1338h	|	38h	|	Reserved
+	u32	reserved3;			//	133Ch	|	3Ch	|	Reserved
+	u32	InboundQueue;			//	1340h	|	40h	|	Inbound Queue Port relative to firmware
+	u32	OutboundQueue;			//	1344h	|	44h	|	Outbound Queue Port relative to firmware
 						// * Must access through ATU Inbound Translation Window
 };
 
@@ -593,6 +634,11 @@ struct rx_inbound {
 #define	InboundMailbox2		IndexRegs.Mailbox[2]
 #define	InboundMailbox3		IndexRegs.Mailbox[3]
 #define	InboundMailbox4		IndexRegs.Mailbox[4]
+#if (defined(AAC_LM_SENSOR))
+#define	InboundMailbox5		IndexRegs.Mailbox[5]
+#define	InboundMailbox6		IndexRegs.Mailbox[6]
+#define	InboundMailbox7		IndexRegs.Mailbox[7]
+#endif
 
 #define	INBOUNDDOORBELL_0	cpu_to_le32(0x00000001)
 #define INBOUNDDOORBELL_1	cpu_to_le32(0x00000002)
@@ -612,8 +658,8 @@ struct rx_inbound {
 #define OutboundDoorbellReg	MUnit.ODR
 
 struct rx_registers {
-	struct rx_mu_registers		MUnit;		// 1300h - 1334h
-	u32				reserved1[6];	// 1338h - 134ch
+	struct rx_mu_registers		MUnit;		// 1300h - 1344h
+	u32				reserved1[2];	// 1348h - 134ch
 	struct rx_inbound		IndexRegs;
 };
 
@@ -622,13 +668,30 @@ struct rx_registers {
 #define rx_writeb(AEP, CSR, value)	writeb(value, &((AEP)->regs.rx->CSR))
 #define rx_writel(AEP, CSR, value)	writel(value, &((AEP)->regs.rx->CSR))
 
-struct fib;
+/*
+ *	Rkt Message Unit Registers (same as Rx, except a larger reserve region)
+ */
+
+#define rkt_mu_registers rx_mu_registers
+#define rkt_inbound rx_inbound
+
+struct rkt_registers {
+	struct rkt_mu_registers		MUnit;		 /* 1300h - 1344h */
+	u32				reserved1[1006]; /* 1348h - 22fch */
+	struct rkt_inbound		IndexRegs;	 /* 2300h - */
+};
+
+#define rkt_readb(AEP, CSR)		readb(&((AEP)->regs.rkt->CSR))
+#define rkt_readl(AEP, CSR)		readl(&((AEP)->regs.rkt->CSR))
+#define rkt_writeb(AEP, CSR, value)	writeb(value, &((AEP)->regs.rkt->CSR))
+#define rkt_writel(AEP, CSR, value)	writel(value, &((AEP)->regs.rkt->CSR))
 
 typedef void (*fib_callback)(void *ctxt, struct fib *fibctx);
 
 struct aac_fib_context {
 	s16	 		type;		// used for verification of structure	
 	s16	 		size;
+	u32			unique;		// unique value representing this context
 	ulong			jiffies;	// used for cleanup - dmb changed to ulong
 	struct list_head	next;		// used to link context's into a linked list
 	struct semaphore 	wait_sem;	// this is used to wait for the next fib to arrive.
@@ -638,13 +701,15 @@ struct aac_fib_context {
 };
 
 struct fsa_scsi_hba {
-	u32		size[MAXIMUM_NUM_CONTAINERS];
+	u64		last[MAXIMUM_NUM_CONTAINERS];
+	u64		size[MAXIMUM_NUM_CONTAINERS];
 	u32		type[MAXIMUM_NUM_CONTAINERS];
+	u16		queue_depth[MAXIMUM_NUM_CONTAINERS];
 	u8		valid[MAXIMUM_NUM_CONTAINERS];
 	u8		ro[MAXIMUM_NUM_CONTAINERS];
 	u8		locked[MAXIMUM_NUM_CONTAINERS];
 	u8		deleted[MAXIMUM_NUM_CONTAINERS];
-	s32		devno[MAXIMUM_NUM_CONTAINERS];
+	char		devname[MAXIMUM_NUM_CONTAINERS][8];
 };
 
 struct fib {
@@ -671,6 +736,7 @@ struct fib {
 	 *	Outstanding I/O queue.
 	 */
 	struct list_head	queue;
+
 	/*
 	 *	And for the internal issue/reply queues (we may be able
 	 *	to merge these two)
@@ -730,22 +796,23 @@ struct aac_adapter_info
 /*
  * Supported Options
  */
-#define AAC_OPT_SNAPSHOT		cpu_to_le32(1)
-#define AAC_OPT_CLUSTERS		cpu_to_le32(1<<1)
-#define AAC_OPT_WRITE_CACHE		cpu_to_le32(1<<2)
-#define AAC_OPT_64BIT_DATA		cpu_to_le32(1<<3)
-#define AAC_OPT_HOST_TIME_FIB		cpu_to_le32(1<<4)
-#define AAC_OPT_RAID50			cpu_to_le32(1<<5)
-#define AAC_OPT_4GB_WINDOW		cpu_to_le32(1<<6)
-#define AAC_OPT_SCSI_UPGRADEABLE	cpu_to_le32(1<<7)
-#define AAC_OPT_SOFT_ERR_REPORT		cpu_to_le32(1<<8)
-#define AAC_OPT_SUPPORTED_RECONDITION	cpu_to_le32(1<<9)
-#define AAC_OPT_SGMAP_HOST64		cpu_to_le32(1<<10)
-#define AAC_OPT_ALARM			cpu_to_le32(1<<11)
-#define AAC_OPT_NONDASD			cpu_to_le32(1<<12)
-#define AAC_OPT_SCSI_MANAGED    	cpu_to_le32(1<<13)
-#define AAC_OPT_RAID_SCSI_MODE		cpu_to_le32(1<<14)
-#define AAC_OPT_SUPPLEMENT_ADAPTER_INFO	cpu_to_le32(1<<15)
+#define AAC_OPT_SNAPSHOT	cpu_to_le32(1)
+#define AAC_OPT_CLUSTERS	cpu_to_le32(1<<1)
+#define AAC_OPT_WRITE_CACHE	cpu_to_le32(1<<2)
+#define AAC_OPT_64BIT_DATA	cpu_to_le32(1<<3)
+#define AAC_OPT_HOST_TIME_FIB	cpu_to_le32(1<<4)
+#define AAC_OPT_RAID50		cpu_to_le32(1<<5)
+#define AAC_OPT_4GB_WINDOW	cpu_to_le32(1<<6)
+#define AAC_OPT_SCSI_UPGRADEABLE cpu_to_le32(1<<7)
+#define AAC_OPT_SOFT_ERR_REPORT	cpu_to_le32(1<<8)
+#define AAC_OPT_SUPPORTED_RECONDITION cpu_to_le32(1<<9)
+#define AAC_OPT_SGMAP_HOST64	cpu_to_le32(1<<10)
+#define AAC_OPT_ALARM		cpu_to_le32(1<<11)
+#define AAC_OPT_NONDASD		cpu_to_le32(1<<12)
+#define AAC_OPT_SCSI_MANAGED    cpu_to_le32(1<<13)
+#define AAC_OPT_RAID_SCSI_MODE	cpu_to_le32(1<<14)
+#define AAC_OPT_SUPPLEMENT_ADAPTER_INFO	cpu_to_le32(1<<16)
+#define AAC_OPT_NEW_COMM	cpu_to_le32(1<<17)
 
 struct aac_dev
 {
@@ -753,13 +820,18 @@ struct aac_dev
 	const char		*name;
 	int			id;
 
-	u16			irq_mask;
+	/*
+	 *	negotiated FIB settings
+	 */
+	unsigned		max_fib_size;
+	unsigned		sg_tablesize;
+
 	/*
 	 *	Map for 128 fib objects (64k)
 	 */	
 	dma_addr_t		hw_fib_pa;
 	struct hw_fib		*hw_fib_va;
-	ulong			fib_base_va;
+	struct hw_fib		*aif_base_va;
 	/*
 	 *	Fib Headers
 	 */
@@ -799,45 +871,51 @@ struct aac_dev
 	/*
 	 *	The following is the device specific extension.
 	 */
+#if (!defined(AAC_MIN_FOOTPRINT_SIZE))
+#	define AAC_MIN_FOOTPRINT_SIZE 8192
+#endif
 	union
 	{
 		struct sa_registers *sa;
 		struct rx_registers *rx;
+		struct rkt_registers *rkt;
 	} regs;
+	u32			OIMR; /* Mask Register Cache */
 	/*
-	 *	The following is the number of the individual adapter
+	 *	AIF thread states.
 	 */
-	u32			devnum;
 	u32			aif_thread;
 	struct completion	aif_completion;
 	struct aac_adapter_info adapter_info;
+	u32			DeviceContainerID;
+	u32			DeviceConfigWaitingOn;
+	int			DeviceConfigNeeded;
 	/* These are in adapter info but they are in the io flow so
 	 * lets break them out so we don't have to do an AND to check them
 	 */
 	u8			nondasd_support; 
-	u8			pae_support;
+	u8			dac_support;
 	u8			raid_scsi_mode;
+	u8			new_comm_interface;
+	/* macro side-effects BEWARE */
+#	define			new_raw_io_interface \
+	  init->InitStructRevision==cpu_to_le32(ADAPTER_INIT_STRUCT_REVISION_4)
 };
 
-#define AllocateAndMapFibSpace(dev, MapFibContext) \
-	dev->a_ops.AllocateAndMapFibSpace(dev, MapFibContext)
-
-#define UnmapAndFreeFibSpace(dev, MapFibContext) \
-	dev->a_ops.UnmapAndFreeFibSpace(dev, MapFibContext)
-
 #define aac_adapter_interrupt(dev) \
-	dev->a_ops.adapter_interrupt(dev)
+	(dev)->a_ops.adapter_interrupt(dev)
 
 #define aac_adapter_notify(dev, event) \
-	dev->a_ops.adapter_notify(dev, event)
+	(dev)->a_ops.adapter_notify(dev, event)
 
-#define aac_adapter_enable_int(dev, event) \
-	dev->a_ops.adapter_enable_int(dev, event)
+#define aac_adapter_sync_cmd(dev, command, p1, p2, p3, p4, p5, p6, p7, status, r1, r2, r3, r4) \
+	(dev)->a_ops.adapter_sync_cmd(dev, command, p1, p2, p3, p4, p5, p6, p7, status, r1, r2, r3, r4)
 
-#define aac_adapter_disable_int(dev, event) \
-	dev->a_ops.adapter_disable_int(dev, event)
+#define aac_adapter_check_health(dev) \
+	(dev)->a_ops.adapter_check_health(dev)
 
-
+#define aac_adapter_send(fib) \
+	((fib)->dev)->a_ops.adapter_send(fib)
 
 #define FIB_CONTEXT_FLAG_TIMED_OUT		(0x00000001)
 
@@ -991,6 +1069,7 @@ struct aac_write64
 	u16		flags;
 	struct sgmap64	sg;	// Must be last in struct because it is variable
 };
+
 struct aac_write_reply
 {
 	u32		status;
@@ -998,11 +1077,46 @@ struct aac_write_reply
 	u32		committed;
 };
 
+struct aac_raw_io
+{
+	u32		block[2];
+	u32		count;
+	u16		cid;
+	u16		flags;		/* 00 W, 01 R */
+	u16		bpTotal;	/* reserved for F/W use */
+	u16		bpComplete;	/* reserved for F/W use */
+	struct sgmapraw	sg;
+};
+	
+#define CT_FLUSH_CACHE 129
+struct aac_synchronize {
+	u32		command;	/* VM_ContainerConfig */
+	u32		type;		/* CT_FLUSH_CACHE */
+	u32		cid;
+	u32		parm1;
+	u32		parm2;
+	u32		parm3;
+	u32		parm4;
+	u32		count;	/* sizeof(((struct aac_synchronize_reply *)NULL)->data) */
+};
+
+struct aac_synchronize_reply {
+	u32		dummy0;
+	u32		dummy1;
+	u32		status;	/* CT_OK */
+	u32		parm1;
+	u32		parm2;
+	u32		parm3;
+	u32		parm4;
+	u32		parm5;
+	u8		data[16];
+};
+
 struct aac_srb
 {
 	u32		function;
 	u32		channel;
-	u32		target;
+	u32		id;
 	u32		lun;
 	u32		timeout;
 	u32		flags;
@@ -1145,6 +1259,43 @@ union aac_contentinfo {
 };
 
 /*
+ *	Query for Container Configuration Status
+ */
+
+#define CT_GET_CONFIG_STATUS 147
+struct aac_get_config_status {
+	u32		command;	/* VM_ContainerConfig */
+	u32		type;		/* CT_GET_CONFIG_STATUS */
+	u32		parm1;
+	u32		parm2;
+	u32		parm3;
+	u32		parm4;
+	u32		parm5;
+	u32		count;	/* sizeof(((struct aac_get_config_status_resp *)NULL)->data) */
+};
+
+#define CFACT_CONTINUE 0
+#define CFACT_PAUSE    1
+#define CFACT_ABORT    2
+struct aac_get_config_status_resp {
+	u32		response; /* ST_OK */
+	u32		dummy0;
+	u32		status;	/* CT_OK */
+	u32		parm1;
+	u32		parm2;
+	u32		parm3;
+	u32		parm4;
+	u32		parm5;
+	struct {
+		u32	action; /* CFACT_CONTINUE, CFACT_PAUSE or CFACT_ABORT */
+		u16	flags;
+		s16	count;
+	}		data;
+};
+
+#define CT_COMMIT_CONFIG 152
+
+/*
  *	Query for "mountable" objects, ie, objects that are typically
  *	associated with a drive letter on the client (host) side.
  */
@@ -1161,9 +1312,9 @@ struct aac_mntent {
 	u32			altoid;		// != oid <==> snapshot or broken mirror exists
 };
 
-#define FSCS_NOTCLEAN	0x0001  	/* fsck is neccessary before mounting */
-#define FSCS_READONLY	0x0002		/* possible result of broken mirror */
-#define FSCS_HIDDEN	0x0004		/* should be ignored - set during a clear */
+#define FSCS_NOTCLEAN	0x0001  /* fsck is neccessary before mounting */
+#define FSCS_READONLY	0x0002	/* possible result of broken mirror */
+#define FSCS_HIDDEN	0x0004	/* should be ignored - set during a clear */
 
 struct aac_query_mount {
 	u32		command;
@@ -1176,6 +1327,31 @@ struct aac_mount {
 	u32	   	type;           /* should be same as that requested */
 	u32		count;
 	struct aac_mntent mnt[1];
+};
+
+#define CT_READ_NAME 130
+struct aac_get_name {
+	u32		command;	/* VM_ContainerConfig */
+	u32		type;		/* CT_READ_NAME */
+	u32		cid;
+	u32		parm1;
+	u32		parm2;
+	u32		parm3;
+	u32		parm4;
+	u32		count;	/* sizeof(((struct aac_get_name_resp *)NULL)->data) */
+};
+
+#define CT_OK        218
+struct aac_get_name_resp {
+	u32		dummy0;
+	u32		dummy1;
+	u32		status;	/* CT_OK */
+	u32		parm1;
+	u32		parm2;
+	u32		parm3;
+	u32		parm4;
+	u32		parm5;
+	u8		data[16];
 };
 
 /*
@@ -1191,7 +1367,7 @@ struct aac_query_disk
 {
 	s32	cnum;
 	s32	bus;
-	s32	target;
+	s32	id;
 	s32	lun;
 	u32	valid;
 	u32	locked;
@@ -1208,9 +1384,9 @@ struct aac_delete_disk {
 
 struct fib_ioctl
 {
-	char	*fibctx;
-	int	wait;
-	char	*fib;
+	u32	fibctx;
+	s32	wait;
+	char *	fib;
 };
 
 struct revision
@@ -1250,6 +1426,8 @@ struct revision
 #define FSACTL_MINIPORT_REV_CHECK               CTL_CODE(2107, METHOD_BUFFERED)
 #define FSACTL_GET_PCI_INFO               	CTL_CODE(2119, METHOD_BUFFERED)
 #define FSACTL_FORCE_DELETE_DISK		CTL_CODE(2120, METHOD_NEITHER)
+#define FSACTL_REGISTER_FIB_SEND		CTL_CODE(2136, METHOD_BUFFERED)
+#define FSACTL_GET_CONTAINERS			2131
 
 
 struct aac_common
@@ -1302,7 +1480,10 @@ extern struct aac_common aac_config;
 #define WRITE_PERMANENT_PARAMETERS	cpu_to_le32(0x0000000b)
 #define HOST_CRASHING			cpu_to_le32(0x0000000d)
 #define	SEND_SYNCHRONOUS_FIB		cpu_to_le32(0x0000000c)
+#define COMMAND_POST_RESULTS		cpu_to_le32(0x00000014)
 #define GET_ADAPTER_PROPERTIES		cpu_to_le32(0x00000019)
+#define RCV_TEMP_READINGS		cpu_to_le32(0x00000025)
+#define GET_COMM_PREFERRED_SETTINGS	cpu_to_le32(0x00000026)
 #define RE_INIT_ADAPTER			cpu_to_le32(0x000000ee)
 
 /*
@@ -1327,6 +1508,7 @@ extern struct aac_common aac_config;
  */					
 
 #define	SELF_TEST_FAILED		cpu_to_le32(0x00000004)
+#define	MONITOR_PANIC			cpu_to_le32(0x00000020)
 #define	KERNEL_UP_AND_RUNNING		cpu_to_le32(0x00000080)
 #define	KERNEL_PANIC			cpu_to_le32(0x00000100)
 
@@ -1334,6 +1516,7 @@ extern struct aac_common aac_config;
  *	Doorbell bit defines
  */
 
+#define DoorBellSyncCmdAvailable	cpu_to_le32(1<<0)	// Host -> Adapter
 #define DoorBellPrintfDone		cpu_to_le32(1<<5)	// Host -> Adapter
 #define DoorBellAdapterNormCmdReady	cpu_to_le32(1<<1)	// Adapter -> Host
 #define DoorBellAdapterNormRespReady	cpu_to_le32(1<<2)	// Adapter -> Host
@@ -1347,8 +1530,17 @@ extern struct aac_common aac_config;
  */
  
 #define 	AifCmdEventNotify	1	/* Notify of event */
+#define		AifEnConfigChange	3	/* Adapter configuration change */
 #define		AifEnContainerChange	4	/* Container configuration change */
+#define		AifEnDeviceFailure	5	/* SCSI device failed */
+#define		AifEnAddContainer	15	/* A new array was created. */
+#define		AifEnDeleteContainer	16	/* A container was deleted. */
+#define		AifEnExpEvent		23	/* Firmware Event Log */
+#define		AifExeFirmwarePanic	3	/* Firmware Event Panic */
+#define		AifHighPriority		3	/* Highest Priority Event */
 #define		AifCmdJobProgress	2	/* Progress report */
+#define		AifJobCtrZero		101	/* Array Zero progress */
+#define		AifJobStsSuccess	1	/* Job completes successfully */
 #define		AifCmdAPIReport		3	/* Report from other user of API */
 #define		AifCmdDriverNotify	4	/* Notify host driver of event */
 #define		AifDenMorphComplete	200	/* A morph operation completed */
@@ -1377,6 +1569,21 @@ struct aac_aifcmd {
 	u8 data[1];		/* Undefined length (from kernel viewpoint) */
 };
 
+/**
+ * 	Convert capacity to cylinders
+ *  	accounting for the fact capacity could be a 64 bit value
+ *
+ */
+typedef unsigned long sector_t;
+
+static inline u32 cap_to_cyls(sector_t capacity, u32 divisor)
+{
+	capacity /= divisor;
+	return (u32)capacity;
+}
+
+struct scsi_cmnd;
+
 const char *aac_driverinfo(struct Scsi_Host *);
 struct fib *fib_alloc(struct aac_dev *dev);
 int fib_setup(struct aac_dev *dev);
@@ -1385,24 +1592,28 @@ void fib_free(struct fib * context);
 void fib_init(struct fib * context);
 void fib_dealloc(struct fib * context);
 void aac_printf(struct aac_dev *dev, u32 val);
-int fib_send(u16 command, struct fib * context, unsigned long size, int priority, int wait, int reply, fib_callback callback, void *ctxt);
+#define aac_fib_send fib_send
+int aac_fib_send(u16 command, struct fib * context, unsigned long size, int priority, int wait, int reply, fib_callback callback, void *ctxt);
 int aac_consumer_get(struct aac_dev * dev, struct aac_queue * q, struct aac_entry **entry);
 int aac_consumer_avail(struct aac_dev * dev, struct aac_queue * q);
 void aac_consumer_free(struct aac_dev * dev, struct aac_queue * q, u32 qnum);
 int fib_complete(struct fib * context);
 #define fib_data(fibctx) ((void *)(fibctx)->hw_fib->data)
-int aac_detach(struct aac_dev *dev);
 struct aac_dev *aac_init_adapter(struct aac_dev *dev);
+int aac_get_config_status(struct aac_dev *dev);
 int aac_get_containers(struct aac_dev *dev);
-int aac_scsi_cmd(Scsi_Cmnd *scsi_cmnd_ptr);
+int aac_scsi_cmd(struct scsi_cmnd *cmd);
 int aac_dev_ioctl(struct aac_dev *dev, int cmd, void *arg);
 int aac_do_ioctl(struct aac_dev * dev, int cmd, void *arg);
-int aac_rx_init(struct aac_dev *dev, unsigned long devNumber);
-int aac_sa_init(struct aac_dev *dev, unsigned long devNumber);
+int aac_rx_init(struct aac_dev *dev);
+int aac_rkt_init(struct aac_dev *dev);
+int aac_sa_init(struct aac_dev *dev);
 unsigned int aac_response_normal(struct aac_queue * q);
 unsigned int aac_command_normal(struct aac_queue * q);
+unsigned int aac_intr_normal(struct aac_dev * dev, u32 Index);
 int aac_command_thread(struct aac_dev * dev);
 int aac_close_fib_context(struct aac_dev * dev, struct aac_fib_context *fibctx);
 int fib_adapter_complete(struct fib * fibptr, unsigned short size);
 struct aac_driver_ident* aac_get_driver_ident(int devtype);
 int aac_get_adapter_info(struct aac_dev* dev);
+int aac_send_shutdown(struct aac_dev *dev);

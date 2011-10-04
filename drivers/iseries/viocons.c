@@ -212,18 +212,16 @@ static inline int viotty_paranoia_check(struct port_info_tag *pi,
 {
 #ifdef VIOTTY_PARANOIA_CHECK
 	static const char *badmagic =
-	    "%s Warning: bad magic number for port_info struct (%s) in %s\n";
+	    "\n\rWarning: bad magic number for port_info struct (%s) in %s.";
 	static const char *badinfo =
-	    "%s Warning: null port_info for (%s) in %s\n";
+	    "\n\rWarning: null port_info for (%s) in %s.";
 
 	if (!pi) {
-		printk(badinfo, KERN_WARNING_VIO, kdevname(device),
-		       routine);
+		hvlog(badinfo, kdevname(device), routine);
 		return 1;
 	}
 	if (pi->magic != VIOTTY_MAGIC) {
-		printk(badmagic, KERN_WARNING_VIO, kdevname(device),
-		       routine);
+		hvlog(badmagic, kdevname(device), routine);
 		return 1;
 	}
 #endif
@@ -1309,15 +1307,15 @@ static void vioHandleData(struct HvLpEvent *event)
 	tty = port_info[port].tty;
 
 	if (tty == NULL) {
+		spin_unlock_irqrestore(&consolelock, flags);
 		printk(KERN_WARNING_VIO
 		       "no tty for virtual device %d\n", port);
-		spin_unlock_irqrestore(&consolelock, flags);
 		return;
 	}
 
 	if (tty->magic != TTY_MAGIC) {
-		printk(KERN_WARNING_VIO "tty bad magic\n");
 		spin_unlock_irqrestore(&consolelock, flags);
+		printk(KERN_WARNING_VIO "tty bad magic\n");
 		return;
 	}
 

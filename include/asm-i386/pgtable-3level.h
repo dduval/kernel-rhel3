@@ -96,18 +96,22 @@ static inline int pte_same(pte_t a, pte_t b)
 #define pte_pfn(x)	(((x).pte_low >> PAGE_SHIFT) | ((x).pte_high << (32 - PAGE_SHIFT)))
 
 #define __mk_pte(nr,prot)	pfn_pte(nr,prot)
+
+extern unsigned long long __supported_pte_mask;
+
 static inline pte_t pfn_pte(unsigned long page_nr, pgprot_t pgprot)
 {
 	pte_t pte;
 
-	pte.pte_high = page_nr >> (32 - PAGE_SHIFT);
-	pte.pte_low = (page_nr << PAGE_SHIFT) | pgprot_val(pgprot);
+ 	pte.pte_high = (page_nr >> (32 - PAGE_SHIFT)) | (unsigned long)(pgprot_nx(pgprot) >> 32);
+ 	pte.pte_high &= (__supported_pte_mask >> 32);
+ 	pte.pte_low = ((page_nr << PAGE_SHIFT) | pgprot_val(pgprot) | (unsigned long)pgprot_nx(pgprot));
 	return pte;
 }
 
 static inline pmd_t pfn_pmd(unsigned long page_nr, pgprot_t pgprot)
 {
-	return __pmd(((unsigned long long)page_nr << PAGE_SHIFT) | pgprot_val(pgprot));
+	return __pmd(((unsigned long long)page_nr << PAGE_SHIFT) | pgprot_val(pgprot) | pgprot_nx(pgprot));
 }
 
 extern struct kmem_cache_s *pae_pgd_cachep;

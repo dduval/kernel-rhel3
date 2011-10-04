@@ -210,6 +210,8 @@ extern void pgtable_cache_init(void);
 #define _PAGE_BIT_DIRTY		6
 #define _PAGE_BIT_PSE		7	/* 4 MB (or 2MB) page, Pentium+, if present.. */
 #define _PAGE_BIT_GLOBAL	8	/* Global TLB entry PPro+ */
+#define _PAGE_BIT_NX		9	/* "soft" NX bit */
+#define _PAGE_BIT_NX_PTE	63
 
 #define _PAGE_PRESENT	0x001
 #define _PAGE_RW	0x002
@@ -222,6 +224,11 @@ extern void pgtable_cache_init(void);
 #define _PAGE_GLOBAL	0x100	/* Global TLB entry PPro+ */
 
 #define _PAGE_PROTNONE	0x080	/* If not present */
+#ifdef CONFIG_X86_PAE
+#define _PAGE_NX        (1ULL<<_PAGE_BIT_NX)
+#else
+#define _PAGE_NX	0
+#endif
 
 #define _PAGE_TABLE	(_PAGE_PRESENT | _PAGE_RW | _PAGE_USER | _PAGE_ACCESSED | _PAGE_DIRTY)
 #define _KERNPG_TABLE	(_PAGE_PRESENT | _PAGE_RW | _PAGE_ACCESSED | _PAGE_DIRTY)
@@ -229,15 +236,25 @@ extern void pgtable_cache_init(void);
 
 #define PAGE_NONE	__pgprot(_PAGE_PROTNONE | _PAGE_USER | _PAGE_ACCESSED)
 #define PAGE_SHARED	__pgprot(_PAGE_PRESENT | _PAGE_RW | _PAGE_USER | _PAGE_ACCESSED)
-#define PAGE_COPY	__pgprot(_PAGE_PRESENT | _PAGE_USER | _PAGE_ACCESSED)
-#define PAGE_READONLY	__pgprot(_PAGE_PRESENT | _PAGE_USER | _PAGE_ACCESSED)
 
-#define __PAGE_KERNEL \
+#define PAGE_SHARED_EXEC  __pgprot(_PAGE_PRESENT | _PAGE_RW | _PAGE_USER | _PAGE_ACCESSED)
+#define PAGE_COPY_NOEXEC  __pgprot(_PAGE_PRESENT | _PAGE_USER | _PAGE_ACCESSED | _PAGE_NX)
+#define PAGE_COPY PAGE_COPY_NOEXEC
+#define PAGE_COPY_EXEC	__pgprot(_PAGE_PRESENT | _PAGE_USER | _PAGE_ACCESSED)
+#define PAGE_READONLY	__pgprot(_PAGE_PRESENT | _PAGE_USER | _PAGE_ACCESSED | _PAGE_NX)
+#define PAGE_READONLY_EXEC	__pgprot(_PAGE_PRESENT | _PAGE_USER | _PAGE_ACCESSED)
+
+#define _PAGE_KERNEL \
+	(_PAGE_PRESENT | _PAGE_RW | _PAGE_DIRTY | _PAGE_ACCESSED | _PAGE_NX)
+#define _PAGE_KERNEL_EXEC \
 	(_PAGE_PRESENT | _PAGE_RW | _PAGE_DIRTY | _PAGE_ACCESSED)
-#define __PAGE_KERNEL_NOCACHE \
-	(_PAGE_PRESENT | _PAGE_RW | _PAGE_DIRTY | _PAGE_PCD | _PAGE_ACCESSED)
-#define __PAGE_KERNEL_RO \
-	(_PAGE_PRESENT | _PAGE_DIRTY | _PAGE_ACCESSED)
+
+extern unsigned long long __PAGE_KERNEL;
+extern unsigned long long __PAGE_KERNEL_EXEC;
+
+#define __PAGE_KERNEL_RO		(__PAGE_KERNEL & ~_PAGE_RW)
+#define __PAGE_KERNEL_NOCACHE		(__PAGE_KERNEL | _PAGE_PCD)
+#define __PAGE_KERNEL_LARGE		(__PAGE_KERNEL | _PAGE_PSE)
 
 #ifdef CONFIG_X86_PGE
 # define MAKE_GLOBAL(x) __pgprot((x) | _PAGE_GLOBAL)
@@ -256,6 +273,7 @@ extern void pgtable_cache_init(void);
 
 #if CONFIG_X86_SWITCH_PAGETABLES
 # define PAGE_KERNEL __pgprot(__PAGE_KERNEL)
+# define PAGE_KERNEL_EXEC __pgprot(__PAGE_KERNEL_EXEC)
 # define PAGE_KERNEL_GLOBAL MAKE_GLOBAL(__PAGE_KERNEL)
 # define PAGE_KERNEL_RO __pgprot(__PAGE_KERNEL_RO)
 # define PAGE_KERNEL_NOCACHE __pgprot(__PAGE_KERNEL_NOCACHE)
@@ -263,6 +281,7 @@ extern void pgtable_cache_init(void);
 # define PAGE_KERNEL_PSE __pgprot(_KERNPG_TABLE|_PAGE_PSE)
 #else
 # define PAGE_KERNEL MAKE_GLOBAL(__PAGE_KERNEL)
+# define PAGE_KERNEL_EXEC MAKE_GLOBAL(__PAGE_KERNEL_EXEC)
 # define PAGE_KERNEL_GLOBAL MAKE_GLOBAL(__PAGE_KERNEL)
 # define PAGE_KERNEL_RO MAKE_GLOBAL(__PAGE_KERNEL_RO)
 # define PAGE_KERNEL_NOCACHE MAKE_GLOBAL(__PAGE_KERNEL_NOCACHE)
@@ -280,19 +299,19 @@ extern void pgtable_cache_init(void);
 #define __P001	PAGE_READONLY
 #define __P010	PAGE_COPY
 #define __P011	PAGE_COPY
-#define __P100	PAGE_READONLY
-#define __P101	PAGE_READONLY
-#define __P110	PAGE_COPY
-#define __P111	PAGE_COPY
+#define __P100	PAGE_READONLY_EXEC
+#define __P101	PAGE_READONLY_EXEC
+#define __P110	PAGE_COPY_EXEC
+#define __P111	PAGE_COPY_EXEC
 
 #define __S000	PAGE_NONE
 #define __S001	PAGE_READONLY
 #define __S010	PAGE_SHARED
 #define __S011	PAGE_SHARED
-#define __S100	PAGE_READONLY
-#define __S101	PAGE_READONLY
-#define __S110	PAGE_SHARED
-#define __S111	PAGE_SHARED
+#define __S100	PAGE_READONLY_EXEC
+#define __S101	PAGE_READONLY_EXEC
+#define __S110	PAGE_SHARED_EXEC
+#define __S111	PAGE_SHARED_EXEC
 
 /*
  * Define this if things work differently on an i386 and an i486:
@@ -362,9 +381,20 @@ static inline void ptep_mkdirty(pte_t *ptep)			{ set_bit(_PAGE_BIT_DIRTY, ptep);
 static inline pte_t pte_modify(pte_t pte, pgprot_t newprot)
 {
 	pte.pte_low &= _PAGE_CHG_MASK;
+#ifndef CONFIG_X86_PAE
 	pte.pte_low |= pgprot_val(newprot);
+#else
+	pte.pte_low |= (pgprot_val(newprot) & __supported_pte_mask);
+	/*
+	 * Chop off the NX bit (if present), and add the NX portion of
+	 * the newprot (if present):
+	 */
+	pte.pte_high &= -1 ^ (1 << (_PAGE_BIT_NX_PTE - 32));
+	pte.pte_high |= (pte.pte_low & _PAGE_NX) << (_PAGE_BIT_NX_PTE - _PAGE_BIT_NX - 32);
+#endif
 	return pte;
 }
+
 
 #define page_pte(page) page_pte_prot(page, __pgprot(0))
 

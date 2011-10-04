@@ -97,4 +97,11 @@ extern void create_pci_bus_tce_table(unsigned long);
 void tce_init_pSeries(void);
 void tce_init_iSeries(void);
 
+extern struct TceTable *build_tce_table(struct TceTable *tbl);
+
+extern dma_addr_t get_tces(struct TceTable *, unsigned order,
+			   void *page, unsigned numPages, int direction);
+extern void tce_free(struct TceTable *tbl, dma_addr_t dma_addr,
+		     unsigned order, unsigned num_pages);
+
 #endif

@@ -675,12 +675,14 @@ static inline void finish_task_switch(task_t *prev)
 {
 	runqueue_t *rq = this_rq();
 	struct mm_struct *mm = rq->prev_mm;
+	long saved_state;
 
 	rq->prev_mm = NULL;
+	saved_state = prev->state;
 	finish_arch_switch(rq, prev);
 	if (mm)
 		mmdrop(mm);
-	if (prev->state & (TASK_DEAD | TASK_ZOMBIE))
+	if (saved_state & (TASK_DEAD | TASK_ZOMBIE))
 		put_task_struct(prev);
 }
 
@@ -1500,6 +1502,23 @@ static inline void __wake_up_common(wait_queue_head_t *q, unsigned int mode, int
 			((curr->flags & WQ_FLAG_EXCLUSIVE) && !--nr_exclusive))
 				break;
 	}
+}
+
+void wake_up_filtered(wait_queue_head_t *q, void *key)
+{
+	unsigned long flags;
+	unsigned int mode = TASK_UNINTERRUPTIBLE | TASK_INTERRUPTIBLE;
+	struct filtered_wait_queue *wait, *save;
+	spin_lock_irqsave(&q->lock, flags);
+	list_for_each_entry_safe(wait, save, &q->task_list, wait.task_list) {
+		if (wait->wait.func)
+			wait->wait.func(&wait->wait);
+		else if (wait->key != key)
+			continue;
+		else if (wait->wait.task->state & mode)
+			try_to_wake_up(wait->wait.task, mode, 0, 0);
+	}
+	spin_unlock_irqrestore(&q->lock, flags);
 }
 
 /**

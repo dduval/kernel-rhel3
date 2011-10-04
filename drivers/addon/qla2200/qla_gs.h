@@ -202,6 +202,7 @@ typedef struct {
 #define	T_CURRENT_SPEED			3
 #define	T_MAX_FRAME_SIZE		4
 #define	T_OS_DEVICE_NAME		5
+#define	T_HOST_NAME			6
 
 typedef struct {
 	uint16_t		type;
@@ -227,10 +228,16 @@ typedef struct {
 	uint8_t			value[24];
 } port_os_attr_t;
 
+typedef struct {
+	uint16_t		type;
+	uint16_t		len;
+	uint8_t			value[80];
+} port_host_name_attr_t;
+
 /*
  * Port Attribute Block.
  */
-#define	PORT_ATTR_COUNT		5
+#define	PORT_ATTR_COUNT		6
 typedef struct {
 	uint32_t		count;
 	port_fc4_attr_t		fc4_types;
@@ -238,6 +245,7 @@ typedef struct {
 	port_speed_attr_t	cur_speed;
 	port_frame_attr_t	max_fsize;
 	port_os_attr_t		os_dev_name;
+	port_host_name_attr_t	host_name;
 } port_attr_t;
 
 /*

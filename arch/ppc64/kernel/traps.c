@@ -482,7 +482,7 @@ KernelFPUnavailableException(struct pt_regs *regs)
 {
 	printk("Illegal floating point used in kernel (task=0x%016lx, pc=0x%016lx, trap=0x%08x)\n",
 		(unsigned long)current, regs->nip, (unsigned int)regs->trap);
-	panic("Unrecoverable FP Unavailable Exception in Kernel");
+	_exception(SIGFPE, NULL, regs);
 }
 
 

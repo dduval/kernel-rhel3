@@ -556,7 +556,7 @@ show_registers (struct device *dev, char *buf)
 	spin_lock_irqsave (&ehci->lock, flags);
 
 	/* Capability Registers */
-	i = readw (&ehci->caps->hci_version);
+	i = HC_VERSION(readl (&ehci->caps->hc_capbase));
 	temp = snprintf (next, size,
 		"EHCI %x.%02x, hcd state %d (version " DRIVER_VERSION ")\n",
 		i >> 8, i & 0x0ff, ehci->hcd.state);

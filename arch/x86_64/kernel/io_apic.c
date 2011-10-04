@@ -1305,9 +1305,15 @@ static void end_level_ioapic_irq (unsigned int irq)
 
 static void mask_and_ack_level_ioapic_irq (unsigned int irq) { /* nothing */ }
 
+extern int no_valid_irqaffinity;
+
 static void set_ioapic_affinity (unsigned int irq, unsigned long mask)
 {
 	unsigned long flags;
+
+	if (no_valid_irqaffinity)
+		return;
+
 	/*
 	 * Only the first 8 bits are valid.
 	 */

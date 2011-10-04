@@ -1123,7 +1123,7 @@ static IPR_INL struct ipr_cmnd* ipr_build_cmd (ipr_host_config * ipr_cfg,
     p_sis_cmnd->p_scsi_cmd = p_scsi_cmd;
     p_sis_cmnd->ccb.buffer = p_scsi_cmd->buffer;
     p_sis_cmnd->ccb.request_buffer = p_scsi_cmd->request_buffer;
-    p_sis_cmnd->ccb.bufflen = p_scsi_cmd->bufflen;
+    p_sis_cmnd->ccb.bufflen = p_scsi_cmd->request_bufflen;
     p_sis_cmnd->ccb.cmd_len = p_scsi_cmd->cmd_len;
     p_sis_cmnd->ccb.p_resource = p_resource;
     p_sis_cmnd->ccb.underflow = p_scsi_cmd->underflow;

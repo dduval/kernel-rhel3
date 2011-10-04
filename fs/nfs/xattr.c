@@ -53,8 +53,13 @@ nfs_getxattr(struct dentry *dentry, const char *name, void *buffer, size_t size)
 	acl = ERR_PTR(-EOPNOTSUPP);
 	if (NFS_PROTO(inode)->version == 3 && NFS_PROTO(inode)->getacl)
 		acl = NFS_PROTO(inode)->getacl(inode, type);
-	if (IS_ERR(acl))
+	if (IS_ERR(acl)) {
+		if (PTR_ERR(acl) == -ESTALE) {
+			nfs_zap_caches(dentry->d_parent->d_inode);
+			d_drop(dentry);
+		}
 		return PTR_ERR(acl);
+	}
 	else if (acl) {
 		if (type == ACL_TYPE_ACCESS && acl->a_count == 0)
 			error = -ENODATA;

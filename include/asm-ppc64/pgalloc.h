@@ -92,13 +92,6 @@ pte_free_kernel(pte_t *pte)
         free_page((unsigned long)pte);
 }
 
-
-static inline void
-pmd_free (pmd_t *pmd)
-{
-        free_page((unsigned long)pmd);
-}
-
 #define pte_alloc_one_fast(mm, address)		(0)
 
 static inline struct page * 
@@ -112,7 +105,45 @@ pte_alloc_one(struct mm_struct *mm, unsigned long address)
         return NULL;
 }
 
-#define pte_free(pte_page)      pte_free_kernel(page_address(pte_page))
+/* Use the PTE functions for freeing PMD as well, since the same
+ * problem with tree traversals apply. Since pmd pointers are always
+ * virtual, no need for a page_address() translation.
+ */
+
+#define pte_free(pte_page)      __pte_free(page_address(pte_page))
+#define pmd_free(pmd)           __pte_free(pmd)
+
+struct pte_freelist_batch
+{
+	unsigned int	index;
+	void	      **entry;
+};
+
+#define PTE_FREELIST_SIZE	(PAGE_SIZE / sizeof(void *))
+
+extern void pte_free_now(pte_t *pte);
+extern void pte_free_batch(void **batch, int size);
+extern struct ____cacheline_aligned pte_freelist_batch pte_freelist_cur[] __cacheline_aligned_in_smp;
+
+static inline void __pte_free(pte_t *pte)
+{
+	struct pte_freelist_batch *batchp = &pte_freelist_cur[smp_processor_id()];
+
+	if (batchp->entry == NULL) {
+		batchp->entry = (void **)__get_free_page(GFP_ATOMIC);
+		if (batchp->entry == NULL) {
+			pte_free_now(pte);
+			return;
+		}
+		batchp->index = 0;
+	}
+
+	batchp->entry[batchp->index++] = pte;
+	if (batchp->index == PTE_FREELIST_SIZE) {
+		pte_free_batch(batchp->entry, batchp->index);
+		batchp->entry = NULL;
+	}
+}
 
 extern int do_check_pgt_cache(int, int);
 

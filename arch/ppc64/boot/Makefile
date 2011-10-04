@@ -103,7 +103,7 @@ zImage.o: $(TOPDIR)/vmlinux
 
 vmlinux .config System.map: % : $(TOPDIR)/% zImage.o
 	cp $(TOPDIR)/$@ kernel-$@
-	[ "$@" = "vmlinux" ] && strip kernel-$@ || :
+	[ "$@" = "vmlinux" ] && $(CROSS_COMPILE)strip kernel-$@ || :
 	gzip -vf9 kernel-$@
 	$(OBJCOPY) zImage.o \
 		--add-section=.kernel:$@=kernel-$@.gz \

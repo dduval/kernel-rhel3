@@ -494,7 +494,7 @@ asmlinkage int printk(const char *fmt, ...)
 	printed_len = vsnprintf(printk_buf, sizeof(printk_buf), fmt, args);
 	va_end(args);
 
-	if (unlikely(netdump_mode)) {
+	if (unlikely(crashdump_mode())) {
 		netdump_call_console_drivers(printk_buf, printed_len);
 		spin_unlock_irqrestore(&logbuf_lock, flags);
 		goto out;

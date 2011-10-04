@@ -116,6 +116,7 @@ long sys_remap_file_pages(unsigned long start, unsigned long size,
 	unsigned long end = start + size;
 	struct vm_area_struct *vma;
 	int err = -EINVAL;
+	extern struct file_operations ramfs_file_operations;
 
 	if (__prot || (start & ~PAGE_MASK) || (size & ~PAGE_MASK))
 		return err;
@@ -128,11 +129,13 @@ long sys_remap_file_pages(unsigned long start, unsigned long size,
 
 	vma = find_vma(mm, start);
 	/*
-	 * Make sure the vma is shared, that it supports prefaulting,
-	 * and that the remapped range is valid and fully within
-	 * the single existing vma:
+	 * Make sure the vma is shared, that it supports prefaulting or
+	 * it represents a ramfs mapping and that the remapped range is 
+	 * valid and fully within the single existing vma:
 	 */
-	if (vma && (vma->vm_flags & VM_SHARED) && (vma->vm_flags & VM_LOCKED) &&
+	if (vma && (vma->vm_flags & VM_SHARED) && 
+	    ((vma->vm_flags & VM_LOCKED) || 
+	     (vma->vm_file && vma->vm_file->f_op == &ramfs_file_operations)) &&
 		vma->vm_ops && vma->vm_ops->populate &&
 			end > start && start >= vma->vm_start &&
 				end <= vma->vm_end)

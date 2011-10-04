@@ -24,6 +24,7 @@
 #include <linux/mm.h>
 #include <linux/mm_inline.h>
 #include <linux/iobuf.h>
+#include <linux/bootmem.h>
 
 #include <asm/pgalloc.h>
 #include <asm/uaccess.h>
@@ -358,6 +359,7 @@ static inline int invalidate_this_page2(struct page * page,
 	 * The page is locked and we hold the pagecache_lock as well
 	 * so both page_count(page) and page->buffers stays constant here.
 	 */
+	SetPageInvalidated(page);
 	if (page_count(page) == 1 + !!page->buffers) {
 		/* Restart after this page */
 		list_del(head);
@@ -854,7 +856,7 @@ void wakeup_page_waiters(struct page * page)
 
 	head = page_waitqueue(page);
 	if (waitqueue_active(head))
-		wake_up(head);
+		wake_up_filtered(head, page);
 }
   
 
@@ -884,9 +886,9 @@ void ___wait_on_page(struct page *page)
 {
 	wait_queue_head_t *waitqueue = page_waitqueue(page);
 	struct task_struct *tsk = current;
-	DECLARE_WAITQUEUE(wait, tsk);
+	DEFINE_FILTERED_WAIT(wait, page);
 
-	add_wait_queue(waitqueue, &wait);
+	add_wait_queue(waitqueue, &wait.wait);
 	do {
 		set_task_state(tsk, TASK_UNINTERRUPTIBLE);
 		if (!PageLocked(page))
@@ -895,7 +897,7 @@ void ___wait_on_page(struct page *page)
 		io_schedule();
 	} while (PageLocked(page));
 	__set_task_state(tsk, TASK_RUNNING);
-	remove_wait_queue(waitqueue, &wait);
+	remove_wait_queue(waitqueue, &wait.wait);
 }
 
 /*
@@ -921,7 +923,7 @@ void unlock_page(struct page *page)
 	 * pages are being waited on here.
 	 */
 	if (waitqueue_active(waitqueue))
-		wake_up_all(waitqueue);
+		wake_up_filtered(waitqueue, page);
 }
 
 
@@ -932,12 +934,12 @@ int wait_on_page_timeout(struct page *page, int timeout)
 {
 	wait_queue_head_t *waitqueue = page_waitqueue(page);
 	struct task_struct *tsk = current;
-	DECLARE_WAITQUEUE(wait, tsk);
+	DEFINE_FILTERED_WAIT(wait, page);
 	
 	if (!PageLocked(page))
 		return 0;
 
-	add_wait_queue(waitqueue, &wait);
+	add_wait_queue(waitqueue, &wait.wait);
 	do {
 		set_task_state(tsk, TASK_UNINTERRUPTIBLE);
 		if (!PageLocked(page))
@@ -946,7 +948,7 @@ int wait_on_page_timeout(struct page *page, int timeout)
 		timeout = schedule_timeout(timeout);
 	} while (PageLocked(page) && timeout);
 	__set_task_state(tsk, TASK_RUNNING);
-	remove_wait_queue(waitqueue, &wait);
+	remove_wait_queue(waitqueue, &wait.wait);
 	return PageLocked(page);
 }
 
@@ -958,9 +960,9 @@ static void __lock_page(struct page *page)
 {
 	wait_queue_head_t *waitqueue = page_waitqueue(page);
 	struct task_struct *tsk = current;
-	DECLARE_WAITQUEUE(wait, tsk);
+	DEFINE_FILTERED_WAIT(wait, page);
 
-	add_wait_queue_exclusive(waitqueue, &wait);
+	add_wait_queue_exclusive(waitqueue, &wait.wait);
 	for (;;) {
 		set_task_state(tsk, TASK_UNINTERRUPTIBLE);
 		if (PageLocked(page)) {
@@ -971,7 +973,7 @@ static void __lock_page(struct page *page)
 			break;
 	}
 	__set_task_state(tsk, TASK_RUNNING);
-	remove_wait_queue(waitqueue, &wait);
+	remove_wait_queue(waitqueue, &wait.wait);
 }
 
 /*
@@ -1640,6 +1642,7 @@ page_not_up_to_date:
 
 readpage:
 		/* ... and start the actual read. The read will unlock the page. */
+		ClearPageInvalidated(page);
 		error = mapping->a_ops->readpage(filp, page);
 
 		if (!error) {
@@ -1650,9 +1653,25 @@ readpage:
 			generic_file_readahead(reada_ok, filp, inode, page, flags);
 			if (!(flags & F_ATOMIC))
 				wait_on_page(page);
-			if (Page_Uptodate(page))
+			if (Page_Uptodate(page) ||
+			    (PageInvalidated(page) && !PageError(page)))
 				goto page_ok;
 			error = (flags & F_ATOMIC) ? -EWOULDBLOCKIO : -EIO;
+			/* Ugly --- if we're racing against another
+			 * instance of generic_file_read(), the
+			 * PageInvalidated flag can have been cleared by
+			 * now.  We can avoid that race by taking the
+			 * page lock again on this rare path and testing
+			 * once more. */
+			if (error == -EIO) {
+				lock_page(page);
+				if (Page_Uptodate(page) ||
+				    (PageInvalidated(page) && !PageError(page))) {
+					unlock_page(page);
+					goto page_ok;
+				}
+				unlock_page(page);
+			}
 		}
 
 		/* UHHUH! A synchronous read error occurred. Report it */
@@ -2168,7 +2187,7 @@ static void nopage_sequential_readahead(struct vm_area_struct * vma,
 		if (vma->vm_raend > (vma->vm_pgoff + ra_window + ra_window)) {
 			unsigned long window = ra_window << PAGE_SHIFT;
 
-			end = vma->vm_start + (vma->vm_raend << PAGE_SHIFT);
+			end = vma->vm_start + ((vma->vm_raend - vma->vm_pgoff) << PAGE_SHIFT);
 			end -= window + window;
 			filemap_sync(vma, end - window, window, MS_INVALIDATE);
 		}
@@ -2424,6 +2443,9 @@ int filemap_sync(struct vm_area_struct * vma, unsigned long address,
 	pgd_t * dir;
 	unsigned long end = address + size;
 	int error = 0;
+
+	if ((vma->vm_flags & VM_HUGETLB) || address < vma->vm_start || end >= vma->vm_end)
+		return error;
 
 	/* Aquire the lock early; it may be possible to avoid dropping
 	 * and reaquiring it repeatedly.
@@ -3528,29 +3550,12 @@ generic_file_write(struct file *file,const char *buf,size_t count, loff_t *ppos)
 
 void __init page_cache_init(unsigned long mempages)
 {
-	unsigned long htable_size, order;
-
-	htable_size = mempages;
-	htable_size *= sizeof(struct page *);
-	for(order = 0; (PAGE_SIZE << order) < htable_size; order++)
-		;
-
-	do {
-		unsigned long tmp = (PAGE_SIZE << order) / sizeof(struct page *);
-
-		page_hash_bits = 0;
-		while((tmp >>= 1UL) != 0UL)
-			page_hash_bits++;
-
-		page_hash_table = (struct page **)
-			__get_free_pages(GFP_ATOMIC, order);
-	} while(page_hash_table == NULL && --order > 0);
-
-	printk("Page-cache hash table entries: %d (order: %ld, %ld bytes)\n",
-	       (1 << page_hash_bits), order, (PAGE_SIZE << order));
-	if (!page_hash_table)
-		panic("Failed to allocate page hash table\n");
-	memset((void *)page_hash_table, 0, PAGE_HASH_SIZE * sizeof(struct page *));
+	page_hash_table = alloc_large_system_hash("Page-cache",	
+						  sizeof(struct page *),
+						  12,
+						  1,
+						  &page_hash_bits,
+						  NULL);
 }
 
 /* address_space_map

@@ -32,6 +32,7 @@ extern unsigned long event;
 
 struct exec_domain;
 extern int exec_shield;
+extern int exec_shield_randomize;
 extern int panic_timeout;
 extern int print_fatal_signals;
 
@@ -344,10 +345,12 @@ extern int mmlist_nr;
 	rlimit_rss:	RLIM_INFINITY,			\
 }
 
+#define NON_EXECUTABLE_CACHE(task)     (((task)->rlim[RLIMIT_STACK].rlim_cur>TASK_SIZE?0: \
+                                       TASK_SIZE-(task)->rlim[RLIMIT_STACK].rlim_cur)&PAGE_MASK)
+
 #ifndef STACK_BUFFER_SPACE
 #define STACK_BUFFER_SPACE	((unsigned long)(128 * 1024 * 1024))
 #endif
-#define NON_EXECUTABLE_CACHE(task)	(TASK_SIZE)
 
 extern void show_stack(unsigned long *esp);
 
@@ -626,7 +629,7 @@ struct task_struct {
 
 /*
  * Limit the stack by to some sane default: root can always
- * increase this limit if needed..  9MB seems reasonable.
+ * increase this limit if needed..  10MB seems reasonable.
  */
 #define _STK_LIM	(10*1024*1024)
 
@@ -800,6 +803,7 @@ extern void do_timer_ticks(int ticks);
 #define time_before_eq(a,b)	time_after_eq(b,a)
 
 extern int FASTCALL(wake_up_state(struct task_struct * tsk, unsigned int state));
+extern void FASTCALL(wake_up_filtered(wait_queue_head_t *, void *));
 extern void FASTCALL(__wake_up(wait_queue_head_t *q, unsigned int mode, int nr));
 extern void FASTCALL(__wake_up_sync(wait_queue_head_t *q, unsigned int mode, int nr));
 extern void FASTCALL(sleep_on(wait_queue_head_t *q));

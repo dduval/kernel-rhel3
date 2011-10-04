@@ -25,6 +25,7 @@
 #include <linux/file.h>
 #include <linux/utsname.h>
 #include <linux/personality.h>
+#include <linux/futex.h>
 
 #include <asm/uaccess.h>
 #include <asm/ipc.h>
@@ -227,4 +228,13 @@ asmlinkage int s390x_personality(unsigned long personality)
 		ret = PER_LINUX;
 
 	return ret;
+}
+
+asmlinkage long s390_futex(u32 *uaddr, int op, int val,
+	struct timespec *utime, u32 *uaddr2)
+{
+	struct pt_regs *regs;
+
+	regs = __KSTK_PTREGS(current);
+	return sys_futex(uaddr, op, val, utime, uaddr2, regs->gprs[7]);
 }

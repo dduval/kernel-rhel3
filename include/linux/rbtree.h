@@ -120,6 +120,8 @@ rb_root_t;
 
 extern void rb_insert_color(rb_node_t *, rb_root_t *);
 extern void rb_erase(rb_node_t *, rb_root_t *);
+extern struct rb_node_s *rb_first(struct rb_root_s *);
+extern struct rb_node_s *rb_next(struct rb_node_s *);
 
 static inline void rb_link_node(rb_node_t * node, rb_node_t * parent, rb_node_t ** rb_link)
 {

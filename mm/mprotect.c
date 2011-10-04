@@ -121,6 +121,7 @@ static inline int mprotect_fixup_all(struct vm_area_struct ** pvma, struct vm_ar
 	struct vm_area_struct * prev = *pprev;
 	struct vm_area_struct * vma = *pvma;
 	struct mm_struct * mm = vma->vm_mm;
+	int oldflags;
 
 	if (prev && prev->vm_end == vma->vm_start && can_vma_merge(prev, newflags) &&
 	    !vma->vm_file && !(vma->vm_flags & VM_SHARED)) {
@@ -128,8 +129,6 @@ static inline int mprotect_fixup_all(struct vm_area_struct ** pvma, struct vm_ar
 		prev->vm_end = vma->vm_end;
 		__vma_unlink(mm, vma, prev);
 		spin_unlock(&mm->page_table_lock);
-		if (prev->vm_flags & VM_EXEC)
-			arch_add_exec_range(current->mm, prev->vm_end);
 
 		kmem_cache_free(vm_area_cachep, vma);
 		mm->map_count--;
@@ -139,11 +138,12 @@ static inline int mprotect_fixup_all(struct vm_area_struct ** pvma, struct vm_ar
 	}
 
 	spin_lock(&mm->page_table_lock);
+	oldflags = vma->vm_flags;
 	vma->vm_flags = newflags;
 	vma->vm_page_prot = prot;
+	if (oldflags & VM_EXEC)
+		arch_remove_exec_range(current->mm, vma->vm_end);
 	spin_unlock(&mm->page_table_lock);
-	if (vma->vm_flags & VM_EXEC)
-		arch_add_exec_range(current->mm, vma->vm_end);
 
 	*pprev = vma;
 
@@ -155,17 +155,19 @@ static inline int mprotect_fixup_start(struct vm_area_struct * vma, struct vm_ar
 	int newflags, pgprot_t prot)
 {
 	struct vm_area_struct * n, * prev = *pprev;
+	unsigned long prev_end;
 
 	*pprev = vma;
 
 	if (prev && prev->vm_end == vma->vm_start && can_vma_merge(prev, newflags) &&
 	    !vma->vm_file && !(vma->vm_flags & VM_SHARED)) {
 		spin_lock(&vma->vm_mm->page_table_lock);
+		prev_end = prev->vm_end;
 		prev->vm_end = end;
+		if (prev->vm_flags & VM_EXEC)
+			arch_remove_exec_range(current->mm, prev_end);
 		vma->vm_start = end;
 		spin_unlock(&vma->vm_mm->page_table_lock);
-		if (prev->vm_flags & VM_EXEC)
-			arch_add_exec_range(current->mm, prev->vm_end);
 
 		return 0;
 	}
@@ -188,8 +190,6 @@ static inline int mprotect_fixup_start(struct vm_area_struct * vma, struct vm_ar
 	__insert_vm_struct(current->mm, n);
 	spin_unlock(&vma->vm_mm->page_table_lock);
 	unlock_vma_mappings(vma);
-	if (vma->vm_flags & VM_EXEC)
-		arch_add_exec_range(current->mm, vma->vm_end);
 
 	return 0;
 }
@@ -219,10 +219,6 @@ static inline int mprotect_fixup_end(struct vm_area_struct * vma, struct vm_area
 	__insert_vm_struct(current->mm, n);
 	spin_unlock(&vma->vm_mm->page_table_lock);
 	unlock_vma_mappings(vma);
-	if (n->vm_flags & VM_EXEC)
-		arch_add_exec_range(current->mm, n->vm_end);
-	if (vma->vm_flags & VM_EXEC)
-		arch_add_exec_range(current->mm, vma->vm_end);
 
 	*pprev = n;
 
@@ -234,6 +230,8 @@ static inline int mprotect_fixup_middle(struct vm_area_struct * vma, struct vm_a
 	int newflags, pgprot_t prot)
 {
 	struct vm_area_struct * left, * right;
+	unsigned long prev_end;
+	int oldflags;
 
 	left = kmem_cache_alloc(vm_area_cachep, SLAB_KERNEL);
 	if (!left)
@@ -261,15 +259,17 @@ static inline int mprotect_fixup_middle(struct vm_area_struct * vma, struct vm_a
 	vma->vm_page_prot = prot;
 	lock_vma_mappings(vma);
 	spin_lock(&vma->vm_mm->page_table_lock);
-	vma->vm_start = start;
-	vma->vm_end = end;
+	oldflags = vma->vm_flags;
 	vma->vm_flags = newflags;
+	vma->vm_start = start;
+	prev_end = vma->vm_end;
+	vma->vm_end = end;
+	if (!(newflags & VM_EXEC))
+		arch_remove_exec_range(current->mm, prev_end);
 	__insert_vm_struct(current->mm, left);
 	__insert_vm_struct(current->mm, right);
 	spin_unlock(&vma->vm_mm->page_table_lock);
 	unlock_vma_mappings(vma);
-	if (vma->vm_flags & VM_EXEC)
-		arch_add_exec_range(current->mm, vma->vm_end);
 
 	*pprev = right;
 
@@ -394,8 +394,6 @@ asmlinkage long sys_mprotect(unsigned long start, size_t len, unsigned long prot
 
 		kmem_cache_free(vm_area_cachep, next);
 		prev->vm_mm->map_count--;
-		if (prev->vm_flags & VM_EXEC)
-			arch_add_exec_range(current->mm, prev->vm_end);
 	}
 out:
 	up_write(&current->mm->mmap_sem);

@@ -90,6 +90,7 @@ extern void dev_probe_lock(void);
 extern void dev_probe_unlock(void);
 struct pt_regs;
 extern struct task_struct *copy_process(unsigned long, unsigned long, struct pt_regs*, unsigned long, int*, int*);
+extern void try_crashdump(struct pt_regs *);
 
 extern int session_of_pgrp(int pgrp);
 
@@ -111,8 +112,12 @@ extern void bust_spinlocks(int yes);
 extern int oops_in_progress;		/* If set, an oops, panic(), BUG() or die() is in progress */
 extern int panic_on_oops;
 struct pt_regs;
-extern void (*netdump_func) (struct pt_regs *regs);
+extern void (*netdump_func)(struct pt_regs *regs);
+extern void (*diskdump_func)(struct pt_regs *regs, void *platform_arg);
 extern int netdump_mode;
+extern int diskdump_mode;
+
+#define crashdump_mode()	(netdump_mode || diskdump_mode)
 
 extern int tainted;
 extern const char *print_tainted(void);

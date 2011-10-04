@@ -49,6 +49,7 @@
 #include <linux/slab.h>
 #include <linux/mm_inline.h>
 #include <linux/hugetlb.h>
+#include <linux/bootmem.h>
 
 #include <asm/pgalloc.h>
 #include <asm/uaccess.h>
@@ -63,6 +64,19 @@ struct page *highmem_start_page;
 
 atomic_t lowmem_pagetables = ATOMIC_INIT(0);
 atomic_t highmem_pagetables = ATOMIC_INIT(0);
+
+atomic_t *page_pin_array = NULL;
+unsigned int page_pin_mask = 0;
+
+void page_pin_init(unsigned long mempages)
+{
+	page_pin_array = (atomic_t *)alloc_large_system_hash("Page-pin",
+							     sizeof(atomic_t),
+							     14,
+							     1,
+							     NULL,
+							     &page_pin_mask);
+}
 
 static inline void vm_account(struct vm_area_struct *vma, pte_t pte, unsigned long address, long adj)
 {
@@ -179,7 +193,7 @@ void __free_pte(pte_t pte)
  * Note: this doesn't free the actual pages themselves. That
  * has been handled earlier when unmapping all the memory regions.
  */
-static inline void free_one_pmd(pmd_t * dir)
+void free_one_pmd(pmd_t * dir)
 {
 	struct page *pte;
 
@@ -681,23 +695,27 @@ follow_page(struct mm_struct *mm, unsigned long address, int write)
 		goto out;
 
 	pte = *ptep;
-	pte_unmap(ptep);
 #ifdef __i386__
 	if (unlikely(!pte_user(pte)))
-		return 0;
+		goto out_pte_unmap;
 #endif
 
 	if (likely(pte_present(pte))) {
-		if (!write || (pte_write(pte) && pte_dirty(pte))) {
+		if (!write || pte_write(pte)) {
 			unsigned long pfn = pte_pfn(pte);
 			if (likely(pfn_valid(pfn))) {
 				struct page *page = pfn_to_page(pfn);
 
+				if (write && !pte_dirty(pte))
+					ptep_mkdirty(ptep);
+				pte_unmap(ptep);
 				mark_page_accessed(page);
 				return page;
 			}
 		}
 	}
+out_pte_unmap:
+	pte_unmap(ptep);
 out:
 	return 0;
 }
@@ -822,8 +840,8 @@ static inline struct page * get_page_map(struct page *page)
  * Accessing a VM_IO area is even more dangerous, therefore the function
  * fails if pages is != NULL and a VM_IO area is found.
  */
-int get_user_pages(struct task_struct *tsk, struct mm_struct *mm, unsigned long start,
-		int len, int write, int force, struct page **pages, struct vm_area_struct **vmas)
+int __get_user_pages(struct task_struct *tsk, struct mm_struct *mm, unsigned long start,
+		int len, int write, int force, struct page **pages, struct vm_area_struct **vmas, int pin)
 {
 	int i;
 	unsigned int flags;
@@ -844,6 +862,10 @@ int get_user_pages(struct task_struct *tsk, struct mm_struct *mm, unsigned long 
 		if ( !vma || (pages && vma->vm_flags & VM_IO) || !(flags & vma->vm_flags) )
 			return i ? : -EFAULT;
 		if (is_vm_hugetlb_page(vma)) {
+			/* We're not going to bother pinning these
+			 * pages.  hugetlbfs pages are already pinned
+			 * wrt page tables, and we'll detect this case
+			 * by testing PageCompound() on unpin. */
 			i = follow_pin_hugetlb_page(mm, vma, pages, vmas,
 						&start, &len, i);
 			continue;
@@ -870,13 +892,18 @@ int get_user_pages(struct task_struct *tsk, struct mm_struct *mm, unsigned long 
 				spin_lock(&mm->page_table_lock);
 			}
 			if (pages) {
-				pages[i] = get_page_map(map);
+				struct page *page;
+				pages[i] = page = get_page_map(map);
 				/* FIXME: call the correct function,
 				 * depending on the type of the found page
 				 */
-				if (!pages[i])
+				if (!page)
 					goto bad_page;
-				page_cache_get(pages[i]);
+				page_cache_get(page);
+				/* It's important to do this while still
+				 * holding page_table_lock! */
+				if (pin && !PageReserved(page))
+					pin_page_mappings(page);
 			}
 			if (vmas)
 				vmas[i] = vma;
@@ -895,13 +922,32 @@ out:
 	 */
 bad_page:
 	spin_unlock(&mm->page_table_lock);
-	while (i--)
-		page_cache_release(pages[i]);
+	while (i--) {
+		struct page *page = pages[i];
+		if (pin && !PageReserved(page) && !PageCompound(page))
+			unpin_page_mappings(page);
+		page_cache_release(page);
+	}
 	i = -EFAULT;
 	goto out;
 }
 
+int get_user_pages(struct task_struct *tsk, struct mm_struct *mm, unsigned long start,
+		   int len, int write, int force, struct page **pages, struct vm_area_struct **vmas)
+{
+	return __get_user_pages(tsk, mm, start, 
+				len, write, force, pages, vmas, 0);
+}
+
 EXPORT_SYMBOL(get_user_pages);
+
+static inline void unpin_user_pages(struct page **pages, int count)
+{
+	int i;
+	for (i=0; i<count; i++)
+		if (!PageReserved(pages[i]) && !PageCompound(pages[i]))
+			unpin_page_mappings(pages[i]);
+}
 
 /*
  * Force in an entire range of pages from the current process's user VA,
@@ -935,8 +981,8 @@ int map_user_kiobuf(int rw, struct kiobuf *iobuf, unsigned long va, size_t len)
 	/* Try to fault in all of the necessary pages */
 	down_read(&mm->mmap_sem);
 	/* rw==READ means read from disk, write into memory area */
-	err = get_user_pages(current, mm, va, pgcount,
-			(rw==READ), 0, iobuf->maplist, NULL);
+	err = __get_user_pages(current, mm, va, pgcount,
+			(rw==READ), 0, iobuf->maplist, NULL, 1);
 	up_read(&mm->mmap_sem);
 	if (err < 0) {
 		unmap_kiobuf(iobuf);
@@ -990,7 +1036,7 @@ void mark_dirty_kiobuf(struct kiobuf *iobuf, int bytes)
 
 /*
  * Unmap all of the pages referenced by a kiobuf.  We release the pages,
- * and unlock them if they were locked. 
+ * and unpin and unlock them if they were locked. 
  */
 
 void unmap_kiobuf (struct kiobuf *iobuf) 
@@ -998,6 +1044,7 @@ void unmap_kiobuf (struct kiobuf *iobuf)
 	int i;
 	struct page *map;
 	
+	unpin_user_pages(iobuf->maplist, iobuf->nr_pages);
 	for (i = 0; i < iobuf->nr_pages; i++) {
 		map = iobuf->maplist[i];
 		if (map) {
@@ -2040,6 +2087,8 @@ struct kvec *mm_map_user_kvec(struct mm_struct *mm, int rw, unsigned long ptr,
 		if (likely(map != NULL)) {
 			flush_dcache_page(map);
 			get_page(map);
+			if (!PageReserved(map) && !PageCompound(map))
+				pin_page_mappings(map);
 		} else
 			printk (KERN_INFO "Mapped page missing [%d]\n", i);
 		spin_unlock(&mm->page_table_lock);
@@ -2089,6 +2138,8 @@ void unmap_kvec (struct kvec *vec, int dirtied)
 				SetPageDirty(map);
 				flush_dcache_page(map);	/* FIXME */
 			}
+			if (!PageCompound(map))
+				unpin_page_mappings(map);
 			__free_page(map);
 		}
 	}
@@ -2246,8 +2297,8 @@ int map_user_kiobuf_iovecs(int rw, struct kiobuf *iobuf, const struct iovec *iov
 		/* Try to fault in all of the necessary pages */
 		down_read(&mm->mmap_sem);
 		/* rw==READ means read from disk, write into memory area */
-		err = get_user_pages(current, mm, va, iovpages,
-			(rw==READ), 0, &iobuf->maplist[pgcount], NULL);
+		err = __get_user_pages(current, mm, va, iovpages,
+			(rw==READ), 0, &iobuf->maplist[pgcount], NULL, 1);
 		up_read(&mm->mmap_sem);
 
 		/* return on error or in the case of a partially-mapped iovec */

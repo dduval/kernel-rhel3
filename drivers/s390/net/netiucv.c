@@ -1447,7 +1447,7 @@ netiucv_buffer_read(struct file *file, char *buf, size_t count, loff_t *off)
 
 	l = strlen(sbuf);
 	p = sbuf;
-	if (pos == (unsigned)pos && pos < l) {
+	if (pos >= 0 && pos < l) {
 		p += pos;
 		l = strlen(p);
 		ret = (count > l) ? l : count;

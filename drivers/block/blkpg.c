@@ -40,6 +40,26 @@
 
 #include <asm/uaccess.h>
 
+/*
+ *  Dump  stuff.
+ */
+void (*diskdump_func)(struct pt_regs *regs, void *platform_arg) = NULL;
+
+int diskdump_register_hook(void (*dump_func)(struct pt_regs *, void *))
+{
+	if (diskdump_func)
+		return -EEXIST;
+
+	diskdump_func = dump_func;
+
+	return 0;
+}
+
+void diskdump_unregister_hook(void)
+{
+	diskdump_func = NULL;
+}
+
 #if defined(CONFIG_IA64) 
 static int set_last_sector( kdev_t dev, const void *param );
 static int get_last_sector( kdev_t dev, const void *param );

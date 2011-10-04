@@ -49,6 +49,15 @@ static inline void setup_num_counters(void)
 #endif
 }
 
+static int inline addr_increment(void)
+{
+#ifdef CONFIG_SMP
+	return smp_num_siblings == 2 ? 2 : 1;
+#else
+	return 1;
+#endif
+}
+
 
 /* tables to simulate simplified hardware view of p4 registers */
 struct p4_counter_binding {
@@ -88,6 +97,17 @@ static struct p4_counter_binding p4_counters [NUM_COUNTERS_NON_HT] = {
 	{ CTR_MS_2,    MSR_P4_MS_PERFCTR2,    MSR_P4_MS_CCCR2 },
 	{ CTR_FLAME_2, MSR_P4_FLAME_PERFCTR2, MSR_P4_FLAME_CCCR2 },
 	{ CTR_IQ_5,    MSR_P4_IQ_PERFCTR5,    MSR_P4_IQ_CCCR5 }
+};
+
+#define NUM_UNUSED_CCCRS	NUM_CCCRS_NON_HT - NUM_COUNTERS_NON_HT
+
+/* All cccr we don't use. */
+static int p4_unused_cccr[NUM_UNUSED_CCCRS] = {
+	MSR_P4_BPU_CCCR1,	MSR_P4_BPU_CCCR3,
+	MSR_P4_MS_CCCR1,	MSR_P4_MS_CCCR3,
+	MSR_P4_FLAME_CCCR1,	MSR_P4_FLAME_CCCR3,
+	MSR_P4_IQ_CCCR0,	MSR_P4_IQ_CCCR1,
+	MSR_P4_IQ_CCCR2,	MSR_P4_IQ_CCCR3
 };
 
 /* p4 event codes in libop/op_event.h are indices into this table. */
@@ -338,7 +358,7 @@ static struct p4_event_binding p4_events[NUM_EVENTS] = {
 #define ESCR_SET_OS_0(escr, os) ((escr) |= (((os) & 1) << 3))
 #define ESCR_SET_USR_1(escr, usr) ((escr) |= (((usr) & 1)))
 #define ESCR_SET_OS_1(escr, os) ((escr) |= (((os) & 1) << 1))
-#define ESCR_SET_EVENT_SELECT(escr, sel) ((escr) |= (((sel) & 0x1f) << 25))
+#define ESCR_SET_EVENT_SELECT(escr, sel) ((escr) |= (((sel) & 0x3f) << 25))
 #define ESCR_SET_EVENT_MASK(escr, mask) ((escr) |= (((mask) & 0xffff) << 9))
 #define ESCR_READ(escr,high,ev,i) do {rdmsr(ev->bindings[(i)].escr_address, (escr), (high));} while (0);
 #define ESCR_WRITE(escr,high,ev,i) do {wrmsr(ev->bindings[(i)].escr_address, (escr), (high));} while (0);
@@ -397,29 +417,33 @@ static void p4_fill_in_addresses(struct op_msrs * const msrs)
 	setup_num_counters();
 	stag = get_stagger();
 
-	/* the 8 counter registers we pay attention to */
-	for (i = 0; i < num_counters; ++i)
+	/* the counter registers we pay attention to */
+	for (i = 0; i < num_counters; ++i) {
 		msrs->counters.addrs[i] = 
 			p4_counters[VIRT_CTR(stag, i)].counter_address;
+	}
+
+	/* FIXME: bad feeling, we don't save the 10 counters we don't use. */
 
 	/* 18 CCCR registers */
-	for (i=stag, addr = MSR_P4_BPU_CCCR0;
-	     addr <= MSR_P4_IQ_CCCR5; ++i, addr += (1 + stag)) 
-		msrs->controls.addrs[i] = addr;
-	
-	/* 43 ESCR registers */
-	for (addr = MSR_P4_BSU_ESCR0;
-	     addr <= MSR_P4_SSU_ESCR0; ++i, addr += (1 + stag)){ 
+	for (i = 0, addr = MSR_P4_BPU_CCCR0 + stag;
+	     addr <= MSR_P4_IQ_CCCR5; ++i, addr += addr_increment()) {
 		msrs->controls.addrs[i] = addr;
 	}
 	
-	for (addr = MSR_P4_MS_ESCR0;
-	     addr <= MSR_P4_TC_ESCR1; ++i, addr += (1 + stag)){ 
+	/* 43 ESCR registers in three discontiguous group */
+	for (addr = MSR_P4_BSU_ESCR0 + stag;
+	     addr <= MSR_P4_SSU_ESCR0; ++i, addr += addr_increment()) { 
 		msrs->controls.addrs[i] = addr;
 	}
 	
-	for (addr = MSR_P4_IX_ESCR0;
-	     addr <= MSR_P4_CRU_ESCR3; ++i, addr += (1 + stag)){ 
+	for (addr = MSR_P4_MS_ESCR0 + stag;
+	     addr <= MSR_P4_TC_ESCR1; ++i, addr += addr_increment()) { 
+		msrs->controls.addrs[i] = addr;
+	}
+	
+	for (addr = MSR_P4_IX_ESCR0 + stag;
+	     addr <= MSR_P4_CRU_ESCR3; ++i, addr += addr_increment()) { 
 		msrs->controls.addrs[i] = addr;
 	}
 
@@ -458,7 +482,7 @@ static void pmc_setup_one_p4_counter(unsigned int ctr)
 	stag = get_stagger();
 	
 	/* convert from counter *number* to counter *bit* */
-	counter_bit = 1 << ctr;
+	counter_bit = 1 << VIRT_CTR(stag, ctr);
 	
 	/* find our event binding structure. */
 	if (counter_config[ctr].event <= 0 || counter_config[ctr].event > NUM_EVENTS) {
@@ -519,27 +543,35 @@ static void p4_setup_ctrs(struct op_msrs const * const msrs)
 		return;
 	}
 
-	/* clear all cccrs (including those outside our concern) */
-	for (i = stag ; i < num_cccrs ; i += (1 + stag)) {
-		RAW_CCCR_READ(low, high, i);
+	/* clear the cccrs we will use */
+	for (i = 0 ; i < num_counters ; i++) {
+		rdmsr(p4_counters[VIRT_CTR(stag, i)].cccr_address, low, high);
 		CCCR_CLEAR(low);
 		CCCR_SET_REQUIRED_BITS(low);
-		RAW_CCCR_WRITE(low, high, i);
+		wrmsr(p4_counters[VIRT_CTR(stag, i)].cccr_address, low, high);
 	}
 
-	/* clear all escrs (including those outside out concern) */
+	/* clear cccrs outside our concern */
+	for (i = stag ; i < NUM_UNUSED_CCCRS ; i += addr_increment()) {
+		rdmsr(p4_unused_cccr[i], low, high);
+		CCCR_CLEAR(low);
+		CCCR_SET_REQUIRED_BITS(low);
+		wrmsr(p4_unused_cccr[i], low, high);
+	}
+
+	/* clear all escrs (including those outside our concern) */
 	for (addr = MSR_P4_BSU_ESCR0 + stag;
-	     addr <= MSR_P4_SSU_ESCR0; addr += (1 + stag)){ 
+	     addr <= MSR_P4_SSU_ESCR0; addr += addr_increment()) { 
 		wrmsr(addr, 0, 0);
 	}
 	
 	for (addr = MSR_P4_MS_ESCR0 + stag;
-	     addr <= MSR_P4_TC_ESCR1; addr += (1 + stag)){ 
+	     addr <= MSR_P4_TC_ESCR1; addr += addr_increment()){ 
 		wrmsr(addr, 0, 0);
 	}
 	
 	for (addr = MSR_P4_IX_ESCR0 + stag;
-	     addr <= MSR_P4_CRU_ESCR3; addr += (1 + stag)){ 
+	     addr <= MSR_P4_CRU_ESCR3; addr += addr_increment()){ 
 		wrmsr(addr, 0, 0);
 	}
 

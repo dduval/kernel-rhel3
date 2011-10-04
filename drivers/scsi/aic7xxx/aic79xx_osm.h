@@ -51,6 +51,7 @@
 #include <linux/smp_lock.h>
 #include <linux/version.h>
 #include <linux/module.h>
+#include <linux/diskdumplib.h>
 #include <asm/byteorder.h>
 #include <asm/io.h>
 
@@ -70,6 +71,8 @@
 #define AIC_LIB_PREFIX ahd
 #include "scsi.h"
 #include "hosts.h"
+
+#include "scsi_dump.h"
 
 /* Name space conflict with BSD queue macros */
 #ifdef LIST_HEAD
@@ -95,6 +98,20 @@
 #define AHD_DEBUG_OPTS 0
 #endif
 /* No debugging code. */
+#endif
+
+/******************************** Disk dump ***********************************/
+#if defined(CONFIG_DISKDUMP) || defined(CONFIG_DISKDUMP_MODULE)
+#undef  add_timer
+#define add_timer	diskdump_add_timer
+#undef  del_timer_sync
+#define del_timer_sync	diskdump_del_timer
+#undef  del_timer
+#define del_timer	diskdump_del_timer
+#undef  mod_timer
+#define mod_timer	diskdump_mod_timer
+
+#define tasklet_schedule	diskdump_tasklet_schedule
 #endif
 
 /********************************** Misc Macros *******************************/
@@ -141,7 +158,8 @@ typedef Scsi_Cmnd      *ahd_io_ctx_t;
 /************************* Configuration Data *********************************/
 extern uint32_t aic79xx_allow_memio;
 extern int aic79xx_detect_complete;
-extern Scsi_Host_Template aic79xx_driver_template;
+extern Scsi_Host_Template_dump aic79xx_driver_template_dump;
+#define aic79xx_driver_template (aic79xx_driver_template_dump.hostt)
 
 /***************************** Bus Space/DMA **********************************/
 
@@ -293,7 +311,7 @@ ahd_scb_timer_reset(struct scb *scb, u_int usec)
 #define AHD_SCSI_HAS_HOST_LOCK 0
 #endif
 
-#define AIC79XX_DRIVER_VERSION "1.3.10"
+#define AIC79XX_DRIVER_VERSION "1.3.10-RH1"
 
 /**************************** Front End Queues ********************************/
 /*

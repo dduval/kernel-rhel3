@@ -29,6 +29,7 @@ extern u_char *OpenPIC_InitSenses;
 extern void* OpenPIC_Addr;
 
 /* Exported functions */
+extern void openpic_isa_init(void);
 extern void openpic_init(int, int, unsigned char *, int);
 extern void openpic_request_IPIs(void);
 extern void do_openpic_setup_cpu(void);
@@ -37,9 +38,4 @@ extern void openpic_init_processor(u_int cpumask);
 extern void openpic_setup_ISU(int isu_num, unsigned long addr);
 extern void openpic_cause_IPI(u_int ipi, u_int cpumask);
 
-extern inline int openpic_to_irq(int irq)
-{
-	return irq += NUM_8259_INTERRUPTS;
-}
-/*extern int open_pic_irq_offset;*/
 #endif /* _PPC64_KERNEL_OPEN_PIC_H */

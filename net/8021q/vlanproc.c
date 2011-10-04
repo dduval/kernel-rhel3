@@ -233,8 +233,7 @@ static ssize_t vlan_proc_read(struct file *file, char *buf,
 	struct proc_dir_entry *dent;
 	char *page;
 	int pos, len;
-	loff_t n = *ppos;
-	unsigned offs = n;
+	loff_t offs = *ppos;
 
 	if (count <= 0)
 		return 0;
@@ -251,7 +250,7 @@ static ssize_t vlan_proc_read(struct file *file, char *buf,
 		return -ENOBUFS;
 
 	pos = dent->get_info(page, dent->data, 0, 0);
-	if (offs == n && offs < pos) {
+	if (offs >= 0 && offs < pos) {
 		len = min_t(int, pos - offs, count);
 		if (copy_to_user(buf, (page + offs), len)) {
 			kfree(page);

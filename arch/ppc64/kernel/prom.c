@@ -145,10 +145,17 @@ static unsigned long interpret_pci_props(struct device_node *, unsigned long,
 static interpret_func interpret_isa_props;
 static interpret_func interpret_root_props;
 
+/*
+ * Properties whose value is longer than this get excluded from our
+ * copy of the device tree. This value does need to be big enough to
+ * ensure that we don't lose things like the interrupt-map property
+ * on a PCI-PCI bridge.
+ */
+#define MAX_PROPERTY_LENGTH	(1UL * 1024 * 1024)
+
 #ifndef FB_MAX			/* avoid pulling in all of the fb stuff */
 #define FB_MAX	8
 #endif
-
 
 struct prom_t prom = {
 	0,			/* entry */
@@ -164,7 +171,6 @@ struct prom_t prom = {
 	,NULL			/* yaboot */
 #endif
 };
-
 
 char *prom_display_paths[FB_MAX] __initdata = { 0, };
 unsigned int prom_num_displays = 0;
@@ -184,14 +190,18 @@ struct _of_tce_table of_tce_table[MAX_PHB + 1] = {{0, 0, 0}};
 char *bootpath = 0;
 char *bootdevice = 0;
 
+#define MAX_CPU_THREADS 2
 int boot_cpuid = 0;
 
-struct device_node *allnodes = 0;
+/*
+ * 'ramdisk_start' is used to ensure the initrd image is not overwritten
+ * when the device tree is constructed in memory.
+ */
+#ifdef CONFIG_BLK_DEV_INITRD
+unsigned long ramdisk_start = 0;
+#endif
 
-#define UNDEFINED_IRQ 0xffff
-unsigned short real_irq_to_virt_map[NR_HW_IRQS];
-unsigned short virt_irq_to_real_map[NR_IRQS];
-int last_virt_irq = 2;	/* index of last virt_irq.  Skip through IPI */
+struct device_node *allnodes = 0;
 
 static unsigned long call_prom(const char *service, int nargs, int nret, ...);
 static void prom_exit(void);
@@ -944,12 +954,21 @@ prom_initialize_tce_table(void)
 			minsize = 4UL << 20;
 		}
 
-		/* Even though we read what OF wants, we just set the table
-		 * size to 4 MB.  This is enough to map 2GB of PCI DMA space.
-		 * By doing this, we avoid the pitfalls of trying to DMA to
-		 * MMIO space and the DMA alias hole.
+		/*
+		 * Even though we read what OF wants, we just set the table
+ 		 * size to 4 MB.  This is enough to map 2GB of PCI DMA space.
+ 		 * By doing this, we avoid the pitfalls of trying to DMA to
+ 		 * MMIO space and the DMA alias hole.
+		 *
+ 		 * On POWER4, firmware sets the TCE region by assuming
+ 		 * each TCE table is 8MB. Using this memory for anything
+ 		 * else will impact performance, so we always allocate 8MB.
+ 		 * Anton
 		 */
-		minsize = 4UL << 20;
+		if (__is_processor(PV_POWER4) || __is_processor(PV_POWER4p))
+			minsize = 8UL << 20;
+		else
+			minsize = 4UL << 20;
 
 		/* Align to the greater of the align or size */
 		align = (minalign < minsize) ? minsize : minalign;
@@ -997,9 +1016,12 @@ prom_initialize_tce_table(void)
 			*tce_entryp = tce_entry;
 		}
 
+		/* It seems OF doesn't null-terminate the path :-( */
+		memset(path, 0, sizeof(path));
+
 		/* Call OF to setup the TCE hardware */
 		if (call_prom(RELOC("package-to-path"), 3, 1, node,
-                             path, 255) <= 0) {
+                             path, sizeof(path)-1) <= 0) {
                         prom_print(RELOC("package-to-path failed\n"));
                 } else {
                         prom_print(RELOC("opened "));
@@ -1062,12 +1084,16 @@ prom_hold_cpus(unsigned long mem)
 	unsigned long offset = reloc_offset();
 	char type[64], *path;
 	int cpuid = 0;
+	unsigned int interrupt_server[MAX_CPU_THREADS];
+	unsigned int cpu_threads, hw_cpu_num;
+	int propsize;
 	extern void __secondary_hold(void);
         extern unsigned long __secondary_hold_spinloop;
         extern unsigned long __secondary_hold_acknowledge;
         unsigned long *spinloop     = __v2a(&__secondary_hold_spinloop);
         unsigned long *acknowledge  = __v2a(&__secondary_hold_acknowledge);
         unsigned long secondary_hold = (unsigned long)__v2a(*PTRRELOC((unsigned long *)__secondary_hold));
+        struct naca_struct *_naca = RELOC(naca);
         struct systemcfg *_systemcfg = RELOC(systemcfg);
 	struct paca_struct *_xPaca = PTRRELOC(&paca[0]);
 	struct prom_t *_prom = PTRRELOC(&prom);
@@ -1124,17 +1150,11 @@ prom_hold_cpus(unsigned long mem)
 		call_prom(RELOC("getprop"), 4, 1, node, RELOC("reg"),
 			  &reg, sizeof(reg));
 
-		/* Only need to start secondary procs, not ourself. */
-		if ( reg == _prom->cpu )
-			continue;
-
 		path = (char *) mem;
 		memset(path, 0, 256);
 		if ((long) call_prom(RELOC("package-to-path"), 3, 1,
 				     node, path, 255) < 0)
 			continue;
-
-		cpuid++;
 
 #ifdef DEBUG_PROM
 		prom_print_nl();
@@ -1145,10 +1165,8 @@ prom_hold_cpus(unsigned long mem)
 		prom_print_hex(reg);
 		prom_print_nl();
 #endif
-		_xPaca[cpuid].xHwProcNum = reg;
-
-		prom_print(RELOC("starting cpu "));
-		prom_print(path);
+		if (cpuid < NR_CPUS)
+			_xPaca[cpuid].xHwProcNum = reg;
 
 		/* Init the acknowledge var which will be reset by
 		 * the secondary cpu when it awakens from its OF
@@ -1156,47 +1174,89 @@ prom_hold_cpus(unsigned long mem)
 		 */
 		*acknowledge = (unsigned long)-1;
 
-#ifdef DEBUG_PROM
-		prom_print(RELOC("    3) spinloop       = 0x"));
-		prom_print_hex(spinloop);
-		prom_print_nl();
-		prom_print(RELOC("    3) *spinloop      = 0x"));
-		prom_print_hex(*spinloop);
-		prom_print_nl();
-		prom_print(RELOC("    3) acknowledge    = 0x"));
-		prom_print_hex(acknowledge);
-		prom_print_nl();
-		prom_print(RELOC("    3) *acknowledge   = 0x"));
-		prom_print_hex(*acknowledge);
-		prom_print_nl();
-		prom_print(RELOC("    3) secondary_hold = 0x"));
-		prom_print_hex(secondary_hold);
-		prom_print_nl();
-		prom_print(RELOC("    3) cpuid = 0x"));
-		prom_print_hex(cpuid);
-		prom_print_nl();
-#endif
-		call_prom(RELOC("start-cpu"), 3, 0, node, secondary_hold, cpuid);
-		prom_print(RELOC("..."));
-		for ( i = 0 ; (i < 100000000) && 
-			      (*acknowledge == ((unsigned long)-1)); i++ ) ;
-#ifdef DEBUG_PROM
-		{
-			unsigned long *p = 0x0;
-			prom_print(RELOC("    4) 0x0 = 0x"));
-			prom_print_hex(*p);
-			prom_print_nl();
-		}
-#endif
-		if (*acknowledge == cpuid) {
-			prom_print(RELOC("ok\n"));
-			/* Set the number of active processors. */
-			_systemcfg->processorCount++;
+		propsize = call_prom(RELOC("getprop"), 4, 1, node,
+				     RELOC("ibm,ppc-interrupt-server#s"),
+				     &interrupt_server,
+				     sizeof(interrupt_server));
+		if (propsize < 0) {
+			/* no property.  old hardware has no SMT */
+			cpu_threads = 1;
+			interrupt_server[0] = reg; /* fake it with phys id */
 		} else {
-			prom_print(RELOC("failed: "));
-			prom_print_hex(*acknowledge);
+			/* We have a threaded processor */
+			cpu_threads = propsize / sizeof(u32);
+			if (cpu_threads > MAX_CPU_THREADS) {
+				prom_print(RELOC("SMT: too many threads!\nSMT: found "));
+				prom_print_hex(cpu_threads);
+				prom_print(RELOC(", max is "));
+				prom_print_hex(MAX_CPU_THREADS);
+				prom_print_nl();
+				cpu_threads = 1; /* ToDo: panic? */
+			}
+		}
+
+		hw_cpu_num = interrupt_server[0];
+		if (hw_cpu_num != _prom->cpu) {
+			/* Primary Thread of non-boot cpu */
+			prom_print_hex(cpuid);
+			prom_print(RELOC(" : starting cpu "));
+			prom_print(path);
+			prom_print(RELOC("..."));
+			call_prom(RELOC("start-cpu"), 3, 0, node,
+				  secondary_hold, cpuid);
+
+			for ( i = 0 ; (i < 100000000) && 
+				(*acknowledge == ((unsigned long)-1)); i++ ) ;
+
+			if (*acknowledge == cpuid) {
+				prom_print(RELOC("ok\n"));
+				/* We have to get every CPU out of OF,
+				 * even if we never start it. */
+				if (cpuid >= NR_CPUS) {
+					cpuid++;
+					continue;
+				}
+#ifdef CONFIG_SMP
+				/* Set the number of active processors. */
+				_systemcfg->processorCount++;
+				set_bit(cpuid, &RELOC(cpu_online_map));
+				set_bit(cpuid, &RELOC(cpu_available_map));
+#endif
+			} else {
+				prom_print(RELOC("failed: "));
+				prom_print_hex(*acknowledge);
+				prom_print_nl();
+				/* prom_panic(RELOC("cpu failed to start")); */
+			}
+		}
+#ifdef CONFIG_SMP
+		else {
+			prom_print_hex(cpuid);
+			prom_print(RELOC(" : booting  cpu "));
+			prom_print(path);
+			prom_print_nl();
+			set_bit(cpuid, &RELOC(cpu_online_map));
+			set_bit(cpuid, &RELOC(cpu_available_map));
+		}
+
+		/* Init paca for secondary threads.   They start later. */
+		for (i=1; i < cpu_threads; i++) {
+			cpuid++;
+			if (cpuid >= NR_CPUS)
+				continue;
+			_xPaca[cpuid].xHwProcNum = interrupt_server[i];
+			prom_print_hex(interrupt_server[i]);
+			prom_print(RELOC(" : preparing thread ... "));
+			if (_naca->smt_state) {
+				set_bit(cpuid, &RELOC(cpu_available_map));
+				prom_print(RELOC("available"));
+			} else {
+				prom_print(RELOC("not available"));
+			}
 			prom_print_nl();
 		}
+#endif
+		cpuid++;
 	}
 #ifdef CONFIG_HMT
 	/* Only enable HMT on processors that provide support. */
@@ -1238,9 +1298,112 @@ prom_hold_cpus(unsigned long mem)
 	}
 #endif
 	
+	if (cpuid >= NR_CPUS)
+		prom_print(RELOC("WARNING: maximum CPUs (" __stringify(NR_CPUS)
+				 ") exceeded: ignoring extras\n"));
+
 #ifdef DEBUG_PROM
 	prom_print(RELOC("prom_hold_cpus: end...\n"));
 #endif
+}
+
+static void
+smt_setup(void)
+{
+	char *p, *q;
+	char my_smt_enabled = SMT_DYNAMIC;
+	unsigned long my_smt_snooze_delay;
+	ihandle prom_options = NULL;
+	char option[9];
+	unsigned long offset = reloc_offset();
+	struct naca_struct *_naca = RELOC(naca);
+	char found = 0;
+
+	if (strstr(RELOC(cmd_line), RELOC("smt-enabled="))) {
+		for (q = RELOC(cmd_line); 
+		    (p = strstr(q, RELOC("smt-enabled="))) != 0; ) {
+			q = p + 12;
+			if (p > RELOC(cmd_line) && p[-1] != ' ')
+				continue;
+			found = 1;
+			if (q[0] == 'o' && q[1] == 'f' &&
+			    q[2] == 'f' && (q[3] == ' ' || q[3] == '\0')) {
+				my_smt_enabled = SMT_OFF;
+			} else if (q[0]=='o' && q[1] == 'n' &&
+				   (q[2] == ' ' || q[2] == '\0')) {
+				my_smt_enabled = SMT_ON;
+			} else {
+				my_smt_enabled = SMT_DYNAMIC;
+			}
+		}
+	}
+	if (!found) {
+		prom_options = (ihandle)call_prom(RELOC("finddevice"), 1, 1, RELOC("/options"));
+		if (prom_options != (ihandle) -1) {
+			call_prom(RELOC("getprop"),
+				4, 1, prom_options,
+				RELOC("ibm,smt-enabled"),
+				option, sizeof(option));
+			if (option[0] != 0) {
+				found = 1;
+				if (!strcmp(option, RELOC("off")))
+					my_smt_enabled = SMT_OFF;
+				else if (!strcmp(option, RELOC("on")))
+					my_smt_enabled = SMT_ON;
+				else
+					my_smt_enabled = SMT_DYNAMIC;
+			}
+		}
+	}
+
+	if (!found )
+		my_smt_enabled = SMT_DYNAMIC; /* default to on */
+
+	found = 0;
+	if (my_smt_enabled) {
+		if (strstr(RELOC(cmd_line), RELOC("smt-snooze-delay="))) {
+			for (q = RELOC(cmd_line); (p = strstr(q, RELOC("smt-snooze-delay="))) != 0; ) {
+				q = p + 17;
+				if (p > RELOC(cmd_line) && p[-1] != ' ')
+					continue;
+				found = 1;
+				/* Don't use simple_strtoul() because _ctype & others aren't RELOC'd */
+				my_smt_snooze_delay = 0;
+				while (*q >= '0' && *q <= '9') {
+					my_smt_snooze_delay = my_smt_snooze_delay * 10 + *q - '0';
+					q++;
+				}
+			}
+		}
+
+		if (!found) {
+			prom_options = (ihandle)call_prom(RELOC("finddevice"), 1, 1, RELOC("/options"));
+			if (prom_options != (ihandle) -1) {
+				call_prom(RELOC("getprop"),
+					4, 1, prom_options,
+					RELOC("ibm,smt-snooze-delay"),
+					option, sizeof(option));
+				if (option[0] != 0) {
+					found = 1;
+					/* Don't use simple_strtoul() because _ctype & others aren't RELOC'd */
+					my_smt_snooze_delay = 0;
+					q = option;
+					while (*q >= '0' && *q <= '9') {
+						my_smt_snooze_delay = my_smt_snooze_delay * 10 + *q - '0';
+						q++;
+					}
+				}
+			}
+		}
+
+		if (!found) {
+			my_smt_snooze_delay = 0; /* default value */
+		}
+	} else {
+		my_smt_snooze_delay = 0; /* default value */
+	}
+	_naca->smt_snooze_delay = my_smt_snooze_delay;
+	_naca->smt_state = my_smt_enabled;
 }
 
 #ifdef CONFIG_PPCDBG
@@ -1560,12 +1723,13 @@ prom_init(unsigned long r3, unsigned long r4, unsigned long pp,
         /* Initialize some system info into the Naca early... */
         mem = prom_initialize_naca(mem);
 
+	smt_setup();
+
         /* If we are on an SMP machine, then we *MUST* do the
          * following, regardless of whether we have an SMP
          * kernel or not.
          */
-        if (_systemcfg->processorCount > 1)
-	        prom_hold_cpus(mem);
+	prom_hold_cpus(mem);
 
 #ifdef DEBUG_PROM
 	prom_print(RELOC("copying OF device tree...\n"));
@@ -1725,46 +1889,6 @@ check_display(unsigned long mem)
 	return DOUBLEWORD_ALIGN(mem);
 }
 
-void
-virt_irq_init(void)
-{
-	int i;
-	for (i = 0; i < NR_IRQS; i++)
-		virt_irq_to_real_map[i] = UNDEFINED_IRQ;
-	for (i = 0; i < NR_HW_IRQS; i++)
-		real_irq_to_virt_map[i] = UNDEFINED_IRQ;
-}
-
-/* Create a mapping for a real_irq if it doesn't already exist.
- * Return the virtual irq as a convenience.
- */
-unsigned long
-virt_irq_create_mapping(unsigned long real_irq)
-{
-	unsigned long virq;
-	if (naca->interrupt_controller == IC_OPEN_PIC)
-		return real_irq;	/* no mapping for openpic (for now) */
-	virq = real_irq_to_virt(real_irq);
-	if (virq == UNDEFINED_IRQ) {
-		/* Assign a virtual IRQ number */
-		if (real_irq < NR_IRQS && virt_irq_to_real(real_irq) == UNDEFINED_IRQ) {
-			/* A 1-1 mapping will work. */
-			virq = real_irq;
-		} else {
-			while (last_virt_irq < NR_IRQS &&
-			       virt_irq_to_real(++last_virt_irq) != UNDEFINED_IRQ)
-				/* skip irq's in use */;
-			if (last_virt_irq >= NR_IRQS)
-				panic("Too many IRQs are required on this system.  NR_IRQS=%d\n", NR_IRQS);
-			virq = last_virt_irq;
-		}
-		virt_irq_to_real_map[virq] = real_irq;
-		real_irq_to_virt_map[real_irq] = virq;
-	}
-	return virq;
-}
-
-
 static int __init
 prom_next_node(phandle *nodep)
 {
@@ -1796,6 +1920,10 @@ copy_device_tree(unsigned long mem_start)
 	unsigned long offset = reloc_offset();
 	unsigned long mem_end = mem_start + (8<<20);
 
+#ifdef CONFIG_BLK_DEV_INITRD
+	if (RELOC(ramdisk_start) && RELOC(ramdisk_start) > mem_start)
+		mem_end = RELOC(ramdisk_start) - 1;
+#endif
 	root = call_prom(RELOC("peer"), 1, 1, (phandle)0);
 	if (root == (phandle)0) {
 		prom_print(RELOC("couldn't get device tree root\n"));
@@ -1805,11 +1933,19 @@ copy_device_tree(unsigned long mem_start)
 	mem_start = DOUBLEWORD_ALIGN(mem_start);
 	new_start = inspect_node(root, 0, mem_start, mem_end, &allnextp);
 	*allnextp = 0;
+	if (new_start > mem_end) {
+		prom_print(RELOC("Insufficient space for device tree:"));
+		prom_print(RELOC("  size allocated = 0x"));
+		prom_print_hex(mem_end - mem_start);
+		prom_print(RELOC(",  size required = 0x"));
+		prom_print_hex(new_start - mem_start);
+		prom_print_nl();
+		prom_exit();
+	}
 	return new_start;
 }
 
-__init
-static unsigned long
+static unsigned long __init
 inspect_node(phandle node, struct device_node *dad,
 	     unsigned long mem_start, unsigned long mem_end,
 	     struct device_node ***allnextpp)
@@ -1855,12 +1991,45 @@ inspect_node(phandle node, struct device_node *dad,
 		pp->length = (int)(long)
 			call_prom(RELOC("getprop"), 4, 1, node, namep,
 				  valp, mem_end - mem_start);
-		if (pp->length < 0)
+		if (pp->length < 0) 
 			continue;
+		if (pp->length > MAX_PROPERTY_LENGTH) {
+			char path[128];
+
+			prom_print(RELOC("WARNING: ignoring large property "));
+			/* It seems OF doesn't null-terminate the path :-( */
+			memset(path, 0, sizeof(path));
+			if (call_prom(RELOC("package-to-path"), 3, 1, node,
+                            path, sizeof(path)-1) > 0)
+				prom_print(path);
+			prom_print(namep);
+			prom_print(RELOC(" length 0x"));
+			prom_print_hex(pp->length);
+			prom_print_nl();
+
+			continue; 
+		}
 		mem_start = DOUBLEWORD_ALIGN(mem_start + pp->length);
 		*prev_propp = PTRUNRELOC(pp);
 		prev_propp = &pp->next;
 	}
+
+	/* Add a "linux_phandle" value */
+	if (np->node != NULL) {
+		u32 ibm_phandle = 0;
+		int len;
+
+		/* First see if "ibm,phandle" exists and use its value */
+		len = (int) call_prom(RELOC("getprop"), 4, 1, node,
+				      RELOC("ibm,phandle"),
+				      &ibm_phandle, sizeof(ibm_phandle));
+		if (len < 0) {
+			np->linux_phandle = np->node;
+		} else {
+			np->linux_phandle = ibm_phandle;
+		}
+	}
+
 	*prev_propp = 0;
 
 	/* get the node's full name */
@@ -1954,137 +2123,195 @@ finish_node(struct device_node *np, unsigned long mem_start,
 	return mem_start;
 }
 
-/* This routine walks the interrupt tree for a given device node and gather 
- * all necessary informations according to the draft interrupt mapping
- * for CHRP. The current version was only tested on Apple "Core99" machines
- * and may not handle cascaded controllers correctly.
+/*
+ * Find the interrupt parent of a node.
  */
-__init
-static unsigned long
+static struct device_node * __devinit
+intr_parent(struct device_node *p)
+{
+	phandle *parp;
+
+	parp = (phandle *) get_property(p, "interrupt-parent", NULL);
+	if (parp == NULL)
+		return p->parent;
+	return find_phandle(*parp);
+}
+
+/*
+ * Find out the size of each entry of the interrupts property
+ * for a node.
+ */
+static int __devinit
+prom_n_intr_cells(struct device_node *np)
+{
+	struct device_node *p;
+	unsigned int *icp;
+
+	for (p = np; (p = intr_parent(p)) != NULL; ) {
+		icp = (unsigned int *)
+			get_property(p, "#interrupt-cells", NULL);
+		if (icp != NULL)
+			return *icp;
+		if (get_property(p, "interrupt-controller", NULL) != NULL
+		    || get_property(p, "interrupt-map", NULL) != NULL) {
+			printk("oops, node %s doesn't have #interrupt-cells\n",
+			       p->full_name);
+		return 1;
+		}
+	}
+#ifdef DEBUG_IRQ
+	printk("prom_n_intr_cells failed for %s\n", np->full_name);
+#endif
+	return 1;
+}
+
+/*
+ * Map an interrupt from a device up to the platform interrupt
+ * descriptor.
+ */
+static int __devinit
+map_interrupt(unsigned int **irq, struct device_node **ictrler,
+	      struct device_node *np, unsigned int *ints, int nintrc)
+{
+	struct device_node *p, *ipar;
+	unsigned int *imap, *imask, *ip;
+	int i, imaplen, match;
+	int newintrc, newaddrc;
+	unsigned int *reg;
+	int naddrc;
+
+	reg = (unsigned int *) get_property(np, "reg", NULL);
+	naddrc = prom_n_addr_cells(np);
+	p = intr_parent(np);
+	while (p != NULL) {
+		if (get_property(p, "interrupt-controller", NULL) != NULL)
+			/* this node is an interrupt controller, stop here */
+			break;
+		imap = (unsigned int *)
+			get_property(p, "interrupt-map", &imaplen);
+		if (imap == NULL) {
+			p = intr_parent(p);
+			continue;
+		}
+		imask = (unsigned int *)
+			get_property(p, "interrupt-map-mask", NULL);
+		if (imask == NULL) {
+			printk("oops, %s has interrupt-map but no mask\n",
+			       p->full_name);
+			return 0;
+		}
+		imaplen /= sizeof(unsigned int);
+		match = 0;
+		ipar = NULL;
+		while (imaplen > 0 && !match) {
+			/* check the child-interrupt field */
+			match = 1;
+			for (i = 0; i < naddrc && match; ++i)
+				match = ((reg[i] ^ imap[i]) & imask[i]) == 0;
+			for (; i < naddrc + nintrc && match; ++i)
+				match = ((ints[i-naddrc] ^ imap[i]) & imask[i]) == 0;
+			imap += naddrc + nintrc;
+			imaplen -= naddrc + nintrc;
+			/* grab the interrupt parent */
+			ipar = find_phandle((phandle) *imap++);
+			--imaplen;
+			if (ipar == NULL) {
+				printk("oops, no int parent %x in map of %s\n",
+				       imap[-1], p->full_name);
+				return 0;
+			}
+			/* find the parent's # addr and intr cells */
+			ip = (unsigned int *)
+				get_property(ipar, "#interrupt-cells", NULL);
+			if (ip == NULL) {
+				printk("oops, no #interrupt-cells on %s\n",
+				       ipar->full_name);
+				return 0;
+			}
+			newintrc = *ip;
+			ip = (unsigned int *)
+				get_property(ipar, "#address-cells", NULL);
+			newaddrc = (ip == NULL)? 0: *ip;
+			imap += newaddrc + newintrc;
+			imaplen -= newaddrc + newintrc;
+		}
+		if (imaplen < 0) {
+			printk("oops, error decoding int-map on %s, len=%d\n",
+			       p->full_name, imaplen);
+			return 0;
+		}
+		if (!match) {
+#ifdef DEBUG_IRQ
+			printk("oops, no match in %s int-map for %s\n",
+			       p->full_name, np->full_name);
+#endif
+			return 0;
+		}
+		p = ipar;
+		naddrc = newaddrc;
+		nintrc = newintrc;
+		ints = imap - nintrc;
+		reg = ints - naddrc;
+	}
+	if (p == NULL) {
+#ifdef DEBUG_IRQ
+		printk("hmmm, int tree for %s doesn't have ctrler\n",
+		       np->full_name);
+#endif
+		return 0;
+	}
+	*irq = ints;
+	*ictrler = p;
+	return nintrc;
+}
+
+/*
+ * New version of finish_node_interrupts.
+ */
+static unsigned long __init
 finish_node_interrupts(struct device_node *np, unsigned long mem_start)
 {
-	/* Finish this node */
-	unsigned int *isizep, *asizep, *interrupts, *map, *map_mask, *reg;
-	phandle *parent, map_parent;
-	struct device_node *node, *parent_node;
-	int l, isize, ipsize, asize, map_size, regpsize;
+	unsigned int *ints;
+	int intlen, intrcells, intrcount;
+	int i, j, n;
+	unsigned int *irq, virq;
+	struct device_node *ic;
 
-	/* Currently, we don't look at all nodes with no "interrupts" property */
-
-	interrupts = (unsigned int *)get_property(np, "interrupts", &l);
-	if (interrupts == NULL)
+	ints = (unsigned int *) get_property(np, "interrupts", &intlen);
+	if (ints == NULL)
 		return mem_start;
-	ipsize = l>>2;
+	intrcells = prom_n_intr_cells(np);
+	intlen /= intrcells * sizeof(unsigned int);
+	np->intrs = (struct interrupt_info *) mem_start;
+	mem_start += intlen * sizeof(struct interrupt_info);
 
-	reg = (unsigned int *)get_property(np, "reg", &l);
-	regpsize = l>>2;
+	intrcount = 0;
+	for (i = 0; i < intlen; ++i, ints += intrcells) {
+		n = map_interrupt(&irq, &ic, np, ints, intrcells);
+		if (n <= 0)
+			continue;
 
-	/* We assume default interrupt cell size is 1 (bugus ?) */
-	isize = 1;
-	node = np;
-	
-	do {
-	    /* We adjust the cell size if the current parent contains an #interrupt-cells
-	     * property */
-	    isizep = (unsigned int *)get_property(node, "#interrupt-cells", &l);
-	    if (isizep)
-	    	isize = *isizep;
-
-	    /* We don't do interrupt cascade (ISA) for now, we stop on the first 
-	     * controller found
-	     */
-	    if (get_property(node, "interrupt-controller", &l)) {
-	    	int i,j;
-
-	    	np->intrs = (struct interrupt_info *) mem_start;
-		np->n_intrs = ipsize / isize;
-		mem_start += np->n_intrs * sizeof(struct interrupt_info);
-		for (i = 0; i < np->n_intrs; ++i) {
-		    np->intrs[i].line = openpic_to_irq(virt_irq_create_mapping(*interrupts++));
-		    np->intrs[i].sense = 1;
-		    if (isize > 1)
-		        np->intrs[i].sense = *interrupts++;
-		    for (j=2; j<isize; j++)
-		    	interrupts++;
+		/* don't map IRQ numbers under a cascaded 8259 controller */
+		if (ic && device_is_compatible(ic, "chrp,iic")) {
+			np->intrs[intrcount].line = irq[0];
+		} else {
+			virq = virt_irq_create_mapping(irq[0]);
+			np->intrs[intrcount].line = irq_offset_up(virq);
 		}
-		return mem_start;
-	    }
-	    /* We lookup for an interrupt-map. This code can only handle one interrupt
-	     * per device in the map. We also don't handle #address-cells in the parent
-	     * I skip the pci node itself here, may not be necessary but I don't like it's
-	     * reg property.
-	     */
-	    if (np != node)
-	        map = (unsigned int *)get_property(node, "interrupt-map", &l);
-	     else
-	     	map = NULL;
-	    if (map && l) {
-	    	int i, found, temp_isize, temp_asize;
-	        map_size = l>>2;
-	        map_mask = (unsigned int *)get_property(node, "interrupt-map-mask", &l);
-	        asizep = (unsigned int *)get_property(node, "#address-cells", &l);
-	        if (asizep && l == sizeof(unsigned int))
-	            asize = *asizep;
-	        else
-	            asize = 0;
-	        found = 0;
-	        while (map_size>0 && !found) {
-	            found = 1;
-	            for (i=0; i<asize; i++) {
-	            	unsigned int mask = map_mask ? map_mask[i] : 0xffffffff;
-	            	if (!reg || (i>=regpsize) || ((mask & *map) != (mask & reg[i])))
-	           	    found = 0;
-	           	map++;
-	           	map_size--;
-	            }
-	            for (i=0; i<isize; i++) {
-	            	unsigned int mask = map_mask ? map_mask[i+asize] : 0xffffffff;
-	            	if ((mask & *map) != (mask & interrupts[i]))
-	            	    found = 0;
-	            	map++;
-	            	map_size--;
-	            }
-	            map_parent = *((phandle *)map);
-	            map+=1; map_size-=1;
-	            parent_node = find_phandle(map_parent);
-	            temp_isize = isize;
-		    temp_asize = 0;
-	            if (parent_node) {
-			isizep = (unsigned int *)get_property(parent_node, "#interrupt-cells", &l);
-	    		if (isizep)
-	    		    temp_isize = *isizep;
-			asizep = (unsigned int *)get_property(parent_node, "#address-cells", &l);
-			if (asizep && l == sizeof(unsigned int))
-				temp_asize = *asizep;
-	            }
-	            if (!found) {
-			map += temp_isize + temp_asize;
-			map_size -= temp_isize + temp_asize;
-	            }
-	        }
-	        if (found) {
-		    /* Mapped to a new parent.  Use the reg and interrupts specified in
-		     * the map as the new search parameters.  Then search from the parent.
-		     */
-	            node = parent_node;
-		    reg = map;
-		    regpsize = temp_asize;
-		    interrupts = map + temp_asize;
-		    ipsize = temp_isize;
-		    continue;
-	        }
-	    }
-	    /* We look for an explicit interrupt-parent.
-	     */
-	    parent = (phandle *)get_property(node, "interrupt-parent", &l);
-	    if (parent && (l == sizeof(phandle)) &&
-	    	(parent_node = find_phandle(*parent))) {
-	    	node = parent_node;
-	    	continue;
-	    }
-	    /* Default, get real parent */
-	    node = node->parent;
-	} while (node);
+
+		np->intrs[intrcount].sense = 1;
+		if (n > 1)
+			np->intrs[intrcount].sense = irq[1];
+		if (n > 2) {
+			printk("hmmm, got %d intr cells for %s:", n,
+			       np->full_name);
+			for (j = 0; j < n; ++j)
+				printk(" %d", irq[j]);
+			printk("\n");
+		}
+		++intrcount;
+	}
+	np->n_intrs = intrcount;
 
 	return mem_start;
 }
@@ -2362,7 +2589,7 @@ find_phandle(phandle ph)
 	struct device_node *np;
 
 	for (np = allnodes; np != 0; np = np->allnext)
-		if (np->node == ph)
+		if (np->linux_phandle == ph)
 			return np;
 	return NULL;
 }
@@ -2451,6 +2678,26 @@ print_properties(struct device_node *np)
 }
 #endif
 
+#if 0
+void print_allnodes()
+{
+	struct device_node *np;
+	struct property *pp;
+
+
+	for (np = allnodes; np != 0; np = np->allnext) {
+		if (np->name)
+			printk("Device Node %s, n_addrs %d, n_intrs %d\n",
+			       np->name, np->n_addrs, np->n_intrs);
+		if (np->properties) {
+			for (pp = np->properties; pp != 0; pp = pp->next)
+			  printk("       Property %s, length %d\n",
+				 pp->name, pp->length);
+		}
+	}
+}
+
+#endif
 
 void __init
 abort()
@@ -2498,6 +2745,7 @@ prom_bi_rec_reserve(unsigned long mem)
 			switch (rec->tag) {
 #ifdef CONFIG_BLK_DEV_INITRD
 			case BI_INITRD:
+				RELOC(ramdisk_start) = rec->data[0];
 				lmb_reserve(rec->data[0], rec->data[1]);
 				break;
 #endif /* CONFIG_BLK_DEV_INITRD */

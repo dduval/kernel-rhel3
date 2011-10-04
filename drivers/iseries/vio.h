@@ -103,7 +103,8 @@ enum viosubtypes {
 	viomajorsubtype_chario = 0x0300,
 	viomajorsubtype_config = 0x0400,
 	viomajorsubtype_cdio = 0x0500,
-	viomajorsubtype_tape = 0x0600
+	viomajorsubtype_tape = 0x0600,
+	viomajorsubtype_scsi = 0x0700
 };
 
 

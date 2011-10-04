@@ -400,6 +400,12 @@ asmlinkage void __init start_kernel(void)
 		initrd_start = 0;
 	}
 #endif
+	/* allocate large system hash tables using the bootmem allocator */
+	page_cache_init(max_low_pfn);
+	page_pin_init(max_low_pfn);
+	dcache_init_early(max_low_pfn);
+	inode_init_early(max_low_pfn);
+	buffer_init(max_low_pfn);
 	mem_init();
 	kmem_cache_sizes_init();
 	pidhash_init();
@@ -419,8 +425,6 @@ asmlinkage void __init start_kernel(void)
 	fork_init(num_mappedpages);
 	proc_caches_init();
 	vfs_caches_init(num_physpages);
-	buffer_init(num_physpages);
-	page_cache_init(num_physpages);
 #if defined(CONFIG_ARCH_S390)
 	ccwcache_init();
 #endif

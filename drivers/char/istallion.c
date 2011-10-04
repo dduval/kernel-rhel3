@@ -4869,7 +4869,7 @@ static ssize_t stli_memread(struct file *fp, char *buf, size_t count, loff_t *of
 		return(-ENODEV);
 	if (brdp->state == 0)
 		return(-ENODEV);
-	if (pos != (unsigned)pos || pos >= brdp->memsize)
+	if (pos < 0 || pos >= brdp->memsize)
 		return(0);
 
 	size = MIN(count, (brdp->memsize - pos));
@@ -4926,7 +4926,7 @@ static ssize_t stli_memwrite(struct file *fp, const char *buf, size_t count, lof
 		return(-ENODEV);
 	if (brdp->state == 0)
 		return(-ENODEV);
-	if (pos != (unsigned)pos || pos >= brdp->memsize)
+	if (pos < 0 || pos >= brdp->memsize)
 		return(0);
 
 	chbuf = (char *) buf;

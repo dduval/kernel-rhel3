@@ -10407,10 +10407,9 @@ static ssize_t qeth_procfile_read(struct file *file,char *user_buf,
 {
 	loff_t len;
 	tempinfo_t *p_info = (tempinfo_t *) file->private_data;
-	loff_t n = *offset;
-	unsigned long pos = n;
+	loff_t pos = *offset;
 	
-	if (pos != n || pos >= p_info->len) {
+	if (pos < 0 || pos >= p_info->len) {
 		return 0;
 	} else {
 		len = __min(user_len, (p_info->len - pos));

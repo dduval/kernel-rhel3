@@ -120,35 +120,34 @@ static int proc_scsi_write(struct file * file, const char * buf,
 	return(ret);
 }
 
-void build_proc_dir_entries(Scsi_Host_Template * tpnt)
+void build_proc_dir_entry(struct Scsi_Host *shpnt)
 {
-	struct Scsi_Host *hpnt;
-	char name[10];	/* see scsi_unregister_host() */
+	char name[10]; /* host_no >= 10^9? I don't think so. */
+	struct proc_dir_entry *p;
 
+	if (shpnt->hostt->proc_dir) {
+		sprintf(name, "%d", shpnt->host_no);
+		p = create_proc_read_entry(
+			name,
+			S_IFREG | S_IRUGO | S_IWUSR,
+			shpnt->hostt->proc_dir,
+			proc_scsi_read,
+			(void *)shpnt);
+		if (!p)
+			panic("Not enough memory to register SCSI HBA in /proc/scsi!\n");
+		p->write_proc = proc_scsi_write;
+		p->owner = shpnt->hostt->module;
+	}
+}
+
+void build_proc_dir(Scsi_Host_Template * tpnt)
+{
 	tpnt->proc_dir = proc_mkdir(tpnt->proc_name, proc_scsi);
         if (!tpnt->proc_dir) {
-                printk(KERN_ERR "Unable to proc_mkdir in scsi.c/build_proc_dir_entries");
+                printk(KERN_ERR "Unable to proc_mkdir in scsi_proc.c/build_proc_dir\n");
                 return;
         }
 	tpnt->proc_dir->owner = tpnt->module;
-
-	hpnt = scsi_hostlist;
-	while (hpnt) {
-		if (tpnt == hpnt->hostt) {
-			struct proc_dir_entry *p;
-			sprintf(name,"%d",hpnt->host_no);
-			p = create_proc_read_entry(name,
-					S_IFREG | S_IRUGO | S_IWUSR,
-					tpnt->proc_dir,
-					proc_scsi_read,
-					(void *)hpnt);
-			if (!p)
-				panic("Not enough memory to register SCSI HBA in /proc/scsi !\n");
-			p->write_proc=proc_scsi_write;
-			p->owner = tpnt->module;
-		}
-		hpnt = hpnt->next;
-	}
 }
 
 /*

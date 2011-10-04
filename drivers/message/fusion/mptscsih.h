@@ -15,7 +15,7 @@
  *
  *      (see also mptbase.c)
  *
- *  Copyright (c) 1999-2002 LSI Logic Corporation
+ *  Copyright (c) 1999-2004 LSI Logic Corporation
  *  Originally By: Steven J. Ralston
  *  (mailto:sjralston1@netscape.net)
  *  (mailto:mpt_linux_developer@lsil.com)
@@ -252,7 +252,7 @@ extern	int		 x_scsi_proc_info(char *, char **, off_t, int, int, int);
 #endif
 
 #ifdef MPT_SCSI_USE_NEW_EH
-#define MPT_SCSIHOST {						\
+#define _MPT_SCSIHOST {						\
 	.next				= NULL,			\
 	PROC_SCSI_DECL						\
 	.proc_info			= x_scsi_proc_info,	\
@@ -275,12 +275,12 @@ extern	int		 x_scsi_proc_info(char *, char **, off_t, int, int, int);
 	.unchecked_isa_dma		= 0,			\
 	.use_clustering			= ENABLE_CLUSTERING,	\
 	.vary_io			= 1,			\
-	.use_new_eh_code		= 1			\
-}
+	.use_new_eh_code		= 1
+
 
 #else /* MPT_SCSI_USE_NEW_EH */
 
-#define MPT_SCSIHOST {						\
+#define _MPT_SCSIHOST 						\
 	.next				= NULL,			\
 	PROC_SCSI_DECL						\
 	.name				= "MPT SCSI Host",	\
@@ -298,9 +298,21 @@ extern	int		 x_scsi_proc_info(char *, char **, off_t, int, int, int);
 	.cmd_per_lun			= MPT_SCSI_CMD_PER_LUN,	\
 	.unchecked_isa_dma		= 0,			\
 	.use_clustering			= ENABLE_CLUSTERING,	\
-	.vary_io			= 1                     \
-}
+	.vary_io			= 1
+
 #endif  /* MPT_SCSI_USE_NEW_EH */
+
+#if defined(CONFIG_DISKDUMP) || defined(CONFIG_DISKDUMP_MODULE)
+#define MPT_SCSIHOST { 						\
+	.hostt = {						\
+		_MPT_SCSIHOST,					\
+		.disk_dump		= 1			\
+	},							\
+	.dump_ops			= &mptscsih_dump_ops	\
+}
+#else
+#define MPT_SCSIHOST { _MPT_SCSIHOST }
+#endif
 
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/

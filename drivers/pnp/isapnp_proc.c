@@ -112,7 +112,7 @@ static ssize_t isapnp_info_entry_read(struct file *file, char *buffer,
 	buf = (isapnp_info_buffer_t *) file->private_data;
 	if (!buf)
 		return -EIO;
-	if (pos != (unsigned)pos || pos >= buf->size)
+	if (pos < 0 || pos >= buf->size)
 		return 0;
 	size = buf->size < count ? buf->size : count;
 	size1 = buf->size - pos;

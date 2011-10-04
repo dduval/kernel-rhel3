@@ -443,20 +443,49 @@ END(__ia64_syscall)
 	 * We invoke syscall_trace through this intermediate function to
 	 * ensure that the syscall input arguments are not clobbered.  We
 	 * also use it to preserve b6, which contains the syscall entry point.
+	 *
+	 * If audit is running we spill and fill the 8 argument registers. This
+	 * is less elegant but faster than using the unwind mechanism which
+	 * would result in the creation and use of a full switch stack.
 	 */
-GLOBAL_ENTRY(invoke_syscall_trace)
+GLOBAL_ENTRY(invoke_syscall_trace_enter)
 	.prologue ASM_UNW_PRLG_RP|ASM_UNW_PRLG_PFS, ASM_UNW_PRLG_GRSAVE(8)
-	alloc loc1=ar.pfs,8,3,0,0
+	alloc loc1=ar.pfs,8,3,2,0
 	mov loc0=rp
 	.body
 	mov loc2=b6
+	adds out0=16,sp			// pass *pt_regs
+	mov out1=ar.bsp			// get the current bsp
 	;;
-	br.call.sptk.many rp=syscall_trace
-.ret3:	mov rp=loc0
+	br.call.sptk.many rp=syscall_trace_enter
+	;; 
+	mov rp=loc0
 	mov ar.pfs=loc1
 	mov b6=loc2
 	br.ret.sptk.many rp
-END(invoke_syscall_trace)
+END(invoke_syscall_trace_enter)
+
+
+	/*
+	 * We invoke syscall_trace through this intermediate function to
+	 * ensure that the syscall input arguments are not clobbered.  We
+	 * also use it to preserve b6, which contains the syscall entry point.
+	 */
+GLOBAL_ENTRY(invoke_syscall_trace_leave)
+	.prologue ASM_UNW_PRLG_RP|ASM_UNW_PRLG_PFS, ASM_UNW_PRLG_GRSAVE(8)
+	alloc loc1=ar.pfs,8,3,1,0
+	mov loc0=rp
+	.body
+	mov loc2=b6
+	adds out0=16,sp
+	;;
+	br.call.sptk.many rp=syscall_trace_leave
+	;; 
+	mov rp=loc0
+	mov ar.pfs=loc1
+	mov b6=loc2
+	br.ret.sptk.many rp
+END(invoke_syscall_trace_leave)
 
 	/*
 	 * Invoke a system call, but do some tracing before and after the call.
@@ -478,7 +507,7 @@ GLOBAL_ENTRY(ia64_trace_syscall)
 	 */
 	nop.m 0
 	nop.i 0
-	br.call.sptk.many rp=invoke_syscall_trace // give parent a chance to catch syscall args
+	br.call.sptk.many rp=invoke_syscall_trace_enter // give parent a chance to catch syscall args
 }
 .ret6:	br.call.sptk.many rp=b6			// do the syscall
 strace_check_retval:
@@ -492,7 +521,7 @@ strace_save_retval:
 .mem.offset 0,0;	st8.spill [r2]=r8	// store return value in slot for r8
 .mem.offset 8,0;	st8.spill [r3]=r10	// clear error indication in slot for r10
 ia64_strace_leave_kernel:
-	br.call.sptk.many rp=invoke_syscall_trace // give parent a chance to catch return value
+	br.call.sptk.many rp=invoke_syscall_trace_leave // give parent a chance to catch return value
 .rety:	br.cond.sptk ia64_leave_kernel
 
 strace_error:
@@ -523,12 +552,15 @@ GLOBAL_ENTRY(ia64_ret_from_clone)
 	br.call.sptk.many rp=ia64_invoke_schedule_tail
 }
 .ret8:
-	adds r2=IA64_TASK_PTRACE_OFFSET,r13
+	adds r2=IA64_TASK_PTRACE_OFFSET,r13	// r2 = &current->ptrace
 	;;
-	ld8 r2=[r2]
+	ld8 r2=[r2]				// r2 = current->ptrace
+	mov r3=PT_TRACEAUDITMASK		// r3 = PT_TRACESYS|PT_AUDITED
 	;;
 	mov r8=0
-	tbit.nz p6,p0=r2,PT_TRACESYS_BIT
+	and r2=r2,r3				// mask current->ptrace
+	;; 
+	cmp.ne p6,p0=r2,r0			// ptrace or audit?
 (p6)	br.cond.spnt strace_check_retval
 	;;					// added stop bits to prevent r8 dependency
 END(ia64_ret_from_clone)

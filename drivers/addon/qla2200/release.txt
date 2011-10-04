@@ -1,10 +1,12 @@
 				Release Notes
 
 Driver Name  : QLogic QLA22xx/QLA23xx PCI Fibre Channel Linux Driver
-Version      : 6.07.01
-OS platform  : Red Hat 8.0, Red Hat 9.0, Red Hat AS2.1 (IA32 & IA64), SuSE SLES8 (IA32 & IA64)
+Version      : 7.00.03
+OS platform  : Red Hat AS2.1 (IA32 & IA64)
+               Red Hat RHEL 3 AS (IA32, PPC64, IA64 & AMD64)
+               SuSE SLES8 (IA32, PPC64 & IA64)
 HBA Support  : QLA22xx, QLA23xx
-FW version   : QLA22xx : 2.02.06(tp),  QLA23xx: 3.02.24(tp)
+FW version   : QLA22xx : 2.02.06(tp/ip),  QLA23xx: 3.02.28(ipx/flx)
 
  
 Table of Contents
@@ -17,24 +19,27 @@ V.      Additional Information
 
 I.	Overview
 
-This document describes the changes between versions 6.06.00 and 6.06.10 
+This document describes the changes between versions 6.06.10 and 7.00.00b15
 of the QLogic Fibre Channel driver for Linux.
 
 
 II.	Enhancements
 
-- Added MSA1000 support to failover code.
-- Change BIOS translation code to read boot sector.
-- Added comandlune option "ql2xioctltimeout" to change
-  the default of 66 seconds for ioctl pass-thur commands.
+ - Eliminate checking initiators while processing fcport list. 
+ - Added logic to honor "ConfigRequired=1" in mon-failover mode. 
+ - Added support for ISP2322 chips.
+ - Added EVA support
+ - Added support for enhance
 
 
 III.	Bug Fixes
 
-- Fixed support for x86_64.
-- Fixed compile error when "configDisplay" is enabled.
-- Fixed issue where the controller lun was not exported 
-  when the active path was not the first path.
+ - PortID binding was broken.
+ - 2100/2200 panic during firmware load
+ - Fixed handling of tape commands during LIPs
+ - Fixed flushing logic for START_STOP commands
+ - Back-out PLUG-TIMER and scsi-affine 'performace patches'
+ - Fixed DMA double allocation bug on retries.
 
 IV.	Known Issues
 
@@ -45,6 +50,3 @@ V.	Additional Information
 
 - This driver must be used with API library v2.00Beta4 + 
   to handle re-entrant API/ioctl commands correctly.
-
-
-

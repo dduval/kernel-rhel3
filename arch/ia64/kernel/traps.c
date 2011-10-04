@@ -104,7 +104,8 @@ die (const char *str, struct pt_regs *regs, long err)
 
 	if (die.lock_owner != smp_processor_id()) {
 		console_verbose();
-		spin_lock_irq(&die.lock);
+		if (!crashdump_mode())
+			spin_lock_irq(&die.lock);
 		die.lock_owner = smp_processor_id();
 		die.lock_owner_depth = 0;
 		bust_spinlocks(1);
@@ -116,13 +117,7 @@ die (const char *str, struct pt_regs *regs, long err)
   	} else
 		printk(KERN_ERR "Recursive die() failure, output suppressed\n");
 
-	if (netdump_func)
-		netdump_func(regs);
-	if (panic_on_oops) {
-		if (netdump_func)
-			netdump_func = NULL;
-		panic("Fatal exception");
-	}
+	try_crashdump(regs);
 	bust_spinlocks(0);
 	die.lock_owner = -1;
 	spin_unlock_irq(&die.lock);

@@ -1363,11 +1363,10 @@ sys_ptrace (long request, pid_t pid, unsigned long addr, unsigned long data,
 	return ret;
 }
 
+
 void
 syscall_trace (void)
 {
-	if ((current->ptrace & (PT_PTRACED|PT_TRACESYS)) != (PT_PTRACED|PT_TRACESYS))
-		return;
 	current->exit_code = SIGTRAP;
 	set_current_state(TASK_STOPPED);
 	notify_parent(current, SIGCHLD);
@@ -1381,4 +1380,26 @@ syscall_trace (void)
 		send_sig(current->exit_code, current, 1);
 		current->exit_code = 0;
 	}
+}
+
+asmlinkage void syscall_trace_enter(struct pt_regs *regs, unsigned long *bsp)
+{
+#if defined(CONFIG_AUDIT) || defined(CONFIG_AUDIT_MODULE)
+	if (current->ptrace & PT_AUDITED)
+               audit_intercept(regs, bsp);
+#endif
+
+	if ((current->ptrace & (PT_PTRACED|PT_TRACESYS)) == (PT_PTRACED|PT_TRACESYS))
+		syscall_trace();
+}
+
+asmlinkage void syscall_trace_leave(struct pt_regs *regs)
+{
+	if ((current->ptrace & (PT_PTRACED|PT_TRACESYS)) == (PT_PTRACED|PT_TRACESYS))
+		syscall_trace();
+
+#if defined(CONFIG_AUDIT) || defined(CONFIG_AUDIT_MODULE)
+	if (current->ptrace & PT_AUDITED)
+		audit_result(regs);
+#endif
 }

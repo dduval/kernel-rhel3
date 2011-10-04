@@ -343,6 +343,11 @@ void scsi_old_done(Scsi_Cmnd * SCpnt)
 	SCpnt->serial_number_at_timeout = 0;
 	oldto = update_timeout(SCpnt, 0);
 
+#if defined(CONFIG_SCSI_DUMP) || defined(CONFIG_SCSI_DUMP_MODULE)
+	if (crashdump_mode())
+		return;
+#endif
+
 #ifdef DEBUG_TIMEOUT
 	if (result)
 		printk("Non-zero result in scsi_done %x %d:%d\n",

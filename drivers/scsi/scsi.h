@@ -624,6 +624,9 @@ struct scsi_device {
 
 	// Flag to allow revalidate to succeed in sd_open
 	int allow_revalidate;
+#ifndef __GENKSYMS__ /* preserve KMI/ABI ksyms compatibility for mod linkage */
+	struct list_head sdev_retry_q;	/* list of cmds to be retried */
+#endif
 };
 
 

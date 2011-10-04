@@ -87,7 +87,7 @@ Valid options:
 
 */
 
-int exec_shield32 = 2;
+int exec_shield32 = 1;
 
 static int __init nonx32_setup(char *str)
 {

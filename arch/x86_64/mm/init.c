@@ -325,8 +325,9 @@ void __init paging_init(void)
 	}
 	free_area_init(zones_size);
 }
+#endif
 
-static inline int page_is_ram (unsigned long pagenr)
+int page_is_ram(unsigned long pagenr)
 {
 	int i;
 
@@ -347,7 +348,6 @@ static inline int page_is_ram (unsigned long pagenr)
 	}
 	return 0;
 }
-#endif
 
 void __init mem_init(void)
 {

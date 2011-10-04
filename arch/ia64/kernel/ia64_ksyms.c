@@ -184,3 +184,15 @@ EXPORT_SYMBOL(efi_mem_type);
 #include <linux/acpi.h>
 extern acpi_status acpi_hp_csr_space(acpi_handle obj, u64 *csr_base, u64 *csr_length);
 EXPORT_SYMBOL(acpi_hp_csr_space);
+
+#include <linux/elf.h>
+#include <asm/unwind.h>
+extern void ia64_do_copy_regs (struct unw_frame_info *info, void *arg);
+EXPORT_SYMBOL(ia64_do_copy_regs);
+extern void ia64_freeze_cpu (struct unw_frame_info *info, void *arg);
+EXPORT_SYMBOL(ia64_freeze_cpu);
+
+extern int page_is_ram (unsigned long pagenr);
+EXPORT_SYMBOL(page_is_ram);
+EXPORT_SYMBOL(unw_init_running);
+

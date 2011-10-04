@@ -382,7 +382,7 @@ efi_sys_table_read(struct file *file, char *buffer, size_t count, loff_t *ppos)
        if( efi.boot_info > 0 )
 	       length += sprintf(proc_buffer+length, "BootInfo=0x%lx\n", __pa(efi.boot_info));
 
-       if (pos != (unsigned)pos || pos >= length)
+       if (pos < 0 || pos >= length)
 	       return 0;
 
        data = (u8 *) proc_buffer + pos;

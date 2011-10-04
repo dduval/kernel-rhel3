@@ -7,6 +7,7 @@
 #include <linux/kernel.h>
 #include <linux/types.h>
 #include <linux/init.h>
+#include <linux/acpi.h>
 #include <linux/bootmem.h>
 #include <linux/ioport.h>
 #include <asm/page.h>
@@ -16,6 +17,10 @@
 
 extern unsigned long table_start, table_end;
 extern char _end[];
+
+#ifdef	CONFIG_ACPI_BOOT
+extern acpi_interrupt_flags	acpi_sci_flags;
+#endif
 
 extern struct resource code_resource, data_resource, vram_resource;
 
@@ -538,12 +543,25 @@ void __init parse_mem_cmdline (char ** cmdline_p)
 		else if (!memcmp(from, "acpi=off", 8)) {
 			acpi_disabled = 1;
 		}
+		else if (!memcmp(from, "acpi=noirq", 8)) {
+			acpi_noirq = 1;
+		}
 #endif
 #ifdef CONFIG_GART_IOMMU 
 		else if (!memcmp(from,"iommu=",6)) { 
 			iommu_setup(from+6); 
 		} 	
 		
+#endif
+#ifdef	CONFIG_ACPI_BOOT
+		else if (!memcmp(from, "acpi_sci=edge", 13))
+			acpi_sci_flags.trigger =  1;
+		else if (!memcmp(from, "acpi_sci=level", 14))
+			acpi_sci_flags.trigger = 3;
+		else if (!memcmp(from, "acpi_sci=high", 13))
+			acpi_sci_flags.polarity = 1;
+		else if (!memcmp(from, "acpi_sci=low", 12))
+			acpi_sci_flags.polarity = 3;
 #endif
 #ifdef CONFIG_SWIOTLB
 		else if (!memcmp(from, "swiotlb=", 8)) {

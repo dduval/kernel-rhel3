@@ -163,6 +163,26 @@ sd_find_target(void *host, int tgt)
 }
 #endif
 
+#if defined(CONFIG_DISKDUMP) || defined(CONFIG_DISKDUMP_MODULE)
+Scsi_Device *sd_find_scsi_device(kdev_t dev)
+{
+	int i;
+	int target;
+
+	for (i = 0; i < N_SD_MAJORS; i++) {
+		if (sd_major[i] == MAJOR(dev)) {
+			target = DEVICE_NR(dev);
+			if (sd_template.dev_max >= target)
+				return rscsi_disks[target].device;
+			break;
+		}
+	}
+	return NULL;
+}
+
+EXPORT_SYMBOL(sd_find_scsi_device);
+#endif
+
 static int sd_ioctl(struct inode * inode, struct file * file, unsigned int cmd, unsigned long arg)
 {
 	kdev_t dev = inode->i_rdev;

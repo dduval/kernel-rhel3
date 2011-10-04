@@ -294,3 +294,45 @@ void rb_erase(rb_node_t * node, rb_root_t * root)
 		__rb_erase_color(child, parent, root);
 }
 EXPORT_SYMBOL(rb_erase);
+
+/*
+ * This function returns the first node (in sort order) of the tree.
+ */
+struct rb_node_s *rb_first(struct rb_root_s *root)
+{
+	struct rb_node_s	*n;
+
+	n = root->rb_node;
+	if (!n)
+		return NULL;
+	while (n->rb_left)
+		n = n->rb_left;
+	return n;
+}
+
+EXPORT_SYMBOL(rb_first);
+
+struct rb_node_s *rb_next(struct rb_node_s *node)
+{
+	/* If we have a right-hand child, go down and then left as far
+	   as we can. */
+	if (node->rb_right) {
+		node = node->rb_right;
+		while (node->rb_left)
+			node=node->rb_left;
+		return node;
+	}
+
+	/* No right-hand children.  Everything down and left is
+	   smaller than us, so any 'next' node must be in the general
+	   direction of our parent. Go up the tree; any time the
+	   ancestor is a right-hand child of its parent, keep going
+	   up. First time it's a left-hand child of its parent, said
+	   parent is our 'next' node. */
+	while (node->rb_parent && node == node->rb_parent->rb_right)
+		node = node->rb_parent;
+
+	return node->rb_parent;
+}
+
+EXPORT_SYMBOL(rb_next);

@@ -217,7 +217,8 @@ static void futex_vcache_callback(vcache_t *vcache, struct page *new_page)
  * physical page.
  */
 static inline int futex_requeue(unsigned long uaddr1, int offset1,
-	unsigned long uaddr2, int offset2, int nr_wake, int nr_requeue)
+	unsigned long uaddr2, int offset2, int nr_wake, int nr_requeue,
+	int *valp)
 {
 	struct list_head *i, *next, *head1, *head2;
 	struct page *page1 = NULL, *page2 = NULL;
@@ -234,6 +235,24 @@ static inline int futex_requeue(unsigned long uaddr1, int offset1,
 
 	head1 = hash_futex(page1, offset1);
 	head2 = hash_futex(page2, offset2);
+
+	if (likely (valp != NULL)) {
+		void *kaddr;
+		int curval;
+
+		if (!access_ok(VERIFY_READ, uaddr1, 4)) {
+			ret = -EFAULT;
+			goto out;
+		}
+		kaddr = kmap_atomic(page1, KM_USER0);
+		curval = *(int*)(kaddr + offset1);
+		kunmap_atomic(kaddr, KM_USER0);
+
+		if (curval != *valp) {
+			ret = -EAGAIN;
+			goto out;
+		}
+	}
 
 	list_for_each_safe(i, next, head1) {
 		struct futex_q *this = list_entry(i, struct futex_q, list);
@@ -383,7 +402,7 @@ out_fault:
 }
 
 long do_futex(unsigned long uaddr, int op, int val, unsigned long timeout,
-		unsigned long uaddr2, int val2)
+		unsigned long uaddr2, int val2, int val3)
 {
 	unsigned long pos_in_page;
 	int ret;
@@ -410,7 +429,19 @@ long do_futex(unsigned long uaddr, int op, int val, unsigned long timeout,
 			return -EINVAL;
 
 		ret = futex_requeue(uaddr, pos_in_page, uaddr2, pos_in_page2,
-				    val, val2);
+				    val, val2, NULL);
+		break;
+	}
+	case FUTEX_CMP_REQUEUE:
+	{
+		unsigned long pos_in_page2 = uaddr2 % PAGE_SIZE;
+
+		/* Must be "naturally" aligned */
+		if (pos_in_page2 % sizeof(u32))
+			return -EINVAL;
+
+		ret = futex_requeue(uaddr, pos_in_page, uaddr2, pos_in_page2,
+				    val, val2, &val3);
 		break;
 	}
 	default:
@@ -421,7 +452,8 @@ long do_futex(unsigned long uaddr, int op, int val, unsigned long timeout,
 
 
 asmlinkage long sys_futex(u32 __user *uaddr, int op, int val,
-			  struct timespec __user *utime, u32 __user *uaddr2)
+			  struct timespec __user *utime, u32 __user *uaddr2,
+			  int val3)
 {
 	struct timespec t;
 	unsigned long timeout = MAX_SCHEDULE_TIMEOUT;
@@ -435,11 +467,11 @@ asmlinkage long sys_futex(u32 __user *uaddr, int op, int val,
 	/*
 	 * requeue parameter in 'utime' if op == FUTEX_REQUEUE.
 	 */
-	if (op == FUTEX_REQUEUE)
+	if (op >= FUTEX_REQUEUE)
 		val2 = (int) (long) utime;
 
 	return do_futex((unsigned long)uaddr, op, val, timeout,
-			(unsigned long)uaddr2, val2);
+			(unsigned long)uaddr2, val2, val3);
 }
 
 static int __init init(void)

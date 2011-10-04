@@ -54,6 +54,7 @@
 
 /******************************** Globals *************************************/
 struct ahd_softc_tailq ahd_tailq = TAILQ_HEAD_INITIALIZER(ahd_tailq);
+uint32_t ahd_attach_to_HostRAID_controllers = 1;
 
 /***************************** Lookup Tables **********************************/
 char *ahd_chip_names[] =

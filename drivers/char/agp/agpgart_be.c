@@ -6097,7 +6097,6 @@ static int __init agp_find_supported_device(void)
 	struct pci_dev *dev = NULL;
 	u8 cap_ptr = 0x00;
 
-#if defined(CONFIG_AGP_HP_ZX1) || defined(CONFIG_X86_64)
 	do {
 		dev = pci_find_class(PCI_CLASS_BRIDGE_HOST << 8, dev);
 	} while((dev) && !agp_check_supported_device(dev));
@@ -6109,10 +6108,6 @@ static int __init agp_find_supported_device(void)
 				return -ENODEV;	
 		} while(!agp_check_supported_device(dev));
 	}
-#else
-	if ((dev = pci_find_class(PCI_CLASS_BRIDGE_HOST << 8, NULL)) == NULL)
-		return -ENODEV;
-#endif
 
 	agp_bridge.dev = dev;
 

@@ -560,7 +560,7 @@ ssize_t rwvec_raw_dev(int rw, struct file * filp, const struct iovec *iov,
 	err = 0;
 	if (tot_len)
 		err = -ENXIO;
-	if ((off >> sector_bits) >= limit) 
+	if ((off >> sector_bits) >= limit)
 		goto out;
 
 	blocknr = off >> sector_bits;

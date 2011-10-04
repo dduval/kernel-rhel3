@@ -876,6 +876,13 @@ static __initdata struct dmi_blacklist dmi_blacklist[]={
 			MATCH(DMI_PRODUCT_NAME, "Dell PowerEdge 8450"),
 			NO_MATCH, NO_MATCH, NO_MATCH
 			} },
+
+	/* Possibly another Intel board issue, bz89593 */
+	{ broken_pirq, "Intel NA440BX DP", {
+			MATCH(DMI_BIOS_VENDOR, "Intel Corporation"),
+			MATCH(DMI_BIOS_VERSION, "NIGHTS0.86B.0095.P14.0001211034"),
+			NO_MATCH, NO_MATCH
+			} },
 			
 	{ init_ints_after_s1, "Toshiba Satellite 4030cdt", { /* Reinitialization of 8259 is needed after S1 resume */
 			MATCH(DMI_PRODUCT_NAME, "S4030CDT/4.3"),

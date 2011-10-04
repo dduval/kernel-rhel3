@@ -22,6 +22,9 @@
  * command source for 2300 module
  */
 #define ISP2300
+#define ISP2322
+#define EXTENDED_IDS
+#define IPX
 
 #if !defined(LINUX)
 #define LINUX

@@ -17,7 +17,7 @@ all: $(KHEAD) kernel.o
 
 O_TARGET := kernel.o
 
-export-objs         := ppc_ksyms.o setup.o udbg.o
+export-objs         := ppc_ksyms.o setup.o udbg.o vio.o
 
 obj-y               :=	ppc_ksyms.o setup.o entry.o traps.o irq.o idle.o \
 			time.o process.o signal.o syscalls.o misc.o ptrace.o \
@@ -36,8 +36,7 @@ obj-$(CONFIG_PCI) += iSeries_pci.o iSeries_pci_reset.o iSeries_IoMmTable.o iSeri
 endif
 ifeq ($(CONFIG_PPC_PSERIES),y)
 obj-$(CONFIG_PCI) += pSeries_pci.o eeh.o
-
-obj-y += rtasd.o nvram.o
+obj-y += rtasd.o nvram.o vio.o
 endif
 
 obj-$(CONFIG_RTAS_FLASH) += rtas_flash.o

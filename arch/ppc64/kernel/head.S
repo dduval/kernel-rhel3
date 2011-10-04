@@ -143,6 +143,10 @@ __secondary_hold_acknowledge:
  * All of it must fit below the first exception vector at 0x100.
  */
 _GLOBAL(__secondary_hold)
+	mfmsr	r24
+	ori	r24,r24,MSR_RI
+	mtmsrd	r24			/* RI on */
+
 	/* Grab our linux cpu number */
 	mr      r24,r3
 
@@ -214,7 +218,7 @@ _GLOBAL(__secondary_hold)
 		                        /*   assumes *_common < 16b   */ \
 	mfmsr   r23;                                                     \
 	rotldi  r23,r23,4;                                               \
-	ori     r23,r23,0x30B;          /* Set IR, DR, SF, ISF, HV    */ \
+	ori     r23,r23,0x32B;          /* Set IR, DR, RI, SF, ISF, HV*/ \
 	rotldi  r23,r23,60;             /* for generic handlers       */ \
 	mtspr   SRR0,r22;                                                \
 	mtspr   SRR1,r23;                                                \
@@ -632,6 +636,12 @@ fast_exception_return:
 	REST_GPR(0, r1)
 	REST_8GPRS(2, r1)
 	REST_4GPRS(10, r1)
+
+	mfmsr	r20
+	li	r21, MSR_RI
+	andc	r20,r20,r21
+	mtmsrd	r20,1
+
 	mtspr   SRR1,r23
 	mtspr   SRR0,r22
 	REST_4GPRS(20, r1)
@@ -1166,6 +1176,12 @@ _GLOBAL(do_stab_bolted)
 	lwz	r23,EX_CCR(r21)		/* get saved CR */
 	/* note that this is almost identical to maskable_exception_exit */
 	mtcr    r23                     /* restore CR */
+
+	mfmsr	r22
+	li	r23, MSR_RI
+	andc	r22,r22,r23
+	mtmsrd	r22,1
+
 	ld	r22,EX_SRR0(r21)	/* Get SRR0 from exc. frame */
 	ld	r23,EX_SRR1(r21)	/* Get SRR1 from exc. frame */
 	mtspr	SRR0,r22
@@ -1240,11 +1256,11 @@ SLB_NUM_ENTRIES = 64
 	beq-	2b
 	
 	/* Invalidate the old entry */
-	slbmfee r21,r22
 	lis	r23,-2049
 	ori	r23,r23,65535
 	and	r21,r21,r23
 	slbie	r21
+	slbie	r21	/* Power5 DD2.0 errata */
 
 4:	/* Put together the vsid portion of the entry */
 	li      r21,0
@@ -1273,6 +1289,12 @@ SLB_NUM_ENTRIES = 64
 	lwz	r23,EX_CCR(r21)		/* get saved CR */
 	/* note that this is almost identical to maskable_exception_exit */
 	mtcr    r23                     /* restore CR */
+
+	mfmsr	r22
+	li	r23, MSR_RI
+	andc	r22,r22,r23
+	mtmsrd	r22,1
+
 	ld	r22,EX_SRR0(r21)	/* Get SRR0 from exc. frame */
 	ld	r23,EX_SRR1(r21)	/* Get SRR1 from exc. frame */
 	mtspr	SRR0,r22
@@ -1902,9 +1924,13 @@ _GLOBAL(__secondary_start)
 	bne   	98f
 	mfspr	r3,PVR
 	srwi	r3,r3,16
-	cmpwi	r3,0x37         /* SStar */
+	cmpwi	r3,0x37         /* SStar  */
+	beq	97f
+	cmpwi	r3,0x36         /* IStar  */
+	beq	97f
+	cmpwi	r3,0x34         /* Pulsar */
 	bne	98f
-	li	r3,H_SET_ASR    /* hcall = H_SET_ASR */
+97:	li	r3,H_SET_ASR    /* hcall = H_SET_ASR */
 	HSC     		/* Invoking hcall */
 	b	99f
 98:                             /* !(rpa hypervisor) || !(sstar) */
@@ -1970,6 +1996,10 @@ _STATIC(start_here_pSeries)
 	/* get a new offset, now that the kernel has moved. */
 	bl	.reloc_offset
 	mr	r26,r3
+
+	mfmsr	r6
+	ori	r6,r6,MSR_RI
+	mtmsrd	r6			/* RI on */
 
 	/* setup the systemcfg pointer which is needed by *tab_initialize  */
 	LOADADDR(r6,systemcfg)
@@ -2057,8 +2087,12 @@ _STATIC(start_here_pSeries)
 	mfspr	r3,PVR
 	srwi	r3,r3,16
 	cmpwi	r3,0x37         /* SStar */
+	beq	97f
+	cmpwi	r3,0x36         /* IStar  */
+	beq	97f
+	cmpwi	r3,0x34         /* Pulsar */
 	bne	98f
-	li	r3,H_SET_ASR    /* hcall = H_SET_ASR */
+97:	li	r3,H_SET_ASR    /* hcall = H_SET_ASR */
 	HSC     	        /* Invoking hcall */
 	b     	99f
 98:                 /* This is not a hypervisor machine */

@@ -1,14 +1,15 @@
 /*
  * kernel/lvm.c
  *
- * Copyright (C) 1997 - 2002  Heinz Mauelshagen, Sistina Software
+ * Copyright (C) 1997 - 2003  Heinz Mauelshagen, Sistina Software
  *
  * February-November 1997
  * April-May,July-August,November 1998
  * January-March,May,July,September,October 1999
  * January,February,July,September-November 2000
  * January-May,June,October 2001
- * May-July 2002
+ * May-August 2002
+ * February 2003
  *
  *
  * LVM driver is free software; you can redistribute it and/or modify
@@ -220,6 +221,12 @@
  *               - support HDIO_GETGEO_BIG ioctl
  *    05/07/2002 - fixed OBO error on vg array access [benh@kernel.crashing.org]
  *    22/07/2002 - streamlined blk_ioctl() call
+ *    14/08/2002 - stored fs handle in lvm_do_lv_rename
+ *                 [kaoru@bsd.tnes.nec.co.jp]
+ *    06/02/2003 - fix persistent snapshot extend/reduce bug in
+ *                lvm_do_lv_extend_reduce() [dalestephenson@mac.com]
+ *    04/03/2003 - snapshot extend/reduce memory leak
+ *               - VG PE counter wrong [dalestephenson@mac.com]
  *
  */
 
@@ -407,19 +414,19 @@ static DECLARE_RWSEM(_pe_lock);
 
 
 struct file_operations lvm_chr_fops = {
-	owner:		THIS_MODULE,
-	open:		lvm_chr_open,
-	release:	lvm_chr_close,
-	ioctl:		lvm_chr_ioctl,
+	.owner		= THIS_MODULE,
+	.open		= lvm_chr_open,
+	.release	= lvm_chr_close,
+	.ioctl		= lvm_chr_ioctl,
 };
 
 /* block device operations structure needed for 2.3.38? and above */
 struct block_device_operations lvm_blk_dops =
 {
-	owner:		THIS_MODULE,
-	open:		lvm_blk_open,
-	release:	lvm_blk_close,
-	ioctl:		lvm_blk_ioctl,
+	.owner		= THIS_MODULE,
+	.open		= lvm_blk_open,
+	.release	= lvm_blk_close,
+	.ioctl		= lvm_blk_ioctl,
 };
 
 
@@ -433,13 +440,13 @@ static mempool_t *lvm_callback_mempool;
 
 static struct gendisk lvm_gendisk =
 {
-	major:		MAJOR_NR,
-	major_name:	LVM_NAME,
-	minor_shift:	0,
-	max_p:		1,
-	part:		lvm_hd_struct,
-	sizes:		lvm_size,
-	nr_real:	MAX_LV,
+	.major		= MAJOR_NR,
+	.major_name	= LVM_NAME,
+	.minor_shift	= 0,
+	.max_p		= 1,
+	.part		= lvm_hd_struct,
+	.sizes		= lvm_size,
+	.nr_real	= MAX_LV,
 };
 
 
@@ -1766,8 +1773,10 @@ static int lvm_do_vg_create(void *arg, int minor)
 		minor = vg_ptr->vg_number;
 
 	/* check limits */
-	if (minor >= ABS_MAX_VG)
+	if (minor >= ABS_MAX_VG) {
+		kfree(vg_ptr);
 		return -EFAULT;
+	}
 
 	/* Validate it */
 	if (vg[VG_CHR(minor)] != NULL) {
@@ -1834,8 +1843,7 @@ static int lvm_do_vg_create(void *arg, int minor)
 			if (copy_from_user(&lv, lvp, sizeof(lv_t)) != 0) {
 				P_IOCTL("ERROR: copying LV ptr %p (%d bytes)\n",
 					lvp, sizeof(lv_t));
-				lvm_do_vg_remove(minor);
-				return -EFAULT;
+				goto copy_fault;
 			}
 			if ( lv.lv_access & LV_SNAPSHOT) {
 				snap_lv_ptr[ls] = lvp;
@@ -1845,10 +1853,8 @@ static int lvm_do_vg_create(void *arg, int minor)
 			}
 			vg_ptr->lv[l] = NULL;
 			/* only create original logical volumes for now */
-			if (lvm_do_lv_create(minor, lv.lv_name, &lv) != 0) {
-				lvm_do_vg_remove(minor);
-				return -EFAULT;
-			}
+			if (lvm_do_lv_create(minor, lv.lv_name, &lv) != 0)
+				goto copy_fault;
 		}
 	}
 
@@ -1856,14 +1862,11 @@ static int lvm_do_vg_create(void *arg, int minor)
 	   in place during first path above */
 	for (l = 0; l < ls; l++) {
 		lv_t *lvp = snap_lv_ptr[l];
-		if (copy_from_user(&lv, lvp, sizeof(lv_t)) != 0) {
-			lvm_do_vg_remove(minor);
-			return -EFAULT;
-		}
-		if (lvm_do_lv_create(minor, lv.lv_name, &lv) != 0) {
-			lvm_do_vg_remove(minor);
-			return -EFAULT;
-		}
+		if (copy_from_user(&lv, lvp, sizeof(lv_t)) != 0)
+			goto copy_fault;
+
+		if (lvm_do_lv_create(minor, lv.lv_name, &lv) != 0)
+			goto copy_fault;
 	}
 
 	vfree(snap_lv_ptr);
@@ -1877,6 +1880,11 @@ static int lvm_do_vg_create(void *arg, int minor)
 	vg_ptr->vg_status |= VG_ACTIVE;
 
 	return 0;
+
+copy_fault:
+	lvm_do_vg_remove(minor);
+	vfree(snap_lv_ptr);
+	return -EFAULT;
 } /* lvm_do_vg_create() */
 
 
@@ -2693,7 +2701,7 @@ static int lvm_do_lv_extend_reduce(int minor, char *lv_name, lv_t *new_lv)
 	if(r)
 		return r;
 
-	/* copy relevent fields */
+	/* copy relevant fields */
 	down_write(&old_lv->lv_lock);
 
 	if(new_lv->lv_access & LV_SNAPSHOT) {
@@ -2702,6 +2710,8 @@ static int lvm_do_lv_extend_reduce(int minor, char *lv_name, lv_t *new_lv)
 		size *= sizeof(lv_block_exception_t);
 		memcpy(new_lv->lv_block_exception,
 		       old_lv->lv_block_exception, size);
+		vfree(old_lv->lv_block_exception);
+		vfree(old_lv->lv_snapshot_hash_table);
 
 		old_lv->lv_remap_end = new_lv->lv_remap_end;
 		old_lv->lv_block_exception = new_lv->lv_block_exception;
@@ -2712,12 +2722,15 @@ static int lvm_do_lv_extend_reduce(int minor, char *lv_name, lv_t *new_lv)
 		old_lv->lv_snapshot_hash_mask =
 			new_lv->lv_snapshot_hash_mask;
 
-		for (e = 0; e < new_lv->lv_remap_ptr; e++)
+		for (e = 0; e < old_lv->lv_remap_ptr; e++)
 			lvm_hash_link(new_lv->lv_block_exception + e,
 				      new_lv->lv_block_exception[e].rdev_org,
 				      new_lv->lv_block_exception[e].rsector_org,
 				      new_lv);
 
+		vg_ptr->pe_allocated -= old_lv->lv_allocated_snapshot_le;
+		vg_ptr->pe_allocated += new_lv->lv_allocated_le;
+		old_lv->lv_allocated_snapshot_le = new_lv->lv_allocated_le;
 	} else {
 
 		vfree(old_lv->lv_current_pe);

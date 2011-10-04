@@ -66,14 +66,23 @@ audit_unregister(void)
 	up_write(&hook_lock);
 }
 
+#ifdef __ia64__
+int
+audit_intercept(struct pt_regs *regs, unsigned long *bsp)
+#else
 int
 audit_intercept(struct pt_regs *regs)
+#endif
 {
 	int res = 0;
 
 	down_read(&hook_lock);
 	if (audit.intercept)
+#ifdef __ia64__
+		res = audit.intercept(regs, bsp);
+#else
 		res = audit.intercept(regs);
+#endif
 	up_read(&hook_lock);
 	if (res < 0)
 		audit_kill_process(res);

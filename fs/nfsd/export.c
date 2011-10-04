@@ -1050,7 +1050,7 @@ exp_stopfodrop(struct nfsctl_fodrop *nfp)
 	retval = -EACCES;
 	if (nd.mnt->mnt_flags & MNT_NODEV)
 		goto dput_and_out;
-	dev = to_kdev_t(inode->i_bdev->bd_dev);
+	dev = inode->i_rdev;
 	retval = -ENXIO;
 	if (MAJOR(dev) >= MAX_BLKDEV)
 		goto dput_and_out;

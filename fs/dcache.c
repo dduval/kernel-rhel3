@@ -24,6 +24,7 @@
 #include <linux/cache.h>
 #include <linux/module.h>
 #include <linux/spinlock.h>
+#include <linux/bootmem.h>
 
 #include <asm/uaccess.h>
 
@@ -1221,11 +1222,6 @@ void flush_dentry_attributes (void)
 
 static void __init dcache_init(unsigned long mempages)
 {
-	struct list_head *d;
-	unsigned long order;
-	unsigned int nr_hash;
-	int i;
-
 	/* 
 	 * A constructor could be added for stable state like the lists,
 	 * but it is probably not worth it because of the cache nature
@@ -1241,43 +1237,28 @@ static void __init dcache_init(unsigned long mempages)
 					 NULL, NULL);
 	if (!dentry_cache)
 		panic("Cannot create dentry cache");
+}
 
-#if PAGE_SHIFT < 13
-	mempages >>= (13 - PAGE_SHIFT);
-#endif
-	mempages *= sizeof(struct list_head);
-	for (order = 0; ((1UL << order) << PAGE_SHIFT) < mempages; order++)
-		;
+void __init dcache_init_early(unsigned long mempages)
+{
+	struct list_head *p;
+	int loop;
 
+	dentry_hashtable =
+		alloc_large_system_hash("Dentry cache",
+					sizeof(struct list_head),
+					13,
+					1,
+					&d_hash_shift,
+					&d_hash_mask);
+
+	p = dentry_hashtable;
+	loop = 1 << d_hash_shift;
 	do {
-		unsigned long tmp;
-
-		nr_hash = (1UL << order) * PAGE_SIZE /
-			sizeof(struct list_head);
-		d_hash_mask = (nr_hash - 1);
-
-		tmp = nr_hash;
-		d_hash_shift = 0;
-		while ((tmp >>= 1UL) != 0UL)
-			d_hash_shift++;
-
-		dentry_hashtable = (struct list_head *)
-			__get_free_pages(GFP_ATOMIC, order);
-	} while (dentry_hashtable == NULL && --order >= 0);
-
-	printk(KERN_INFO "Dentry cache hash table entries: %d (order: %ld, %ld bytes)\n",
-			nr_hash, order, (PAGE_SIZE << order));
-
-	if (!dentry_hashtable)
-		panic("Failed to allocate dcache hash table\n");
-
-	d = dentry_hashtable;
-	i = nr_hash;
-	do {
-		INIT_LIST_HEAD(d);
-		d++;
-		i--;
-	} while (i);
+		INIT_LIST_HEAD(p);
+		p++;
+		loop--;
+	} while (loop);
 }
 
 static void init_buffer_head(void * foo, kmem_cache_t * cachep, unsigned long flags)

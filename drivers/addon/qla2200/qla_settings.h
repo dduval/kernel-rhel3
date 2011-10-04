@@ -35,17 +35,12 @@
 #define  WATCH_THREADS_SIZ             0    /* watch size of pending queue */
 #define  USE_PORTNAME                  1    /* option to use port names for targets */
 #define  LUN_MASKING                   0
-#define  USE_FLASH_DATABASE            0 /* Save persistent data to flash */
 #define  QLA_SCSI_VENDOR_DIR           0 /* Decode vendor specific opcodes for direction */
 #define QLA2100_LIPTEST    	       0
 #define REQ_TRACE    		       1
 #define USE_ABORT_TGT                  1 /* Use Abort Target mbx cmd */
 
-#if defined(FC_IP_SUPPORT)
 #define REG_FC4_ENABLED                1 /* Enable register_fc4 call */
-#else
-#define REG_FC4_ENABLED                0 /* Enable register_fc4 call */
-#endif
 
 #define REG_FDMI_ENABLED		1 /* Support FDMI registration */
 
@@ -59,13 +54,10 @@
 #define  NO_LONG_DELAYS			0
 #define  QL_TRACE_MEMORY		0
 
-/* The following WORD_FW_LOAD is defined in Makefile for ia-64 builds
-   and can also be decommented here for Word by Word confirmation of
-   RISC code download operation */
-/* #define  WORD_FW_LOAD               0  */
-
 #define MPIO_SUPPORT			0
 #define VSA				0  /* Volume Set Addressing */
+
+#define QLA2XXX_LOOP_RETRY_COUNT	10
 
 #define PERF_CODE			0  /* enable performance code */
 #define EH_DEBUG                        0  /* enable new error handling debug */

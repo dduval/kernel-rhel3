@@ -37,6 +37,7 @@
 #include <asm/paca.h>
 #include <asm/ppcdebug.h>
 #include <asm/time.h>
+#include <asm/cputable.h>
 #ifdef CONFIG_KDB
 #include <linux/kdb.h>
 #endif
@@ -47,6 +48,8 @@ extern HTAB htab_data;
 extern unsigned long loops_per_jiffy;
 extern int preferred_console;  /* from kernel/printk.c */
 extern int blk_nohighio;
+
+extern int is_js20;
 
 extern unsigned long embedded_sysmap_start;
 extern unsigned long embedded_sysmap_end;
@@ -65,6 +68,7 @@ extern void iSeries_init_early( void );
 extern void pSeries_init_early( void );
 extern void pSeriesLP_init_early(void);
 extern void mm_init_ppc64( void ); 
+extern void pseries_secondary_smp_init(unsigned long);
 
 unsigned long decr_overclock = 1;
 unsigned long decr_overclock_proc0 = 1;
@@ -111,6 +115,8 @@ struct console udbg_console = {
 void setup_system(unsigned long r3, unsigned long r4, unsigned long r5,
 		  unsigned long r6, unsigned long r7)
 {
+	unsigned int ret, i;
+
 	/* This should be fixed properly in kernel/resource.c */
 	iomem_resource.end = MEM_SPACE_LIMIT;
 
@@ -148,7 +154,30 @@ void setup_system(unsigned long r3, unsigned long r4, unsigned long r5,
 		udbg_printf("---- start early boot console ----\n");
 	}
 
-	printk("Starting Linux PPC64 %s\n", UTS_RELEASE);
+	if (systemcfg->platform & PLATFORM_PSERIES) {
+		finish_device_tree();
+		chrp_init(r3, r4, r5, r6, r7);
+#ifdef CONFIG_JS20
+		/* 
+		 * Workaround for firmware bug on Power Blades which
+		 * incorrectly claims "hcall-splpar" is supported on
+		 * these platforms 
+		 */
+		if (is_js20) 
+			cur_cpu_spec->firmware_features &= ~FW_FEATURE_SPLPAR;
+#endif
+		/* Start secondary threads on SMT systems */
+		for (i = 0; i < NR_CPUS; i++) {
+			if(cpu_available(i)  && !cpu_possible(i)) {
+				printk("%16.16lx : starting thread\n", i);
+				rtas_call(rtas_token("start-cpu"), 3, 1,
+					  (void *)&ret,
+					  i, *((unsigned long *)pseries_secondary_smp_init), i);
+				set_bit(i, &cpu_online_map);
+				systemcfg->processorCount++;
+			}
+		}
+	}
 
 	printk("-----------------------------------------------------\n");
 	printk("naca                          = 0x%p\n", naca);
@@ -165,12 +194,15 @@ void setup_system(unsigned long r3, unsigned long r4, unsigned long r5,
 	printk("htab_data.num_ptegs           = 0x%lx\n", htab_data.htab_num_ptegs);
 	printk("-----------------------------------------------------\n");
 
-	if (systemcfg->platform & PLATFORM_PSERIES) {
-		finish_device_tree();
-		chrp_init(r3, r4, r5, r6, r7);
-	}
+	printk("Starting Linux PPC64 %s\n", UTS_RELEASE);
 
 	mm_init_ppc64();
+
+	if (cur_cpu_spec->firmware_features & FW_FEATURE_SPLPAR) {
+		vpa_init(0);
+	}
+
+	idle_setup();
 
 	switch (systemcfg->platform) {
 	    case PLATFORM_ISERIES_LPAR:
@@ -274,7 +306,10 @@ static int show_cpuinfo(struct seq_file *m, void *v)
 		seq_printf(m, "POWER4+ (gpul)\n");
 		break;
 	default:
-		seq_printf(m, "Unknown (%08x)\n", pvr);
+		if (cur_cpu_spec->pvr_mask)
+			seq_printf(m, "%s\n", cur_cpu_spec->cpu_name);
+		else
+			seq_printf(m, "Unknown (%08x)\n", pvr);
 		break;
 	}
 
@@ -284,14 +319,14 @@ static int show_cpuinfo(struct seq_file *m, void *v)
 	 */
 	if (systemcfg->platform != PLATFORM_ISERIES_LPAR) {
 		struct device_node *cpu_node;
-		int *fp;
+		unsigned int *fp;
 
 		cpu_node = find_type_devices("cpu");
 		if (cpu_node) {
-			fp = (int *) get_property(cpu_node, "clock-frequency",
-						  NULL);
+			fp = (unsigned int *) get_property(cpu_node, 	
+					      "clock-frequency", NULL);
 			if (fp)
-				seq_printf(m, "clock\t\t: %dMHz\n",
+				seq_printf(m, "clock\t\t: %uMHz\n",
 					   *fp / 1000000);
 		}
 	}
@@ -362,8 +397,25 @@ void parse_cmd_line(unsigned long r3, unsigned long r4, unsigned long r5,
 						}
 					}
 				} else if (strcmp(name, "vty") == 0) {
-					/* pSeries LPAR virtual console */
-					val = "hvc0";
+					char *compat = (char *)get_property(prom_stdout,
+							"compatible", NULL);
+					if (compat && (strcmp(compat, "hvterm-protocol") == 0)) {
+						u32 *reg = (u32 *)get_property(prom_stdout, "reg", NULL);
+						val = "hvsi0";
+						if (reg) {
+							switch (*reg) {
+								case 0x30000000:
+									val = "hvsi0";
+									break;
+								case 0x30000001:
+									val = "hvsi1";
+									break;
+							}
+						}
+					} else {
+						/* pSeries LPAR virtual console */
+						val = "hvc0";
+					}
 				}
 				if (val) {
 					i = strlen(cmd_line);
@@ -438,8 +490,7 @@ int parse_bootinfo(void)
 			memcpy(cmd_line, (void *)rec->data, rec->size);
 			break;
 		case BI_SYSMAP:
-			sysmap = (char *)((rec->data[0] >= (KERNELBASE))
-					? rec->data[0] : (unsigned long)__va(rec->data[0]));
+			sysmap = (char *)__va(rec->data[0]);
 			sysmap_size = rec->data[1];
 			break;
 #ifdef CONFIG_BLK_DEV_INITRD
@@ -464,6 +515,9 @@ void __init ppc_init(void)
 	if (ppc_md.init != NULL) {
 		ppc_md.init();
 	}
+
+	if (ppc_md.init_ras_IRQ)
+		ppc_md.init_ras_IRQ();
 }
 
 void __init ppc64_calibrate_delay(void)

@@ -333,7 +333,6 @@ qla2x00_cfg_build_path_tree(scsi_qla_host_t *ha)
 				 * number
 				 */
 				PERSIST_STRING("scsi-qla%ld-tgt-%d-di-%d-node", "%ld-%d-%d-n");
-				DEBUG(printk("build_tree: %s\n",propbuf);)
 
 				rval = qla2x00_get_prop_xstr(ha, propbuf,
 				    node_name, WWN_SIZE);
@@ -343,6 +342,7 @@ qla2x00_cfg_build_path_tree(scsi_qla_host_t *ha)
 					 */
 					continue;
 
+				DEBUG(printk("build_tree: %s\n",propbuf);)
 				memcpy(port->node_name, node_name, WWN_SIZE);
 
 				/*
@@ -350,13 +350,13 @@ qla2x00_cfg_build_path_tree(scsi_qla_host_t *ha)
 				 * number
 				 */
 				PERSIST_STRING("scsi-qla%ld-tgt-%d-di-%d-port", "%ld-%d-%d-p");
-				DEBUG(printk("build_tree: %s\n",propbuf);)
 
 				rval = qla2x00_get_prop_xstr(ha, propbuf,
 				    port_name, WWN_SIZE);
 				if (rval != WWN_SIZE)
 					continue;
 
+				DEBUG(printk("build_tree: %s\n",propbuf);)
 				memcpy(port->node_name, node_name, WWN_SIZE);
 				memcpy(port->port_name, port_name, WWN_SIZE);
 				port->flags |= FC_CONFIG;
@@ -366,8 +366,6 @@ qla2x00_cfg_build_path_tree(scsi_qla_host_t *ha)
 				 * is present then all luns are visible.
 				 */
 				PERSIST_STRING("scsi-qla%ld-tgt-%d-di-%d-control", "%ld-%d-%d-c");
-				DEBUG3(printk("build_tree: %s\n",propbuf);)
-
 				rval = qla2x00_get_prop_xstr(ha, propbuf,
 				    (uint8_t *)(&control_byte),
 				    sizeof(control_byte));
@@ -378,6 +376,8 @@ qla2x00_cfg_build_path_tree(scsi_qla_host_t *ha)
 					    __func__);)
 					continue;
 				}
+
+				DEBUG3(printk("build_tree: %s\n",propbuf);)
 
 				DEBUG(printk("build_tree: control byte 0x%x\n",
 				    control_byte);)
@@ -460,7 +460,6 @@ void qla2x00_cfg_display_devices( int flag )
 	mp_lun_t	*lun;
 	unsigned char 	tmp_buf[32];
 
-	printk("qla2x00_cfg_display_devices\n");
 	for (host = mp_hosts_base; (host); host = host->next) {
 
 		instance = (int) host->instance;
@@ -585,8 +584,8 @@ void qla2x00_cfg_display_devices( int flag )
 					if( flag )
 					for (lun = dp->luns; lun != NULL ; lun = lun->next) {
 						printk(KERN_INFO
-							"scsi-qla%d-tgt-%d-lun-%d-lunid=",
-							instance,  id, lun->number);
+							"scsi-qla%d-tgt-%d-di-%d-lun-%d-lunid=",
+							instance,  id, path->id, lun->number);
 						for (i = 0 ; i < lun->siz ;
 							       	i++) {
 							sprintf(tmp_buf+i,

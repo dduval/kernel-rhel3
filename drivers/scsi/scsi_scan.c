@@ -184,6 +184,7 @@ static struct dev_info device_list[] =
 	{"IBM", "AuSaV1S2", "*", BLIST_FORCELUN},
 	{"FSC", "CentricStor", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
 	{"DDN", "SAN DataDirector", "*", BLIST_SPARSELUN},
+	{"DDN", "S2A 8000", "*", BLIST_SPARSELUN},
 	{"HITACHI", "DF400", "*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_RETRY_ABORTED_CMD },
 	{"HITACHI", "DF500", "*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_RETRY_ABORTED_CMD },
 	{"HITACHI", "DF600", "*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_RETRY_ABORTED_CMD },
@@ -205,7 +206,8 @@ static struct dev_info device_list[] =
 	{"IBM", "ProFibre 4000R", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
 	{"WINSYS","FLASHDISK", "*", BLIST_SPARSELUN},
 	{"WINSYS","Flashdisk", "*", BLIST_SPARSELUN},
-	{"DotHill","SANnet", "*", BLIST_SPARSELUN},	
+	{"DotHill","SANnet II FC", "*", BLIST_SPARSELUN},	
+	{"DotHill","SANnet II SATA", "*", BLIST_SPARSELUN},	
 	{"SUN", "T300", "*", BLIST_SPARSELUN},
 	{"SUN", "T4", "*", BLIST_SPARSELUN},
 	{"SGI", "RAID3", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
@@ -220,11 +222,15 @@ static struct dev_info device_list[] =
 	{"HP", "C7200", "*", BLIST_SPARSELUN},			/* Medium Changer */
 	{"SMSC", "USB 2 HS", "*", BLIST_SPARSELUN | BLIST_LARGELUN}, 
 	{"XYRATEX", "RS", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
-	{"SUN", "StorEdge", "*", BLIST_SPARSELUN},
+	{"Xyratex", "4200", "*", BLIST_SPARSELUN | BLIST_FORCELUN},
+	{"SUN", "StorEdge 3510 ", "*", BLIST_SPARSELUN},
+	{"SUN", "StorEdge 3511 ", "*", BLIST_SPARSELUN},
 	{"IBM", "1742", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
 	{"CNSi", "JSS122", "*", BLIST_SPARSELUN}, 		// Chaparral SR0812 SR1422
 	{"CNSi", "JSS224", "*", BLIST_SPARSELUN}, 		// Chaparral FR1422
 	{"NEC","iStorage","*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_FORCELUN}, // NEC iStorage
+	{"IBM","2105","*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_FORCELUN }, // ESS, aka Shark
+	{"IBM","2145","*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_FORCELUN }, // ESS, aka Shark
 	{"CLOVERLF", "CLOVERLEAF", "*", BLIST_SPARSELUN},
 	{"ADIC", "Pathlight 5000", "*", BLIST_SPARSELUN},
 	{"PATHLGHT", "SAN Router", "*", BLIST_SPARSELUN},
@@ -235,7 +241,10 @@ static struct dev_info device_list[] =
  	{"HP", "C5713A", "*", BLIST_FORCELUN},			/* HP SureStore DAT40x6 */
 	{"HP", "DAT72X6", "*", BLIST_FORCELUN},			/* HP StorageWorks DAT72x6 */
 	{"HP", "UHDL", "*", BLIST_FORCELUN},			/* HP StorageWorks SSL1016 */
+	{"HP", "NS E1200-160", "*", BLIST_FORCELUN},    /* HP Network Storage Router E1200 */
 	{"APPLE", "Xserve", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
+	{"SanDisk", "ImageMate", "*", BLIST_FORCELUN},
+	{"CBOX3", "USB", "*", BLIST_FORCELUN},
 
 	/*
 	 * Must be at end of list...

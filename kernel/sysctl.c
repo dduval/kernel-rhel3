@@ -60,6 +60,15 @@ extern int core_setuid_ok;
 extern char core_pattern[];
 extern int cad_pid;
 extern int pid_max;
+#if defined(CONFIG_X86) && !defined(CONFIG_X86_64)
+extern int unknown_nmi_panic;
+#endif
+
+int exec_shield = 1;
+#ifdef __x86_64__
+extern int exec_shield32;
+#endif
+int exec_shield_randomize = 1;
 
 /* this is needed for the proc_dointvec_minmax for [fs_]overflow UID and GID */
 static int maxolduid = 65535;
@@ -199,6 +208,18 @@ static ctl_table kern_table[] = {
 	 0644, NULL, &proc_dointvec},
 	{KERN_PANIC, "print_fatal_signals", &print_fatal_signals, sizeof(int),
 	 0644, NULL, &proc_dointvec},
+	{KERN_PANIC, "exec-shield", &exec_shield, sizeof(int),
+	 0644, NULL, &proc_dointvec},
+#ifdef __x86_64__
+	{KERN_PANIC, "exec-shield32", &exec_shield32, sizeof(int),
+	 0644, NULL, &proc_dointvec},
+#endif
+	{KERN_PANIC, "exec-shield-randomize", &exec_shield_randomize, sizeof(int),
+	 0644, NULL, &proc_dointvec},
+#ifdef __i386__
+	{KERN_PANIC, "use-nx", &use_nx, sizeof(int),
+	 0644, NULL, &proc_dointvec},
+#endif
 	{KERN_CORE_USES_PID, "core_uses_pid", &core_uses_pid, sizeof(int),
 	 0644, NULL, &proc_dointvec},
 	{KERN_CORE_USES_PID, "core_setuid_ok", &core_setuid_ok, sizeof(int),
@@ -320,10 +341,15 @@ static ctl_table kern_table[] = {
 	{KERN_HONOR_UAC_NOPRINT, "honor_uac_noprint_prctl", &honor_uac_noprint,
 	 sizeof(int), 0644, NULL, &proc_dointvec},
 #endif
+#if defined(CONFIG_X86) && !defined(CONFIG_X86_64)
+	{KERN_UNKNOWN_NMI_PANIC, "unknown_nmi_panic", &unknown_nmi_panic,
+	 sizeof(int), 0644, NULL, &proc_dointvec},
+#endif
 	{0}
 };
 
 extern int inactive_clean_percent;
+extern int skip_mapped_pages;
 
 static ctl_table vm_table[] = {
 	{VM_BDFLUSH, "bdflush", &bdf_prm, 9*sizeof(int), 0644, NULL,
@@ -358,6 +384,9 @@ static ctl_table vm_table[] = {
 		0644, NULL, &proc_dointvec},
 	{VM_STACK_DEFER_THRESHOLD, "stack_defer_threshold",
 		&stack_defer_threshold, sizeof(stack_defer_threshold),
+		0644, NULL, &proc_dointvec},
+	{VM_SKIP_MAPPED_PAGES, "skip_mapped_pages",
+		&skip_mapped_pages, sizeof(skip_mapped_pages),
 		0644, NULL, &proc_dointvec},
 	{0}
 };

@@ -139,7 +139,7 @@ nfs_write_inode(struct inode *inode, int sync)
 {
 	int flags = sync ? FLUSH_WAIT : 0;
 
-	nfs_sync_file(inode, NULL, 0, 0, flags);
+	nfs_sync_file(inode, 0, 0, flags);
 }
 
 static void
@@ -304,11 +304,6 @@ nfs_setup_superblock(struct super_block *sb, struct nfs_fh *rootfh)
 	if (!server->wsize)
 		server->wsize = nfs_block_size(fsinfo.wtpref, NULL);
 
-	/* NFSv3: we don't have bsize, but rather rtmult and wtmult... */
-	if (!fsinfo.wtmult)
-		fsinfo.wtmult = 512;
-	sb->s_blocksize = nfs_block_bits(fsinfo.wtmult, &sb->s_blocksize_bits);
-
 	if (server->rsize > fsinfo.rtmax)
 		server->rsize = fsinfo.rtmax;
 	if (server->wsize > fsinfo.wtmax)
@@ -325,6 +320,8 @@ nfs_setup_superblock(struct super_block *sb, struct nfs_fh *rootfh)
 		server->wpages = NFS_WRITE_MAXIOV;
                 server->wsize = server->wpages << PAGE_CACHE_SHIFT;
 	}
+
+	sb->s_blocksize = nfs_block_bits(server->wsize, &sb->s_blocksize_bits);
 
 	server->dtsize = nfs_block_size(fsinfo.dtpref, NULL);
 	if (server->dtsize > PAGE_CACHE_SIZE)
@@ -596,6 +593,7 @@ out_fail:
 	return NULL;
 }
 
+#define TOOBIG(_arg) ((_arg) > LONG_MAX)
 static int
 nfs_statfs(struct super_block *sb, struct statfs *buf)
 {
@@ -608,24 +606,44 @@ nfs_statfs(struct super_block *sb, struct statfs *buf)
 
 	error = server->rpc_ops->statfs(server, NFS_FH(sb->s_root->d_inode), &res);
 	buf->f_type = NFS_SUPER_MAGIC;
-	if (error < 0)
+	if (error < 0) {
+		printk("nfs_statfs: statfs error = %d\n", -error);
 		goto out_err;
+	}
 
 	buf->f_bsize = sb->s_blocksize;
 	blockbits = sb->s_blocksize_bits;
 	blockres = (1 << blockbits) - 1;
+	buf->f_namelen = server->namelen;
+
+	/*
+	 * Make sure things fit
+	 */
+	if (TOOBIG(((res.tbytes + blockres) >> blockbits)))
+		goto too_big;
+	if (TOOBIG(((res.fbytes + blockres) >> blockbits)))
+		goto too_big;
+	if (TOOBIG(((res.abytes + blockres) >> blockbits)))
+		goto too_big;
+	if (TOOBIG(res.tfiles) || TOOBIG(res.afiles))
+		goto too_big;
+
 	buf->f_blocks = (res.tbytes + blockres) >> blockbits;
 	buf->f_bfree = (res.fbytes + blockres) >> blockbits;
 	buf->f_bavail = (res.abytes + blockres) >> blockbits;
 	buf->f_files = res.tfiles;
 	buf->f_ffree = res.afiles;
-	buf->f_namelen = server->namelen;
 	return 0;
+
+ too_big:
+ 	dprintk("nfs_statfs: failed: EOVERFLOW\n");
+	buf->f_files = buf->f_ffree = -1;
+
  out_err:
-	printk("nfs_statfs: statfs error = %d\n", -error);
 	buf->f_bsize = buf->f_blocks = buf->f_bfree = buf->f_bavail = -1;
 	return 0;
 }
+#undef TOOBIG
 
 static int nfs_show_options(struct seq_file *m, struct vfsmount *mnt)
 {
@@ -959,7 +977,15 @@ int
 nfs_revalidate(struct dentry *dentry)
 {
 	struct inode *inode = dentry->d_inode;
-	return nfs_revalidate_inode(NFS_SERVER(inode), inode);
+	int error;
+
+	error = nfs_revalidate_inode(NFS_SERVER(inode), inode);
+	if (error == -ESTALE) {
+		nfs_zap_caches(dentry->d_parent->d_inode);
+		d_drop(dentry);
+	}
+
+	return error;
 }
 
 /*

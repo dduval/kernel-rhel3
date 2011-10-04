@@ -298,9 +298,6 @@ asmlinkage int sys_rt_sigreturn(unsigned long __unused)
 
 	if (__copy_from_user(&st, &frame->uc.uc_stack, sizeof(st)))
 		goto badframe;
-	/* It is more difficult to avoid calling this function than to
-	   call it and ignore errors.  */
-	do_sigaltstack(&st, NULL, regs->esp);
 
 	return eax;
 

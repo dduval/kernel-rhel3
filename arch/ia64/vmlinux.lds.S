@@ -7,6 +7,10 @@
 OUTPUT_FORMAT("elf64-ia64-little")
 OUTPUT_ARCH(ia64)
 ENTRY(phys_start)
+PHDRS
+{
+  rwe_segment PT_LOAD;
+}
 SECTIONS
 {
   /* Sections to be discarded */
@@ -31,7 +35,7 @@ SECTIONS
     {
 	*(.text.ivt)
 	*(.text)
-    }
+    } :rwe_segment
   .text2 : AT(ADDR(.text2) - PAGE_OFFSET)
 	{ *(.text2) }
 #ifdef CONFIG_SMP

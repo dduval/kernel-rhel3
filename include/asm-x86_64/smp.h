@@ -128,7 +128,7 @@ extern int slow_smp_processor_id(void);
 
 #endif
 #define INT_DELIVERY_MODE 1     /* logical delivery */
-#define TARGET_CPUS 1
+#define TARGET_CPUS cpu_online_map
 
 #ifndef CONFIG_SMP
 #define stack_smp_processor_id() 0

@@ -213,3 +213,7 @@ EXPORT_SYMBOL_GPL(show_regs);
 extern int page_is_ram (unsigned long);
 EXPORT_SYMBOL_GPL(page_is_ram);
 
+extern unsigned long long __PAGE_KERNEL;
+EXPORT_SYMBOL_GPL(__PAGE_KERNEL);
+extern unsigned long long __supported_pte_mask;
+EXPORT_SYMBOL_GPL(__supported_pte_mask);

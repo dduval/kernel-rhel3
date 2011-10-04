@@ -650,6 +650,7 @@ static void __init quirk_svwks_csb5ide(struct pci_dev *pdev)
 static void __init quirk_intel_ide_combined(struct pci_dev *pdev)
 {
 	u8 prog, comb, tmp;
+	int ich = 0;
 
 	/*
 	 * Narrow down to Intel SATA PCI devices.
@@ -660,8 +661,12 @@ static void __init quirk_intel_ide_combined(struct pci_dev *pdev)
 	case 0x24df:
 	case 0x25a3:
 	case 0x25b0:
+		ich = 5;
+		break;
 	case 0x2651:
 	case 0x2652:
+	case 0x2653:
+		ich = 6;
 		break;
 	default:
 		/* we do not handle this PCI device */
@@ -672,13 +677,25 @@ static void __init quirk_intel_ide_combined(struct pci_dev *pdev)
 	 * Read combined mode register.
 	 */
 	pci_read_config_byte(pdev, 0x90, &tmp);	/* combined mode reg */
-	tmp &= 0x6;     /* interesting bits 2:1, PATA primary/secondary */
-	if (tmp == 0x4)		/* bits 10x */
-		comb = (1 << 0);		/* SATA port 0, PATA port 1 */
-	else if (tmp == 0x6)	/* bits 11x */
-		comb = (1 << 2);		/* PATA port 0, SATA port 1 */
-	else
-		return;				/* not in combined mode */
+
+	if (ich == 5) {
+		tmp &= 0x6;  /* interesting bits 2:1, PATA primary/secondary */
+		if (tmp == 0x4)		/* bits 10x */
+			comb = (1 << 0);	/* SATA port 0, PATA port 1 */
+		else if (tmp == 0x6)	/* bits 11x */
+			comb = (1 << 2);	/* PATA port 0, SATA port 1 */
+		else
+			return;			/* not in combined mode */
+	} else {
+		/* WARN_ON(ich != 6); */
+		tmp &= 0x3;  /* interesting bits 1:0 */
+		if (tmp & (1 << 0))
+			comb = (1 << 2);	/* PATA port 0, SATA port 1 */
+		else if (tmp & (1 << 1))
+			comb = (1 << 0);	/* SATA port 0, PATA port 1 */
+		else
+			return;			/* not in combined mode */
+	}
 
 	/*
 	 * Read programming interface register.
@@ -700,6 +717,39 @@ static void __init quirk_intel_ide_combined(struct pci_dev *pdev)
 	else
 		request_region(0x170, 8, "libata");	/* port 1 */
 }
+
+/* 
+ * Some chipsets don't allow changing the irq affinity settings
+ */
+
+int no_valid_irqaffinity;
+
+#ifdef CONFIG_X86_IO_APIC
+static void __init quirk_intel_irq_affinity(struct pci_dev *pdev)
+{
+	u8 rev, config;
+	int word;
+	pci_read_config_byte(pdev, PCI_REVISION_ID, &rev);
+	if (rev > 0x09)		/* Only 09 and earlier require this */
+		return;
+
+	pci_read_config_byte(pdev, 0xF4, &config);
+	config |= 0x2;
+	/* enable access to config space*/
+	pci_write_config_byte(pdev, 0xF4, config);
+
+	pci_config_read(0, 0, 8, 0, 0x4c, 2, &word);
+	if (!(word & (1 << 13))) {
+		no_valid_irqaffinity = 1;
+		printk("Disabling IRQ affinity setting\n");
+	}
+
+	config &= ~0x2;
+	/* disable access to config space*/
+	pci_write_config_byte(pdev, 0xF4, config);
+}
+
+#endif
 
 /*
  *  The main table of quirks.
@@ -751,6 +801,9 @@ static struct pci_fixup pci_fixups[] __initdata = {
 
 #ifdef CONFIG_X86_IO_APIC 
 	{ PCI_FIXUP_FINAL,	PCI_VENDOR_ID_VIA,	PCI_DEVICE_ID_VIA_82C686,	quirk_via_ioapic },
+	{ PCI_FIXUP_HEADER,	PCI_VENDOR_ID_INTEL,	0x3590,	quirk_intel_irq_affinity },
+	{ PCI_FIXUP_HEADER,	PCI_VENDOR_ID_INTEL,	0x3592,	quirk_intel_irq_affinity },
+	{ PCI_FIXUP_HEADER,	PCI_VENDOR_ID_INTEL,	0x359e,	quirk_intel_irq_affinity },
 #endif
 	{ PCI_FIXUP_HEADER,	PCI_VENDOR_ID_VIA,	PCI_DEVICE_ID_VIA_82C586_3,	quirk_via_acpi },
 	{ PCI_FIXUP_HEADER,	PCI_VENDOR_ID_VIA,	PCI_DEVICE_ID_VIA_82C686_4,	quirk_via_acpi },

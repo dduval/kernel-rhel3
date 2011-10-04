@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   
-  Copyright(c) 1999 - 2003 Intel Corporation. All rights reserved.
+  Copyright(c) 1999 - 2004 Intel Corporation. All rights reserved.
   
   This program is free software; you can redistribute it and/or modify it 
   under the terms of the GNU General Public License as published by the Free 
@@ -60,12 +60,7 @@
 #include <linux/if_vlan.h>
 #include <linux/mii.h>
 
-/* For 2.6.x compatibility */
-typedef void irqreturn_t;
-#define IRQ_NONE
-#define IRQ_HANDLED
-#define IRQ_RETVAL(x)
-
+#include "e100_compat.h"
 
 #define E100_CABLE_UNKNOWN	0
 #define E100_CABLE_OK		1		
@@ -441,6 +436,7 @@ struct driver_stats {
 #define D102_REV_ID      12
 #define D102C_REV_ID     13	/* 82550 step C */
 #define D102E_REV_ID     15
+#define D102E_A1_REV_ID  16
 
 /* ############Start of 82555 specific defines################## */
 

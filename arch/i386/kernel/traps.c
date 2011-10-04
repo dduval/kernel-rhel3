@@ -333,18 +333,15 @@ void die(const char * str, struct pt_regs * regs, long err)
 	}
 #endif	
 	console_verbose();
-	spin_lock_irq(&die_lock);
+	if (!crashdump_mode())
+		spin_lock_irq(&die_lock);
 	bust_spinlocks(1);
 	handle_BUG(regs);
 	printk("%s: %04lx\n", str, err & 0xffff);
 	show_registers(regs);
-	if (netdump_func)
-		netdump_func(regs);
-	if (panic_on_oops) {
-		if (netdump_func)
-			netdump_func = NULL;
+	try_crashdump(regs);
+	if (panic_on_oops)
 		panic("Fatal exception");
-	}
 	bust_spinlocks(0);
 	spin_unlock_irq(&die_lock);
 	do_exit(SIGSEGV);
@@ -452,6 +449,10 @@ DO_ERROR(11, SIGBUS,  "segment not present", segment_not_present)
 DO_ERROR(12, SIGBUS,  "stack segment", stack_segment)
 DO_ERROR_INFO(17, SIGBUS, "alignment check", alignment_check, BUS_ADRALN, get_cr2())
 
+/*
+ * the original non-exec stack patch was written by
+ * Solar Designer <solar at openwall.com>. Thanks!
+ */
 asmlinkage void do_general_protection(struct pt_regs * regs, long error_code)
 {
 	if (regs->eflags & VM_MASK)
@@ -459,6 +460,46 @@ asmlinkage void do_general_protection(struct pt_regs * regs, long error_code)
 
 	if (!(regs->xcs & 3))
 		goto gp_in_kernel;
+
+	/*
+	 * lazy-check for CS validity on exec-shield binaries:
+	 */
+	if (current->mm) {
+		int cpu = smp_processor_id();
+		struct desc_struct *desc1, *desc2;
+		struct vm_area_struct *vma;
+		unsigned long limit = 0;
+		
+		spin_lock(&current->mm->page_table_lock);
+		for (vma = current->mm->mmap; vma; vma = vma->vm_next)
+			if ((vma->vm_flags & VM_EXEC) && (vma->vm_end > limit))
+				limit = vma->vm_end;
+		spin_unlock(&current->mm->page_table_lock);
+
+		current->mm->context.exec_limit = limit;
+		set_user_cs(&current->mm->context.user_cs, limit);
+
+		desc1 = &current->mm->context.user_cs;
+		desc2 = cpu_gdt_table[cpu] + GDT_ENTRY_DEFAULT_USER_CS;
+
+		/*
+		 * The CS was not in sync - reload it and retry the
+		 * instruction. If the instruction still faults then
+		 * we wont hit this branch next time around.
+		 */
+		if (desc1->a != desc2->a || desc1->b != desc2->b) {
+			if (print_fatal_signals >= 2) {
+				printk("#GPF fixup (%ld[seg:%lx]) at %08lx, CPU#%d.\n", error_code, error_code/8, regs->eip, smp_processor_id());
+				printk(" exec_limit: %08lx, user_cs: %08lx/%08lx, CPU_cs: %08lx/%08lx.\n", current->mm->context.exec_limit, desc1->a, desc1->b, desc2->a, desc2->b);
+			}
+			load_user_cs_desc(cpu, current->mm);
+			return;
+		}
+	}
+	if (print_fatal_signals) {
+		printk("#GPF(%ld[seg:%lx]) at %08lx, CPU#%d.\n", error_code, error_code/8, regs->eip, smp_processor_id());
+		printk(" exec_limit: %08lx, user_cs: %08lx/%08lx.\n", current->mm->context.exec_limit, current->mm->context.user_cs.a, current->mm->context.user_cs.b);
+	}
 
 	current->thread.error_code = error_code;
 	current->thread.trap_no = 13;
@@ -523,6 +564,31 @@ static void unknown_nmi_error(unsigned char reason, struct pt_regs * regs)
 	printk("Do you have a strange power saving mode enabled?\n");
 }
 
+int unknown_nmi_panic = 0;
+
+static spinlock_t nmi_print_lock = SPIN_LOCK_UNLOCKED;
+
+void die_nmi (struct pt_regs *regs, const char *msg)
+{
+	spin_lock(&nmi_print_lock);
+	/*
+	 * We are in trouble anyway, lets at least try
+	 * to get a message out.
+	 */
+	bust_spinlocks(1);
+	printk(msg);
+	printk(" on CPU%d, eip %08lx, registers:\n",
+			smp_processor_id(), regs->eip);
+	show_registers(regs);
+	try_crashdump(regs);
+	printk("console shuts up ...\n");
+	console_silent();
+	spin_unlock(&nmi_print_lock);
+	bust_spinlocks(0);
+	do_exit(SIGSEGV);
+}
+
+
 static void default_do_nmi(struct pt_regs * regs)
 {
 	unsigned char reason = inb(0x61);
@@ -538,6 +604,11 @@ static void default_do_nmi(struct pt_regs * regs)
 			return;
 		}
 #endif
+		if (unknown_nmi_panic) {
+			char buf[64];
+			sprintf(buf, "NMI received for unknown reason %02x\n", reason);
+			die_nmi(regs, buf);
+		}
 		unknown_nmi_error(reason, regs);
 		return;
 	}

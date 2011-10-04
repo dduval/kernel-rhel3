@@ -181,6 +181,13 @@
 #define MSR_K7_FID_VID_CTL		0xC0010041
 #define MSR_K7_VID_STATUS		0xC0010042
 
+#define MSR_EFER 			0xc0000080	/* extended feature register */
+
+/* EFER bits: */ 
+#define _EFER_NX 11  			/* Execute Disable enable */
+
+#define EFER_NX (1<<_EFER_NX)
+
 /* Centaur-Hauls/IDT defined MSRs. */
 #define MSR_IDT_FCR1			0x107
 #define MSR_IDT_FCR2			0x108

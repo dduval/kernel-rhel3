@@ -77,6 +77,9 @@ EXPORT_SYMBOL(register_ioctl32_conversion);
 EXPORT_SYMBOL(unregister_ioctl32_conversion);
 #endif
 
+extern asmlinkage int sys_ioctl(unsigned int fd, unsigned int cmd, unsigned long arg);
+EXPORT_SYMBOL(sys_ioctl);
+
 /*
  * misc.
  */

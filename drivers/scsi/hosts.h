@@ -306,6 +306,13 @@ typedef struct	SHT
      */
     unsigned need_plug_timer:1;
 
+#ifndef __GENKSYMS__ /* preserve KMI/ABI ksyms compatibility for mod linkage */
+    /*
+     * True for drivers that support disk dump
+     */
+    unsigned disk_dump:1;
+#endif
+
     /*
      * Name of proc directory
      */
@@ -498,8 +505,6 @@ extern struct Scsi_Device_Template * scsi_devicelist;
 
 extern Scsi_Host_Template * scsi_hosts;
 
-extern void build_proc_dir_entries(Scsi_Host_Template  *);
-
 /*
  *  scsi_init initializes the scsi hosts.
  */
@@ -509,6 +514,7 @@ extern int next_scsi_host;
 unsigned int scsi_init(void);
 extern struct Scsi_Host * scsi_register(Scsi_Host_Template *, int j);
 extern void scsi_unregister(struct Scsi_Host * i);
+extern void scsi_scan_host(struct Scsi_Host *);
 
 extern void scsi_register_blocked_host(struct Scsi_Host * SHpnt);
 extern void scsi_deregister_blocked_host(struct Scsi_Host * SHpnt);

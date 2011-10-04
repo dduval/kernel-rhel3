@@ -56,7 +56,7 @@ static int nmi_callback(struct pt_regs * regs, int cpu)
 }
  
  
-static void nmi_save_registers(struct op_msrs * msrs)
+static void nmi_cpu_save_registers(struct op_msrs * msrs)
 {
 	unsigned int const nr_ctrs = model->num_counters;
 	unsigned int const nr_ctrls = model->num_controls; 
@@ -78,12 +78,19 @@ static void nmi_save_registers(struct op_msrs * msrs)
 }
 
  
-static void nmi_cpu_setup(void * dummy)
+static void nmi_save_registers(void * dummy)
 {
 	int cpu = smp_processor_id();
 	struct op_msrs * msrs = &cpu_msrs[cpu];
 	model->fill_in_addresses(msrs);
-	nmi_save_registers(msrs);
+	nmi_cpu_save_registers(msrs);
+}
+
+
+static void nmi_cpu_setup(void * dummy)
+{
+	int cpu = smp_processor_id();
+	struct op_msrs * msrs = &cpu_msrs[cpu];
 	spin_lock(&oprofilefs_lock);
 	model->setup_ctrs(msrs);
 	spin_unlock(&oprofilefs_lock);
@@ -99,6 +106,10 @@ static int nmi_setup(void)
 	 * without actually triggering any NMIs as this will
 	 * break the core code horrifically.
 	 */
+	/* We need to serialize save and setup for HT because the subset
+	 * of msrs are distinct for save and setup operations
+	 */
+	on_each_cpu(nmi_save_registers, NULL, 0, 1);
 	on_each_cpu(nmi_cpu_setup, NULL, 0, 1);
 	set_nmi_callback(nmi_callback);
 	oprofile_pmdev = set_nmi_pm_callback(oprofile_pm_callback);
@@ -217,15 +228,6 @@ struct oprofile_operations nmi_ops = {
 
 #if !defined(CONFIG_X86_64) || defined(CONFIG_IA32E)
 
-#ifdef CONFIG_IA32E
-inline static int __init is_ia32e(void)
-{
-	return (test_bit(X86_FEATURE_LM, current_cpu_data.x86_capability));
-}
-#else
-#define is_ia32e() 0
-#endif
-
 static int __init p4_init(void)
 {
 	__u8 cpu_model = current_cpu_data.x86_model;
@@ -234,36 +236,24 @@ static int __init p4_init(void)
 		return 0;
 
 #ifndef CONFIG_SMP
-	if (is_ia32e())
-		nmi_ops.cpu_type = "x86-64/ia32e";
-	else
-		nmi_ops.cpu_type = "i386/p4";
+	nmi_ops.cpu_type = "i386/p4";
 	model = &op_p4_spec;
 	return 1;
 #else
 	switch (smp_num_siblings) {
 		case 1:
-			if (is_ia32e())
-				nmi_ops.cpu_type = "x86-64/ia32e";
-			else
-				nmi_ops.cpu_type = "i386/p4";
+			nmi_ops.cpu_type = "i386/p4";
 			model = &op_p4_spec;
 			return 1;
 
 		case 2:
-			if (is_ia32e())
-				nmi_ops.cpu_type = "x86-64/ia32e-ht";
-			else
-				nmi_ops.cpu_type = "i386/p4-ht";
+			nmi_ops.cpu_type = "i386/p4-ht";
 			model = &op_p4_ht2_spec;
 			return 1;
 	}
 #endif
 
-	if (is_ia32e())
-		printk(KERN_INFO "oprofile: ia32e HyperThreading detected with > 2 threads\n");
-	else
-		printk(KERN_INFO "oprofile: P4 HyperThreading detected with > 2 threads\n");
+	printk(KERN_INFO "oprofile: P4 HyperThreading detected with > 2 threads\n");
 	printk(KERN_INFO "oprofile: Reverting to timer mode.\n");
 	return 0;
 }

@@ -59,6 +59,10 @@ struct cpuinfo_x86 boot_cpu_data = {
 
 unsigned long mmu_cr4_features;
 
+#ifdef CONFIG_ACPI_BOOT
+int acpi_noirq __devinitdata;  /* skip ACPI IRQ initialization */
+#endif
+
 int acpi_disabled = 0;
 static int __init acpioff(char *str)
 {
@@ -361,7 +365,8 @@ void __init setup_arch(char **cmdline_p)
 
 	num_mappedpages = end_pfn;
 
-	exec_shield = 2;	// exec_shield forced ON by default
+	exec_shield = 1;	// exec_shield forced ON by default,
+				// PT_GNU_STACK can override
 }
 
 static int __init get_model_name(struct cpuinfo_x86 *c)

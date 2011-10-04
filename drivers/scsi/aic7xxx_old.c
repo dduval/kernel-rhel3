@@ -9775,24 +9775,20 @@ aic7xxx_detect(Scsi_Host_Template *template)
           pci_write_config_dword(pdev, DEVCONFIG, devconfig);
 #endif /* AIC7XXX_STRICT_PCI_SETUP */
 
-          if(temp_p->base && check_region(temp_p->base, MAXREG - MINREG))
-          {
+	  if (temp_p->base == 0 && temp_p->mbase == 0)
+	  {
             printk("aic7xxx: <%s> at PCI %d/%d/%d\n", 
               board_names[aic_pdevs[i].board_name_index],
               temp_p->pci_bus,
               PCI_SLOT(temp_p->pci_device_fn),
               PCI_FUNC(temp_p->pci_device_fn));
-            printk("aic7xxx: I/O ports already in use, ignoring.\n");
+            printk("aic7xxx: Invalid I/O & Mem port addresses, ignoring.\n");
             kfree(temp_p);
             temp_p = NULL;
             continue;
           }
-
-          temp_p->unpause = INTEN;
-          temp_p->pause = temp_p->unpause | PAUSE;
-          if ( ((temp_p->base == 0) &&
-                (temp_p->mbase == 0)) ||
-               (temp_p->irq == 0) )
+	    
+          if (temp_p->irq == 0)
           {
             printk("aic7xxx: <%s> at PCI %d/%d/%d\n", 
               board_names[aic_pdevs[i].board_name_index],
@@ -9804,6 +9800,22 @@ aic7xxx_detect(Scsi_Host_Template *template)
             temp_p = NULL;
             continue;
           }
+
+          if(pci_request_regions(temp_p->pdev, "aic7xxx"))
+          {
+            printk("aic7xxx: <%s> at PCI %d/%d/%d\n", 
+              board_names[aic_pdevs[i].board_name_index],
+              temp_p->pci_bus,
+              PCI_SLOT(temp_p->pci_device_fn),
+              PCI_FUNC(temp_p->pci_device_fn));
+            printk("aic7xxx: Unable to reserve PCI regions, ignoring.\n");
+            kfree(temp_p);
+            temp_p = NULL;
+            continue;
+          }
+
+          temp_p->unpause = INTEN;
+          temp_p->pause = temp_p->unpause | PAUSE;
 
 #ifdef MMAPIO
           if ( !(temp_p->base) || !(temp_p->flags & AHC_MULTI_CHANNEL) ||
@@ -9844,6 +9856,7 @@ aic7xxx_detect(Scsi_Host_Template *template)
                     PCI_SLOT(temp_p->pci_device_fn),
                     PCI_FUNC(temp_p->pci_device_fn));
                   printk("aic7xxx: Controller disabled by BIOS, ignoring.\n");
+		  pci_release_regions(temp_p->pdev);
                   kfree(temp_p);
                   temp_p = NULL;
                   continue;
@@ -9852,12 +9865,6 @@ aic7xxx_detect(Scsi_Host_Template *template)
             }
           }
 #endif
-
-          /*
-           * Lock out other contenders for our i/o space.
-           */
-          if(temp_p->base)
-            request_region(temp_p->base, MAXREG - MINREG, "aic7xxx");
 
           /*
            * We HAVE to make sure the first pause_sequencer() and all other
@@ -9895,7 +9902,14 @@ aic7xxx_detect(Scsi_Host_Template *template)
 
           if (aic7xxx_chip_reset(temp_p) == -1)
           {
-            release_region(temp_p->base, MAXREG - MINREG);
+#ifdef MMAPIO
+            if (temp_p->maddr)
+	    {
+	      iounmap((void *) (((unsigned long) temp_p->maddr) & PAGE_MASK));
+              temp_p->maddr = 0;
+	    }
+#endif
+            pci_release_regions(temp_p->pdev);
             kfree(temp_p);
             temp_p = NULL;
             continue;
@@ -10207,7 +10221,7 @@ aic7xxx_detect(Scsi_Host_Template *template)
   {
     base = SLOTBASE(slot) + MINREG;
 
-    if (check_region(base, MAXREG - MINREG))
+    if (request_region(base, MAXREG - MINREG, "aic7xxx") == NULL)
     {
       /*
        * Some other driver has staked a
@@ -10221,19 +10235,17 @@ aic7xxx_detect(Scsi_Host_Template *template)
     if (type == -1)
     {
       slot++;
+      release_region(base, MAXREG - MINREG);
       continue;
     }
     temp_p = kmalloc(sizeof(struct aic7xxx_host), GFP_ATOMIC);
     if (temp_p == NULL)
     {
       printk(KERN_WARNING "aic7xxx: Unable to allocate device space.\n");
+      release_region(base, MAXREG - MINREG);
       slot++;
       continue; /* back to the beginning of the while loop */
     }
-    /*
-     * Lock out other contenders for our i/o space.
-     */
-    request_region(base, MAXREG - MINREG, "aic7xxx");
 
     /*
      * Pause the card preserving the IRQ type.  Allow the operator
@@ -11790,14 +11802,20 @@ aic7xxx_release(struct Scsi_Host *host)
 
   if(p->irq)
     free_irq(p->irq, p);
-  if(p->base)
-    release_region(p->base, MAXREG - MINREG);
-#ifdef MMAPIO
-  if(p->maddr)
+  if(p->pdev)
   {
-    iounmap((void *) (((unsigned long) p->maddr) & PAGE_MASK));
-  }
+#ifdef MMAPIO
+    if(p->maddr)
+    {
+      iounmap((void *) (((unsigned long) p->maddr) & PAGE_MASK));
+    }
 #endif /* MMAPIO */
+    pci_release_regions(p->pdev);
+  }
+  else
+  {
+    release_region(p->base, MAXREG - MINREG);
+  }
   prev = NULL;
   next = first_aic7xxx;
   while(next != NULL)

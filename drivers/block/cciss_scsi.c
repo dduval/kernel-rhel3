@@ -602,6 +602,8 @@ cciss_find_non_disk_devices(int cntl_num)
 
 	for(i=0; i<num_luns; i++) {
 		/* Execute an inquiry to figure the device type */
+		/* Skip over masked devices */
+		if (ld_buff->LUN[i][3] & 0xC0) continue;
 		memset(inq_buff, 0, sizeof(InquiryData_struct));
 		memcpy(scsi3addr, ld_buff->LUN[i], 8); /* ugly... */
 		return_code = sendcmd(CISS_INQUIRY, cntl_num, inq_buff,

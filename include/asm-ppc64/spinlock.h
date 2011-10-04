@@ -23,47 +23,9 @@ typedef struct {
 
 #define spin_is_locked(x)	((x)->lock != 0)
 
-static __inline__ int spin_trylock(spinlock_t *lock)
-{
-	unsigned int tmp;
+extern int spin_trylock(spinlock_t *lock);
 
-	__asm__ __volatile__(
-"1:	lwarx		%0,0,%1		# spin_trylock\n\
-	cmpwi		0,%0,0\n\
-	li		%0,0\n\
-	bne-		2f\n\
-	li		%0,1\n\
-	stwcx.		%0,0,%1\n\
-	bne-		1b\n\
-	isync\n\
-2:"	: "=&r"(tmp)
-	: "r"(&lock->lock)
-	: "cr0", "memory");
-
-	return tmp;
-}
-
-static __inline__ void spin_lock(spinlock_t *lock)
-{
-	unsigned int tmp;
-
-	__asm__ __volatile__(
-	"b		2f		# spin_lock\n\
-1:	or		1,1,1		# spin at low priority\n\
-	lwzx		%0,0,%1\n\
-	cmpwi		0,%0,0\n\
-	bne+		1b\n\
-	or		2,2,2		# back to medium priority\n\
-2:	lwarx		%0,0,%1\n\
-	cmpwi		0,%0,0\n\
-	bne-		1b\n\
-	stwcx.		%2,0,%1\n\
-	bne-		2b\n\
-	isync"
-	: "=&r"(tmp)
-	: "r"(&lock->lock), "r"(1)
-	: "cr0", "memory");
-}
+extern void spin_lock(spinlock_t *lock);
 
 static __inline__ void spin_unlock(spinlock_t *lock)
 {
@@ -80,6 +42,15 @@ static __inline__ void spin_unlock(spinlock_t *lock)
  * can "mix" irq-safe locks - any writer needs to get a
  * irq-safe write-lock, but readers can get non-irqsafe
  * read-locks.
+ *
+ * Read-write lock states:
+ *  0:	unlocked
+ *  positive: reader count
+ *  negative: write locked.
+ *
+ * Old modules put -1 in to indicate a write lock.
+ * Kernel code puts smp_processor_id() - 0x100 in, giving
+ * us the opportunity to optimize performance on shared processors.
  */
 typedef struct {
 	volatile signed int lock;
@@ -87,108 +58,15 @@ typedef struct {
 
 #define RW_LOCK_UNLOCKED (rwlock_t) { 0 }
 
-static __inline__ int read_trylock(rwlock_t *rw)
-{
-	unsigned int tmp;
-	unsigned int ret;
+extern int read_trylock(rwlock_t *rw);
 
-	__asm__ __volatile__(
-"1:	lwarx		%0,0,%2		# read_trylock\n\
-	li		%1,0\n\
-	extsw		%0,%0\n\
-	addic.		%0,%0,1\n\
-	ble-		2f\n\
-	stwcx.		%0,0,%2\n\
-	bne-		1b\n\
-	li		%1,1\n\
-	isync\n\
-2:"	: "=&r"(tmp), "=&r"(ret)
-	: "r"(&rw->lock)
-	: "cr0", "memory");
+extern void read_lock(rwlock_t *rw);
 
-	return ret;
-}
+extern void read_unlock(rwlock_t *rw);
 
-static __inline__ void read_lock(rwlock_t *rw)
-{
-	unsigned int tmp;
+extern int write_trylock(rwlock_t *rw);
 
-	__asm__ __volatile__(
-	"b		2f		# read_lock\n\
-1:	or		1,1,1		# spin at low priority\n\
-	lwax		%0,0,%1\n\
-	cmpwi		0,%0,0\n\
-	blt+		1b\n\
-	or		2,2,2		# back to medium priority\n\
-2:	lwarx		%0,0,%1\n\
-	extsw		%0,%0\n\
-	addic.		%0,%0,1\n\
-	ble-		1b\n\
-	stwcx.		%0,0,%1\n\
-	bne-		2b\n\
-	isync"
-	: "=&r"(tmp)
-	: "r"(&rw->lock)
-	: "cr0", "memory");
-}
-
-static __inline__ void read_unlock(rwlock_t *rw)
-{
-	unsigned int tmp;
-
-	__asm__ __volatile__(
-	"lwsync				# read_unlock\n\
-1:	lwarx		%0,0,%1\n\
-	addic		%0,%0,-1\n\
-	stwcx.		%0,0,%1\n\
-	bne-		1b"
-	: "=&r"(tmp)
-	: "r"(&rw->lock)
-	: "cr0", "memory");
-}
-
-static __inline__ int write_trylock(rwlock_t *rw)
-{
-	unsigned int tmp;
-	unsigned int ret;
-
-	__asm__ __volatile__(
-"1:	lwarx		%0,0,%2		# write_trylock\n\
-	cmpwi		0,%0,0\n\
-	li		%1,0\n\
-	bne-		2f\n\
-	stwcx.		%3,0,%2\n\
-	bne-		1b\n\
-	li		%1,1\n\
-	isync\n\
-2:"	: "=&r"(tmp), "=&r"(ret)
-	: "r"(&rw->lock), "r"(-1)
-	: "cr0", "memory");
-
-	return ret;
-}
-
-static __inline__ void write_lock(rwlock_t *rw)
-{
-	unsigned int tmp;
-
-	__asm__ __volatile__(
-	"b		2f		# write_lock\n\
-1:	or		1,1,1		# spin at low priority\n\
-	lwax		%0,0,%1\n\
-	cmpwi		0,%0,0\n\
-	bne+		1b\n\
-	or		2,2,2		# back to medium priority\n\
-2:	lwarx		%0,0,%1\n\
-	cmpwi		0,%0,0\n\
-	bne-		1b\n\
-	stwcx.		%2,0,%1\n\
-	bne-		2b\n\
-	isync"
-	: "=&r"(tmp)
-	: "r"(&rw->lock), "r"(-1)
-	: "cr0", "memory");
-}
+extern void write_lock(rwlock_t *rw);
 
 static __inline__ void write_unlock(rwlock_t *rw)
 {

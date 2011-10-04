@@ -248,6 +248,8 @@ inline void make_slbe(unsigned long esid, unsigned long vsid, int large)
 
 	esid_data.data.v = 0;
 	__asm__ __volatile__("slbie  %0" : : "r" (esid_data));
+	/* Second slbie for Power5 DD2.0 errata */
+	__asm__ __volatile__("slbie  %0" : : "r" (esid_data));
 
 	/* 
 	 * Write the new SLB entry.

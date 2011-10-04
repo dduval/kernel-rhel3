@@ -903,19 +903,19 @@ void scsi_request_fn(request_queue_t * q)
 			return;
 
 		/*
-		 * If the device cannot accept another request, then quit.
+		 * If we are blocked, then quit.
 		 */
-		if (SDpnt->device_blocked)
+		if (SDpnt->device_blocked ||
+		    SHpnt->host_blocked ||
+		    SHpnt->host_self_blocked)
 			break;
 
 		/*
 		 * If we couldn't find a request that could be queued, then we
 		 * can quit.
 		 */
-		if (list_empty(&q->queue_head))
-			break;
-
-		if (SHpnt->host_blocked || SHpnt->host_self_blocked)
+		if (list_empty(&q->queue_head) &&
+		    list_empty(&SDpnt->sdev_retry_q))
 			break;
 
 		spin_lock(SHpnt->host_lock);
@@ -954,6 +954,27 @@ void scsi_request_fn(request_queue_t * q)
 				spin_lock_irq(q->queue_lock);
 				continue;
 			}
+		}
+
+		/*
+		 * See if we have any commands that need a simple retry first.
+		 * If so, handle it and then start this loop over again.
+		 * When we are all out of these commands, then we fall
+		 * through to regular block layer command processing.
+		 */
+		if (!list_empty(&SDpnt->sdev_retry_q)) {
+			/* no need to check that we aren't over the queue
+			 * depth, our command is already allocated out of
+			 * our total number of commands which happens to
+			 * equal maximum queue depth.
+			 */
+			atomic_inc(&SDpnt->device_busy);
+			SCpnt = list_entry(SDpnt->sdev_retry_q.next, Scsi_Cmnd, sc_list);
+			list_del(&SCpnt->sc_list);
+			spin_unlock_irq(q->queue_lock);
+			scsi_dispatch_cmd(SCpnt);
+			spin_lock_irq(q->queue_lock);
+			continue;
 		}
 
 		/*
@@ -1058,6 +1079,11 @@ void scsi_request_fn(request_queue_t * q)
 			 */
 			if (!STpnt->init_command(SCpnt)) {
 				blkdev_dequeue_request(req);
+				if (req != &SCpnt->request &&
+				    req != &SRpnt->sr_request ) {
+					blkdev_release_request(req);
+				}
+				req = NULL;
 				scsi_release_buffers(SCpnt);
 				spin_unlock_irq(q->queue_lock);
 				SCpnt = __scsi_end_request(SCpnt, 0, 

@@ -639,7 +639,6 @@ qla2x00_fdmi_srb_init(scsi_qla_host_t *ha, srb_t *sp, uint16_t tov,
 	sp->flags = SRB_FDMI_CMD;
 	sp->fclun->lun = 0;
 	sp->fclun->flags = 0;
-	sp->fclun->next = NULL;
 	sp->lun_queue->fclun = sp->fclun;
 	sp->lun_queue->fclun->fcport->ha = ha;
 	sp->lun_queue->q_state = LUN_STATE_READY;
@@ -908,8 +907,8 @@ qla2x00_fdmi_setup_hbaattr(scsi_qla_host_t *ha, hba_attr_t *attr)
 	/* opt rom version */
 	attr->or.type = __constant_cpu_to_be16(T_OPTION_ROM_VERSION);
 	attr->or.len = cpu_to_be16(sizeof(hba_or_attr_t));
-	sprintf((char *)attr->or.value, "%d.%d", ha->optrom_major,
-	    ha->optrom_minor);
+	sprintf((char *)attr->or.value, "%d.%d", ha->bios_revision[1],
+	    ha->bios_revision[0]);
 
 	DEBUG13(printk("%s(%ld): OPTROMVER=%s.\n",
 	    __func__, ha->host_no, attr->or.value);)
@@ -1211,6 +1210,13 @@ qla2x00_fdmi_setup_rpainfo(scsi_qla_host_t *ha, ct_iu_rpa_t *ct)
 	DEBUG13(printk("%s(%ld): register OSDEVNAME=%s.\n",
 	    __func__, ha->host_no, ct->attr.os_dev_name.value);)
 
+	/* Host name */
+	ct->attr.host_name.type = __constant_cpu_to_be16(T_HOST_NAME);
+	ct->attr.host_name.len = cpu_to_be16(sizeof(port_host_name_attr_t));
+	strcpy((char *)ct->attr.host_name.value, system_utsname.nodename);
+
+	DEBUG13(printk("%s(%ld): register HOSTNAME=%s.\n",
+	    __func__, ha->host_no, ct->attr.host_name.value);)
 }
 
 /*

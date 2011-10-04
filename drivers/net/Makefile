@@ -91,6 +91,7 @@ obj-$(CONFIG_STNIC) += stnic.o 8390.o
 obj-$(CONFIG_FEALNX) += fealnx.o mii.o
 obj-$(CONFIG_TC35815) += tc35815.o
 obj-$(CONFIG_TIGON3) += tg3.o
+obj-$(CONFIG_IBMVETH) += ibmveth.o
 
 ifeq ($(CONFIG_E100),y)
   obj-y += e100/e100.o

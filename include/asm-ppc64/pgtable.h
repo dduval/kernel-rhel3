@@ -97,13 +97,13 @@
 #define _PAGE_WRITETHRU	0x040UL	/* W: cache write-through */
 #define _PAGE_DIRTY	0x080UL	/* C: page changed */
 #define _PAGE_ACCESSED	0x100UL	/* R: page referenced */
-#define _PAGE_HPTENOIX	0x200UL /* software: pte HPTE slot unknown */
+#define _PAGE_BUSY	0x200UL /* software: pte & hash are busy */
 #define _PAGE_HASHPTE	0x400UL	/* software: pte has an associated HPTE */
 #define _PAGE_EXEC	0x800UL	/* software: i-cache coherence required */
-#define _PAGE_SECONDARY 0x8000UL /* software: HPTE is in secondary group */
 #define _PAGE_GROUP_IX  0x7000UL /* software: HPTE index within group */
+#define _PAGE_SECONDARY 0x8000UL /* software: HPTE is in secondary group */
 /* Bits 0x7000 identify the index within an HPT Group */
-#define _PAGE_HPTEFLAGS (_PAGE_HASHPTE | _PAGE_HPTENOIX | _PAGE_SECONDARY | _PAGE_GROUP_IX)
+#define _PAGE_HPTEFLAGS (_PAGE_BUSY | _PAGE_HASHPTE | _PAGE_SECONDARY | _PAGE_GROUP_IX)
 /* PAGE_MASK gives the right answer below, but only by accident */
 /* It should be preserving the high 48 bits and then specifically */
 /* preserving _PAGE_SECONDARY | _PAGE_GROUP_IX */
@@ -289,13 +289,15 @@ static inline unsigned long pte_update( pte_t *p, unsigned long clr,
 	unsigned long old, tmp;
 
 	__asm__ __volatile__("\n\
-1:	ldarx	%0,0,%3	\n\
+1:	ldarx	%0,0,%3 \n\
+        andi.   %1,%0,%7 # loop on _PAGE_BUSY set\n\
+        bne-    1b \n\
 	andc	%1,%0,%4 \n\
 	or	%1,%1,%5 \n\
 	stdcx.	%1,0,%3 \n\
 	bne-	1b"
 	: "=&r" (old), "=&r" (tmp), "=m" (*p)
-	: "r" (p), "r" (clr), "r" (set), "m" (*p)
+	: "r" (p), "r" (clr), "r" (set), "m" (*p), "i" (_PAGE_BUSY)
 	: "cc" );
 	return old;
 }

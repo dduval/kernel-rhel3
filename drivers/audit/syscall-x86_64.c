@@ -46,6 +46,9 @@
 #include <asm/unistd.h>
 #include <asm/ia32_unistd.h>
 
+#include <linux/net.h>
+#include <asm-i386/ipc.h>
+
 #include <linux/audit.h>
 #include "audit-private.h"
 
@@ -56,172 +59,125 @@ extern int		audit_get_ioctlargs(struct aud_syscall_data *);
 
 int			audit_arch = AUDIT_ARCH_X86_64;
 
-
-/* copied from syscall.c, need to consolidate */
-#define T_void          { AUDIT_ARG_END }
-#define T_immediate(T)  { AUDIT_ARG_IMMEDIATE, sizeof(T) }
-#define T_signedimm(T)  { AUDIT_ARG_IMMEDIATE, sizeof(T), .sa_flags = AUD_ARG_SIGNED }
-#define T_pointer(T)    { AUDIT_ARG_POINTER, sizeof(T) }
-#define T_string        { AUDIT_ARG_STRING }
-#define T_path          { AUDIT_ARG_PATH }
-#define T_path_parent   { AUDIT_ARG_PATH, .sa_flags = AUD_ARG_DIRNAME }
-#define T_filedesc      { AUDIT_ARG_FILEDESC }
-#define T_int           T_signedimm(int)
-#define T_uint          T_immediate(int)
-#define T_long          T_signedimm(long)
-#define T_ulong         T_immediate(long)
-#define T_off_t         T_signedimm(off_t)
-#define T_loff_t        T_signedimm(loff_t)
-#define T_mode_t        T_immediate(mode_t)
-#define T_size_t        T_immediate(size_t)
-#define T_dev_t         T_immediate(dev_t)
-#define T_pid_t         T_immediate(pid_t)
-#define T_uid_t         T_immediate(uid_t)
-#define T_gid_t         T_immediate(gid_t)
-#define T_u16_t         { AUDIT_ARG_IMMEDIATE, 2 }
-#define T_u32_t         { AUDIT_ARG_IMMEDIATE, 4 }
-#define T_u64_t         { AUDIT_ARG_IMMEDIATE, 8 }
-#define T_any_ptr       { AUDIT_ARG_POINTER, 0 }
-#define T_timeval_t     T_pointer(struct timeval)
-#define T_timezone_t    T_pointer(struct timezone)
-#define T_timex_t       T_pointer(struct timex)
-#define T_caphdr_t      T_pointer(struct __user_cap_header_struct)
-#define T_capdata_t     T_pointer(struct __user_cap_data_struct)
-#define T_sysctl_t      T_pointer(struct __sysctl_args)
-#define T_rlimit_t      T_pointer(struct rlimit)
-#define T_socklen_t     T_immediate(socklen_t)
-#define T_sigset_t      T_pointer(sigset_t)
-#define socklen_t       int     /* socklen_t is a user land thing */
-#define T_array(itype, index, max) \
-                        { AUDIT_ARG_ARRAY, sizeof(itype), index, max }
-#define T_opaque_t(idx) { AUDIT_ARG_ARRAY, 1, idx+1, 256 }
-
-
-/* x86-64 supports 64-bit and 32-bit syscalls. They use different codes
- * therefore we need a second table
+/* System call filtering is fundamentally based on the 64bit native
+ * x86_64 syscall numbers. We also need auditing for the ia32 emulation
+ * mode syscalls, and these need to use the same filter tables. As
+ * a crude hack, convert the ia32 syscall numbers to native ones.
  */
-static struct sysent linux_sysent_ia32[IA32_NR_syscalls] = {
-[__NR_ia32_fork]	= { 0, { T_void } },
-[__NR_ia32_vfork]	= { 0, { T_void } },
-[__NR_ia32_clone]	= { 1, { T_uint } },
-[__NR_ia32_execve]	= { 3, { T_path, T_any_ptr, T_any_ptr } },
-[__NR_ia32_exit]	= { 1, { T_int } },
-[__NR_ia32_ptrace]	= { 4, { T_uint, T_pid_t, T_any_ptr, T_any_ptr } },
-[__NR_ia32_uselib]	= { 1, { T_path } },
-[__NR_ia32_kill]	= { 2, { T_pid_t, T_int } },
-[__NR_ia32_tkill]	= { 2, { T_pid_t, T_int } },
-
-[__NR_ia32_setuid]	= { 1, { T_u16_t } },
-[__NR_ia32_setgid]	= { 1, { T_u16_t } },
-[__NR_ia32_setreuid]	= { 2, { T_u16_t, T_u16_t } },
-[__NR_ia32_setregid]	= { 2, { T_u16_t, T_u16_t } },
-[__NR_ia32_setresuid]	= { 3, { T_u16_t, T_u16_t, T_u16_t } },
-[__NR_ia32_setresgid]	= { 3, { T_u16_t, T_u16_t, T_u16_t } },
-[__NR_ia32_setfsuid]	= { 1, { T_u16_t } },
-[__NR_ia32_setfsgid]	= { 1, { T_u16_t } },
-[__NR_ia32_setgroups]	= { 2, { T_size_t, T_array(__u16, 0, NGROUPS) } },
-[__NR_ia32_setuid32]	= { 1, { T_uid_t } },
-[__NR_ia32_setgid32]	= { 1, { T_gid_t } },
-[__NR_ia32_setreuid32]	= { 2, { T_uid_t, T_uid_t } },
-[__NR_ia32_setregid32]	= { 2, { T_gid_t, T_gid_t } },
-[__NR_ia32_setresuid32]	= { 3, { T_uid_t, T_uid_t, T_uid_t } },
-[__NR_ia32_setresgid32]	= { 3, { T_gid_t, T_gid_t, T_gid_t } },
-[__NR_ia32_setfsuid32]	= { 1, { T_uid_t } },
-[__NR_ia32_setfsgid32]	= { 1, { T_uid_t } },
-[__NR_ia32_setgroups32]	= { 2, { T_size_t, T_array(gid_t, 0, NGROUPS) } },
-[__NR_ia32_capset]	= { 2, { T_caphdr_t, T_capdata_t } },
-
-[__NR_ia32_umask]		= { 1, { T_mode_t } },
-[__NR_ia32_chroot]		= { 1, { T_path } },
-[__NR_ia32_chdir]		= { 1, { T_path } },
-[__NR_ia32_fchdir]		= { 1, { T_filedesc } },
-[__NR_ia32_setrlimit]		= { 2, { T_int, T_rlimit_t } },
-[__NR_ia32_setpriority]		= { 2, { T_int, T_int } },
-[__NR_ia32_sched_setaffinity]	= { 3, { T_pid_t, T_int, T_pointer(long) } },
-[__NR_ia32_sched_setparam]	= { 2, { T_pid_t, T_pointer(struct sched_param) } },
-[__NR_ia32_sched_setscheduler]	= { 3, { T_pid_t, T_int, T_pointer(struct sched_param) } },
-[__NR_ia32_brk]			= { 1, { T_any_ptr } },
-[__NR_ia32_signal]		= { 2, { T_int, T_any_ptr } },
-[__NR_ia32_rt_sigreturn]	= { 1, { T_long } },
-[__NR_ia32_rt_sigaction]	= { 3, { T_int, T_pointer(struct sigaction), T_any_ptr } },
-[__NR_ia32_rt_sigprocmask]	= { 3, { T_int, T_sigset_t, T_any_ptr } },
-[__NR_ia32_rt_sigpending]	= { 1, { T_any_ptr } },
-[__NR_ia32_rt_sigtimedwait]	= { 3, { T_sigset_t, T_any_ptr, T_pointer(struct timespec) } },
-[__NR_ia32_rt_sigqueueinfo]	= { 1, { T_void } },
-[__NR_ia32_rt_sigsuspend]	= { 1, { T_pointer(sigset_t) } },
-[__NR_ia32_setitimer]		= { 3, { T_int, T_any_ptr, T_any_ptr } },
-[__NR_ia32_setpgid]		= { 2, { T_pid_t, T_pid_t } },
-[__NR_ia32_setsid]		= { 1, { T_void } },
-
-[__NR_ia32_settimeofday]	= { 2, { T_timeval_t, T_timezone_t } },
-[__NR_ia32_adjtimex]		= { 1, { T_timex_t } },
-[__NR_ia32_stime]		= { 1, { T_pointer(int) } },
-[__NR_ia32__sysctl]		= { 1, { T_sysctl_t } },
-[__NR_ia32_sethostname]		= { 2, { T_array(char, 1, 256), T_size_t } },
-[__NR_ia32_setdomainname]	= { 2, { T_array(char, 1, __NEW_UTS_LEN), T_size_t } },
-[__NR_ia32_reboot]		= { 4, { T_int, T_int, T_int, T_any_ptr } },
-[__NR_ia32_create_module]	= { 2, { T_string, T_size_t } },
-[__NR_ia32_init_module]		= { 2, { T_string, T_any_ptr } },
-[__NR_ia32_query_module]	= { 5, { T_string, T_int, T_any_ptr, T_size_t, T_any_ptr } },
-[__NR_ia32_delete_module]	= { 1, { T_string } },
-[__NR_ia32_mount]		= { 5, { T_string, T_path, T_string, T_long, T_any_ptr } },
-[__NR_ia32_umount]		= { 1, { T_path } },
-[__NR_ia32_umount2]		= { 2, { T_path, T_int } },
-[__NR_ia32_swapon]		= { 2, { T_path, T_int } },
-[__NR_ia32_swapoff]		= { 1, { T_path } },
-[__NR_ia32_ioperm]		= { 3, { T_long, T_long, T_int } },
-[__NR_ia32_iopl]		= { 1, { T_int } },
-[__NR_ia32_syslog]		= { 3, { T_int, T_any_ptr, T_int } },
-
-[__NR_ia32_open]		= { 3, { T_path, T_int, T_mode_t } },
-[__NR_ia32_read]		= { 3, { T_filedesc, T_any_ptr, T_size_t } },
-[__NR_ia32_write]		= { 3, { T_filedesc, T_any_ptr, T_size_t } },
-[__NR_ia32_close]		= { 1, { T_filedesc } },
-[__NR_ia32_readv]		= { 3, { T_filedesc, T_any_ptr, T_size_t } },
-[__NR_ia32_writev]		= { 3, { T_filedesc, T_any_ptr, T_size_t } },
-[__NR_ia32_readdir]		= { 3, { T_filedesc, T_any_ptr, T_size_t } },
-[__NR_ia32_sendfile]		= { 4, { T_filedesc, T_filedesc, T_off_t, T_size_t } },
-[__NR_ia32_access]		= { 2, { T_path, T_int } },
-[__NR_ia32_creat]		= { 2, { T_path, T_mode_t } },
-[__NR_ia32_mkdir]		= { 2, { T_path_parent, T_mode_t } },
-[__NR_ia32_mknod]		= { 3, { T_path_parent, T_mode_t, T_dev_t } },
-[__NR_ia32_link]		= { 2, { T_path, T_path_parent } },
-[__NR_ia32_symlink]		= { 2, { T_string, T_path_parent } },
-[__NR_ia32_rename]		= { 2, { T_path, T_path_parent } },
-[__NR_ia32_unlink]		= { 1, { T_path } },
-[__NR_ia32_rmdir]		= { 1, { T_path } },
-[__NR_ia32_utime]		= { 2, { T_path, T_pointer(struct utimbuf) } },
-[__NR_ia32_chmod]		= { 2, { T_path, T_mode_t } },
-[__NR_ia32_chown]		= { 3, { T_path, T_u16_t, T_u16_t } },
-[__NR_ia32_chown32]		= { 3, { T_path, T_uid_t, T_gid_t } },
-[__NR_ia32_lchown]		= { 3, { T_path_parent, T_u16_t, T_u16_t } },
-[__NR_ia32_lchown32]		= { 3, { T_path_parent, T_uid_t, T_gid_t } },
-[__NR_ia32_fchown]		= { 3, { T_filedesc, T_u16_t, T_u16_t } },
-[__NR_ia32_fchown32]		= { 3, { T_filedesc, T_uid_t, T_gid_t } },
-[__NR_ia32_fchmod]		= { 2, { T_filedesc, T_mode_t } },
-[__NR_ia32_truncate]		= { 2, { T_path, T_size_t } },
-[__NR_ia32_truncate64]		= { 2, { T_path, T_u64_t } },
-[__NR_ia32_ftruncate]		= { 2, { T_filedesc, T_size_t } },
-[__NR_ia32_ftruncate64]		= { 2, { T_filedesc, T_u64_t } },
-[__NR_ia32_setxattr]		= { 5, { T_path, T_string, T_array(char, 3, 2046), T_size_t, T_int } },
-[__NR_ia32_lsetxattr]		= { 5, { T_path_parent, T_string, T_array(char, 3, 2046), T_size_t, T_int } },
-[__NR_ia32_fsetxattr]		= { 5, { T_filedesc, T_string, T_array(char, 3, 2046), T_size_t, T_int } },
-[__NR_ia32_getxattr]		= { 3, { T_path, T_any_ptr, T_size_t } },
-[__NR_ia32_lgetxattr]		= { 3, { T_path_parent, T_any_ptr, T_size_t } },
-[__NR_ia32_fgetxattr]		= { 3, { T_filedesc, T_any_ptr, T_size_t } },
-[__NR_ia32_listxattr]		= { 3, { T_path, T_any_ptr, T_size_t } },
-[__NR_ia32_llistxattr]		= { 3, { T_path_parent, T_any_ptr, T_size_t } },
-[__NR_ia32_flistxattr]		= { 3, { T_filedesc, T_any_ptr, T_size_t } },
-[__NR_ia32_removexattr]		= { 2, { T_path, T_string } },
-[__NR_ia32_lremovexattr]	= { 2, { T_path_parent, T_string } },
-[__NR_ia32_fremovexattr]	= { 2, { T_filedesc, T_string } },
-
-[__NR_ia32_socketcall]	= { 2, { T_int, T_any_ptr } },
-
-[__NR_ia32_ipc]		= { 6, { T_int, T_long, T_long, T_long, T_long, T_long } },
-
-[__NR_ia32_ioctl]	= { 3, { T_filedesc, T_int, T_any_ptr } },
-
+static int syscall_conv_ia32_to_x86_64[IA32_NR_syscalls] = {
+[__NR_ia32_fork] = __NR_fork,
+[__NR_ia32_vfork] = __NR_vfork,
+[__NR_ia32_clone] = __NR_clone,
+[__NR_ia32_execve] = __NR_execve,
+[__NR_ia32_exit] = __NR_exit,
+[__NR_ia32_ptrace] = __NR_ptrace,
+[__NR_ia32_uselib] = __NR_uselib,
+[__NR_ia32_kill] = __NR_kill,
+[__NR_ia32_tkill] = __NR_tkill,
+[__NR_ia32_setuid] = __NR_setuid,
+[__NR_ia32_setgid] = __NR_setgid,
+[__NR_ia32_setreuid] = __NR_setreuid,
+[__NR_ia32_setregid] = __NR_setregid,
+[__NR_ia32_setresuid] = __NR_setresuid,
+[__NR_ia32_setresgid] = __NR_setresgid,
+[__NR_ia32_setfsuid] = __NR_setfsuid,
+[__NR_ia32_setfsgid] = __NR_setfsgid,
+[__NR_ia32_setgroups] = __NR_setgroups,
+[__NR_ia32_setuid32] = __NR_setuid,
+[__NR_ia32_setgid32] = __NR_setgid,
+[__NR_ia32_setreuid32] = __NR_setreuid,
+[__NR_ia32_setregid32] = __NR_setregid,
+[__NR_ia32_setresuid32] = __NR_setresuid,
+[__NR_ia32_setresgid32] = __NR_setresgid,
+[__NR_ia32_setfsuid32] = __NR_setfsuid,
+[__NR_ia32_setfsgid32] = __NR_setfsgid,
+[__NR_ia32_setgroups32] = __NR_setgroups,
+[__NR_ia32_capset] = __NR_capset,
+[__NR_ia32_umask] = __NR_umask,
+[__NR_ia32_chroot] = __NR_chroot,
+[__NR_ia32_chdir] = __NR_chdir,
+[__NR_ia32_fchdir] = __NR_fchdir,
+[__NR_ia32_setrlimit] = __NR_setrlimit,
+[__NR_ia32_setpriority] = __NR_setpriority,
+[__NR_ia32_sched_setaffinity] = __NR_sched_setaffinity,
+[__NR_ia32_sched_setparam] = __NR_sched_setparam,
+[__NR_ia32_sched_setscheduler] = __NR_sched_setscheduler,
+[__NR_ia32_brk] = __NR_brk,
+[__NR_ia32_signal] = __NR_rt_sigaction,
+[__NR_ia32_rt_sigreturn] = __NR_rt_sigreturn,
+[__NR_ia32_rt_sigaction] = __NR_rt_sigaction,
+[__NR_ia32_rt_sigprocmask] = __NR_rt_sigprocmask,
+[__NR_ia32_rt_sigpending] = __NR_rt_sigpending,
+[__NR_ia32_rt_sigtimedwait] = __NR_rt_sigtimedwait,
+[__NR_ia32_rt_sigqueueinfo] = __NR_rt_sigqueueinfo,
+[__NR_ia32_rt_sigsuspend] = __NR_rt_sigsuspend,
+[__NR_ia32_setitimer] = __NR_setitimer,
+[__NR_ia32_setpgid] = __NR_setpgid,
+[__NR_ia32_setsid] = __NR_setsid,
+[__NR_ia32_settimeofday] = __NR_settimeofday,
+[__NR_ia32_adjtimex] = __NR_adjtimex,
+[__NR_ia32_stime] = __NR_settimeofday,
+[__NR_ia32__sysctl] = __NR__sysctl,
+[__NR_ia32_sethostname] = __NR_sethostname,
+[__NR_ia32_setdomainname] = __NR_setdomainname,
+[__NR_ia32_reboot] = __NR_reboot,
+[__NR_ia32_create_module] = __NR_create_module,
+[__NR_ia32_init_module] = __NR_init_module,
+[__NR_ia32_query_module] = __NR_query_module,
+[__NR_ia32_delete_module] = __NR_delete_module,
+[__NR_ia32_mount] = __NR_mount,
+[__NR_ia32_umount] = __NR_umount2,
+[__NR_ia32_umount2] = __NR_umount2,
+[__NR_ia32_swapon] = __NR_swapon,
+[__NR_ia32_swapoff] = __NR_swapoff,
+[__NR_ia32_ioperm] = __NR_ioperm,
+[__NR_ia32_iopl] = __NR_iopl,
+[__NR_ia32_syslog] = __NR_syslog,
+[__NR_ia32_open] = __NR_open,
+[__NR_ia32_read] = __NR_read,
+[__NR_ia32_write] = __NR_write,
+[__NR_ia32_close] = __NR_close,
+[__NR_ia32_readv] = __NR_readv,
+[__NR_ia32_writev] = __NR_writev,
+[__NR_ia32_readdir] = __NR_getdents,
+[__NR_ia32_sendfile] = __NR_sendfile,
+[__NR_ia32_access] = __NR_access,
+[__NR_ia32_creat] = __NR_creat,
+[__NR_ia32_mkdir] = __NR_mkdir,
+[__NR_ia32_mknod] = __NR_mknod,
+[__NR_ia32_link] = __NR_link,
+[__NR_ia32_symlink] = __NR_symlink,
+[__NR_ia32_rename] = __NR_rename,
+[__NR_ia32_unlink] = __NR_unlink,
+[__NR_ia32_rmdir] = __NR_rmdir,
+[__NR_ia32_utime] = __NR_utime,
+[__NR_ia32_chmod] = __NR_chmod,
+[__NR_ia32_chown] = __NR_chown,
+[__NR_ia32_chown32] = __NR_chown,
+[__NR_ia32_lchown] = __NR_lchown,
+[__NR_ia32_lchown32] = __NR_lchown,
+[__NR_ia32_fchown] = __NR_fchown,
+[__NR_ia32_fchown32] = __NR_fchown,
+[__NR_ia32_fchmod] = __NR_fchmod,
+[__NR_ia32_truncate] = __NR_truncate,
+[__NR_ia32_truncate64] = __NR_truncate,
+[__NR_ia32_ftruncate] = __NR_ftruncate,
+[__NR_ia32_ftruncate64] = __NR_ftruncate,
+[__NR_ia32_setxattr] = __NR_setxattr,
+[__NR_ia32_lsetxattr] = __NR_lsetxattr,
+[__NR_ia32_fsetxattr] = __NR_fsetxattr,
+[__NR_ia32_getxattr] = __NR_getxattr,
+[__NR_ia32_lgetxattr] = __NR_lgetxattr,
+[__NR_ia32_fgetxattr] = __NR_fgetxattr,
+[__NR_ia32_listxattr] = __NR_listxattr,
+[__NR_ia32_llistxattr] = __NR_llistxattr,
+[__NR_ia32_flistxattr] = __NR_flistxattr,
+[__NR_ia32_removexattr] = __NR_removexattr,
+[__NR_ia32_lremovexattr] = __NR_lremovexattr,
+[__NR_ia32_fremovexattr] = __NR_fremovexattr,
+[__NR_ia32_socketcall] = __NR_socket, /* fixed below */
+[__NR_ia32_ipc] = __NR_semop, /* fixed below */
+[__NR_ia32_ioctl] = __NR_ioctl,
 };
 
 /*
@@ -232,9 +188,10 @@ int
 audit_get_args(struct pt_regs *regs, struct aud_syscall_data *sc)
 {
 	struct sysent	*entry;
-	int		code;
+	int		code_64, code_raw;
 	int		ia32_thread = 0;
 	int 		nr_syscalls = NR_syscalls;
+	int		ret = -EINVAL;
 
 	if (current->thread.flags & THREAD_IA32) {
 		ia32_thread = 1;
@@ -248,64 +205,124 @@ audit_get_args(struct pt_regs *regs, struct aud_syscall_data *sc)
 	if (regs == NULL)
 		return -EPERM;
 
-	code = regs->orig_rax;
+	code_raw = regs->orig_rax;
 
 	/* XXX should we try to log calls to invalid syscalls? */
-	if (code < 0 || code >= nr_syscalls)
+	if (code_raw < 0 || code_raw >= nr_syscalls)
 		return -ENOSYS;
 
-	if (audit_policy_ignore(code))
-		return 0;
+	if (ia32_thread) {
+		/* convert ia32 syscall number to native x86_64 numbering scheme */
+		code_64 = syscall_conv_ia32_to_x86_64[code_raw];
+
+		/* ugly special cases, ia32 uses multiplexed calls via socketcall()
+                 * and ipc(), which x86_64 does not have. Do manual mapping.
+                 */
+		if (code_64 == __NR_socket) {
+			switch(regs->rbx) {
+			case SYS_SOCKET: code_64=__NR_socket; break;
+			case SYS_BIND: code_64=__NR_bind; break; 
+			case SYS_CONNECT: code_64=__NR_connect; break;
+			case SYS_LISTEN: code_64=__NR_listen; break;
+			case SYS_ACCEPT: code_64=__NR_accept; break;
+			case SYS_GETSOCKNAME: code_64=__NR_getsockname; break;
+			case SYS_GETPEERNAME: code_64=__NR_getpeername; break;
+			case SYS_SOCKETPAIR: code_64=__NR_socketpair; break;
+			case SYS_SEND: code_64=__NR_sendto; break; 
+			case SYS_RECV: code_64=__NR_recvfrom; break; 
+			case SYS_SENDTO: code_64=__NR_sendto; break;
+			case SYS_RECVFROM: code_64=__NR_recvfrom; break;
+			case SYS_SHUTDOWN: code_64=__NR_shutdown; break;
+			case SYS_SETSOCKOPT: code_64=__NR_setsockopt; break;
+			case SYS_GETSOCKOPT: code_64=__NR_getsockopt; break;
+			case SYS_SENDMSG: code_64=__NR_sendmsg; break;
+			case SYS_RECVMSG: code_64=__NR_recvmsg; break;
+			}
+		} else if (code_64 == __NR_semop) {
+			switch(regs->rbx) {
+			case SEMOP: code_64=__NR_semop; break;
+			case SEMGET: code_64=__NR_semget; break;
+			case SEMCTL: code_64=__NR_semctl; break;
+			case SEMTIMEDOP: code_64=__NR_semtimedop; break;
+			case MSGSND: code_64=__NR_msgsnd; break;
+			case MSGRCV: code_64=__NR_msgrcv; break;
+			case MSGGET: code_64=__NR_msgget; break;
+			case MSGCTL: code_64=__NR_msgctl; break;
+			case SHMAT: code_64=__NR_shmat; break;
+			case SHMDT: code_64=__NR_shmdt; break;
+			case SHMGET: code_64=__NR_shmget; break;
+			case SHMCTL: code_64=__NR_shmctl; break;
+			}
+		}
+	} else {
+		code_64 = code_raw;
+	}
+
+	DPRINTF("code=%d raw=%d/%s\n", code_64, code_raw, ia32_thread ? "32" : "64");
+
+	if (audit_policy_ignore(code_64)) {
+		ret = 0;
+		goto exit;
+	}
+
+	sc->arch = AUDIT_ARCH_X86_64;
+	entry = &linux_sysent[code_64];
 
 	if (ia32_thread) {
-		sc->arch = AUDIT_ARCH_I386;
-		entry = &linux_sysent_ia32[code];
+		/* always copy all registers, due to ipc(2) renumbering */
+		sc->raw_args[5] = regs->rbp;
+		sc->raw_args[4] = regs->rdi;
+		sc->raw_args[3] = regs->rsi;
+		sc->raw_args[2] = regs->rdx;
+		sc->raw_args[1] = regs->rcx;
+		sc->raw_args[0] = regs->rbx;
 	} else {
-		sc->arch = AUDIT_ARCH_X86_64;
-		entry = &linux_sysent[code];
+		switch (entry->sy_narg) {
+		case 6:	sc->raw_args[5] = regs->r9;  /* correct? */
+		case 5:	sc->raw_args[4] = regs->r8;
+		case 4: sc->raw_args[3] = regs->r10;
+		case 3: sc->raw_args[2] = regs->rdx;
+		case 2: sc->raw_args[1] = regs->rsi;
+		case 1: sc->raw_args[0] = regs->rdi;
+		case 0: break;
+		default:
+			printk("audit: invalid argument count?!\n");
+			BUG();
+		}
 	}
 
-	switch (entry->sy_narg) {
-	case 6:	sc->raw_args[5] = regs->r9;  /* correct? */
-	case 5:	sc->raw_args[4] = regs->r8;
-	case 4: sc->raw_args[3] = regs->r10;
-	case 3: sc->raw_args[2] = regs->rdx;
-	case 2: sc->raw_args[1] = regs->rsi;
-	case 1: sc->raw_args[0] = regs->rdi;
-	case 0: break;
-	default:
-		printk("audit: invalid argument count?!\n");
-		BUG();
-	}
-
-	sc->major = code;
+	sc->major = code_64;
 	sc->entry = entry;
 
 	/* Special treatment for special functions */
 
 	if (ia32_thread) {
-		switch (code) {
+		switch (code_raw) {
 		case __NR_ia32_truncate64:
 		case __NR_ia32_ftruncate64:
 			/* 64bit values are actually passed as two 32bit
 		 	* registers, lower one first */
 			sc->raw_args[1] |= ((u_int64_t) regs->rdx) << 32;
 			break;
-
-/* the audit_get_[socket|ipc]args() are ifdef'ed in syscall.c */
-#if 0
 		case __NR_ia32_socketcall:
-			return audit_get_socketargs(sc);
+			ret = audit_get_socketargs(sc);
+			sc->minor = 0;
+			goto exit;
 		case __NR_ia32_ipc:
-			return audit_get_ipcargs(sc);
-#endif
+			ret = audit_get_ipcargs(sc);
+			sc->minor = 0;
+			goto exit;
 		}
 	}
 
-	if (code == __NR_ioctl || code == __NR_ia32_ioctl)
-		return audit_get_ioctlargs(sc);
+	if (code_64 == __NR_ioctl) {
+		ret = audit_get_ioctlargs(sc);
+		goto exit;
+	}
 
-	return 0;
+	ret = 0;
+exit:
+	return ret;
 }
 
 /*
@@ -331,13 +348,25 @@ audit_update_arg(struct aud_syscall_data *sc, unsigned int n, unsigned long newv
 		return -EINVAL;
 
 	sc->raw_args[n] = newval;
-	switch (n) {
-	case 5: regs->r9  = newval; break;
-	case 4: regs->r8  = newval; break;
-	case 3: regs->r10 = newval; break;
-	case 2: regs->rdx = newval; break;
-	case 1: regs->rsi = newval; break;
-	case 0: regs->rdi = newval; break;
+
+	if (current->thread.flags & THREAD_IA32) {
+		switch (n) {
+		case 5: regs->rbp = newval; break;
+		case 4: regs->rdi = newval; break;
+		case 3: regs->rsi = newval; break;
+		case 2: regs->rdx = newval; break;
+		case 1: regs->rcx = newval; break;
+		case 0: regs->rbx = newval; break;
+		}
+	} else {
+		switch (n) {
+		case 5: regs->r9  = newval; break;
+		case 4: regs->r8  = newval; break;
+		case 3: regs->r10 = newval; break;
+		case 2: regs->rdx = newval; break;
+		case 1: regs->rsi = newval; break;
+		case 0: regs->rdi = newval; break;
+		}
 	}
 
 	return 0;

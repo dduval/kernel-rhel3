@@ -184,9 +184,9 @@ ia32_setup_arg_pages (struct linux_binprm *bprm, int executable_stack)
 		mpnt->vm_end = IA32_STACK_TOP;
 		mpnt->vm_page_prot = PAGE_COPY;
 		if (executable_stack)
-			mpnt->vm_flags = VM_STACK_FLAGS | VM_MAYEXEC | VM_EXEC;
+			mpnt->vm_flags = VM_STACK_FLAGS | VM_EXEC;
 		else
-			mpnt->vm_flags = VM_STACK_FLAGS & ~(VM_MAYEXEC|VM_EXEC);
+			mpnt->vm_flags = VM_STACK_FLAGS & ~VM_EXEC;
 		mpnt->vm_ops = NULL;
 		mpnt->vm_pgoff = 0;
 		mpnt->vm_file = NULL;
@@ -219,10 +219,27 @@ elf32_set_personality (void)
 }
 
 static unsigned long
-elf32_map (struct file *filep, unsigned long addr, struct elf_phdr *eppnt, int prot, int type)
+elf32_map (struct file *filep, unsigned long addr, struct elf_phdr *eppnt, int prot, int type, unsigned long total_size)
 {
 	unsigned long pgoff = (eppnt->p_vaddr) & ~IA32_PAGE_MASK;
+	unsigned long size = eppnt->p_filesz + pgoff;
 
-	return ia32_do_mmap(filep, (addr & IA32_PAGE_MASK), eppnt->p_filesz + pgoff, prot, type,
+	if (total_size)
+		size = total_size;
+
+	return ia32_do_mmap(filep, (addr & IA32_PAGE_MASK), size, prot, type,
 			    eppnt->p_offset - pgoff);
 }
+
+#define cpu_uses_ia32el()	(local_cpu_data->family > 0x1f)
+
+static int __init check_elf32_binfmt(void)
+{
+	if (cpu_uses_ia32el()) {
+		printk(KERN_INFO "IA-32 emulation not present, assuming IA-32EL is installed\n");
+		return unregister_binfmt(&elf_format);
+	}
+	return 0;
+}
+
+module_init(check_elf32_binfmt)

@@ -34,6 +34,8 @@ struct proc_dir_entry *rtas_proc_dir;	/* /proc/ppc64/rtas dir */
 struct flash_block_list_header rtas_firmware_flash_list = {0, 0};
 struct errinjct_token ei_token_list[MAX_ERRINJCT_TOKENS];
 
+extern int slabpages; /* from mm/slab.c to see if slab is up & running */
+
 /*
  * prom_init() is called very early on, before the kernel text
  * and data have been mapped to KERNELBASE.  At this point the code
@@ -55,9 +57,11 @@ struct errinjct_token ei_token_list[MAX_ERRINJCT_TOKENS];
  * are put in the data segment.
  */
 
-struct rtas_t rtas = { 
+struct rtas_t rtas = {
 	.lock = SPIN_LOCK_UNLOCKED
 };
+
+char rtas_err_buf[RTAS_DATA_BUF_SIZE];
 
 extern unsigned long reloc_offset(void);
 
@@ -82,7 +86,7 @@ phys_call_rtas(int token, int nargs, int nret, ...)
 	  rtas->args[i] = (rtas_arg_t)LONG_LSW(va_arg(list, ulong));
 	va_end(list);
 
-        enter_rtas(rtas);	
+	enter_rtas(rtas);	
 }
 
 void
@@ -103,15 +107,19 @@ phys_call_rtas_display_status(char c)
 void
 call_rtas_display_status(char c)
 {
-	struct rtas_args *rtas = &(get_paca()->xRtas);
+	struct rtas_args *rargs = &(get_paca()->xRtas);
+	unsigned long flags;
 
-	rtas->token = 10;
-	rtas->nargs = 1;
-	rtas->nret  = 1;
-	rtas->rets  = (rtas_arg_t *)&(rtas->args[1]);
-	rtas->args[0] = (int)c;
+	spin_lock_irqsave(&rtas.lock, flags);
 
-	enter_rtas((void *)__pa((unsigned long)rtas));	
+	rargs->token = 10;
+	rargs->nargs = 1;
+	rargs->nret  = 1;
+	rargs->rets  = (rtas_arg_t *)(&(rargs->args[1]));
+	rargs->args[0] = (int)c;
+
+	enter_rtas((void *)__pa((unsigned long)rargs));
+	spin_unlock_irqrestore(&rtas.lock, flags);
 }
 
 __openfirmware
@@ -127,15 +135,61 @@ rtas_token(const char *service)
 	return tokp ? *tokp : RTAS_UNKNOWN_SERVICE;
 }
 
+/** Return a copy of the detailed error text associated with the
+ *  most recent failed call to rtas.  Because the error text
+ *  might go stale if there are any other intervening rtas calls,
+ *  this routine must be called atomically with whatever produced
+ *  the error (i.e. with rtas.lock still held from the previous call).
+ */
+static int
+__fetch_rtas_last_error(void)
+{
+	struct rtas_args err_args, save_args;
+	u32 bufsz;
+
+	bufsz = rtas_token ("rtas-error-log-max");
+	if ((bufsz == RTAS_UNKNOWN_SERVICE) ||
+	    (bufsz > RTAS_ERROR_LOG_MAX)) {
+		printk (KERN_WARNING "RTAS: bad log buffer size %d\n", bufsz);
+		bufsz = RTAS_ERROR_LOG_MAX;
+	}
+
+	err_args.token = rtas_token("rtas-last-error");
+	err_args.nargs = 2;
+	err_args.nret = 1;
+
+	err_args.args[0] = (rtas_arg_t)__pa(rtas_err_buf);
+	err_args.args[1] = bufsz;
+	err_args.args[2] = 0;
+
+	save_args = rtas.args;
+	rtas.args = err_args;
+	rtas.args.rets = (rtas_arg_t *)&(rtas.args.args[2]);
+
+	PPCDBG(PPCDBG_RTAS, "\tentering rtas with 0x%lx\n",
+	       __pa(&err_args));
+	enter_rtas((void *)__pa((unsigned long)(&rtas.args)));
+	PPCDBG(PPCDBG_RTAS, "\treturned from rtas ...\n");
+
+	err_args = rtas.args;
+	rtas.args = save_args;
+
+	err_args.rets = (rtas_arg_t *)&(err_args.args[2]);
+	return err_args.rets[0];
+}
+
+
 __openfirmware
 long
 rtas_call(int token, int nargs, int nret,
 	  unsigned long *outputs, ...)
 {
 	va_list list;
-	int i;
-	unsigned long s;
-	struct rtas_args *rtas_args = &(get_paca()->xRtas);
+	int i, logit = 0;
+	unsigned long flags;
+	struct rtas_args *rtas_args;
+	char * buff_copy = NULL;
+	unsigned long retval;
 
 	PPCDBG(PPCDBG_RTAS, "Entering rtas_call\n");
 	PPCDBG(PPCDBG_RTAS, "\ttoken    = 0x%x\n", token);
@@ -144,6 +198,9 @@ rtas_call(int token, int nargs, int nret,
 	PPCDBG(PPCDBG_RTAS, "\t&outputs = 0x%lx\n", outputs);
 	if (token == RTAS_UNKNOWN_SERVICE)
 		return -1;
+
+	spin_lock_irqsave(&rtas.lock, flags);
+	rtas_args = &(get_paca()->xRtas);
 
 	rtas_args->token = token;
 	rtas_args->nargs = nargs;
@@ -159,20 +216,16 @@ rtas_call(int token, int nargs, int nret,
 	for (i = 0; i < nret; ++i)
 	  rtas_args->rets[i] = 0;
 
-#if 0   /* Gotta do something different here, use global lock for now... */
-	spin_lock_irqsave(&rtas_args->lock, s);
-#else
-	spin_lock_irqsave(&rtas.lock, s);
-#endif
 	PPCDBG(PPCDBG_RTAS, "\tentering rtas with 0x%lx\n",
 		(void *)__pa((unsigned long)rtas_args));
 	enter_rtas((void *)__pa((unsigned long)rtas_args));
 	PPCDBG(PPCDBG_RTAS, "\treturned from rtas ...\n");
-#if 0   /* Gotta do something different here, use global lock for now... */
-	spin_unlock_irqrestore(&rtas_args->lock, s);
-#else
-	spin_unlock_irqrestore(&rtas.lock, s);
-#endif
+
+	/* A -1 return code indicates that the last command couldn't
+	 * be completed due to a hardware error. */
+	if (rtas_args->rets[0] == -1)
+		logit = (__fetch_rtas_last_error() == 0);
+
 	ifppcdebug(PPCDBG_RTAS) {
 		for(i=0; i < nret ;i++)
 			udbg_printf("\tnret[%d] = 0x%lx\n", i, (ulong)rtas_args->rets[i]);
@@ -181,7 +234,26 @@ rtas_call(int token, int nargs, int nret,
 	if (nret > 1 && outputs != NULL)
 		for (i = 0; i < nret-1; ++i)
 			outputs[i] = rtas_args->rets[i+1];
-	return (ulong)((nret > 0) ? rtas_args->rets[0] : 0);
+	retval = (ulong)((nret > 0) ? rtas_args->rets[0] : 0);
+
+	/* Log the error in the unlikely case that there was one. */
+	if (unlikely(logit)) {
+		/* Can't call kmalloc if VM subsystem is not yet up. */
+		if (slabpages>0) {
+			buff_copy = kmalloc(RTAS_ERROR_LOG_MAX, GFP_ATOMIC);
+			if (buff_copy) {
+				memcpy(buff_copy, rtas_err_buf, RTAS_ERROR_LOG_MAX);
+			}
+		}
+	}
+
+	spin_unlock_irqrestore(&rtas.lock, flags);
+
+	if (buff_copy) {
+		log_error(buff_copy, ERR_TYPE_RTAS_LOG, 0);
+		kfree(buff_copy);
+	}
+	return retval;
 }
 
 /* Given an RTAS status code of 990n perform the hinted delay of 10^n

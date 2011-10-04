@@ -79,7 +79,7 @@ static ssize_t dev_ppc64_read_nvram(struct file *file, char *buf,
 
 	if (verify_area(VERIFY_WRITE, buf, count))
 		return -EFAULT;
-	if (pos != (unsigned)pos || pos >= rtas_nvram_size)
+	if (pos < 0 || pos >= rtas_nvram_size)
 		return 0;
 	if (count > rtas_nvram_size) 
 		count = rtas_nvram_size;
@@ -116,7 +116,7 @@ static ssize_t dev_ppc64_write_nvram(struct file *file, const char *buf,
 
 	if (verify_area(VERIFY_READ, buf, count))
 		return -EFAULT;
-	if (pos != (unsigned)pos || pos >= rtas_nvram_size)
+	if (pos < 0 || pos >= rtas_nvram_size)
 		return 0;
 	if (count > rtas_nvram_size)
 		count = rtas_nvram_size;

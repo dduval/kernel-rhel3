@@ -2,7 +2,7 @@
  * kernel/lvm-snap.c
  *
  * Copyright (C) 2000 Andrea Arcangeli <andrea@suse.de> SuSE
- *               2000 - 2002 Heinz Mauelshagen, Sistina Software
+ *               2000 - 2003 Heinz Mauelshagen, Sistina Software
  *
  * LVM snapshot driver is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -42,6 +42,8 @@
  *    15/10/2001 - fix snapshot alignment problem [CM]
  *               - fix snapshot full oops (always check lv_block_exception) [CM]
  *    26/06/2002 - support for new list_move macro [patch@luckynet.dynu.com]
+ *    26/07/2002 - removed conditional list_move macro because we will
+ *                 discontinue LVM1 before 2.6 anyway
  *
  */
 
@@ -128,12 +130,8 @@ lvm_find_exception_table(kdev_t org_dev, unsigned long org_start, lv_t * lv)
 			if (i)
 			{
 				/* fun, isn't it? :) */
-#ifdef	list_move
-				list_move(next, hash_table);
-#else
 				list_del(next);
 				list_add(next, hash_table);
-#endif
 			}
 			ret = exception;
 			break;
@@ -583,15 +581,14 @@ out:
 
 int lvm_snapshot_alloc(lv_t * lv_snap)
 {
-	int ret, max_sectors;
+	int ret;
 
 	/* allocate kiovec to do chunk io */
 	ret = alloc_kiovec(1, &lv_snap->lv_iobuf);
 	if (ret) goto out;
 
-	max_sectors = KIO_MAX_SECTORS << (PAGE_SHIFT-9);
-
-	ret = lvm_snapshot_alloc_iobuf_pages(lv_snap->lv_iobuf, max_sectors);
+	ret = lvm_snapshot_alloc_iobuf_pages(lv_snap->lv_iobuf,
+					     KIO_MAX_SECTORS);
 	if (ret) goto out_free_kiovec;
 
 	/* allocate kiovec to do exception table io */

@@ -93,8 +93,8 @@ putstat(struct stat32 *ubuf, struct stat *kbuf)
 	    __put_user (kbuf->st_ino, &ubuf->st_ino) ||
 	    __put_user (kbuf->st_mode, &ubuf->st_mode) ||
 	    __put_user (kbuf->st_nlink, &ubuf->st_nlink) ||
-	    __put_user (kbuf->st_uid, &ubuf->st_uid) ||
-	    __put_user (kbuf->st_gid, &ubuf->st_gid) ||
+	    __put_user (high2lowuid(kbuf->st_uid), &ubuf->st_uid) ||
+	    __put_user (high2lowgid(kbuf->st_gid), &ubuf->st_gid) ||
 	    __put_user (kbuf->st_rdev, &ubuf->st_rdev) ||
 	    __put_user (kbuf->st_size, &ubuf->st_size) ||
 	    __put_user (kbuf->st_atime, &ubuf->st_atime) ||
@@ -155,6 +155,19 @@ sys32_newfstat(unsigned int fd, struct stat32 *statbuf)
 	if (putstat (statbuf, &s))
 		return -EFAULT;
 	return ret;
+}
+
+asmlinkage long
+sys32_truncate64(char * filename, unsigned long offset_low, unsigned long offset_high)
+{
+       return sys_truncate(filename, ((loff_t) offset_high << 32) | offset_low);
+}
+
+
+asmlinkage long
+sys32_ftruncate64(unsigned int fd, unsigned long offset_low, unsigned long offset_high)
+{
+       return sys_ftruncate(fd, ((loff_t) offset_high << 32) | offset_low);
 }
 
 /* Another set for IA32/LFS -- x86_64 struct stat is different due to 
@@ -2572,6 +2585,161 @@ long sys32_vm86_warning(void)
 	} 
 	return -ENOSYS ;
 } 
+
+
+#ifndef CONFIG_UID16
+/* If the main kernel doesn't have UID16 support, then we define our
+ * own versions of the 16-bit UID compatibility functions here...
+ */
+
+extern asmlinkage long sys_chown(const char *, uid_t,gid_t);
+extern asmlinkage long sys_lchown(const char *, uid_t,gid_t);
+extern asmlinkage long sys_fchown(unsigned int, uid_t,gid_t);
+extern asmlinkage long sys_setregid(gid_t, gid_t);
+extern asmlinkage long sys_setgid(gid_t);
+extern asmlinkage long sys_setreuid(uid_t, uid_t);
+extern asmlinkage long sys_setuid(uid_t);
+extern asmlinkage long sys_setresuid(uid_t, uid_t, uid_t);
+extern asmlinkage long sys_setresgid(gid_t, gid_t, gid_t);
+extern asmlinkage long sys_setfsuid(uid_t);
+extern asmlinkage long sys_setfsgid(gid_t);
+ 
+asmlinkage long sys_chown16(const char * filename, u16 user, u16 group)
+{
+	return sys_chown(filename, low2highuid(user), low2highgid(group));
+}
+
+asmlinkage long sys_lchown16(const char * filename, u16 user, u16 group)
+{
+	return sys_lchown(filename, low2highuid(user), low2highgid(group));
+}
+
+asmlinkage long sys_fchown16(unsigned int fd, u16 user, u16 group)
+{
+	return sys_fchown(fd, low2highuid(user), low2highgid(group));
+}
+
+asmlinkage long sys_setregid16(u16 rgid, u16 egid)
+{
+	return sys_setregid(low2highgid(rgid), low2highgid(egid));
+}
+
+asmlinkage long sys_setgid16(u16 gid)
+{
+	return sys_setgid((gid_t)gid);
+}
+
+asmlinkage long sys_setreuid16(u16 ruid, u16 euid)
+{
+	return sys_setreuid(low2highuid(ruid), low2highuid(euid));
+}
+
+asmlinkage long sys_setuid16(u16 uid)
+{
+	return sys_setuid((uid_t)uid);
+}
+
+asmlinkage long sys_setresuid16(u16 ruid, u16 euid, u16 suid)
+{
+	return sys_setresuid(low2highuid(ruid), low2highuid(euid),
+		low2highuid(suid));
+}
+
+asmlinkage long sys_getresuid16(u16 *ruid, u16 *euid, u16 *suid)
+{
+	int retval;
+
+	if (!(retval = put_user(high2lowuid(current->uid), ruid)) &&
+	    !(retval = put_user(high2lowuid(current->euid), euid)))
+		retval = put_user(high2lowuid(current->suid), suid);
+
+	return retval;
+}
+
+asmlinkage long sys_setresgid16(u16 rgid, u16 egid, u16 sgid)
+{
+	return sys_setresgid(low2highgid(rgid), low2highgid(egid),
+		low2highgid(sgid));
+}
+
+asmlinkage long sys_getresgid16(u16 *rgid, u16 *egid, u16 *sgid)
+{
+	int retval;
+
+	if (!(retval = put_user(high2lowgid(current->gid), rgid)) &&
+	    !(retval = put_user(high2lowgid(current->egid), egid)))
+		retval = put_user(high2lowgid(current->sgid), sgid);
+
+	return retval;
+}
+
+asmlinkage long sys_setfsuid16(u16 uid)
+{
+	return sys_setfsuid((uid_t)uid);
+}
+
+asmlinkage long sys_setfsgid16(u16 gid)
+{
+	return sys_setfsgid((gid_t)gid);
+}
+
+asmlinkage long sys_getgroups16(int gidsetsize, u16 *grouplist)
+{
+	u16 groups[NGROUPS];
+	int i,j;
+
+	if (gidsetsize < 0)
+		return -EINVAL;
+	i = current->ngroups;
+	if (gidsetsize) {
+		if (i > gidsetsize)
+			return -EINVAL;
+		for(j=0;j<i;j++)
+			groups[j] = current->groups[j];
+		if (copy_to_user(grouplist, groups, sizeof(u16)*i))
+			return -EFAULT;
+	}
+	return i;
+}
+
+asmlinkage long sys_setgroups16(int gidsetsize, u16 *grouplist)
+{
+	u16 groups[NGROUPS];
+	int i;
+
+	if (!capable(CAP_SETGID))
+		return -EPERM;
+	if ((unsigned) gidsetsize > NGROUPS)
+		return -EINVAL;
+	if (copy_from_user(groups, grouplist, gidsetsize * sizeof(u16)))
+		return -EFAULT;
+	for (i = 0 ; i < gidsetsize ; i++)
+		current->groups[i] = (gid_t)groups[i];
+	current->ngroups = gidsetsize;
+	return 0;
+}
+
+asmlinkage long sys_getuid16(void)
+{
+	return high2lowuid(current->uid);
+}
+
+asmlinkage long sys_geteuid16(void)
+{
+	return high2lowuid(current->euid);
+}
+
+asmlinkage long sys_getgid16(void)
+{
+	return high2lowgid(current->gid);
+}
+
+asmlinkage long sys_getegid16(void)
+{
+	return high2lowgid(current->egid);
+}
+
+#endif
 
 /* This only triggers an i686 uname */
 struct exec_domain ia32_exec_domain = { 

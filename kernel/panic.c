@@ -192,6 +192,7 @@ __setup("panicblink=", panicblink_setup);
  */
 
 int netdump_mode = 0;
+int diskdump_mode = 0;
  
 NORET_TYPE void panic(const char * fmt, ...)
 {
@@ -206,7 +207,7 @@ NORET_TYPE void panic(const char * fmt, ...)
 	vsprintf(buf, fmt, args);
 	va_end(args);
 	printk(KERN_EMERG "Kernel panic: %s\n",buf);
-	if (netdump_func)
+	if (netdump_func || diskdump_func)
 		BUG();
 	if (in_interrupt())
 		printk(KERN_EMERG "In interrupt handler - not syncing\n");
@@ -312,4 +313,28 @@ void __out_of_line_bug(int line)
 	/* Satisfy __attribute__((noreturn)) */
 	for ( ; ; )
 		;
+}
+
+/*
+ * Try crashdump. Diskdump is first, netdump is second.
+ * We clear diskdump_func before call of diskdump_func, so
+ * If double panic would occur in diskdump, netdump can handle
+ * it.
+ */
+#if defined(CONFIG_DISKDUMP) || defined(CONFIG_DISKDUMP_MODULE)
+#include <asm/diskdump.h>
+#endif
+void try_crashdump(struct pt_regs *regs)
+{
+#if defined(CONFIG_DISKDUMP) || defined(CONFIG_DISKDUMP_MODULE)
+	if (diskdump_func) {
+		void (*func)(struct pt_regs *, void *);
+		func = diskdump_func;
+		diskdump_func = NULL;
+		platform_start_diskdump(func, regs);
+	}
+#endif
+	if (netdump_func)
+		netdump_func(regs);
+	netdump_func = NULL;
 }

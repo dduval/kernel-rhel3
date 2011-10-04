@@ -1626,7 +1626,7 @@ relock:
 		 * Anything else is fatal, maybe with a core dump.
 		 */
 		current->flags |= PF_SIGNALED;
-		if (print_fatal_signals && sig_kernel_coredump(signr))
+		if (print_fatal_signals)
 			print_fatal_signal(regs, signr);
 		if (sig_kernel_coredump(signr) &&
 		    do_coredump((long)signr, signr, regs)) {

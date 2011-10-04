@@ -808,6 +808,9 @@ static void __init parse_cmdline_early (char ** cmdline_p)
 				to--;
 			if (!memcmp(from+4, "nopentium", 9)) {
 				from += 9+4;
+				/* all PSE CPUs handle WP well: */
+				if (cpu_has_pse)
+					boot_cpu_data.wp_works_ok = 1;
 				clear_bit(X86_FEATURE_PSE, &boot_cpu_data.x86_capability);
 				set_bit(X86_FEATURE_PSE, &disabled_x86_caps);
 			} else if (!memcmp(from+4, "exactmap", 8)) {
@@ -2765,6 +2768,50 @@ static int __init id_and_try_enable_cpuid(struct cpuinfo_x86 *c)
 	return have_cpuid_p();	/* Check to see if CPUID now enabled? */
 }
 
+
+int disable_nx __initdata = 0;
+u64 __supported_pte_mask = ~_PAGE_NX;
+int use_nx = 0;
+
+/*
+ * noexec = on|off
+ *
+ * Control non executable mappings.
+ *
+ * on      Enable
+ * off     Disable (disables exec-shield too)
+ */
+static int __init nonx_setup(char *str)
+{
+	if (!strncmp(str, "on",2) && cpu_has_nx) { 
+		__supported_pte_mask |= _PAGE_NX; 
+ 		disable_nx = 0; 
+	} else if (!strncmp(str,"off",3)) { 
+		disable_nx = 1;
+		__supported_pte_mask &= ~_PAGE_NX; 
+		exec_shield = 0;
+        } 
+        return 1;
+} 
+
+__setup("noexec=", nonx_setup); 
+
+void __init check_efer(void)
+{
+	unsigned long l,h;
+
+	if (cpu_has_nx) {
+		rdmsr(MSR_EFER, l, h);
+		if (!(l & EFER_NX) || disable_nx) {
+			__supported_pte_mask &= ~_PAGE_NX;
+			use_nx = 0;
+		}
+	} else	{
+		__supported_pte_mask &= ~_PAGE_NX;
+		use_nx = 0;
+	}
+}
+
 /*
  * This does the hard work of actually picking apart the CPU stuff...
  */
@@ -2908,6 +2955,7 @@ void __init identify_cpu(struct cpuinfo_x86 *c)
 
 	/* Init Machine Check Exception if available. */
 	mcheck_init(c);
+	check_efer();
 
 	/* If the model name is still unset, do table lookup. */
 	if ( !c->x86_model_id[0] ) {
@@ -3015,7 +3063,7 @@ static int show_cpuinfo(struct seq_file *m, void *v)
 		/* AMD-defined */
 		NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
 		NULL, NULL, NULL, "syscall", NULL, NULL, NULL, NULL,
-		NULL, NULL, NULL, NULL, NULL, NULL, "mmxext", NULL,
+		NULL, NULL, NULL, NULL, "nx", NULL, "mmxext", NULL,
 		NULL, NULL, NULL, NULL, NULL, "lm", "3dnowext", "3dnow",
 
 		/* Transmeta-defined */

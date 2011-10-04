@@ -298,7 +298,7 @@ void scsi_resize_dma_pool(void)
 #endif
 
 	/* limit DMA memory to 32MB: */
-	new_dma_sectors = (new_dma_sectors + 15) & 0xfff0;
+	new_dma_sectors = min(new_dma_sectors + 15, 0xffffU) & 0xfff0;
 
 	/*
 	 * We never shrink the buffers - this leads to
@@ -359,7 +359,7 @@ void scsi_resize_dma_pool(void)
 			if (new_dma_sectors < (8 * SECTORS_PER_PAGE))
 				break;	/* pretty well hopeless ... */
 			new_dma_sectors = (new_dma_sectors * 3) / 4;
-			new_dma_sectors = (new_dma_sectors + 15) & 0xfff0;
+			new_dma_sectors = min(new_dma_sectors + 15, 0xffffU) & 0xfff0;
 			if (new_dma_sectors <= dma_sectors)
 				break;	/* stick with what we have got */
 		} else

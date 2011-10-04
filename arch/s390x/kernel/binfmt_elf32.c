@@ -193,16 +193,19 @@ MODULE_AUTHOR("Gerhard Tonn <ton@de.ibm.com>");
 #include "../../../fs/binfmt_elf.c"
 
 static unsigned long
-elf_map32 (struct file *filep, unsigned long addr, struct elf_phdr *eppnt, int prot, int type)
+elf_map32 (struct file *filep, unsigned long addr, struct elf_phdr *eppnt, int prot, int type, unsigned long total_size)
 {
 	unsigned long map_addr;
+	unsigned long size = eppnt->p_filesz + ELF_PAGEOFFSET(eppnt->p_vaddr);
+
+	if(total_size)
+		size = total_size;
 
 	if(!addr)
 		addr = 0x40000000;
 
 	down_write(&current->mm->mmap_sem);
-	map_addr = do_mmap(filep, ELF_PAGESTART(addr),
-			   eppnt->p_filesz + ELF_PAGEOFFSET(eppnt->p_vaddr), prot, type,
+	map_addr = do_mmap(filep, ELF_PAGESTART(addr), size, prot, type,
 			   eppnt->p_offset - ELF_PAGEOFFSET(eppnt->p_vaddr));
 	up_write(&current->mm->mmap_sem);
 	return(map_addr);

@@ -29,6 +29,7 @@ extern "C"
 #endif
 
 #include "exioct.h"
+
 #include "qla_fo.h"
 
 /*
@@ -43,6 +44,7 @@ extern int qla2x00_get_prop_xstr(scsi_qla_host_t *, char *, uint8_t *, int);
 extern void qla2x00_formatted_print(char *, uint64_t , uint8_t, uint8_t);
 extern void qla2x00_formatted_dump_buffer(char *, uint8_t *, uint8_t ,
 			uint32_t );
+extern inline void *kmem_zalloc( int siz, int code, int id);
 extern uint32_t qla2x00_fo_path_change(uint32_t ,
 					       fc_lun_t *, fc_lun_t *);
 extern scsi_qla_host_t *qla2x00_get_hba(int);
@@ -65,7 +67,7 @@ extern BOOL   mp_config_required;
 extern int qla2x00_cfg_init (scsi_qla_host_t *ha);
 extern int qla2x00_cfg_path_discovery(scsi_qla_host_t *ha);
 extern int qla2x00_cfg_event_notify(scsi_qla_host_t *ha, uint32_t i_type);
-extern int qla2x00_cfg_remap(scsi_qla_host_t *halist);
+extern int qla2x00_cfg_remap(scsi_qla_host_t *);
 extern fc_lun_t *qla2x00_cfg_failover(scsi_qla_host_t *ha, fc_lun_t *fp,
 					      os_tgt_t *tgt, srb_t *sp);
 extern int qla2x00_cfg_get_paths( EXT_IOCTL *, FO_GET_PATHS *, int);
@@ -81,11 +83,12 @@ extern mp_path_t *qla2x00_find_path_by_name(mp_host_t *, mp_path_list_t *,
 extern int16_t qla2x00_cfg_lookup_device(unsigned char *response_data);
 extern int qla2x00_combine_by_lunid( void *host, uint16_t dev_id, 
 	fc_port_t *port, uint16_t pathid); 
+extern int qla2x00_export_target( void *host, uint16_t dev_id, 
+	fc_port_t *port, uint16_t pathid); 
 
 /*
  * Global Function Prototypes in qla_cfgln.c source file.
  */
-extern inline void *kmem_zalloc( int siz, int code, int id);
 extern void qla2x00_cfg_build_path_tree( scsi_qla_host_t *ha);
 extern BOOL qla2x00_update_mp_device(mp_host_t *, fc_port_t  *, uint16_t,
     uint16_t);
@@ -99,6 +102,8 @@ extern int qla2x00_fo_missing_port_summary(scsi_qla_host_t *,
     EXT_DEVICEDATAENTRY *, void *, uint32_t, uint32_t *, uint32_t *);
 extern UINT8
 qla2x00_is_fcport_in_config(scsi_qla_host_t *ha, fc_port_t *fcport);
+extern UINT8
+qla2x00_is_fcport_in_foconfig(scsi_qla_host_t *ha, fc_port_t *fcport);
 
 /*
  * Global Function Prototypes for qla_gs.c functions
@@ -112,7 +117,7 @@ qla2x00_fdmi_register(scsi_qla_host_t *);
 extern void
 qla2x00_fdmi_register_intr(scsi_qla_host_t *);
 
-#if CONFIG_PPC64 || CONFIG_X86_64
+#if defined(QLA_CONFIG_COMPAT)
 extern int qla2x00_ioctl32(unsigned int, unsigned int, unsigned long,
     struct file *);
 #endif

@@ -96,7 +96,14 @@ struct paca_struct {
 	u64 pgtable_cache_sz;		/*					0x18 */
 	u64 next_jiffy_update_tb;	/* TB value for next jiffy update	0x20 */
 	u32 lpEvent_count;		/* lpEvents processed			0x28 */
+#ifndef __GENKSYMS__ /* preserve KMI/ABI ksyms compatibility for mod linkage */
+	u8  yielded;                    /* 0 = this processor is running        0x2c */
+					/* 1 = this processor is yielded             */
+	u8  rsvd2[128-5*8-1*4-1];	/*					0x69 */
+#else
 	u8  rsvd2[128-5*8-1*4];		/*					0x68 */
+#endif
+
 
 /*=====================================================================================
  * CACHE_LINE_3 0x0100 - 0x017F
@@ -149,7 +156,13 @@ struct paca_struct {
  * CACHE_LINE_20-30
  *=====================================================================================
  */
+#ifndef __GENKSYMS__ /* preserve KMI/ABI ksyms compatibility for mod linkage */
+	u64 slb_shadow[0x20];
+	u64 dispatch_log;
+	u8  rsvd6[0x400 - 0x8];
+#else
 	u8 rsvd6[0x500];
+#endif
 
 /*=====================================================================================
  * CACHE_LINE_31 0x0F00 - 0x0F7F Exception stack
@@ -170,5 +183,7 @@ struct paca_struct {
  */
 	u8 guard[0x1000];               /* ... and then hang 'em         */ 
 };
+
+#define get_hard_smp_processor_id(CPU) (paca[(CPU)].xHwProcNum)
 
 #endif /* _PPC64_PACA_H */

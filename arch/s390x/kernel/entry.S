@@ -166,7 +166,8 @@ system_call:
 	la      %r10,4(%r10)      # use 31 bit emulation system calls
 sysc_noemu:
         lgf     %r8,0(%r7,%r10)   # load address of system call routine
-        tm      __TASK_ptrace+7(%r9),0x22 # PT_TRACESYS|PT_AUDITED
+        lg      %r1,__TASK_ptrace(%r9) # process ptrace flags
+        tml     %r1,0x802         # PT_TRACESYS|PT_AUDITED
         jnz     sysc_tracesys
         basr    %r14,%r8          # call sys_xxxx
         stg     %r2,SP_R2(%r15)   # store return value (change R2 on stack)
@@ -610,7 +611,7 @@ sys_call_table:
 	.long  SYSCALL(sys_fremovexattr,sys32_fremovexattr_wrapper)/* 235 */
 	.long  SYSCALL(sys_gettid,sys_gettid)
 	.long  SYSCALL(sys_tkill,sys_tkill)
-	.long  SYSCALL(sys_futex,sys32_futex_wrapper)
+	.long  SYSCALL(s390_futex,sys32_futex_wrapper)
 	.long  SYSCALL(sys_sched_setaffinity,sys32_sched_setaffinity_wrapper)
 	.long  SYSCALL(sys_sched_getaffinity,sys32_sched_getaffinity_wrapper) /* 240 */
 	.long  SYSCALL(sys_tgkill,sys32_tgkill_wrapper)
@@ -718,7 +719,8 @@ pgm_svcper:
 	la      %r10,4(%r10)      # use 31 bit emulation system calls
 pgm_svcper_noemu:
         lgf     %r8,0(%r7,%r10)   # load address of system call routine
-        tm      __TASK_ptrace+7(%r9),0x22 # PT_TRACESYS|PT_AUDITED
+        lg      %r1,__TASK_ptrace(%r9) # process ptrace flags
+        tml     %r1,0x802         # PT_TRACESYS|PT_AUDITED
         jnz     pgm_tracesys
         basr    %r14,%r8          # call sys_xxxx
         stg     %r2,SP_R2(%r15)   # store return value (change R2 on stack)

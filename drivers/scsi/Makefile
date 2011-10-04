@@ -21,7 +21,7 @@ CFLAGS_seagate.o =   -DARBITRATE -DPARITY -DSEAGATE_USE_ASM
 
 O_TARGET := scsidrv.o
 
-export-objs	:= scsi_syms.o 53c700.o libata-core.o
+export-objs	:= scsi_syms.o 53c700.o sd.o libata-core.o
 mod-subdirs	:= pcmcia ../acorn/scsi
 
 
@@ -106,6 +106,10 @@ obj-$(CONFIG_SCSI_EATA_PIO)	+= eata_pio.o
 obj-$(CONFIG_SCSI_7000FASST)	+= wd7000.o
 obj-$(CONFIG_SCSI_MCA_53C9X)	+= NCR53C9x.o	mca_53c9x.o
 obj-$(CONFIG_SCSI_IBMMCA)	+= ibmmca.o
+subdir-$(CONFIG_SCSI_IBMVSCSI)	+= ibmvscsi
+ifeq ($(CONFIG_SCSI_IBMVSCSI),y)
+  obj-$(CONFIG_SCSI_IBMVSCSI)	+= ibmvscsi/ibmvscsic.o
+endif
 obj-$(CONFIG_SCSI_EATA)		+= eata.o
 obj-$(CONFIG_SCSI_DC390T)	+= tmscsim.o
 obj-$(CONFIG_SCSI_AM53C974)	+= AM53C974.o
@@ -138,6 +142,10 @@ obj-$(CONFIG_SCSI_ATA_PIIX)	+= libata.o ata_piix.o
 obj-$(CONFIG_SCSI_SATA_PROMISE)	+= libata.o sata_promise.o
 obj-$(CONFIG_SCSI_SATA_SIL)	+= libata.o sata_sil.o
 obj-$(CONFIG_SCSI_SATA_VIA)	+= libata.o sata_via.o
+obj-$(CONFIG_SCSI_SATA_VITESSE)	+= libata.o sata_vsc.o
+obj-$(CONFIG_SCSI_SATA_SIS)	+= libata.o sata_sis.o
+obj-$(CONFIG_SCSI_SATA_SX4)	+= libata.o sata_sx4.o
+obj-$(CONFIG_SCSI_SATA_NV)	+= libata.o sata_nv.o
 
 subdir-$(CONFIG_ARCH_ACORN)	+= ../acorn/scsi
 obj-$(CONFIG_ARCH_ACORN)	+= ../acorn/scsi/acorn-scsi.o
@@ -147,6 +155,8 @@ obj-$(CONFIG_CHR_DEV_OSST)	+= osst.o
 obj-$(CONFIG_BLK_DEV_SD)	+= sd_mod.o
 obj-$(CONFIG_BLK_DEV_SR)	+= sr_mod.o
 obj-$(CONFIG_CHR_DEV_SG)	+= sg.o
+
+obj-$(CONFIG_SCSI_DUMP)		+= scsi_dump.o
 
 list-multi	:= scsi_mod.o sd_mod.o sr_mod.o initio.o a100u2w.o cpqfc.o \
 			zalon7xx_mod.o libata.o

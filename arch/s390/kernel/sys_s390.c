@@ -24,6 +24,7 @@
 #include <linux/mman.h>
 #include <linux/file.h>
 #include <linux/utsname.h>
+#include <linux/futex.h>
 
 #include <asm/uaccess.h>
 #include <asm/ipc.h>
@@ -250,3 +251,11 @@ asmlinkage int sys_ioperm(unsigned long from, unsigned long num, int on)
   return -ENOSYS;
 }
 
+asmlinkage int s390_futex(u32 *uaddr, int op, int val,
+	struct timespec *utime, u32 *uaddr2)
+{
+	struct pt_regs *regs;
+
+	regs = __KSTK_PTREGS(current);
+	return sys_futex(uaddr, op, val, utime, uaddr2, regs->gprs[7]);
+}

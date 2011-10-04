@@ -131,6 +131,7 @@ enum
 	KERN_TASK_SIZE=60,	/* int: process VM size */
 	KERN_HONOR_UAC_NOPRINT=61, /* int: allow access to UAC_NOPRINT prctl */
 	KERN_S390_HZ_TIMER=62,	/* int: hz timer on or off */
+	KERN_UNKNOWN_NMI_PANIC=63, /* int: unknown nmi panic flag */
 };
 
 
@@ -156,6 +157,7 @@ enum
 	VM_DCACHE_PRIORITY=24,	/* int: priority of the dcache pool */
 	VM_INACTIVE_CLEAN_PERCENT=25, /* int: percent of inactive thats clean */
 	VM_STACK_DEFER_THRESHOLD=26, /* int: softirq-defer threshold */
+	VM_SKIP_MAPPED_PAGES=27,/* int: don't reclaim pages w/active mappings */
 };
 
 

@@ -244,8 +244,7 @@ typedef struct wan_stat_entry
 		struct proc_dir_entry* dent;
 		char* page;
 		int pos, len;
-		loff_t n = *ppos;
-		unsigned offs = n;
+		loff_t offs = *ppos;
 
 		if (count <= 0)
 			return 0;
@@ -259,7 +258,7 @@ typedef struct wan_stat_entry
 			return -ENOBUFS;
 			
 		pos = dent->get_info(page, dent->data, 0, 0);
-		if (offs == n && offs < pos) {
+		if (offs >= 0 && offs < pos) {
 			len = min_t(unsigned int, pos - offs, count);
 			if (copy_to_user(buf, (page + offs), len)) {
 				kfree(page);

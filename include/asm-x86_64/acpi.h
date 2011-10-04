@@ -107,6 +107,7 @@
 #ifndef CONFIG_ACPI_BOOT
 #define acpi_lapic 0
 #define acpi_ioapic 0
+#define acpi_noirq 0
 #else
 #ifdef CONFIG_X86_LOCAL_APIC
 extern int acpi_lapic;
@@ -118,6 +119,8 @@ extern int acpi_ioapic;
 #else
 #define acpi_ioapic 0
 #endif
+
+extern int acpi_noirq;
 
 /* Fixmap pages to reserve for ACPI boot-time tables (see fixmap.h) */
 #define FIX_ACPI_PAGES 4

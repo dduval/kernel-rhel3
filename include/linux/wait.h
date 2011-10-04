@@ -43,6 +43,11 @@ struct __wait_queue {
 #endif
 };
 
+struct filtered_wait_queue {
+	void *key;
+	wait_queue_t wait;
+};
+
 /*
  * 'dual' spinlock architecture. Can be switched between spinlock_t and
  * rwlock_t locks via changing this define. Since waitqueues are quite
@@ -156,6 +161,12 @@ typedef struct __wait_queue_head wait_queue_head_t;
 	lock:		WAITQUEUE_RW_LOCK_UNLOCKED,			\
 	task_list:	{ &(name).task_list, &(name).task_list },	\
 			__WAITQUEUE_HEAD_DEBUG_INIT(name)}
+
+#define DEFINE_FILTERED_WAIT(name, p)					\
+	struct filtered_wait_queue name = {				\
+		.key	= p,						\
+		.wait	= __WAITQUEUE_INITIALIZER(name.wait, current),	\
+	}
 
 #define DECLARE_WAIT_QUEUE_HEAD(name) \
 	wait_queue_head_t name = __WAIT_QUEUE_HEAD_INITIALIZER(name)

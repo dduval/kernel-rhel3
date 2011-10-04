@@ -718,6 +718,8 @@ pSeries_pcibios_fixup(void)
 
 	if (naca->interrupt_controller == IC_PPC_XIC) {
 		xics_isa_init(); 
+	} else {
+		openpic_isa_init();
 	}
 }
 

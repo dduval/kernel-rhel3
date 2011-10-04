@@ -18,6 +18,7 @@
 #include <linux/swapctl.h>
 #include <linux/prefetch.h>
 #include <linux/locks.h>
+#include <linux/bootmem.h>
 
 /*
  * New inode.c implementation.
@@ -285,7 +286,8 @@ void refile_inode(struct inode *inode)
 		BUG(); */
 	if (!inode) return;
 	spin_lock(&inode_lock);
-	__refile_inode(inode);
+	if (!(inode->i_state & I_LOCK))
+		__refile_inode(inode);
 	spin_unlock(&inode_lock);
 }
 
@@ -1205,48 +1207,30 @@ int bmap(struct inode * inode, int block)
 /*
  * Initialize the hash tables.
  */
+void __init inode_init_early(unsigned long mempages)
+{
+	struct list_head *p;
+	int loop;
+
+	inode_hashtable =
+		alloc_large_system_hash("Inode cache",
+					sizeof(struct list_head),
+					14,
+					1,
+					&i_hash_shift,
+					&i_hash_mask);
+
+	p = inode_hashtable;
+	loop = 1 << i_hash_shift;
+	do {
+		INIT_LIST_HEAD(p);
+		p++;
+		loop--;
+	} while (loop);
+}
+
 void __init inode_init(unsigned long mempages)
 {
-	struct list_head *head;
-	unsigned long order;
-	unsigned int nr_hash;
-	int i;
-
-	mempages >>= (14 - PAGE_SHIFT);
-	mempages *= sizeof(struct list_head);
-	for (order = 0; ((1UL << order) << PAGE_SHIFT) < mempages; order++)
-		;
-
-	do {
-		unsigned long tmp;
-
-		nr_hash = (1UL << order) * PAGE_SIZE /
-			sizeof(struct list_head);
-		i_hash_mask = (nr_hash - 1);
-
-		tmp = nr_hash;
-		i_hash_shift = 0;
-		while ((tmp >>= 1UL) != 0UL)
-			i_hash_shift++;
-
-		inode_hashtable = (struct list_head *)
-			__get_free_pages(GFP_ATOMIC, order);
-	} while (inode_hashtable == NULL && --order >= 0);
-
-	printk(KERN_INFO "Inode cache hash table entries: %d (order: %ld, %ld bytes)\n",
-			nr_hash, order, (PAGE_SIZE << order));
-
-	if (!inode_hashtable)
-		panic("Failed to allocate inode hash table\n");
-
-	head = inode_hashtable;
-	i = nr_hash;
-	do {
-		INIT_LIST_HEAD(head);
-		head++;
-		i--;
-	} while (i);
-
 	/* inode slab cache */
 	inode_cachep = kmem_cache_create("inode_cache", sizeof(struct inode),
 					 0, SLAB_HWCACHE_ALIGN, init_once,

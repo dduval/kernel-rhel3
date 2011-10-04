@@ -53,6 +53,50 @@ unsigned long vmalloc_end = VMALLOC_END_INIT;
 static struct page *vmem_map;
 static unsigned long num_dma_physpages;
 
+struct curr_mem_request {
+	unsigned long requested;
+	int found;
+};
+
+/*
+ *  Check whether a physical address fits within the memory descriptor
+ *  block sent from efi_mmap_walk(). If it fits, set found.
+ */
+static int
+verify_physaddr (unsigned long start, unsigned long end, void *arg)
+{
+	struct curr_mem_request *cr = (struct curr_mem_request *)arg;
+
+	start = __pa(start);
+	end = __pa(end);
+
+	if ((cr->requested >= start) && (cr->requested + PAGE_SIZE) <= end) {
+		cr->found = 1;
+		return -1;
+	}
+
+	return 0;
+}
+
+/* 
+ * If physical page 'nr' is valid RAM then return 1.  Otherwise return 0.
+ */
+int
+page_is_ram (unsigned long pagenr)
+{
+	struct curr_mem_request cr;
+
+	if (pagenr >= max_mapnr)
+		return 0;
+
+	cr.requested = pagenr << PAGE_SHIFT;
+	cr.found = 0;
+
+	efi_memmap_walk(verify_physaddr, &cr);
+
+	return cr.found;
+}
+
 int
 do_check_pgt_cache (int low, int high)
 {
@@ -404,7 +448,9 @@ create_mem_map_page_table (u64 start, u64 end, void *arg)
 	pgd_t *pgd;
 	pmd_t *pmd;
 	pte_t *pte;
+	static void *lastpage;
 
+	lastpage = __pa(MAX_DMA_ADDRESS);
 	/* should we use platform_map_nr here? */
 
 	map_start = vmem_map + MAP_NR_DENSE(start);
@@ -423,9 +469,10 @@ create_mem_map_page_table (u64 start, u64 end, void *arg)
 			pmd_populate_kernel(&init_mm, pmd, alloc_bootmem_pages(PAGE_SIZE));
 		pte = pte_offset_kernel(pmd, address);
 
-		if (pte_none(*pte))
-			set_pte(pte, mk_pte_phys(__pa(alloc_bootmem_low_pages(PAGE_SIZE)),
-						 PAGE_KERNEL));
+		if (pte_none(*pte)) {
+			lastpage = __pa(__alloc_bootmem(PAGE_SIZE, PAGE_SIZE, lastpage));	
+			set_pte(pte, mk_pte_phys(lastpage, PAGE_KERNEL));
+		}
  	}
  	return 0;
 }

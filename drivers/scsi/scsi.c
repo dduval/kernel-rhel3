@@ -77,6 +77,7 @@
 #undef USE_STATIC_SCSI_MEMORY
 
 struct proc_dir_entry *proc_scsi;
+int scsi_in_detection;
 
 #ifdef CONFIG_PROC_FS
 static int scsi_proc_info(char *buffer, char **start, off_t offset, int length);
@@ -1096,6 +1097,11 @@ void scsi_done(Scsi_Cmnd * SCpnt)
 
 	prefetchw(SCpnt->request.bh);
 
+#if defined(CONFIG_SCSI_DUMP) || defined(CONFIG_SCSI_DUMP_MODULE)
+	if (crashdump_mode())
+		return;
+#endif
+
 	/*
 	 * We don't have to worry about this one timing out any more.
 	 */
@@ -1479,6 +1485,11 @@ void scsi_build_commandblocks(Scsi_Device * SDpnt)
 	 * Init the list we keep free commands on
 	 */
 	INIT_LIST_HEAD(&SDpnt->sdev_free_q);
+
+	/*
+	 * Init the list we keep commands to be retried on
+	 */
+	INIT_LIST_HEAD(&SDpnt->sdev_retry_q);
 
         /*
          * Initialize the object that we will use to wait for command blocks.
@@ -1885,6 +1896,121 @@ out:
 }
 #endif
 
+#ifdef CONFIG_PROC_FS
+extern void build_proc_dir(Scsi_Host_Template *);
+extern void build_proc_dir_entry(struct Scsi_Host *);
+#endif
+
+/*
+ * This is called once for every host found during module loading after the
+ * detect routine has completed.  It is also called by scsi_register() when
+ * dynamically adding an adapter to an already loaded and running module.
+ */
+void scsi_setup_host(struct Scsi_Host *shpnt)
+{
+	char * name;
+
+	/* Make an entry for this host in the module's /proc directory */
+#ifdef CONFIG_PROC_FS
+	build_proc_dir_entry(shpnt);
+#endif
+	/* Print out a nice message about this host */
+	if (shpnt->hostt->info)
+		name = (char *)shpnt->hostt->info(shpnt);
+	else
+		name = (char *)shpnt->hostt->name;
+	printk(KERN_INFO "scsi%d : %s\n", shpnt->host_no, name);
+	/* Start any needed error handler threads */
+	if (shpnt->hostt->use_new_eh_code) {
+		DECLARE_MUTEX_LOCKED(sem);
+
+		shpnt->eh_notify = &sem;
+		kernel_thread((int (*)(void *))scsi_error_handler, (void *)shpnt, 0);
+
+		/* Now wait for startup to complete */
+		down(&sem);
+		shpnt->eh_notify = NULL;
+	}
+}
+
+void scsi_scan_host(struct Scsi_Host *shpnt)
+{
+	struct Scsi_Device_Template *sdtpnt;
+	Scsi_Device *SDpnt;
+
+	/* Scan the host for devices */
+	scan_scsis(shpnt, 0, 0, 0, 0);
+	/* Set the queue depth on any found devices */
+	if (shpnt->select_queue_depths != NULL) {
+		(shpnt->select_queue_depths) (shpnt, shpnt->host_queue);
+	}
+	/* See if the upper layer drivers noticed any devices */
+	for (sdtpnt = scsi_devicelist; sdtpnt; sdtpnt = sdtpnt->next) {
+		if (sdtpnt->init && sdtpnt->dev_noticed)
+			(*sdtpnt->init) ();
+	}
+	/*
+	 * Next we attach devices and build commandblocks 
+	 */
+	for (SDpnt = shpnt->host_queue; SDpnt; SDpnt = SDpnt->next) {
+		for (sdtpnt = scsi_devicelist; sdtpnt; sdtpnt = sdtpnt->next)
+			if (sdtpnt->attach)
+				(*sdtpnt->attach) (SDpnt);
+		if (SDpnt->attached) {
+			scsi_build_commandblocks(SDpnt);
+			if (0 == SDpnt->has_cmdblocks) {
+				for (sdtpnt = scsi_devicelist; sdtpnt;
+					sdtpnt = sdtpnt->next)
+					if (sdtpnt->detach)
+						(*sdtpnt->detach) (SDpnt);
+
+				if (SDpnt->attached == 0) {
+					/*
+					 * Nobody is using this device any more.
+					 * Free all of the command structures.
+					 */
+		                        if (shpnt->hostt->revoke)
+                		                shpnt->hostt->revoke(SDpnt);
+					devfs_unregister (SDpnt->de);
+
+					/* Now we can remove the device */
+					if (SDpnt->next != NULL)
+						SDpnt->next->prev = SDpnt->prev;
+
+					if (SDpnt->prev != NULL)
+						SDpnt->prev->next = SDpnt->next;
+
+					if (shpnt->host_queue == SDpnt) {
+						shpnt->host_queue = SDpnt->next;
+					}
+					blk_cleanup_queue(&SDpnt->request_queue);
+					kfree((char *) SDpnt);
+				} else {
+					printk(KERN_WARNING "scsi: unable to free partially initialized device!\n");
+				}
+			}
+		}
+	}
+	/*
+	 * Now that we have all of the devices, resize the DMA pool,
+	 * as required.
+	 */
+	scsi_resize_dma_pool();
+
+	/* This does any final handling that is required. */
+	for (sdtpnt = scsi_devicelist; sdtpnt; sdtpnt = sdtpnt->next) {
+		if (sdtpnt->finish && sdtpnt->nr_dev) {
+			(*sdtpnt->finish) ();
+		}
+	}
+#if defined(USE_STATIC_SCSI_MEMORY)
+	printk("SCSI memory: total %ldKb, used %ldKb, free %ldKb.\n",
+	       (scsi_memory_upper_value - scsi_memory_lower_value) / 1024,
+	       (scsi_init_memory_start - scsi_memory_lower_value) / 1024,
+	       (scsi_memory_upper_value - scsi_init_memory_start) / 1024);
+#endif
+}
+
 /*
  * This entry point should be called by a driver if it is trying
  * to add a low level scsi driver to the system.
@@ -1893,11 +2019,7 @@ static int scsi_register_host(Scsi_Host_Template * tpnt)
 {
 	int pcount;
 	struct Scsi_Host *shpnt;
-	Scsi_Device *SDpnt;
-	struct Scsi_Device_Template *sdtpnt;
-	const char *name;
 	unsigned long flags;
-	int out_of_space = 0;
 
 	if (tpnt->next || !tpnt->detect)
 		return 1;	/* Must be already loaded, or
@@ -1926,132 +2048,51 @@ static int scsi_register_host(Scsi_Host_Template * tpnt)
 
 	if (tpnt->use_new_eh_code) {
 		spin_lock_irqsave(&io_request_lock, flags);
-		tpnt->present = tpnt->detect(tpnt);
+		scsi_in_detection = 1;
+		tpnt->detect(tpnt);
+		scsi_in_detection = 0;
 		spin_unlock_irqrestore(&io_request_lock, flags);
-	} else
-		tpnt->present = tpnt->detect(tpnt);
-
-	if (tpnt->present) {
-		if (pcount == next_scsi_host) {
-			if (tpnt->present > 1) {
-				printk(KERN_ERR "scsi: Failure to register low-level scsi driver");
-				scsi_unregister_host(tpnt);
-				return 1;
-			}
-			/* 
-			 * The low-level driver failed to register a driver.
-			 * We can do this now.
-			 */
-			if(scsi_register(tpnt, 0)==NULL)
-			{
-				printk(KERN_ERR "scsi: register failed.\n");
-				scsi_unregister_host(tpnt);
-				return 1;
-			}
-		}
-		tpnt->next = scsi_hosts;	/* Add to the linked list */
-		scsi_hosts = tpnt;
-
-		/* Add the new driver to /proc/scsi */
-#ifdef CONFIG_PROC_FS
-		build_proc_dir_entries(tpnt);
-#endif
-
-
-		/*
-		 * Add the kernel threads for each host adapter that will
-		 * handle error correction.
-		 */
-		for (shpnt = scsi_hostlist; shpnt; shpnt = shpnt->next) {
-			if (shpnt->hostt == tpnt && shpnt->hostt->use_new_eh_code) {
-				DECLARE_MUTEX_LOCKED(sem);
-
-				shpnt->eh_notify = &sem;
-				kernel_thread((int (*)(void *)) scsi_error_handler,
-					      (void *) shpnt, 0);
-
-				/*
-				 * Now wait for the kernel error thread to initialize itself
-				 * as it might be needed when we scan the bus.
-				 */
-				down(&sem);
-				shpnt->eh_notify = NULL;
-			}
-		}
-
-		for (shpnt = scsi_hostlist; shpnt; shpnt = shpnt->next) {
-			if (shpnt->hostt == tpnt) {
-				if (tpnt->info) {
-					name = tpnt->info(shpnt);
-				} else {
-					name = tpnt->name;
-				}
-				printk(KERN_INFO "scsi%d : %s\n",		/* And print a little message */
-				       shpnt->host_no, name);
-			}
-		}
-
-		/* The next step is to call scan_scsis here.  This generates the
-		 * Scsi_Devices entries
-		 */
-		for (shpnt = scsi_hostlist; shpnt; shpnt = shpnt->next) {
-			if (shpnt->hostt == tpnt) {
-				scan_scsis(shpnt, 0, 0, 0, 0);
-				if (shpnt->select_queue_depths != NULL) {
-					(shpnt->select_queue_depths) (shpnt, shpnt->host_queue);
-				}
-			}
-		}
-
-		for (sdtpnt = scsi_devicelist; sdtpnt; sdtpnt = sdtpnt->next) {
-			if (sdtpnt->init && sdtpnt->dev_noticed)
-				(*sdtpnt->init) ();
-		}
-
-		/*
-		 * Next we create the Scsi_Cmnd structures for this host 
-		 */
-		for (shpnt = scsi_hostlist; shpnt; shpnt = shpnt->next) {
-			for (SDpnt = shpnt->host_queue; SDpnt; SDpnt = SDpnt->next)
-				if (SDpnt->host->hostt == tpnt) {
-					for (sdtpnt = scsi_devicelist; sdtpnt; sdtpnt = sdtpnt->next)
-						if (sdtpnt->attach)
-							(*sdtpnt->attach) (SDpnt);
-					if (SDpnt->attached) {
-						scsi_build_commandblocks(SDpnt);
-						if (0 == SDpnt->has_cmdblocks)
-							out_of_space = 1;
-					}
-				}
-		}
-
-		/*
-		 * Now that we have all of the devices, resize the DMA pool,
-		 * as required.  */
-		if (!out_of_space)
-			scsi_resize_dma_pool();
-
-
-		/* This does any final handling that is required. */
-		for (sdtpnt = scsi_devicelist; sdtpnt; sdtpnt = sdtpnt->next) {
-			if (sdtpnt->finish && sdtpnt->nr_dev) {
-				(*sdtpnt->finish) ();
-			}
-		}
+	} else {
+		scsi_in_detection = 1;
+		tpnt->detect(tpnt);
+		scsi_in_detection = 0;
 	}
-#if defined(USE_STATIC_SCSI_MEMORY)
-	printk("SCSI memory: total %ldKb, used %ldKb, free %ldKb.\n",
-	       (scsi_memory_upper_value - scsi_memory_lower_value) / 1024,
-	       (scsi_init_memory_start - scsi_memory_lower_value) / 1024,
-	       (scsi_memory_upper_value - scsi_init_memory_start) / 1024);
+
+	/*
+	 * If we succeed at registering *any* host adapter, this will be non-0.
+	 * If it's still 0, then we didn't register anything, and we haven't
+	 * linked the template into our template list yet, so backing out and
+	 * exiting is easy, just dec the module count and return non-0.
+	 */
+	if (!tpnt->present) {
+		MOD_DEC_USE_COUNT;
+		return 1;
+	}
+
+	/* Add the new driver to /proc/scsi (directory only) */
+#ifdef CONFIG_PROC_FS
+	build_proc_dir(tpnt);
 #endif
 
+	tpnt->next = scsi_hosts;
+	wmb();
+	scsi_hosts = tpnt;
 
-	if (out_of_space) {
-		scsi_unregister_host(tpnt);	/* easiest way to clean up?? */
-		return 1;
-	} else
-		return 0;
+	/*
+	 * Time to setup whatever SCSI hosts we found.
+	 */
+	for(shpnt = scsi_hostlist; shpnt; shpnt = shpnt->next)
+		if (shpnt->hostt == tpnt)
+			scsi_setup_host(shpnt);
+
+	/*
+	 * Time to scan found hosts
+	 */
+	for(shpnt = scsi_hostlist; shpnt; shpnt = shpnt->next)
+		if (shpnt->hostt == tpnt)
+			scsi_scan_host(shpnt);
+
+	return 0;
 }
 
 /*
@@ -2068,7 +2109,6 @@ static int scsi_unregister_host(Scsi_Host_Template * tpnt)
 	struct Scsi_Device_Template *sdtpnt;
 	struct Scsi_Host *sh1;
 	struct Scsi_Host *shpnt;
-	char name[10];	/* host_no>=10^9? I don't think so. */
 
 	/* get the big kernel lock, so we don't race with open() */
 	lock_kernel();
@@ -2167,22 +2207,6 @@ static int scsi_unregister_host(Scsi_Host_Template * tpnt)
 		}
 	}
 
-	/*
-	 * Next, kill the kernel error recovery thread for this host.
-	 */
-	for (shpnt = scsi_hostlist; shpnt; shpnt = shpnt->next) {
-		if (shpnt->hostt == tpnt
-		    && shpnt->hostt->use_new_eh_code
-		    && shpnt->ehandler != NULL) {
-			DECLARE_MUTEX_LOCKED(sem);
-
-			shpnt->eh_notify = &sem;
-			send_sig(SIGHUP, shpnt->ehandler, 1);
-			down(&sem);
-			shpnt->eh_notify = NULL;
-		}
-	}
-
 	/* Next we free up the Scsi_Cmnd structures for this host */
 
 	for (shpnt = scsi_hostlist; shpnt; shpnt = shpnt->next) {
@@ -2210,9 +2234,6 @@ static int scsi_unregister_host(Scsi_Host_Template * tpnt)
 		if (shpnt->hostt != tpnt)
 			continue;
 		pcount = next_scsi_host;
-		/* Remove the /proc/scsi directory entry */
-		sprintf(name,"%d",shpnt->host_no);
-		remove_proc_entry(name, tpnt->proc_dir);
 		if (tpnt->release)
 			(*tpnt->release) (shpnt);
 		else {
@@ -2229,7 +2250,6 @@ static int scsi_unregister_host(Scsi_Host_Template * tpnt)
 		}
 		if (pcount == next_scsi_host)
 			scsi_unregister(shpnt);
-		tpnt->present--;
 	}
 
 	/*
@@ -2488,36 +2508,44 @@ int scsi_unregister_module(int module_type, void *ptr)
 static void scsi_dump_status(int level)
 {
 #ifdef CONFIG_SCSI_LOGGING		/* { */
-	int i;
+	int i, j;
 	struct Scsi_Host *shpnt;
 	Scsi_Cmnd *SCpnt;
 	Scsi_Device *SDpnt;
-	printk(KERN_INFO "Dump of scsi host parameters:\n");
+	request_queue_t *q;
+	unsigned long flags;
+
 	i = 0;
 	for (shpnt = scsi_hostlist; shpnt; shpnt = shpnt->next) {
-		printk(KERN_INFO " %d %d %d : %d %d\n",
+		printk(KERN_INFO "Dump of scsi host parameters:\n");
+		printk(KERN_INFO "(scsi%d) Failed %d Busy %d Active %d\n",
+		       shpnt->host_no,
 		       shpnt->host_failed,
 		       atomic_read(&shpnt->host_busy),
-		       atomic_read(&shpnt->host_active),
+		       atomic_read(&shpnt->host_active));
+		printk(KERN_INFO "(scsi%d) Blocked %d (Timer Active %d) Self Blocked %d\n",
+		       shpnt->host_no,
 		       shpnt->host_blocked,
+		       shpnt->unblock_timer_active,
 		       shpnt->host_self_blocked);
-	}
-
-	printk(KERN_INFO "\n\n");
-	printk(KERN_INFO "Dump of scsi command parameters:\n");
-	for (shpnt = scsi_hostlist; shpnt; shpnt = shpnt->next) {
-		printk(KERN_INFO "h:c:t:l (dev sect nsect cnumsec sg) (ret all flg) (to/cmd to ito) cmd snse result\n");
+		printk(KERN_INFO "Dump of scsi device and command parameters:\n");
 		for (SDpnt = shpnt->host_queue; SDpnt; SDpnt = SDpnt->next) {
+			q = &SDpnt->request_queue;
+			spin_lock_irqsave(q->queue_lock, flags);
+			printk(KERN_INFO "(scsi%d:%d:%d:%d) Busy %d Active %d OnLine %d Blocked %d (Timer Active %d)\n",
+			       shpnt->host_no,
+			       SDpnt->channel,
+			       SDpnt->id,
+			       SDpnt->lun,
+			       atomic_read(&SDpnt->device_busy),
+			       atomic_read(&SDpnt->device_active),
+			       SDpnt->online,
+			       SDpnt->device_blocked,
+			       SDpnt->unblock_timer_active);
+			printk(KERN_INFO "(cnt) ( kdev sect nsect cnsect stat use_sg) (retries allowed flags) (timo/cmd timo int_timo) (cmd[0] sense[2] result)\n");
 			for (SCpnt = SDpnt->device_queue; SCpnt; SCpnt = SCpnt->next) {
-				/*  (0) h:c:t:l (dev sect nsect cnumsec sg) (ret all flg) (to/cmd to ito) cmd snse result %d %x      */
-				printk(KERN_INFO "(%3d) %2d:%1d:%2d:%2d (%6s %4ld %4ld %4ld %4x %1d) (%1d %1d 0x%2x) (%4d %4d %4d) 0x%2.2x 0x%2.2x 0x%8.8x\n",
+				printk(KERN_INFO "(%3d) (%6s %4ld %4ld %4ld %4x %1d) (%1d %1d 0x%2.2x) (%4d %4d %4d) 0x%2.2x 0x%2.2x 0x%8.8x\n",
 				       i++,
-
-				       SCpnt->host->host_no,
-				       SCpnt->channel,
-				       SCpnt->target,
-				       SCpnt->lun,
-
 				       kdevname(SCpnt->request.rq_dev),
 				       SCpnt->request.sector,
 				       SCpnt->request.nr_sectors,
@@ -2537,35 +2565,31 @@ static void scsi_dump_status(int level)
 				       SCpnt->sense_buffer[2],
 				       SCpnt->result);
 			}
-		}
-	}
-
-	for (shpnt = scsi_hostlist; shpnt; shpnt = shpnt->next) {
-		for (SDpnt = shpnt->host_queue; SDpnt; SDpnt = SDpnt->next) {
-			/* Now dump the request lists for each block device */
 			printk(KERN_INFO "Dump of pending block device requests\n");
-			for (i = 0; i < MAX_BLKDEV; i++) {
-				struct list_head * queue_head;
+			printk(KERN_INFO "(kdev r/w sector nsect c_nsect)\n");
+			if (!list_empty(&q->queue_head)) {
+				struct request *req;
+				struct list_head * entry;
 
-				queue_head = &blk_dev[i].request_queue.queue_head;
-				if (!list_empty(queue_head)) {
-					struct request *req;
-					struct list_head * entry;
-
-					printk(KERN_INFO "%d: ", i);
-					entry = queue_head->next;
-					do {
-						req = blkdev_entry_to_request(entry);
-						printk("(%s %d %ld %ld %ld) ",
-						   kdevname(req->rq_dev),
-						       req->cmd,
-						       req->sector,
-						       req->nr_sectors,
-						req->current_nr_sectors);
-					} while ((entry = entry->next) != queue_head);
-					printk("\n");
-				}
+				entry = q->queue_head.next;
+				printk(KERN_INFO);
+				j = 0;
+				do {
+					req = blkdev_entry_to_request(entry);
+					printk("(%s %d %ld %ld %ld) ",
+					   kdevname(req->rq_dev),
+					       req->cmd,
+					       req->sector,
+					       req->nr_sectors,
+					       req->current_nr_sectors);
+					if (++j == 3) {
+						printk("\n"KERN_INFO);
+						j = 0;
+					}
+				} while ((entry = entry->next) != &q->queue_head);
+				printk("\n");
 			}
+			spin_unlock_irqrestore(q->queue_lock, flags);
 		}
 	}
 #endif	/* CONFIG_SCSI_LOGGING */ /* } */
@@ -2649,6 +2673,7 @@ static int __init init_scsi(void)
 	 * when commands are completed.
 	 */
 	open_softirq(SCSI_SOFTIRQ, scsi_softirq_handler, NULL);
+	scsi_in_detection = 0;
 
 	return 0;
 }

@@ -262,6 +262,12 @@ struct pt_all_user_regs {
 	struct ia64_fpreg fr[128];
 };
 
+/* Container to hold dump hander information */
+struct dump_call_param {
+	void (*func)(struct pt_regs *, void *);
+	struct pt_regs	*regs;
+};
+
 #endif /* !__ASSEMBLY__ */
 
 /* indices to application-registers array in pt_all_user_regs */

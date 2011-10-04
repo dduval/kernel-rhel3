@@ -125,12 +125,11 @@ static ssize_t mtd_read(struct file *file, char *buf, size_t count,loff_t *ppos)
 	int ret=0;
 	int len;
 	char *kbuf;
-	loff_t n = *ppos;
-	unsigned long pos = n;
+	loff_t pos = *ppos;
 	
 	DEBUG(MTD_DEBUG_LEVEL0,"MTD_read\n");
 
-	if (n != pos || pos > mtd->size)
+	if (pos < 0 || pos > mtd->size)
 		return 0;
 
 	if (count > mtd->size - pos)
@@ -182,14 +181,13 @@ static ssize_t mtd_write(struct file *file, const char *buf, size_t count,loff_t
 	char *kbuf;
 	size_t retlen;
 	size_t total_retlen=0;
-	loff_t n = *ppos;
-	unsigned long pos = n;
+	loff_t pos = *ppos;
 	int ret=0;
 	int len;
 
 	DEBUG(MTD_DEBUG_LEVEL0,"MTD_write\n");
 	
-	if (n != pos || pos >= mtd->size)
+	if (pos < 0 || pos >= mtd->size)
 		return -ENOSPC;
 	
 	if (count > mtd->size - pos)

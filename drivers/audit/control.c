@@ -86,7 +86,11 @@ static struct miscdevice audit_dev = {
 
 
 #ifdef CONFIG_AUDIT_MODULE
+#ifdef __ia64__
+static int	__audit_intercept(struct pt_regs *, unsigned long *);
+#else
 static int	__audit_intercept(struct pt_regs *);
+#endif
 static void	__audit_result(struct pt_regs *);
 static void	__audit_fork(struct task_struct *, struct task_struct *);
 static void	__audit_exit(struct task_struct *, long code);
@@ -512,8 +516,13 @@ audit_exit(struct task_struct *p, long code)
 /*
  * Intercept system call
  */
+#ifdef __ia64__
+int
+audit_intercept(struct pt_regs *regs, unsigned long *bsp)
+#else
 int
 audit_intercept(struct pt_regs *regs)
+#endif
 {
 	struct aud_syscall_data	*sc;
 	struct aud_process	*pinfo;
@@ -535,6 +544,9 @@ audit_intercept(struct pt_regs *regs)
 
 	sc = &pinfo->syscall;
 	sc->regs = regs;
+#ifdef __ia64__
+	sc->bsp = bsp;
+#endif
 	sc->personality = personality(current->personality);
 	if ((error = audit_get_args(regs, sc)) < 0)
 		goto failed;

@@ -27,7 +27,31 @@ int qla2x00_update_nvram(scsi_qla_host_t *, EXT_IOCTL *, int);
 int qla2x00_write_nvram_word(scsi_qla_host_t *, uint8_t, uint16_t);
 int qla2x00_send_loopback(scsi_qla_host_t *, EXT_IOCTL *, int);
 int qla2x00_read_option_rom(scsi_qla_host_t *, EXT_IOCTL *, int);
+int qla2x00_read_option_rom_ext(scsi_qla_host_t *, EXT_IOCTL *, int);
 int qla2x00_update_option_rom(scsi_qla_host_t *, EXT_IOCTL *, int);
+int qla2x00_update_option_rom_ext(scsi_qla_host_t *, EXT_IOCTL *, int);
+
+/* Option ROM definitions. */
+INT_OPT_ROM_REGION OptionRomTable1[] = // 128k x20000
+{
+    {INT_OPT_ROM_REGION_BIOS,  OPT_ROM_SIZE_1, 0, OPT_ROM_SIZE_1-1},
+    {INT_OPT_ROM_REGION_NONE, 0,                           0, 0}
+};
+
+INT_OPT_ROM_REGION OptionRomTable2[] = // 1M x100000 for 2322/6312
+{
+    {INT_OPT_ROM_REGION_BIOS,   0x10000,        0,       0x10000-1},
+    {INT_OPT_ROM_REGION_FCODE,  0x10000,        0x10000, 0x20000-1},
+    {INT_OPT_ROM_REGION_EFI,    0x10000,        0x20000, 0x30000-1},
+    {INT_OPT_ROM_REGION_VPD,    0x10000,        0x30000, 0x40000-1},
+							// if combine image
+    {INT_OPT_ROM_REGION_BOOT,   0x40000,        0,       0x40000-1},
+    {INT_OPT_ROM_REGION_FW1,    0x40000,        0x80000, 0xC0000-1},
+    {INT_OPT_ROM_REGION_FW2,    0x40000,        0xC0000, OPT_ROM_SIZE_2-1},
+    {INT_OPT_ROM_REGION_ALL,    OPT_ROM_SIZE_2, 0,       OPT_ROM_SIZE_2-1},
+    {INT_OPT_ROM_REGION_NONE,   0,              0,       0}
+}; 
+
 
 int
 qla2x00_read_nvram(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
@@ -68,7 +92,10 @@ qla2x00_read_nvram(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 
 	/* Dump NVRAM. */
 #if defined(ISP2300)
-	if (ha->device_id == QLA2312_DEVICE_ID) {
+	if (ha->device_id == QLA2312_DEVICE_ID ||
+	    ha->device_id == QLA2322_DEVICE_ID ||
+	    ha->device_id == QLA6312_DEVICE_ID ||
+	    ha->device_id == QLA6322_DEVICE_ID) { 	    
 		data = RD_REG_WORD(&reg->ctrl_status);
 		if ((data >> 14) == 1)
 			base = 0x80;
@@ -106,15 +133,17 @@ qla2x00_read_nvram(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		wptr++;
  	}
 
-#if defined(ISP2300)
-	if (ha->device_id == QLA2312_DEVICE_ID) {
+#if defined(ISP2300) 
+	if (ha->device_id == QLA2312_DEVICE_ID ||
+	    ha->device_id == QLA2322_DEVICE_ID ||
+	    ha->device_id == QLA6312_DEVICE_ID ||
+	    ha->device_id == QLA6322_DEVICE_ID) { 	    
 		/* Unlock resource */
 		WRT_REG_WORD(&reg->host_semaphore, 0);
 	}
 #endif
 
-	ret = copy_to_user((uint8_t *)pext->ResponseAdr, ptmp_buf,
-	    transfer_size * 2);
+	ret = copy_to_user(pext->ResponseAdr, ptmp_buf, transfer_size * 2);
 	if (ret) {
 		pext->Status = EXT_STATUS_COPY_ERR;
 		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR copy rsp buffer.\n",
@@ -149,7 +178,7 @@ qla2x00_read_nvram(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 int
 qla2x00_update_nvram(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 {
-#if defined(ISP2300)
+#if defined(ISP2300) 
 	device_reg_t	*reg = ha->iobase;
 #endif
 #if defined(ISP2100)
@@ -213,7 +242,10 @@ qla2x00_update_nvram(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 
 	/* Write to NVRAM */
 #if defined(ISP2300)
-	if (ha->device_id == QLA2312_DEVICE_ID) {
+	if (ha->device_id == QLA2312_DEVICE_ID ||
+	    ha->device_id == QLA2322_DEVICE_ID ||
+	    ha->device_id == QLA6312_DEVICE_ID ||
+	    ha->device_id == QLA6322_DEVICE_ID) { 	    
 		data = RD_REG_WORD(&reg->ctrl_status);
 		if ((data >> 14) == 1)
 			base = 0x80;
@@ -252,7 +284,10 @@ qla2x00_update_nvram(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	}
 
 #if defined(ISP2300)
-	if (ha->device_id == QLA2312_DEVICE_ID) {
+	if (ha->device_id == QLA2312_DEVICE_ID ||
+	    ha->device_id == QLA2322_DEVICE_ID ||
+	    ha->device_id == QLA6312_DEVICE_ID ||
+	    ha->device_id == QLA6322_DEVICE_ID) { 	    
 		/* Unlock resource */
 		WRT_REG_WORD(&reg->host_semaphore, 0);
 	}
@@ -264,6 +299,10 @@ qla2x00_update_nvram(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	qla2x00_free_ioctl_scrap_mem(ha);
 
 	DEBUG9(printk("qla2x00_update_nvram: exiting.\n");)
+
+	/* Schedule DPC to restart the RISC */
+	set_bit(ISP_ABORT_NEEDED, &ha->dpc_flags);
+	up(ha->dpc_wait);
 
 	return 0;
 }
@@ -382,7 +421,7 @@ qla2x00_send_loopback(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	status = copy_from_user(&rsp, pext->ResponseAdr, pext->ResponseLen);
 	if (status) {
 		pext->Status = EXT_STATUS_COPY_ERR;
-		DEBUG9_10(printk("qla2x00_send_loopback: ERROR copy read of "
+		DEBUG9_10(printk("qla2x00_send_loopback: ERROR verify read of "
 		    "response buffer.\n");)
 		return pext->Status;
 	}
@@ -504,7 +543,8 @@ qla2x00_send_loopback(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	return pext->Status;
 }
 
-int qla2x00_read_option_rom(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
+int
+qla2x00_read_option_rom(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 {
 	uint8_t		*usr_tmp;
 	uint32_t	addr;
@@ -513,6 +553,9 @@ int qla2x00_read_option_rom(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	uint8_t		data;
 	device_reg_t	*reg = ha->iobase;
 	unsigned long	cpu_flags;
+
+	if (pext->SubCode)
+		return qla2x00_read_option_rom_ext(ha, pext, mode);
 
 	DEBUG9(printk("%s: entered.\n", __func__);)
 
@@ -550,13 +593,82 @@ int qla2x00_read_option_rom(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	return (0);
 }
 
-int qla2x00_update_option_rom(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
+int
+qla2x00_read_option_rom_ext(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
+{
+	uint8_t		*usr_tmp;
+	uint8_t		data;
+	device_reg_t	*reg = ha->iobase;
+	unsigned long	cpu_flags;
+	int		iter, found;
+	uint32_t	saddr, length, ilength;
+
+	DEBUG9(printk("%s: entered.\n", __func__);)
+
+	found = 0;
+	saddr = length = 0;
+	/* Retrieve region or raw starting address. */
+	if (pext->SubCode == 0xFFFFFFFFUL) {
+		saddr = pext->Reserved1;
+		length = pext->RequestLen;
+		found++;
+	}
+	for (iter = 0;
+	    iter < sizeof(OptionRomTable2) / sizeof(INT_OPT_ROM_REGION);
+	    iter++) {
+		if (OptionRomTable2[iter].Region == pext->SubCode) {
+			saddr = OptionRomTable2[iter].Beg;
+			length = OptionRomTable2[iter].Size;
+			found++;
+			break;
+		}
+	}
+	if (!found) {
+		pext->Status = EXT_STATUS_ERR;
+		return 1;
+	}
+	if (pext->RequestLen < length) {
+		pext->Status = EXT_STATUS_COPY_ERR;
+		return 1;
+	}
+
+	usr_tmp = (uint8_t *)pext->ResponseAdr;
+
+	/* Dump FLASH. */
+	spin_lock_irqsave(&ha->hardware_lock, cpu_flags);
+	qla2x00_flash_enable(ha);
+	WRT_REG_WORD(&reg->nvram, 0);
+	CACHE_FLUSH(&reg->nvram);
+	WRT_REG_WORD(&reg->nvram, NV_SELECT);
+	CACHE_FLUSH(&reg->nvram);
+	for (ilength = 0; ilength < length; saddr++, ilength++, usr_tmp++) {
+		data = qla2x00_read_flash_byte(ha, saddr);
+		if (saddr % 100)
+			udelay(10);
+		__put_user(data, usr_tmp);
+	}
+	qla2x00_flash_disable(ha);
+	spin_unlock_irqrestore(&ha->hardware_lock, cpu_flags);
+
+	pext->Status = EXT_STATUS_OK;
+	pext->DetailStatus = EXT_STATUS_OK;
+
+	DEBUG9(printk("%s: exiting.\n", __func__);)
+
+	return 0;
+}
+
+int
+qla2x00_update_option_rom(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 {
 	int		ret;
 	uint8_t		*usr_tmp;
 	uint8_t		*kern_tmp;
 	uint16_t	status;
 	unsigned long	cpu_flags;
+
+	if (pext->SubCode)
+		return qla2x00_update_option_rom_ext(ha, pext, mode);
 
 	DEBUG9(printk("%s: entered.\n", __func__);)
 
@@ -590,12 +702,8 @@ int qla2x00_update_option_rom(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 
 	/* Go with update */
 	spin_lock_irqsave(&ha->hardware_lock, cpu_flags);
-	status = qla2x00_set_flash_image(ha, kern_tmp);
+	status = qla2x00_set_flash_image(ha, kern_tmp, 0, FLASH_IMAGE_SIZE);
 	spin_unlock_irqrestore(&ha->hardware_lock, cpu_flags);
-
-	/* Schedule DPC to restart the RISC */
-	set_bit(ISP_ABORT_NEEDED, &ha->dpc_flags);
-	up(ha->dpc_wait);
 
 	KMEM_FREE(kern_tmp, FLASH_IMAGE_SIZE);
 
@@ -606,6 +714,94 @@ int qla2x00_update_option_rom(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	}
 
 	DEBUG9(printk("%s: exiting.\n", __func__);)
+
+	/* Schedule DPC to restart the RISC */
+	set_bit(ISP_ABORT_NEEDED, &ha->dpc_flags);
+	up(ha->dpc_wait);
+
+	return (ret);
+}
+
+int
+qla2x00_update_option_rom_ext(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
+{
+	int		ret;
+	uint8_t		*usr_tmp;
+	uint8_t		*kern_tmp;
+	uint16_t	status;
+	unsigned long	cpu_flags;
+	int		iter, found;
+	uint32_t	saddr, length;
+
+	DEBUG9(printk("%s: entered.\n", __func__);)
+
+	found = 0;
+	saddr = length = 0;
+	/* Retrieve region or raw starting address. */
+	if (pext->SubCode == 0xFFFFFFFFUL) {
+		saddr = pext->Reserved1;
+		length = pext->RequestLen;
+		found++;
+	}
+	for (iter = 0;
+	    iter < sizeof(OptionRomTable2) / sizeof(INT_OPT_ROM_REGION);
+	    iter++) {
+		if (OptionRomTable2[iter].Region == pext->SubCode) {
+			saddr = OptionRomTable2[iter].Beg;
+			length = OptionRomTable2[iter].Size;
+			found++;
+			break;
+		}
+	}
+	if (!found) {
+		pext->Status = EXT_STATUS_ERR;
+		return 1;
+	}
+	if (pext->RequestLen < length) {
+		pext->Status = EXT_STATUS_COPY_ERR;
+		return 1;
+	}
+
+	pext->Status = EXT_STATUS_OK;
+	pext->DetailStatus = EXT_STATUS_OK;
+
+	/* Read from user buffer */
+	usr_tmp = (uint8_t *)pext->RequestAdr;
+
+	kern_tmp = (uint8_t *)KMEM_ZALLOC(length, 30);
+	if (kern_tmp == NULL) {
+		pext->Status = EXT_STATUS_COPY_ERR;
+		printk(KERN_WARNING
+		    "%s: ERROR in flash allocation.\n", __func__);
+		return 1;
+	}
+	ret = copy_from_user(kern_tmp, usr_tmp, length);
+	if (ret) {
+		KMEM_FREE(kern_tmp, length);
+		pext->Status = EXT_STATUS_COPY_ERR;
+		DEBUG9_10(printk("%s: ERROR in buffer copy READ. "
+		    "RequestAdr=%p\n", __func__, pext->RequestAdr));
+		return (ret);
+	}
+
+	/* Go with update */
+	spin_lock_irqsave(&ha->hardware_lock, cpu_flags);
+	status = qla2x00_set_flash_image(ha, kern_tmp, saddr, length);
+	spin_unlock_irqrestore(&ha->hardware_lock, cpu_flags);
+
+	KMEM_FREE(kern_tmp, FLASH_IMAGE_SIZE);
+
+	if (status) {
+		ret = 1;
+		pext->Status = EXT_STATUS_COPY_ERR;
+		DEBUG9_10(printk("%s: ERROR updating flash.\n", __func__);)
+	}
+
+	DEBUG9(printk("%s: exiting.\n", __func__);)
+
+	/* Schedule DPC to restart the RISC */
+	set_bit(ISP_ABORT_NEEDED, &ha->dpc_flags);
+	up(ha->dpc_wait);
 
 	return (ret);
 }

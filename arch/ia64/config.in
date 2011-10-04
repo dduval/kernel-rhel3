@@ -131,6 +131,8 @@ bool 'Sysctl support' CONFIG_SYSCTL
 tristate 'Kernel support for ELF binaries' CONFIG_BINFMT_ELF
 tristate 'Kernel support for MISC binaries' CONFIG_BINFMT_MISC
 
+tristate 'System call auditing' CONFIG_AUDIT
+
 if [ "$CONFIG_IA64_HP_SIM" = "n" ]; then
   define_bool CONFIG_ACPI y
   define_bool CONFIG_ACPI_EFI y

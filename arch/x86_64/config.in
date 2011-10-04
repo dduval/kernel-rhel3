@@ -10,7 +10,7 @@ define_bool CONFIG_X86 y
 define_bool CONFIG_ISA n
 define_bool CONFIG_SBUS n
 
-define_bool CONFIG_UID16 y
+define_bool CONFIG_UID16 n
 define_bool CONFIG_RWSEM_GENERIC_SPINLOCK y
 define_bool CONFIG_RWSEM_XCHGADD_ALGORITHM n
 define_bool CONFIG_X86_CMPXCHG y

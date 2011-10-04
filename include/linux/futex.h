@@ -6,13 +6,15 @@
 #define FUTEX_WAKE (1)
 #define FUTEX_FD (2)
 #define FUTEX_REQUEUE (3)
+#define FUTEX_CMP_REQUEUE (4)
 
 #define __user
 
 asmlinkage long sys_futex(u32 __user *uaddr, int op, int val,
-			struct timespec __user *utime, u32 __user *uaddr2);
+			struct timespec __user *utime, u32 __user *uaddr2,
+			int val3);
 
 long do_futex(unsigned long uaddr, int op, int val,
-		unsigned long timeout, unsigned long uaddr2, int val2);
+	      unsigned long timeout, unsigned long uaddr2, int val2, int val3);
 
 #endif

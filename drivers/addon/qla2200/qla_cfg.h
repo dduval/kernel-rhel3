@@ -115,13 +115,13 @@ failover_notify_srb_t;
 #define	WWULN_SIZE		32
 typedef struct _mp_lun {
    	struct _mp_lun   	*next;
-	struct _mp_device	*dp; 				/* Multipath device */
-	int			number;				/* actual lun number */
-	fc_lun_t	*paths[MAX_PATHS_PER_DEVICE];		/* list of fcluns */
+	struct _mp_device	*dp; 			/* Multipath device */
+	int			number;			/* actual lun number */
+	fc_lun_t	*paths[MAX_PATHS_PER_DEVICE];	/* list of fcluns */
 	struct list_head	ports_list;
-	int			path_cnt;			/* Must be > 1 for fo device  */
-	int			siz;				/* Size of wwuln  */
-	uint8_t		wwuln[WWULN_SIZE];			/* lun id from inquiry page 83. */
+	int			path_cnt;		/* Must be > 1 for fo device  */
+	int			siz;			/* Size of wwuln  */
+	uint8_t		wwuln[WWULN_SIZE];/* lun id from inquiry page 83. */
 }
 mp_lun_t;
 
@@ -131,6 +131,7 @@ typedef struct _mp_port {
 	uint8_t		path_list[ MAX_HOSTS ]; /* path index for a given HBA */
 	scsi_qla_host_t	*hba_list[ MAX_HOSTS ];
 	int		cnt;
+	int		fo_cnt;
 	ulong 	total_blks;	/* blocks transferred on this port */
 }
 mp_port_t;
@@ -159,7 +160,7 @@ typedef struct _mp_host {
 	struct _mp_host	*next;	/* ptr to next host adapter in list */
 	scsi_qla_host_t	*ha;	/* ptr to lower-level driver adapter struct */
 	int		instance;	/* OS instance number */
-	fc_port_t	*fcport;	/* Port chain for this adapter */
+	struct list_head *fcports;	/* Port chain for this adapter */
 	mp_device_t	*mp_devs[MAX_MP_DEVICES]; /* Multipath devices */
 
 	uint32_t	flags;
@@ -184,6 +185,7 @@ typedef struct _mp_path {
 	struct _mp_host	*host;			/* Pointer to adapter */
 	fc_port_t	*port;			/* FC port info  */
 	uint16_t	id;			/* Path id (index) */
+	uint16_t	flags;
 	uint8_t		mp_byte;		/* Multipath control byte */
 #define MP_MASK_HIDDEN		0x80
 #define MP_MASK_UNCONFIGURED	0x40

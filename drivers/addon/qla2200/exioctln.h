@@ -149,7 +149,7 @@ typedef struct  track_instance {
     _IOWR(QLMULTIPATH_MAGIC, idx, sizeof(EXT_IOCTL))
 
 #ifndef APILIB
-  #if CONFIG_PPC64 || CONFIG_X86_64
+  #if defined(QLA_CONFIG_COMPAT)
   #define	QL_IOCTL_CMD(idx)	(QL_IOCTL_BASE(idx) - 0x40000)
   #else
   #define	QL_IOCTL_CMD(idx)	QL_IOCTL_BASE(idx)

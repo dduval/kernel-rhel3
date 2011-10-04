@@ -189,6 +189,7 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 static inline int dup_mmap(struct mm_struct * mm)
 {
 	struct vm_area_struct * mpnt, *tmp, **pprev;
+	rb_node_t **rb_link, *rb_parent;
 	int retval;
 	unsigned long charge = 0;
 
@@ -202,6 +203,9 @@ static inline int dup_mmap(struct mm_struct * mm)
 	mm->non_executable_cache = NON_EXECUTABLE_CACHE(current);
 	mm->rss = 0;
 	mm->cpu_vm_mask = 0;
+	mm->mm_rb = RB_ROOT;
+	rb_link = &mm->mm_rb.rb_node;
+	rb_parent = NULL;
 	pprev = &mm->mmap;
 
 	/*
@@ -254,11 +258,17 @@ static inline int dup_mmap(struct mm_struct * mm)
 
 		/*
 		 * Link in the new vma and copy the page table entries:
-		 * link in first so that swapoff can see swap entries.
+		 * link in first so that swapoff can see swap entries,
+		 * and try_to_unmap_one's find_vma find the new vma.
 		 */
 		spin_lock(&mm->page_table_lock);
 		*pprev = tmp;
 		pprev = &tmp->vm_next;
+
+		__vma_link_rb(mm, tmp, rb_link, rb_parent);
+		rb_link = &tmp->vm_rb.rb_right;
+		rb_parent = &tmp->vm_rb;
+
 		mm->map_count++;
 		retval = copy_page_range(mm, current->mm, tmp);
 		spin_unlock(&mm->page_table_lock);
@@ -270,7 +280,6 @@ static inline int dup_mmap(struct mm_struct * mm)
 			goto fail_nomem;
 	}
 	retval = 0;
-	build_mmap_rb(mm);
 out:
 	flush_tlb_mm(current->mm);
 	return retval;
@@ -383,7 +392,7 @@ void mm_release(void)
 		 * not set up a proper pointer then tough luck.
 		 */
 		put_user(0, tidptr);
-		sys_futex(tidptr, FUTEX_WAKE, 1, NULL, NULL);
+		sys_futex(tidptr, FUTEX_WAKE, 1, NULL, NULL, 0);
 	}
 }
 

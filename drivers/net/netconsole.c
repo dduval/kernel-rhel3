@@ -447,7 +447,7 @@ static void write_netconsole_msg(struct console *con, const char *msg0, unsigned
 	reply_t reply;
 
 	dev = netconsole_dev;
-	if (!dev || netdump_mode)
+	if (!dev || crashdump_mode())
 		return;
 
 	if (dev->poll_controller && netif_running(dev)) {

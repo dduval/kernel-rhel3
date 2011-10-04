@@ -388,3 +388,203 @@ nfs_direct_IO(int rw, struct file *file, struct kiobuf *iobuf,
 	dfprintk(VFS, "NFS: direct_IO result = %d\n", result);
 	return result;
 }
+
+static int
+nfs_precheck_file_write(struct file *file, struct inode *inode, size_t *count,
+	loff_t *ppos)
+{
+	ssize_t		err;
+	unsigned long	limit = current->rlim[RLIMIT_FSIZE].rlim_cur;
+	loff_t		pos = *ppos;
+	
+	err = -EINVAL;
+	if (pos < 0)
+		goto out;
+
+	err = file->f_error;
+	if (err) {
+		file->f_error = 0;
+		goto out;
+	}
+
+	if (file->f_flags & O_APPEND)
+		*ppos = pos = inode->i_size;
+
+	err = -EFBIG;
+	if (limit != RLIM_INFINITY) {
+		if (pos >= limit) {
+			send_sig(SIGXFSZ, current, 0);
+			goto out;
+		}
+		if (pos > 0xFFFFFFFFULL)
+			*count = 0;
+		else if (*count > limit - (u32)pos)
+			*count = limit - (u32)pos;
+	}
+
+	if ( pos + *count > MAX_NON_LFS && !(file->f_flags&O_LARGEFILE)) {
+		if (pos >= MAX_NON_LFS) {
+			send_sig(SIGXFSZ, current, 0);
+			goto out;
+		}
+		if (*count > MAX_NON_LFS - (u32)pos)
+			*count = MAX_NON_LFS - (u32)pos;
+	}
+
+	err = 0;
+	if (*count == 0)
+		goto out;
+
+out:
+	return err;
+}
+
+/*
+ * Based on generic_file_direct_IO, but no need to hold the i_sem here,
+ * and we don't need any of the silly block alignment semantics.
+ */
+static ssize_t
+nfs_file_direct_IO(int rw, struct file *filp, char *buf, size_t count,
+	loff_t offset)
+{
+	ssize_t retval, progress;
+	int chunk_size, iosize, new_iobuf;
+	struct kiobuf *iobuf;
+	struct address_space *mapping = filp->f_dentry->d_inode->i_mapping;
+	struct inode *inode = mapping->host;
+
+	new_iobuf = 0;
+	iobuf = filp->f_iobuf;
+	if (test_and_set_bit(0, &filp->f_iobuf_lock)) {
+		/*
+		 * A parallel read/write is using the preallocated iobuf
+		 * so just run slow and allocate a new one.
+		 */
+		retval = alloc_kiovec(1, &iobuf);
+		if (retval)
+			goto out;
+		new_iobuf = 1;
+	}
+
+	retval = filemap_fdatasync(mapping);
+	if (retval == 0)
+		retval = fsync_inode_data_buffers(inode);
+	if (retval == 0)
+		retval = filemap_fdatawait(mapping);
+	if (retval < 0)
+		goto out_free;
+
+	progress = retval = 0;
+	chunk_size = KIO_MAX_ATOMIC_IO << 10;
+	while (count > 0) {
+		iosize = count;
+		if (iosize > chunk_size)
+			iosize = chunk_size;
+
+		retval = map_user_kiobuf(rw, iobuf, (unsigned long) buf, iosize);
+		if (retval)
+			break;
+
+		switch (rw) {
+		case READ:
+			retval = nfs_direct_read(filp, iobuf, offset+progress, iosize);
+			if (retval > 0)
+				mark_dirty_kiobuf(iobuf, retval);
+			break;
+		case WRITE:
+			retval = nfs_direct_write(filp, iobuf, offset+progress, iosize);
+			break;
+		}
+
+		if (retval >= 0) {
+			count -= retval;
+			buf += retval;
+			progress += retval;
+		}
+
+		unmap_kiobuf(iobuf);
+
+		if (retval != iosize)
+			break;
+	}
+
+	if (progress)
+		retval = progress;
+
+ out_free:
+	if (!new_iobuf)
+		clear_bit(0, &filp->f_iobuf_lock);
+	else
+		free_kiovec(1, &iobuf);
+ out:	
+	return retval;
+}
+
+ssize_t
+nfs_file_direct_read(struct file * file, char * buf, size_t count, loff_t *ppos)
+{
+	loff_t pos = *ppos;
+	struct dentry *dentry = file->f_dentry;
+	struct inode *inode = file->f_dentry->d_inode->i_mapping->host;
+	ssize_t retval;
+
+	dfprintk(VFS, "nfs: direct read(%s/%s, %lu@%lu)\n",
+		dentry->d_parent->d_name.name, dentry->d_name.name,
+		(unsigned long) count, (unsigned long) *ppos);
+
+	if ((ssize_t) count < 0)
+		return -EINVAL;
+	if (!access_ok(VERIFY_WRITE, buf, count))
+		return -EFAULT;
+	if (!count)
+		return 0;
+
+	down_read(&inode->i_alloc_sem);
+	retval = nfs_file_direct_IO(READ, file, buf, count, pos);
+	if (retval > 0)
+		*ppos = pos + retval;
+	up_read(&inode->i_alloc_sem);
+
+	return retval;
+}
+
+ssize_t
+nfs_file_direct_write(struct file *file, char *buf, size_t count, loff_t *ppos)
+{
+	int o_append = file->f_flags & O_APPEND;
+	loff_t pos = *ppos;
+	struct dentry *dentry = file->f_dentry;
+	struct address_space *mapping = file->f_dentry->d_inode->i_mapping;
+	struct inode *inode = mapping->host;
+	ssize_t retval;
+
+	dfprintk(VFS, "nfs: direct write(%s/%s(%ld), %lu@%lu)\n",
+		dentry->d_parent->d_name.name, dentry->d_name.name,
+		inode->i_ino, (unsigned long) count, (unsigned long) *ppos);
+
+	if ((ssize_t) count < 0)
+		return -EINVAL;
+	if (!access_ok(VERIFY_READ, buf, count))
+		return -EFAULT;
+
+	down_read(&inode->i_alloc_sem);
+	if (o_append)
+		down(&inode->i_sem);
+	
+	retval = nfs_precheck_file_write(file, inode, &count, &pos);
+	if (retval != 0 || count == 0)
+		goto out;
+	
+	retval = nfs_file_direct_IO(WRITE, file, buf, count, pos);
+	if (retval > 0) {
+		*ppos = pos + retval;
+		invalidate_inode_pages2(mapping);
+	}
+
+out:
+	if (o_append)
+		up(&inode->i_sem);
+	up_read(&inode->i_alloc_sem);
+
+	return retval;
+}

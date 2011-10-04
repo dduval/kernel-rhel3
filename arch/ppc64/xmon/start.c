@@ -209,6 +209,8 @@ xmon_readchar(void)
 	for (;;) {
 		switch (xmon_read(xmon_stdin, &ch, 1)) {
 		case 1:
+			if (ch == 0)
+				continue;
 			return ch;
 		case -1:
 			xmon_printf("read(stdin) returned -1\r\n", 0, 0);

@@ -110,7 +110,14 @@ struct ItLpPaca
 	u64     xPDCSavedSPRG1;         // Saved SPRG1 for PMC int      x68-x6F
 	u64     xPDCSavedSRR0;          // Saved SRR0 for PMC int       x70-x77
 	volatile u32 xVirtualDecr;	// Virtual DECR for shared procsx78-x7B
-	u32	    xRsvd2_2;		// Reserved			x7C-x7F
+#ifndef __GENKSYMS__ /* preserve KMI/ABI ksyms compatibility for mod linkage */
+	u16     xSLBCount;              // # of SLBs to maintain        x7C-x7D
+	u8      xIdle;                  // Indicate OS is idle          x7E
+	u8      xRsvd2_2;               // Reserved                     x7F
+#else
+	u32	xRsvd2_2;		// Reserved			x7C-x7F
+#endif
+
 
 //=============================================================================
 // CACHE_LINE_3 0x0100 - 0x007F: This line is shared with other processors

@@ -133,8 +133,7 @@ static int flash_ioctl(struct inode *inodep, struct file *filep, unsigned int cm
 
 static ssize_t flash_read(struct file *file, char *buf, size_t size, loff_t * ppos)
 {
-	loff_t n = *ppos;
-	unsigned long p = n;
+	loff_t p = *ppos;
 	unsigned int count = size;
 	int ret = 0;
 
@@ -145,7 +144,7 @@ static ssize_t flash_read(struct file *file, char *buf, size_t size, loff_t * pp
 	if (count)
 		ret = -ENXIO;
 
-	if (n == p && p < gbFlashSize) {
+	if (p >= 0 && p < gbFlashSize) {
 		if (count > gbFlashSize - p)
 			count = gbFlashSize - p;
 
@@ -166,8 +165,7 @@ static ssize_t flash_read(struct file *file, char *buf, size_t size, loff_t * pp
 
 static ssize_t flash_write(struct file *file, const char *buf, size_t size, loff_t * ppos)
 {
-	loff_t n = *ppos;
-	unsigned long p = n;
+	loff_t p = *ppos;
 	unsigned int count = size;
 	int written;
 	int nBlock, temp, rc;
@@ -186,7 +184,7 @@ static ssize_t flash_write(struct file *file, const char *buf, size_t size, loff
 	/*
 	 * check for out of range pos or count
 	 */
-	if (p != n || p >= gbFlashSize)
+	if (p < 0 || p >= gbFlashSize)
 		return count ? -ENXIO : 0;
 
 	if (count > gbFlashSize - p)

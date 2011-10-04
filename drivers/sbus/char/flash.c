@@ -105,10 +105,10 @@ static ssize_t
 flash_read(struct file * file, char * buf,
 	   size_t count, loff_t *ppos)
 {
-	unsigned long p = *ppos;
+	loff_t p = *ppos;
 	int i;
 	
-	if (p > flash.read_size)
+	if (p < 0 || p > flash.read_size)
 		return 0;
 
 	if (count > flash.read_size - p)

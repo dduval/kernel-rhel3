@@ -546,32 +546,44 @@ int smp_call_function (void (*func) (void *info), void *info, int nonatomic,
  * hardware interrupt handler or from a bottom half handler.
  */
 {
-	struct call_data_struct data;
+	static struct call_data_struct dumpdata;
+	struct call_data_struct normaldata;
+	struct call_data_struct *data;
 	int cpus = smp_num_cpus-1;
 
 	if (!cpus)
 		return 0;
 
-	data.func = func;
-	data.info = info;
-	atomic_set(&data.started, 0);
-	data.wait = wait > 0 ? wait : 0;
-	if (wait > 0)
-		atomic_set(&data.finished, 0);
-
 	spin_lock(&call_lock);
-	call_data = &data;
+	if (wait == -1) {
+		/* if another cpu beat us, they win! */
+		if (dumpdata.func) {
+			spin_unlock(&call_lock);
+			return 0;
+		}
+		data = &dumpdata;
+	} else
+		data = &normaldata;
+
+	data->func = func;
+	data->info = info;
+	atomic_set(&data->started, 0);
+	data->wait = (wait > 0) ? wait : 0;
+	if (wait > 0)
+		atomic_set(&data->finished, 0);
+
+	call_data = data;
 	mb();
 	/* Send a message to all other CPUs and wait for them to respond */
 	send_IPI_allbutself(CALL_FUNCTION_VECTOR);
 
 	/* Wait for response */
 	if (wait >= 0)
-		while (atomic_read(&data.started) != cpus)
+		while (atomic_read(&data->started) != cpus)
 			barrier();
 
 	if (wait > 0)
-		while (atomic_read(&data.finished) != cpus)
+		while (atomic_read(&data->finished) != cpus)
 			barrier();
 	spin_unlock(&call_lock);
 

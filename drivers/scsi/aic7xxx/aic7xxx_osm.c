@@ -774,6 +774,8 @@ static int	   ahc_linux_biosparam(Disk *, kdev_t, int[]);
 static int	   ahc_linux_bus_reset(Scsi_Cmnd *);
 static int	   ahc_linux_dev_reset(Scsi_Cmnd *);
 static int	   ahc_linux_abort(Scsi_Cmnd *);
+static int	   ahc_linux_sanity_check(Scsi_Device *);
+static void	   ahc_linux_poll(Scsi_Device *);
 
 /*
  * Calculate a safe value for AHC_NSEG (as expressed through ahc_linux_nseg).
@@ -1294,7 +1296,13 @@ ahc_linux_bus_reset(Scsi_Cmnd *cmd)
 	return SUCCESS;
 }
 
-Scsi_Host_Template aic7xxx_driver_template = {
+static struct scsi_dump_ops ahc_dump_ops = {
+	.sanity_check	= ahc_linux_sanity_check,
+	.poll		= ahc_linux_poll,
+};
+
+Scsi_Host_Template_dump aic7xxx_driver_template_dump = {
+	.hostt = {
 	.module			= THIS_MODULE,
 	.name			= "aic7xxx",
 	.proc_info		= ahc_linux_proc_info,
@@ -1338,6 +1346,10 @@ Scsi_Host_Template aic7xxx_driver_template = {
 	.use_new_eh_code	= 1,
 #endif
 	.vary_io                = 1,
+
+	.disk_dump		= 1,
+	},
+	.dump_ops		= &ahc_dump_ops,
 };
 
 /**************************** Tasklet Handler *********************************/
@@ -3879,6 +3891,41 @@ ahc_linux_isr(int irq, void *dev_id, struct pt_regs * regs)
 	ahc_linux_run_complete_queue(ahc);
 	ahc_unlock(ahc, &flags);
 	return IRQ_RETVAL(ours);
+}
+
+static int
+ahc_linux_sanity_check(Scsi_Device *device)
+{
+	struct	ahc_softc *ahc;
+	struct	ahc_linux_device *dev;
+
+	ahc = *(struct ahc_softc **)device->host->hostdata;
+	dev = ahc_linux_get_device(ahc, device->channel,
+				   device->id, device->lun,
+					   /*alloc*/FALSE);
+	if (dev == NULL)
+		return -ENXIO;
+	if (ahc->platform_data->qfrozen || dev->qfrozen)
+		return -EBUSY;
+	if (spin_is_locked(&ahc->platform_data->spin_lock))
+		return -EBUSY;
+	return 0;
+}
+
+static void
+ahc_linux_poll(Scsi_Device *device)
+{
+	struct	ahc_softc *ahc;
+	struct ahc_linux_device *dev;
+
+	ahc = *(struct ahc_softc **)device->host->hostdata;
+	ahc_intr(ahc);
+	while ((dev = ahc_linux_next_device_to_run(ahc)) != NULL) {
+		TAILQ_REMOVE(&ahc->platform_data->device_runq, dev, links);
+		dev->flags &= ~AHC_DEV_ON_RUN_LIST;
+		ahc_linux_check_device_queue(ahc, dev);
+	}
+	ahc_linux_run_complete_queue(ahc);
 }
 
 void

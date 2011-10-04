@@ -74,7 +74,6 @@ irq_desc_t irq_desc[NR_IRQS] __cacheline_aligned =
 	{ [0 ... NR_IRQS-1] = { 0, NULL, NULL, 0, SPIN_LOCK_UNLOCKED}};
 	
 int ppc_spurious_interrupts = 0;
-struct irqaction *ppc_irq_action[NR_IRQS];
 unsigned long lpEvent_count = 0;
 #ifdef CONFIG_XMON
 extern void xmon(struct pt_regs *regs);
@@ -151,6 +150,10 @@ setup_irq(unsigned int irq, struct irqaction * new)
 		 */
 		rand_initialize_irq(irq);
 	}
+
+	/* Call the controller's startup function for this irq */
+	if (desc->handler && desc->handler->startup)
+		desc->handler->startup(irq);
 
 	/*
 	 * The following block of code has to be executed atomically
@@ -393,8 +396,11 @@ int show_interrupts(struct seq_file *p, void *v)
 skip:
 		spin_unlock_irqrestore(&irq_desc[i].lock, flags);
 	}
+#ifdef CONFIG_SMP
+	/* should this be per processor send/receive? */
 	seq_printf(p, "IPI (recv/sent): %10u/%u\n",
 		       atomic_read(&ipi_recv), atomic_read(&ipi_sent));
+#endif
 	seq_printf(p, "BAD: %10u\n", ppc_spurious_interrupts);
 	return 0;
 }
@@ -596,7 +602,6 @@ void __init init_IRQ(void)
 		once++;
 	
 	ppc_md.init_IRQ();
-	if(ppc_md.init_ras_IRQ) ppc_md.init_ras_IRQ(); 
 }
 
 #ifdef CONFIG_SMP
@@ -888,10 +893,18 @@ static void register_irq_proc (unsigned int irq)
 
 	/* create /proc/irq/1234 */
 	irq_dir[irq] = proc_mkdir(name, root_irq_dir);
+	if (irq_dir[irq] == NULL) {
+		printk(KERN_ERR "register_irq_proc: proc_mkdir failed.\n");
+		return;
+	}
 
 	/* create /proc/irq/1234/smp_affinity */
 	entry = create_proc_entry("smp_affinity", 0600, irq_dir[irq]);
 
+	if (!entry) {
+		printk(KERN_ERR "register_irq_proc: create_proc_entry failed.\n");
+		return;
+	}
 	entry->nlink = 1;
 	entry->data = (void *)(long)irq;
 	entry->read_proc = irq_affinity_read_proc;
@@ -909,10 +922,16 @@ void init_irq_proc (void)
 
 	/* create /proc/irq */
 	root_irq_dir = proc_mkdir("irq", 0);
+	if (root_irq_dir == NULL)
+		printk(KERN_ERR "init_irq_proc: proc_mkdir failed.\n");
 
 	/* create /proc/irq/prof_cpu_mask */
 	entry = create_proc_entry("prof_cpu_mask", 0600, root_irq_dir);
 
+	if (!entry) {
+		printk(KERN_ERR "init_irq_proc: create_proc_entry failed.\n");
+		return;
+	}
 	entry->nlink = 1;
 	entry->data = (void *)&prof_cpu_mask;
 	entry->read_proc = prof_cpu_mask_read_proc;
@@ -922,3 +941,104 @@ void init_irq_proc (void)
 void no_action(int irq, void *dev, struct pt_regs *regs)
 {
 }
+
+/*
+ * Virtual IRQ mapping code, used on systems with XICS interrupt controllers.
+ */
+
+#define UNDEFINED_IRQ 0xffffffffU
+unsigned int virt_irq_to_real_map[NR_IRQS];
+
+/*
+ * Don't use virtual irqs 0, 1, 2 for devices.
+ * The pcnet32 driver considers interrupt numbers < 2 to be invalid,
+ * and 2 is the XICS IPI interrupt.
+ * We limit virtual irqs to 17 less than NR_IRQS so that when we
+ * offset them by 16 (to reserve the first 16 for ISA interrupts)
+ * we don't end up with an interrupt number >= NR_IRQS.
+ */
+#define MIN_VIRT_IRQ	3
+#define MAX_VIRT_IRQ	(NR_IRQS - NUM_ISA_INTERRUPTS - 1)
+#define NR_VIRT_IRQS	(MAX_VIRT_IRQ - MIN_VIRT_IRQ + 1)
+
+void
+virt_irq_init(void)
+{
+	int i;
+	for (i = 0; i < NR_IRQS; i++)
+		virt_irq_to_real_map[i] = UNDEFINED_IRQ;
+}
+
+/* Create a mapping for a real_irq if it doesn't already exist.
+ * Return the virtual irq as a convenience.
+ */
+int virt_irq_create_mapping(unsigned int real_irq)
+{
+	unsigned int virq, first_virq;
+	static int warned;
+
+	if (naca->interrupt_controller == IC_OPEN_PIC)
+		return real_irq;	/* no mapping for openpic (for now) */
+
+	/* don't map interrupts < MIN_VIRT_IRQ */
+	if (real_irq < MIN_VIRT_IRQ) {
+		virt_irq_to_real_map[real_irq] = real_irq;
+		return real_irq;
+	}
+
+	/* map to a number between MIN_VIRT_IRQ and MAX_VIRT_IRQ */
+	virq = real_irq;
+	if (virq > MAX_VIRT_IRQ)
+		virq = (virq % NR_VIRT_IRQS) + MIN_VIRT_IRQ;
+
+	/* search for this number or a free slot */
+	first_virq = virq;
+	while (virt_irq_to_real_map[virq] != UNDEFINED_IRQ) {
+		if (virt_irq_to_real_map[virq] == real_irq)
+			return virq;
+		if (++virq > MAX_VIRT_IRQ)
+			virq = MIN_VIRT_IRQ;
+		if (virq == first_virq)
+			goto nospace;	/* oops, no free slots */
+	}
+
+	virt_irq_to_real_map[virq] = real_irq;
+	return virq;
+
+ nospace:
+	if (!warned) {
+		printk(KERN_CRIT "Interrupt table is full\n");
+		printk(KERN_CRIT "Increase NR_IRQS (currently %d) "
+		       "in your kernel sources and rebuild.\n", NR_IRQS);
+		warned = 1;
+	}
+	return NO_IRQ;
+}
+
+/*
+ * In most cases we will get a hit on the very first slot checked in
+ * the virt_irq_to_real_map.  Only when there are a large number of
+ * IRQs will this be expensive.
+ */
+int real_irq_to_virt_slow(unsigned int real_irq)
+{
+	unsigned int virq;
+	unsigned int first_virq;
+
+	virq = real_irq;
+
+	if (virq > MAX_VIRT_IRQ)
+		virq = (virq % NR_VIRT_IRQS) + MIN_VIRT_IRQ;
+
+	first_virq = virq;
+	do {
+		if (virt_irq_to_real_map[virq] == real_irq)
+			return virq;
+		virq++;
+		if (virq >= MAX_VIRT_IRQ)
+			virq = 0;
+	} while (first_virq != virq);
+
+	return NO_IRQ;
+}
+

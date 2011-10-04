@@ -599,7 +599,7 @@ static struct pid_entry base_stuff[] = {
 #ifdef CONFIG_SMP
   E(PROC_PID_CPU,	"cpu",		S_IFREG|S_IRUGO),
 #endif
-  E(PROC_PID_MAPS,	"maps",		S_IFREG|S_IRUSR|S_IRGRP),
+  E(PROC_PID_MAPS,	"maps",		S_IFREG|S_IRUSR),
   E(PROC_PID_MEM,	"mem",		S_IFREG|S_IRUSR|S_IWUSR),
   E(PROC_PID_CWD,	"cwd",		S_IFLNK|S_IRWXUGO),
   E(PROC_PID_ROOT,	"root",		S_IFLNK|S_IRWXUGO),

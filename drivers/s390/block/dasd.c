@@ -2291,9 +2291,7 @@ dasd_handle_state_change_pending (devstat_t * stat)
 	ccw_req_t *cqr;
 
 	device_addr = dasd_device_from_devno (stat->devno);
-
 	if (device_addr == NULL) {
-
 		MESSAGE (KERN_DEBUG,
                          "unable to find device for state change pending "
                          "interrupt: devno%04x", 
@@ -2301,9 +2299,8 @@ dasd_handle_state_change_pending (devstat_t * stat)
                 return;
 	} 
 
-        /* re-activate first request in queue */
+        /* re-activate requests in queue */
         cqr = (*device_addr)->queue.head;
-
 	if (cqr == NULL) {
 		MESSAGE (KERN_DEBUG,
 			 "got state change pending interrupt on"
@@ -2312,26 +2309,24 @@ dasd_handle_state_change_pending (devstat_t * stat)
 		return;
 	}
         
-        if (cqr->status == CQR_STATUS_PENDING) {
-                
-                DEV_MESSAGE (KERN_DEBUG, (*device_addr), "%s",
-                             "device request queue restarted by "
-                             "state change pending interrupt");
-                
-                del_timer_sync (&(*device_addr)->blocking_timer);
-                
-                check_then_set (&cqr->status,
-                                CQR_STATUS_PENDING, CQR_STATUS_QUEUED);
-                
+        while (cqr) {
+                if (cqr->status == CQR_STATUS_PENDING) {       
+                        DEV_MESSAGE (KERN_DEBUG, (*device_addr), "%s",
+                                     "device request queue restarted by "
+                                     "state change pending interrupt");
+                        del_timer_sync (&(*device_addr)->blocking_timer);
+                        cqr->status = CQR_STATUS_QUEUED;
+                }
+                if (cqr->status == CQR_STATUS_IN_IO) {
+                        DEV_MESSAGE (KERN_DEBUG, (*device_addr), "%s",
+                                     "redriving state change pending condition "
+                                     "while in IO");
+                        cqr->status = CQR_STATUS_QUEUED; 
+                }
+		cqr = cqr->next;
         }
-	if (cqr->status == CQR_STATUS_IN_IO) {
-		cqr->status = CQR_STATUS_QUEUED;
-		DEV_MESSAGE (KERN_WARNING, (*device_addr), "%s",
-				"redriving state change pending condition while in IO");
-	}
-
         dasd_schedule_bh (*device_addr);
-
+        
 } /* end dasd_handle_state_change_pending */
 
 /*
@@ -3820,9 +3815,8 @@ dasd_oper_handler (int irq, devreg_t * devreg)
 			break;
 	}
 
-        if ( device &&
-             (device->level == DASD_STATE_ONLINE) &&
-	     (!device->accessible) ) {
+        if (device &&
+            device->level >= DASD_STATE_NEW) {
                 s390irq_spin_lock_irqsave (device->devinfo.irq, 
                                            flags);
 		DEV_MESSAGE (KERN_DEBUG, device, "%s",
@@ -4676,11 +4670,10 @@ dasd_generic_read (struct file *file, char *user_buf, size_t user_len,
 		   loff_t * offset)
 {
 	loff_t len;
-	loff_t n = *offset;
-	unsigned pos = n;
+	loff_t pos = *offset;
 	tempinfo_t *p_info = (tempinfo_t *) file->private_data;
 
-	if (n != pos || pos >= p_info->len) {
+	if (pos < 0 || pos >= p_info->len) {
 		return 0;	/* EOF */
 	} else {
 		len = MIN (user_len, (p_info->len - pos));

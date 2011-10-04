@@ -233,6 +233,10 @@ EXPORT_SYMBOL(fake_node);
 
 extern void int_ret_from_sys_call(void);
 EXPORT_SYMBOL(int_ret_from_sys_call); 
+EXPORT_SYMBOL_GPL(execve);
 
 extern int swiotlb;
 EXPORT_SYMBOL(swiotlb);
+
+extern int page_is_ram(unsigned long);
+EXPORT_SYMBOL_GPL(page_is_ram);

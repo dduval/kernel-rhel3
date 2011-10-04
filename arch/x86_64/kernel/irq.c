@@ -1120,6 +1120,15 @@ static int irq_affinity_write_proc (struct file *file, const char *buffer,
 {
 	int irq = (long) data, full_count = count, err;
 	unsigned long new_value;
+	extern int no_valid_irqaffinity;
+
+	/* HACK: Since some proc entries get set up before
+	 * we determine (via pci-quirks) that we should never
+	 * modify IRQ affinities.  If so, disallow the write
+	 * even if the proc entry permissions allow.
+	 */
+	if (no_valid_irqaffinity)
+		return -EROFS;
 
 	if (!irq_desc[irq].handler->set_affinity)
 		return -EIO;
@@ -1184,9 +1193,15 @@ static void register_irq_proc (unsigned int irq)
 #if CONFIG_SMP
 	{
 		struct proc_dir_entry *entry;
+		int mask;
+		extern int no_valid_irqaffinity;
+
+		mask = 0600;
+		if (no_valid_irqaffinity)
+			mask = 0400;
 
 		/* create /proc/irq/1234/smp_affinity */
-		entry = create_proc_entry("smp_affinity", 0600, irq_dir[irq]);
+		entry = create_proc_entry("smp_affinity", mask, irq_dir[irq]);
 
 		if (entry) {
 			entry->nlink = 1;

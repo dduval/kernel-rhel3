@@ -49,6 +49,9 @@
 
 extern int acpi_disabled;
 
+acpi_interrupt_flags acpi_sci_flags __initdata;
+int acpi_sci_override_gsi __initdata;
+
 extern int acpi_blacklisted(void);
 
 static struct acpi_resource *
@@ -285,6 +288,60 @@ acpi_parse_ioapic (
 	return 0;
 }
 
+/*
+ * Parse Interrupt Source Override for the ACPI SCI
+ */
+static void
+acpi_sci_ioapic_setup(u32 gsi, u16 polarity, u16 trigger)
+{
+	if (trigger == 0)	/* compatible SCI trigger is level */
+		trigger = 3;
+
+	if (polarity == 0)	/* compatible SCI polarity is low */
+		polarity = 3;
+
+	/* Command-line over-ride via acpi_sci= */
+	if (acpi_sci_flags.trigger)
+		trigger = acpi_sci_flags.trigger;
+
+	if (acpi_sci_flags.polarity)
+		polarity = acpi_sci_flags.polarity;
+
+	/*
+	 * mp_config_acpi_legacy_irqs() already setup IRQs < 16
+	 * If GSI is < 16, this will update its flags,
+	 * else it will create a new mp_irqs[] entry.
+	 */
+	mp_override_legacy_irq(gsi, polarity, trigger, gsi);
+
+	/*
+	 * stash over-ride to indicate we've been here
+	 * and for later update of acpi_fadt
+	 */
+	acpi_sci_override_gsi = gsi;
+	return;
+}
+
+static int __init
+acpi_parse_fadt(unsigned long phys, unsigned long size)
+{
+	struct fadt_descriptor_rev2 *fadt =0;
+
+	fadt = (struct fadt_descriptor_rev2*) __acpi_map_table(phys,size);
+	if (!fadt) {
+		printk(KERN_WARNING PREFIX "Unable to map FADT\n");
+		return 0;
+	}
+
+#ifdef	CONFIG_ACPI_INTERPRETER
+	/* initialize sci_int early for INT_SRC_OVR MADT parsing */
+	acpi_fadt.sci_int = fadt->sci_int;
+#endif
+
+	return 0;
+}
+
+
 
 static int __init
 acpi_parse_int_src_ovr (
@@ -297,6 +354,12 @@ acpi_parse_int_src_ovr (
 		return -EINVAL;
 
 	acpi_table_print_madt_entry(header);
+
+	if (intsrc->bus_irq == acpi_fadt.sci_int) {
+		acpi_sci_ioapic_setup(intsrc->global_irq,
+			intsrc->flags.polarity, intsrc->flags.trigger);
+		return 0;
+	}
 
 	mp_override_legacy_irq (
 		intsrc->bus_irq,
@@ -486,6 +549,9 @@ acpi_boot_init (char * cmdline)
 	 * --------
 	 */
 
+	if (acpi_noirq)
+		return 0;
+
 	result = acpi_table_parse_madt(ACPI_MADT_IOAPIC, acpi_parse_ioapic);
 	if (!result) { 
 		printk(KERN_ERR PREFIX "No IOAPIC entries present\n");
@@ -499,12 +565,23 @@ acpi_boot_init (char * cmdline)
 	/* Build a default routing table for legacy (ISA) interrupts. */
 	mp_config_acpi_legacy_irqs();
 
+	/* Record sci_int for use when looking for MADT sci_int override */
+	acpi_table_parse(ACPI_FADT, acpi_parse_fadt);
+
 	result = acpi_table_parse_madt(ACPI_MADT_INT_SRC_OVR, acpi_parse_int_src_ovr);
 	if (result < 0) {
 		printk(KERN_ERR PREFIX "Error parsing interrupt source overrides entry\n");
 		/* TBD: Cleanup to allow fallback to MPS */
 		return result;
 	}
+
+	/*
+	 * If BIOS did not supply an INT_SRC_OVR for the SCI
+	 * pretend we got one so we can set the SCI flags.
+	 */
+	if (!acpi_sci_override_gsi)
+		acpi_sci_ioapic_setup(acpi_fadt.sci_int, 0, 0);
+
 
 	result = acpi_table_parse_madt(ACPI_MADT_NMI_SRC, acpi_parse_nmi_src);
 	if (result < 0) {

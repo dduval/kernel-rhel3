@@ -98,7 +98,10 @@ void lru_cache_add(struct page * page)
 {
 	if (!PageLRU(page)) {
 		lru_lock(page_zone(page));
-		if (!TestandSetPageLRU(page))
+		/* pages from a WIRED inode go directly to the wired list */
+		if (page->mapping && (page->mapping->gfp_mask & __GFP_WIRED))
+			add_page_to_wired_list(page);
+		else if (!TestandSetPageLRU(page))
 			add_page_to_active_list(page, INITIAL_AGE);
 		lru_unlock(page_zone(page));
 	}

@@ -38,7 +38,7 @@
 
 static struct super_operations ramfs_ops;
 static struct address_space_operations ramfs_aops;
-static struct file_operations ramfs_file_operations;
+struct file_operations ramfs_file_operations;
 static struct inode_operations ramfs_dir_inode_operations;
 
 static int ramfs_statfs(struct super_block *sb, struct statfs *buf)
@@ -354,7 +354,7 @@ static int ramfs_mmap(struct file * file, struct vm_area_struct * vma)
 	return 0;
 }
 
-static struct file_operations ramfs_file_operations = {
+struct file_operations ramfs_file_operations = {
 	read:		generic_file_read,
 	write:		generic_file_write,
 	mmap:		ramfs_mmap,

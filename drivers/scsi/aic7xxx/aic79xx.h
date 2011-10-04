@@ -202,6 +202,8 @@ do {								\
 #define AHD_BUSRESET_DELAY	25
 
 /******************* Chip Characteristics/Operating Settings  *****************/
+extern uint32_t ahd_attach_to_HostRAID_controllers;
+
 /*
  * Chip Type
  * The chip order is from least sophisticated to most sophisticated.
@@ -372,7 +374,8 @@ typedef enum {
 	AHD_HP_BOARD	      = 0x100000,
 	AHD_RESET_POLL_ACTIVE = 0x200000,
 	AHD_UPDATE_PEND_CMDS  = 0x400000,
-	AHD_RUNNING_QOUTFIFO  = 0x800000
+	AHD_RUNNING_QOUTFIFO  = 0x800000,
+	AHD_HOSTRAID_BOARD    = 0x1000000
 } ahd_flag;
 
 /************************* Hardware  SCB Definition ***************************/

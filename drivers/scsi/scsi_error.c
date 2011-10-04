@@ -307,6 +307,10 @@ void scsi_eh_done(Scsi_Cmnd * SCpnt)
 {
 	int     rtn;
 
+#if defined(CONFIG_SCSI_DUMP) || defined(CONFIG_SCSI_DUMP_MODULE)
+	if (crashdump_mode())
+		return;
+#endif
 	/*
 	 * If the timeout handler is already running, then just set the
 	 * flag which says we finished late, and return.  We have no

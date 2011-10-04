@@ -2285,7 +2285,8 @@ void __init console_init(void)
 	con3215_init();
 #endif
 #ifdef CONFIG_HVC_CONSOLE
-        hvc_console_init();
+	hvc_console_init();
+	hvsi_console_init();
 #endif
 #ifdef CONFIG_SCLP_CONSOLE
         sclp_console_init();

@@ -104,22 +104,92 @@ unsigned long __max_memory;
  */
 mmu_gather_t     mmu_gathers[NR_CPUS];
 
+/* PTE free batching structures. We need a lock since not all
+ * operations take place under page_table_lock. Keep it per-CPU
+ * to avoid bottlenecks.
+ */
+
+struct pte_freelist_batch ____cacheline_aligned pte_freelist_cur[NR_CPUS] __cacheline_aligned_in_smp;
+rwlock_t pte_hash_lock[NR_CPUS] __cacheline_aligned_in_smp = { [0 ... NR_CPUS-1] = RW_LOCK_UNLOCKED };
+
+unsigned long pte_freelist_forced_free;
+
+static inline void pte_free_sync(void)
+{
+	unsigned long flags;
+	int i;
+
+	/* Make sure that all PTE/PMD updates are seen by other processors. */
+	smp_mb();
+
+	/* All we need to know is that we can get the write lock if
+	 * we wanted to, i.e. that no hash_page()s are holding it for reading. 
+	 * If none are reading, that means there's no currently executing 
+	 * hash_page() that might be working on one of the PTE's that will 
+	 * be deleted. Likewise, if there is a reader, we need to get the
+	 * write lock to know when it releases the lock.
+	 */
+
+	for (i = 0; i < smp_num_cpus; i++)
+		if (is_read_locked(&pte_hash_lock[i])) {
+			/* So we don't deadlock with a reader on current cpu */
+			if(i == smp_processor_id())
+				local_irq_save(flags);
+
+			write_lock(&pte_hash_lock[i]);
+			write_unlock(&pte_hash_lock[i]);
+
+			if(i == smp_processor_id())
+				local_irq_restore(flags);
+		}
+}
+
+
+/* This is only called when we are critically out of memory
+ * (and fail to get a page in pte_free_tlb).
+ */
+void pte_free_now(pte_t *pte)
+{
+	pte_freelist_forced_free++;
+
+	pte_free_sync();
+
+	pte_free_kernel(pte);
+}
+
+/* Deallocates the pte-free batch after syncronizing with readers of
+ * any page tables.
+ */
+void pte_free_batch(void **batch, int size)
+{
+	unsigned int i;
+
+	pte_free_sync();
+
+	for (i = 0; i < size; i++)
+		pte_free_kernel(batch[i]);
+
+	free_page((unsigned long)batch);
+}
+
+
 int do_check_pgt_cache(int low, int high)
 {
 	int freed = 0;
+	struct pte_freelist_batch *batch;
 
-#if 0
-	if (pgtable_cache_size > high) {
-		do {
-			if (pgd_quicklist)
-				free_page((unsigned long)pgd_alloc_one_fast(0)), ++freed;
-			if (pmd_quicklist)
-				free_page((unsigned long)pmd_alloc_one_fast(0, 0)), ++freed;
-			if (pte_quicklist)
-				free_page((unsigned long)pte_alloc_one_fast(0, 0)), ++freed;
-		} while (pgtable_cache_size > low);
+	/* We use this function to push the current pte free batch to be
+	 * deallocated, since do_check_pgt_cache() is callEd at the end of each
+	 * free_one_pgd() and other parts of VM relies on all PTE's being
+	 * properly freed upon return from that function.
+	 */
+
+	batch = &pte_freelist_cur[smp_processor_id()];
+
+	if(batch->entry) {
+		pte_free_batch(batch->entry, batch->index);
+		batch->entry = NULL;
 	}
-#endif
 	return freed;	
 }
 

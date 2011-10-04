@@ -75,7 +75,7 @@ static ssize_t nodenum_read(struct file *file, char *buf,
 	if (count < 0 || !inode->u.generic_ip)
 		return -EINVAL;
 	sprintf (buffer, "%8.8x\n", (u32)(long)(inode->u.generic_ip));
-	if (pos != (unsigned)pos || pos >= 9)
+	if (pos < 0 || pos >= 9)
 		return 0;
 	if (count > 9 - pos)
 		count = 9 - pos;

@@ -150,7 +150,6 @@ int scsi_mlqueue_insert(Scsi_Cmnd * cmd, int reason)
 	struct Scsi_Host *host;
 	struct scsi_device *device;
 	struct request_queue *q;
-	struct request *rq;
 	unsigned long flags;
 
 	SCSI_LOG_MLQUEUE(1, printk("Inserting command %p into mlqueue\n", cmd));
@@ -158,7 +157,6 @@ int scsi_mlqueue_insert(Scsi_Cmnd * cmd, int reason)
 	host = cmd->host;
 	device = cmd->device;
 	q = &device->request_queue;
-	rq = &cmd->request;
 
 	/*
 	 * Decrement the counters, since these commands are no longer
@@ -167,12 +165,17 @@ int scsi_mlqueue_insert(Scsi_Cmnd * cmd, int reason)
 	atomic_dec(&host->host_busy);
 	atomic_dec(&device->device_busy);
 
+	/* Clear any bad state info from the last try before putting back
+	 * on the queue.
+	 */
+	scsi_setup_cmd_retry(cmd);
+	memset((void *)&cmd->sense_buffer, 0, sizeof cmd->sense_buffer);
+
 	/*
 	 * Register the fact that we own the thing for now.
 	 */
 	cmd->state = SCSI_STATE_MLQUEUE;
 	cmd->owner = SCSI_OWNER_MIDLEVEL;
-	rq->special = cmd;
 
 	if (host->eh_wait != NULL && host->in_recovery) {
 		/*
@@ -181,7 +184,7 @@ int scsi_mlqueue_insert(Scsi_Cmnd * cmd, int reason)
 		 * scsi_softirq_handler will do so if we are ready.
 		 */
 		spin_lock_irqsave(q->queue_lock, flags);
-		list_add(&rq->queue, &q->queue_head);
+		list_add(&cmd->sc_list, &device->sdev_retry_q);
 		spin_unlock_irqrestore(q->queue_lock, flags);
 	} else if (reason == SCSI_MLQUEUE_HOST_BUSY) {
 		/*
@@ -196,12 +199,12 @@ int scsi_mlqueue_insert(Scsi_Cmnd * cmd, int reason)
 		}
 		spin_unlock(host->host_lock);
 		spin_lock(q->queue_lock);
-		list_add(&rq->queue, &q->queue_head);
+		list_add(&cmd->sc_list, &device->sdev_retry_q);
 		spin_unlock_irqrestore(q->queue_lock, flags);
 	} else {
 		spin_lock_irqsave(q->queue_lock, flags);
 		device->device_blocked = TRUE;
-		list_add(&rq->queue, &q->queue_head);
+		list_add(&cmd->sc_list, &device->sdev_retry_q);
 		if (atomic_read(&device->device_busy) == 0) {
 			scsi_add_timer(cmd, HZ/5, scsi_timeout_block);
 			device->unblock_timer_active = 1;

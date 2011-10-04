@@ -4779,3 +4779,15 @@ asmlinkage int sys32_clone(struct pt_regs regs)
 	return do_fork(clone_flags & ~CLONE_IDLETASK, newsp, &regs, 0,
 	  	       parent_tidptr, child_tidptr);
 }
+
+asmlinkage int compat_sys_futex(u32 *uaddr, int op, int val,
+                struct compat_timespec *utime, u32 *uaddr2, int val3);
+
+asmlinkage long sys32_futex(u32 *uaddr, int op, int val,
+	struct compat_timespec *utime, u32 *uaddr2)
+{
+	struct pt_regs *regs;
+
+	regs = __KSTK_PTREGS(current);
+	return compat_sys_futex(uaddr, op, val, utime, uaddr2, regs->gprs[7]);
+}

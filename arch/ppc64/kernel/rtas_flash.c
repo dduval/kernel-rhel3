@@ -239,7 +239,7 @@ static ssize_t rtas_flash_read(struct file *file, char *buf,
 		msglen = sprintf(msg, "%d\n", uf->status);
 	}
 	
-	if (pos != (unsigned)pos || pos >= msglen) {
+	if (pos < 0 || pos >= msglen) {
 		ret =  0;
 		goto done;
 	}
@@ -399,7 +399,7 @@ static ssize_t manage_flash_read(struct file *file, char *buf,
 	}
 
 	msglen = sprintf(msg, "%d\n", args_buf->status);
-	if (pos != (unsigned)pos || pos >= msglen) {
+	if (pos < 0 || pos >= msglen) {
 		ret = 0;
 		goto done;
 	}
@@ -573,7 +573,7 @@ static ssize_t validate_flash_write(struct file *file, const char *buf,
 
 	/* We are only interested in the first 4K of the
 	 * candidate image */
-	if (pos != (unsigned)pos || pos >= VALIDATE_BUF_SIZE || 
+	if (pos < 0 || pos >= VALIDATE_BUF_SIZE ||
 		(args_buf->status == VALIDATE_AUTH)) {
 		*off = pos + count;
 		ret = count;

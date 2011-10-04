@@ -148,7 +148,7 @@ void __pte_chain_free(struct pte_chain *pte_chain)
  */
 int page_referenced(struct page * page, int * rsslimit)
 {
-	int referenced = 0, under_rsslimit = 0;
+	int referenced = 0, over_rsslimit = 0;
 	struct mm_struct * mm;
 	struct pte_chain * pc;
 
@@ -161,11 +161,12 @@ int page_referenced(struct page * page, int * rsslimit)
 			referenced++;
 
 		mm = ptep_to_mm(pte);
-		if (mm->rss < mm->rlimit_rss)
-			under_rsslimit++;
+		if (mm && mm->rss > mm->rlimit_rss)
+			over_rsslimit = 1;
 		rmap_ptep_unmap(pte);
-	} else {
+	} else if (page->pte.chain) {
 		int nr_chains = 0;
+		over_rsslimit = 1;
 
 		/* Check all the page tables mapping this page. */
 		for (pc = page->pte.chain; pc; pc = pte_chain_next(pc)) {
@@ -181,8 +182,8 @@ int page_referenced(struct page * page, int * rsslimit)
 				if (ptep_test_and_clear_young(pte))
 					referenced++;
 				mm = ptep_to_mm(pte);
-				if (mm->rss < mm->rlimit_rss)
-					under_rsslimit++;
+				if (mm && mm->rss <= mm->rlimit_rss)
+					over_rsslimit = 0;
 				rmap_ptep_unmap(pte);
 				nr_chains++;
 			}
@@ -200,7 +201,7 @@ int page_referenced(struct page * page, int * rsslimit)
 	 * We're only over the RSS limit if all the processes sharing the
 	 * page are.
 	 */
-	*rsslimit = !under_rsslimit;
+	*rsslimit = over_rsslimit;
 
 	return referenced;
 }
@@ -239,7 +240,8 @@ page_add_rmap(struct page * page, pte_t * ptep, struct pte_chain * pte_chain)
 		BUG();
 #endif
 
-	if (!VALID_PAGE(page) || PageReserved(page))
+	/* wired pages don't get pte_chains */
+	if (!VALID_PAGE(page) || PageReserved(page) || PageWired(page))
 		return pte_chain;
 
 	pte_chain_lock(page);
@@ -424,6 +426,14 @@ static int try_to_unmap_one(struct page * page, pte_addr_t paddr)
 		return SWAP_AGAIN;
 	}
 
+	/* The page is pinned for direct IO, can't be swapped right now. */
+	if (unlikely(page_mapping_pinned(page))) {
+		/* SWAP_FAIL instead of SWAP_AGAIN: this is a relatively
+		 * long-term condition as far as the VM lrus are
+		 * concerned. */
+		ret = SWAP_FAIL; 
+		goto out_unlock;
+	}
 
 	/* During mremap, it's possible pages are not in a VMA. */
 	vma = find_vma(mm, address);

@@ -65,6 +65,12 @@ extern int fallback_aper_force;
 static spinlock_t iommu_bitmap_lock = SPIN_LOCK_UNLOCKED;
 static unsigned long *iommu_gart_bitmap; /* guarded by iommu_bitmap_lock */
 
+/* Entry for a "guard page" that GART entries get mapped to when
+ * they're otherwise not in use.  Used to deal with over-eager
+ * prefetching in some PCI chipsets.
+ */
+static u32 gart_unmapped_entry;
+
 #define GPTE_VALID    1
 #define GPTE_COHERENT 2
 #define GPTE_ENCODE(x) (((x) & 0xfffff000) | (((x) >> 32) << 4) | GPTE_VALID | GPTE_COHERENT)
@@ -217,7 +223,7 @@ void pci_free_consistent(struct pci_dev *hwdev, size_t size,
 			atomic_dec(&virt_to_page(mem)->count); 
 		pte = iommu_gatt_base[iommu_page + i];
 		BUG_ON((pte & GPTE_VALID) == 0); 
-		iommu_gatt_base[iommu_page + i] = 0; 		
+		iommu_gatt_base[iommu_page + i] = gart_unmapped_entry; 		
 	} 
 	free_pages((unsigned long)vaddr, order);
 	flush_gart(); 
@@ -367,7 +373,7 @@ void pci_unmap_single(struct pci_dev *hwdev, dma_addr_t dma_addr,
 	iommu_page = (dma_addr - iommu_bus_base)>>PAGE_SHIFT;	
 	npages = round_up(size + (dma_addr & ~PAGE_MASK), PAGE_SIZE) >> PAGE_SHIFT;
 	for (i = 0; i < npages; i++) { 
-		iommu_gatt_base[iommu_page + i] = 0; 
+		iommu_gatt_base[iommu_page + i] = gart_unmapped_entry;
 #ifdef CONFIG_IOMMU_LEAK
 		if (iommu_leak_tab)
 			iommu_leak_tab[iommu_page + i] = 0; 
@@ -489,6 +495,8 @@ void __init pci_iommu_init(void)
 	agp_kern_info info;
 	unsigned long aper_size;
 	unsigned long iommu_start;
+	unsigned long scratch;
+	long i;
 
 #ifndef CONFIG_AGP
 	no_agp = 1; 
@@ -557,6 +565,16 @@ void __init pci_iommu_init(void)
 	iommu_bus_base = info.aper_base + iommu_start; 
 	iommu_gatt_base = agp_gatt_table + (iommu_start>>PAGE_SHIFT);
 	bad_dma_address = iommu_bus_base;
+
+	/*
+	 * Map all other entries to the guard page
+	 */
+	scratch = get_zeroed_page(GFP_KERNEL);
+	if (!scratch)
+		panic("Cannot allocate iommu scratch page");
+	gart_unmapped_entry = GPTE_ENCODE(__pa(scratch));
+	for (i = EMERGENCY_PAGES; i < iommu_pages; i++)
+		iommu_gatt_base[i] = gart_unmapped_entry;
 
 	asm volatile("wbinvd" ::: "memory");
 } 

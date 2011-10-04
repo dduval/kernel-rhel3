@@ -15,8 +15,14 @@
  * 2 of the License, or (at your option) any later version.
  */
 
-#define PTRRELOC(x)     ((typeof(x))((unsigned long)(x) - offset))
-#define PTRUNRELOC(x)   ((typeof(x))((unsigned long)(x) + offset))
+static inline unsigned long __hide(unsigned long x)
+{
+	asm volatile("" : "=&r" (x) : "0" (x));
+	return x;
+}
+
+#define PTRRELOC(x)     ((typeof(x))__hide((unsigned long)(x) - offset))
+#define PTRUNRELOC(x)   ((typeof(x))__hide((unsigned long)(x) + offset))
 #define RELOC(x)        (*PTRRELOC(&(x)))
 
 #define LONG_LSW(X) (((unsigned long)X) & 0xffffffff)
@@ -142,6 +148,9 @@ struct device_node {
 	struct	device_node *sibling;
 	struct	device_node *next;	/* next device of same type */
 	struct	device_node *allnext;	/* next in list of all nodes */
+#ifndef __GENKSYMS__ /* preserve KMI/ABI ksyms compatibility for mod linkage */
+	phandle linux_phandle;
+#endif
 };
 
 typedef u32 prom_arg_t;

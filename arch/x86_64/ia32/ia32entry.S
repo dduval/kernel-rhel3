@@ -322,8 +322,8 @@ ia32_sys_call_table:
 	.quad stub32_vfork            /* 190 */
 	.quad sys32_getrlimit
 	.quad sys32_mmap2
-	.quad sys_truncate
-	.quad sys_ftruncate
+	.quad sys32_truncate64
+	.quad sys32_ftruncate64
 	.quad sys32_stat64		/* 195 */
 	.quad sys32_lstat64
 	.quad sys32_fstat64
@@ -374,10 +374,10 @@ ia32_sys_call_table:
 	.quad compat_sys_sched_getaffinity
 	.quad sys32_set_thread_area
 	.quad sys32_get_thread_area
-	.quad sys_io_setup	/* 245 */
+	.quad compat_sys_io_setup	/* 245 */
 	.quad sys_io_destroy
-	.quad sys_io_getevents
-	.quad sys_io_submit
+	.quad compat_sys_io_getevents
+	.quad compat_sys_io_submit
 	.quad sys_io_cancel
 	.quad sys_ni_syscall	/* 250 */
 	.quad sys_ni_syscall /* free_huge_pages */

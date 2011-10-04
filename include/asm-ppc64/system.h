@@ -69,6 +69,7 @@ extern void cvt_fd(float *from, double *to, unsigned long *fpscr);
 extern void cvt_df(double *from, float *to, unsigned long *fpscr);
 extern int abs(int);
 extern void cacheable_memzero(void *p, unsigned int nb);
+extern void vpa_init(int cpu);
 
 #ifdef CONFIG_JS20
 extern int is_js20;

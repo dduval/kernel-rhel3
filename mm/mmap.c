@@ -378,8 +378,8 @@ static inline void __vma_link_list(struct mm_struct * mm, struct vm_area_struct 
 	}
 }
 
-static inline void __vma_link_rb(struct mm_struct * mm, struct vm_area_struct * vma,
-				 rb_node_t ** rb_link, rb_node_t * rb_parent)
+void __vma_link_rb(struct mm_struct * mm, struct vm_area_struct * vma,
+		 rb_node_t ** rb_link, rb_node_t * rb_parent)
 {
 	rb_link_node(&vma->vm_rb, rb_parent, rb_link);
 	rb_insert_color(&vma->vm_rb, &mm->mm_rb);
@@ -469,12 +469,12 @@ static int vma_merge(struct mm_struct * mm, struct vm_area_struct * prev,
 			kmem_cache_free(vm_area_cachep, next);
 			return 1;
 		}
+		spin_unlock(lock);
 		/*
 		 * Just extended 'prev':
 		 */
 		if (prev->vm_flags & VM_EXEC)
 			arch_add_exec_range(mm, prev->vm_end);
-		spin_unlock(lock);
 		if (need_unlock)
 			unlock_vma_mappings(next);
 		return 1;
@@ -1067,17 +1067,21 @@ static struct vm_area_struct * unmap_fixup(struct mm_struct *mm,
 			area->vm_ops->close(area);
 		if (area->vm_file)
 			fput(area->vm_file);
+		if (area->vm_flags & VM_EXEC)
+			arch_remove_exec_range(mm, area->vm_end);
 		kmem_cache_free(vm_area_cachep, area);
 		return extra;
 	}
 
 	/* Work out to one of the ends. */
 	if (end == area->vm_end) {
+		unsigned long old_end = area->vm_end;
 		/*
 		 * here area isn't visible to the semaphore-less readers
 		 * so we don't need to update it under the spinlock.
 		 */
 		area->vm_end = addr;
+		arch_remove_exec_range(mm, old_end);
 		lock_vma_mappings(area);
 		spin_lock(&mm->page_table_lock);
 	} else if (addr == area->vm_start) {
@@ -1404,22 +1408,6 @@ out:
 	vm_validate_enough("exiting do_brk");
 
 	return addr;
-}
-
-/* Build the RB tree corresponding to the VMA list. */
-void build_mmap_rb(struct mm_struct * mm)
-{
-	struct vm_area_struct * vma;
-	rb_node_t ** rb_link, * rb_parent;
-
-	mm->mm_rb = RB_ROOT;
-	rb_link = &mm->mm_rb.rb_node;
-	rb_parent = NULL;
-	for (vma = mm->mmap; vma; vma = vma->vm_next) {
-		__vma_link_rb(mm, vma, rb_link, rb_parent);
-		rb_parent = &vma->vm_rb;
-		rb_link = &rb_parent->rb_right;
-	}
 }
 
 /* Release all mmaps. */

@@ -20,7 +20,7 @@
 #include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/threads.h>	/* for NR_CPUS */
-
+#include <asm/bitops.h>
 
 #ifndef __ASSEMBLY__
 #ifdef CONFIG_SMP
@@ -33,6 +33,7 @@ struct current_set_struct {
 };
 
 extern unsigned long cpu_online_map;
+extern unsigned long cpu_available_map;
 
 extern void smp_message_pass(int target, int msg, unsigned long data, int wait);
 extern void smp_store_cpu_info(int id);
@@ -43,11 +44,8 @@ extern void smp_message_recv(int, struct pt_regs *);
 
 /* Newer 2.5 Linux kernels have cpu_possible. This provides equivalent function
    for the older 2.4 kernels */
-extern unsigned long cpu_online_map;
-static inline int cpu_possible(int cpu)
-{
-	return (cpu_online_map & (1<<(cpu)));
-} 
+#define cpu_possible(cpu)	test_bit((cpu), &cpu_online_map)
+#define cpu_available(cpu)	test_bit((cpu), &cpu_available_map)
 
 #define NO_PROC_ID		0xFF            /* No processor magic marker */
 #define PROC_CHANGE_PENALTY	20
@@ -74,8 +72,11 @@ extern volatile unsigned long cpu_callin_map[NR_CPUS];
 void smp_init_iSeries(void);
 void smp_init_pSeries(void);
 
+#else /* CONFIG_SMP */
+#define cpu_possible(cpu)	((cpu) == 0)
+#define cpu_available(cpu)	((cpu) == 0)
+
 #endif /* !(CONFIG_SMP) */
 #endif /* __ASSEMBLY__ */
-#define get_hard_smp_processor_id(CPU) (paca[(CPU)].xHwProcNum)
 #endif /* !(_PPC64_SMP_H) */
 #endif /* __KERNEL__ */

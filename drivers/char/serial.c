@@ -4479,7 +4479,9 @@ enum pci_board_num_t {
 	pbn_timedia,
 	pbn_intel_i960,
 	pbn_sgi_ioc3,
+#ifdef CONFIG_HP_DIVA
 	pbn_hp_diva,
+#endif
 #ifdef CONFIG_DDB5074
 	pbn_nec_nile4,
 #endif

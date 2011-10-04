@@ -23,9 +23,7 @@
  */
 #ifndef _Z90COMMON_
 #define _Z90COMMON_
-
-#define VERSION_Z90COMMON_H "$Revision: 1.4.6.4 $"
-
+#define VERSION_Z90COMMON_H "$Revision: 1.4.6.7 $"
 #ifndef _TYPES_
 #define _TYPES_
 typedef unsigned char UCHAR;
@@ -38,6 +36,8 @@ typedef UCHAR BOOL;
 #define TRUE  0x01
 #endif                      
 #define RESPBUFFSIZE 256
+#define PCI_FUNC_KEY_DECRYPT 0x5044
+#define PCI_FUNC_KEY_ENCRYPT 0x504B
 #ifndef _DEVSTAT_
 #define _DEVSTAT_
 typedef enum {
@@ -101,25 +101,16 @@ typedef enum
 #define SEN_FATAL_ERROR 33
 #define TSQ_FATAL_ERROR 34
 #define RSQ_FATAL_ERROR 35
-#define LEEDSLITE 0
-#define LEEDS2    1
-#define NILDEV    -1
+#define PCICA	0
+#define PCICC	1
+#define PCIXCC	2
+#define NILDEV	-1
+#define ANYDEV	-1
 typedef int CDEVICE_TYPE;
 typedef enum {NIL0DEV, NIL1DEV, NIL2DEV,
-              LEEDS2_HW, LEEDSLITE_HW,
-              PCIXCC_HW, OTHER_HW} HDEVICE_TYPE;
-typedef struct z90crypt_x_status_t {
-  int totalcount;
-  int leedslitecount;
-  int leeds2count;
-  int pcixccCount;
-  int requestqWaitCount;
-  int pendingqWaitCount;
-  int totalOpenCount;
-  int cryptoDomain;
-  unsigned char status[ML]; 
-  unsigned char qdepth[ML]; 
-} z90crypt_x_status;
+		PCICC_HW, PCICA_HW,
+		PCIXCC_HW, OTHER_HW,
+		OTHER2_HW} HDEVICE_TYPE; 
 #ifndef DEV_NAME
 #define DEV_NAME        "z90crypt"
 #endif

@@ -1212,7 +1212,8 @@ sys32_futex_wrapper:
 	lgfr	%r3,%r3			# int
 	lgfr	%r4,%r4			# int
 	llgtr	%r5,%r5			# struct timespec *
-	jg	compat_sys_futex	# branch to system call
+	llgtr	%r6,%r6			# u32 *
+	jg	sys32_futex		# branch to system call
 
 	.globl  sys32_sched_setaffinity_wrapper
 sys32_sched_setaffinity_wrapper:

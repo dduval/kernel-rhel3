@@ -34,8 +34,8 @@
 #include <asm/sn/idle.h>
 #endif
 
-static void
-do_show_stack (struct unw_frame_info *info, void *arg)
+void
+ia64_do_show_stack (struct unw_frame_info *info, void *arg)
 {
 	static char buffer[512];
 	unsigned long ip, sp, bsp;
@@ -59,20 +59,20 @@ show_trace_task (struct task_struct *task)
 	struct unw_frame_info info;
 
 	unw_init_from_blocked_task(&info, task);
-	do_show_stack(&info, 0);
+	ia64_do_show_stack(&info, 0);
 }
 
 void
 show_stack (unsigned long * sp)
 {
 	if (!sp)
-		unw_init_running(do_show_stack, 0);
+		unw_init_running(ia64_do_show_stack, 0);
 	else {
 		struct unw_frame_info info;
 		struct task_struct *task = (struct task_struct *)sp;
 
 		unw_init_from_blocked_task(&info, task);
-		do_show_stack(&info, 0);
+		ia64_do_show_stack(&info, 0);
 	}
 }
 
@@ -378,7 +378,7 @@ copy_thread (int nr, unsigned long clone_flags,
 }
 
 void
-do_copy_regs (struct unw_frame_info *info, void *arg)
+ia64_do_copy_regs (struct unw_frame_info *info, void *arg)
 {
 	unsigned long mask, sp, nat_bits = 0, ip, ar_rnat, urbs_end, cfm;
 	elf_greg_t *dst = arg;
@@ -471,7 +471,7 @@ do_dump_fpu (struct unw_frame_info *info, void *arg)
 void
 ia64_elf_core_copy_regs (struct pt_regs *pt, elf_gregset_t dst)
 {
-	unw_init_running(do_copy_regs, dst);
+	unw_init_running(ia64_do_copy_regs, dst);
 }
 
 int
@@ -654,4 +654,22 @@ machine_power_off (void)
 	if (pm_power_off)
 		pm_power_off();
 	machine_halt();
+}
+
+void
+ia64_freeze_cpu (struct unw_frame_info *info, void *arg)
+{
+	struct switch_stack **dst = arg;
+
+	current->thread.ksp = (__u64)info->sw - 16;
+	*dst = info->sw;
+	for (;;) __cli();
+}
+
+void
+ia64_start_dump (struct unw_frame_info *info, void *arg)
+{
+	struct dump_call_param *param = arg;
+
+	param->func(param->regs, info);
 }

@@ -137,7 +137,7 @@ void __init openpic_init_IRQ(void)
         int i;
         unsigned int *addrp;
         unsigned char* chrp_int_ack_special = 0;
-        unsigned char init_senses[NR_IRQS - NUM_8259_INTERRUPTS];
+        unsigned char init_senses[NR_IRQS - NUM_ISA_INTERRUPTS];
         int nmi_irq = -1;
 #if defined(CONFIG_VT) && defined(CONFIG_ADB_KEYBOARD) && defined(XMON)
         struct device_node *kbd;
@@ -152,13 +152,23 @@ void __init openpic_init_IRQ(void)
 			__ioremap(addrp[prom_n_addr_cells(np)-1], 1, _PAGE_NO_CACHE);
         /* hydra still sets OpenPIC_InitSenses to a static set of values */
         if (OpenPIC_InitSenses == NULL) {
-                prom_get_irq_senses(init_senses, NUM_8259_INTERRUPTS, NR_IRQS);
+                prom_get_irq_senses(init_senses, NUM_ISA_INTERRUPTS, NR_IRQS);
                 OpenPIC_InitSenses = init_senses;
-                OpenPIC_NumInitSenses = NR_IRQS - NUM_8259_INTERRUPTS;
+                OpenPIC_NumInitSenses = NR_IRQS - NUM_ISA_INTERRUPTS;
         }
-        openpic_init(1, NUM_8259_INTERRUPTS, chrp_int_ack_special, nmi_irq);
-        for ( i = 0 ; i < NUM_8259_INTERRUPTS  ; i++ )
+        openpic_init(1, NUM_ISA_INTERRUPTS, chrp_int_ack_special, nmi_irq);
+        for ( i = 0 ; i < NUM_ISA_INTERRUPTS  ; i++ )
                 irq_desc[i].handler = &i8259_pic;
+}
+
+void openpic_isa_init(void)
+{
+
+	/* Initialize the cascade */
+	if (request_irq(open_pic_irq_offset, no_action, SA_INTERRUPT,
+			"82c59 cascade", NULL))
+		printk(KERN_CRIT "Unable to get OpenPIC IRQ 0 for cascade\n");
+
         i8259_init();
 }
 
@@ -385,12 +395,6 @@ void __init openpic_init(int main_pic, int offset, unsigned char* chrp_ack,
 	ppc64_boot_msg(0x24, "OpenPic Spurious");
 	openpic_set_spurious(openpic_vec_spurious);
 
-	/* Initialize the cascade */
-	if (offset) {
-		if (request_irq(offset, no_action, SA_INTERRUPT,
-				"82c59 cascade", NULL))
-			printk(KERN_ERR "Unable to get OpenPIC IRQ 0 for cascade\n");
-	}
 	openpic_set_priority(0);
 	openpic_disable_8259_pass_through();
 

@@ -60,8 +60,6 @@ int core_setuid_ok = 0;
 static struct linux_binfmt *formats;
 static rwlock_t binfmt_lock = RW_LOCK_UNLOCKED;
 
-int exec_shield = 0;
-
 int register_binfmt(struct linux_binfmt * fmt)
 {
 	struct linux_binfmt ** tmp = &formats;
@@ -375,7 +373,7 @@ int setup_arg_pages(struct linux_binprm *bprm, int executable_stack)
 		if (executable_stack)
 			mpnt->vm_flags = VM_STACK_FLAGS | VM_MAYEXEC | VM_EXEC;
 		else
-			mpnt->vm_flags = VM_STACK_FLAGS & ~(VM_MAYEXEC|VM_EXEC);
+			mpnt->vm_flags = (VM_STACK_FLAGS | VM_MAYEXEC) & ~VM_EXEC;
 		mpnt->vm_ops = NULL;
 		mpnt->vm_pgoff = 0;
 		mpnt->vm_file = NULL;
@@ -828,8 +826,13 @@ int prepare_binprm(struct linux_binprm *bprm)
 
 	if(!(bprm->file->f_vfsmnt->mnt_flags & MNT_NOSUID)) {
 		/* Set-uid? */
-		if (mode & S_ISUID)
+		if (mode & S_ISUID) {
 			bprm->e_uid = inode->i_uid;
+#ifdef __i386__
+			/* reset personality */
+			current->personality = PER_LINUX;
+#endif
+		}
 
 		/* Set-gid? */
 		/*
@@ -837,8 +840,13 @@ int prepare_binprm(struct linux_binprm *bprm)
 		 * is a candidate for mandatory locking, not a setgid
 		 * executable.
 		 */
-		if ((mode & (S_ISGID | S_IXGRP)) == (S_ISGID | S_IXGRP))
+		if ((mode & (S_ISGID | S_IXGRP)) == (S_ISGID | S_IXGRP)) {
 			bprm->e_gid = inode->i_gid;
+#ifdef __i386__
+			/* reset personality */
+			current->personality = PER_LINUX;
+#endif
+		}
 	}
 
 	/* We don't have VFS support for capabilities yet */

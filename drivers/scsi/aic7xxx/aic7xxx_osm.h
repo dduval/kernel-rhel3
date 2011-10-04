@@ -68,6 +68,7 @@
 #include <linux/smp_lock.h>
 #include <linux/version.h>
 #include <linux/module.h>
+#include <linux/diskdumplib.h>
 #include <asm/byteorder.h>
 #include <asm/io.h>
 
@@ -87,6 +88,8 @@
 #define AIC_LIB_PREFIX ahc
 #include "scsi.h"
 #include "hosts.h"
+
+#include "scsi_dump.h"
 
 /* Name space conflict with BSD queue macros */
 #ifdef LIST_HEAD
@@ -153,7 +156,8 @@ typedef Scsi_Cmnd      *ahc_io_ctx_t;
 extern u_int aic7xxx_no_probe;
 extern u_int aic7xxx_allow_memio;
 extern int aic7xxx_detect_complete;
-extern Scsi_Host_Template aic7xxx_driver_template;
+extern Scsi_Host_Template_dump aic7xxx_driver_template_dump;
+#define aic7xxx_driver_template (aic7xxx_driver_template_dump.hostt)
 
 /***************************** Bus Space/DMA **********************************/
 
@@ -253,6 +257,22 @@ int	ahc_dmamap_unload(struct ahc_softc *, bus_dma_tag_t, bus_dmamap_t);
  * to do an mb()?
  */
 #define ahc_dmamap_sync(ahc, dma_tag, dmamap, offset, len, op)
+
+
+/******************************** Disk dump ***********************************/
+#if defined(CONFIG_DISKDUMP) || defined(CONFIG_DISKDUMP_MODULE)
+#undef  add_timer
+#define add_timer	diskdump_add_timer
+#undef  del_timer_sync
+#define del_timer_sync	diskdump_del_timer
+#undef  del_timer
+#define del_timer	diskdump_del_timer
+#undef  mod_timer
+#define mod_timer	diskdump_mod_timer
+
+#define tasklet_schedule	diskdump_tasklet_schedule
+#endif
+
 
 /************************** Timer DataStructures ******************************/
 typedef struct timer_list ahc_timer_t;

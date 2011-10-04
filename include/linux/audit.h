@@ -46,12 +46,17 @@ struct audit_policy {
 #define AUDIT_INVAL		0x0301
 #endif
 
+#ifdef __ia64__
+#define MAX_SYSCALL 1300
+#else
+#define MAX_SYSCALL 299
+#endif
 
 /*
  * Special values for audit_policy.code
  */
 enum {
-	__AUD_POLICY_LAST_SYSCALL = 299,
+	__AUD_POLICY_LAST_SYSCALL = MAX_SYSCALL,
 	AUD_POLICY_FORK,
 	AUD_POLICY_EXIT,
 	AUD_POLICY_NETLINK,
@@ -327,7 +332,11 @@ enum {
 
 struct sk_buff;
 
+#ifdef __ia64__
+extern int  audit_intercept(struct pt_regs *, unsigned long *);
+#else
 extern int  audit_intercept(struct pt_regs *);
+#endif
 extern void audit_result(struct pt_regs *);
 extern void audit_fork(struct task_struct *, struct task_struct *);
 extern void audit_exit(struct task_struct *, long);

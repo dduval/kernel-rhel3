@@ -44,6 +44,10 @@ extern kdev_t sd_find_target(void *host, int tgt);
 
 #endif
 
+#if defined(CONFIG_DISKDUMP) || defined(CONFIG_DISKDUMP_MODULE)
+Scsi_Device *sd_find_scsi_device(kdev_t);
+#endif
+
 /*
  * Overrides for Emacs so that we follow Linus's tabbing style.
  * Emacs will notice this stuff at the end of the file and automatically

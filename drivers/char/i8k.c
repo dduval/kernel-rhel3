@@ -502,7 +502,7 @@ static ssize_t i8k_read(struct file *f, char *buffer, size_t len, loff_t *fpos)
 	return n;
     }
 
-    if (pos != (unsigned)pos || pos >= n) {
+    if (pos < 0 || pos >= n) {
 	return 0;
     }
 

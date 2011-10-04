@@ -293,9 +293,6 @@ typedef struct page {
  * active, inactive_dirty and inactive_clean lists are protected by
  * the lru lock, and *NOT* by the usual PG_locked bit!
  *
- * PG_skip is used on sparc/sparc64 architectures to "skip" certain
- * parts of the address space.
- *
  * PG_error is set to indicate that an I/O error occurred on this page.
  *
  * PG_arch_1 is an architecture specific page state bit.  The generic
@@ -318,7 +315,7 @@ typedef struct page {
 #define PG_inactive_laundry	 8
 #define PG_inactive_clean	 9
 #define PG_slab			10
-#define PG_skip			11
+#define PG_invalidated		11	/* Page invalidated by direct IO */
 #define PG_highmem		12
 #define PG_checked		13	/* kill me in 2.5.<early>. */
 #define PG_arch_1		14
@@ -523,6 +520,10 @@ extern void FASTCALL(set_page_dirty(struct page *));
 #define SetPageSync(page)	set_bit(PG_sync, &(page)->flags)
 #define ClearPageSync(page)	clear_bit(PG_sync, &(page)->flags)
 #define TestClearPageSync(page)	test_and_clear_bit(PG_sync, &(page)->flags)
+
+#define SetPageInvalidated(page) set_bit(PG_invalidated, &(page)->flags)
+#define ClearPageInvalidated(page) clear_bit(PG_invalidated, &(page)->flags)
+#define PageInvalidated(page)   test_bit(PG_invalidated, &(page)->flags)
 
 #ifdef CONFIG_HIGHMEM
 #define PageHighMem(page)		test_bit(PG_highmem, &(page)->flags)
@@ -733,7 +734,8 @@ extern void lock_vma_mappings(struct vm_area_struct *);
 extern void unlock_vma_mappings(struct vm_area_struct *);
 extern void insert_vm_struct(struct mm_struct *, struct vm_area_struct *);
 extern void __insert_vm_struct(struct mm_struct *, struct vm_area_struct *);
-extern void build_mmap_rb(struct mm_struct *);
+extern void __vma_link_rb(struct mm_struct *, struct vm_area_struct *,
+	rb_node_t **, rb_node_t *);
 extern void exit_mmap(struct mm_struct *);
 
 extern unsigned long get_unmapped_area(struct file *, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long);
@@ -759,12 +761,20 @@ extern int do_munmap(struct mm_struct *, unsigned long, size_t, int acct);
 
 extern unsigned long do_brk(unsigned long, unsigned long);
 
+#ifdef __i386__
+extern void arch_remove_exec_range(struct mm_struct *mm, unsigned long limit);
+#else
+#define arch_remove_exec_range(mm, limit)  do { } while (0)
+#endif
+
+
 static inline void __vma_unlink(struct mm_struct * mm, struct vm_area_struct * vma, struct vm_area_struct * prev)
 {
 	prev->vm_next = vma->vm_next;
 	rb_erase(&vma->vm_rb, &mm->mm_rb);
 	if (mm->mmap_cache == vma)
 		mm->mmap_cache = prev;
+	arch_remove_exec_range(mm, vma->vm_end);
 }
 
 #define VM_SPECIAL (VM_IO | VM_DONTCOPY | VM_DONTEXPAND | VM_RESERVED)
@@ -880,6 +890,32 @@ static inline struct vm_area_struct * find_vma_intersection(struct mm_struct * m
 extern struct vm_area_struct *find_extend_vma(struct mm_struct *mm, unsigned long addr);
 
 extern struct page * vmalloc_to_page(void *addr);
+
+/* Page pinning for direct IO.  Copy-on-write effects mean it's unsafe
+ * for the VM to unmap a pte if the process has requested direct IO to
+ * that page.  So we keep a count of outstanding direct IOs per page.
+ *
+ * We actually maintain this as a hash into an atomic_t[] array, so
+ * depending on the hash size there may be a certain amount of false
+ * sharing of page pins. */
+extern atomic_t *page_pin_array;
+extern unsigned int page_pin_mask;
+extern void page_pin_init(unsigned long);
+static inline unsigned int page_pin_hash(struct page *p) 
+{
+	unsigned int addr = (unsigned int)(unsigned long)p;
+	/* gcc usually optimises integer divide-by-constant pretty well. */
+	addr /= sizeof(struct page);  
+	addr ^= (addr >> 8);
+	return (addr & page_pin_mask);
+}
+#define page_pin_counter(p) (page_pin_array + page_pin_hash(p))
+#define pin_page_mappings(p) \
+	do {atomic_inc(page_pin_counter(p));} while (0)
+#define unpin_page_mappings(p) \
+	do {atomic_dec(page_pin_counter(p));} while (0)
+#define page_mapping_pinned(p) \
+	(atomic_read(page_pin_counter(p)) != 0)
 
 #endif /* __KERNEL__ */
 

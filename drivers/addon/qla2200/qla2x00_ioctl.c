@@ -57,11 +57,6 @@ STATIC void qla2x00_free_ioctl_mem(scsi_qla_host_t *);
 STATIC int qla2x00_get_ioctl_scrap_mem(scsi_qla_host_t *, void **, uint32_t);
 STATIC void qla2x00_free_ioctl_scrap_mem(scsi_qla_host_t *);
 
-#if defined(ISP2300)
-STATIC uint8_t qla2x00_get_next_free_pub_id(scsi_qla_host_t *, uint16_t *);
-STATIC uint8_t qla2x00_host_relogin(scsi_qla_host_t *, fcdev_t *);
-#endif
-
 STATIC int qla2x00_find_curr_ha(uint16_t, scsi_qla_host_t **);
 
 STATIC int qla2x00_get_driver_specifics(EXT_IOCTL *);
@@ -82,7 +77,7 @@ STATIC int qla2x00_get_statistics(scsi_qla_host_t *, EXT_IOCTL *, int);
 STATIC int qla2x00_get_fc_statistics(scsi_qla_host_t *, EXT_IOCTL *, int);
 STATIC int qla2x00_get_port_summary(scsi_qla_host_t *, EXT_IOCTL *, int);
 STATIC int qla2x00_get_fcport_summary(scsi_qla_host_t *, EXT_DEVICEDATAENTRY *,
-    void *, uint32_t, uint32_t *, uint32_t *);
+    void *, uint32_t, uint32_t, uint32_t *, uint32_t *);
 STATIC int qla2x00_std_missing_port_summary(scsi_qla_host_t *,
     EXT_DEVICEDATAENTRY *, void *, uint32_t, uint32_t *, uint32_t *);
 STATIC int qla2x00_query_driver(scsi_qla_host_t *, EXT_IOCTL *, int);
@@ -90,7 +85,7 @@ STATIC int qla2x00_query_fw(scsi_qla_host_t *, EXT_IOCTL *, int);
 
 STATIC int qla2x00_msiocb_passthru(scsi_qla_host_t *, EXT_IOCTL *, int,
     int);
-#if defined(ISP2300)
+#if defined(ISP2300) 
 STATIC int qla2x00_send_els_passthru(scsi_qla_host_t *, EXT_IOCTL *,
     Scsi_Cmnd *, fc_port_t *, fc_lun_t *, int);
 #endif
@@ -285,13 +280,6 @@ qla2x00_ioctl(Scsi_Device *dev, int cmd, void *arg)
 		return (ret);
 	}
 
-	ret = verify_area(VERIFY_READ, (void *)arg, sizeof(EXT_IOCTL));
-	if (ret) {
-		DEBUG9_10(printk("%s: ERROR VERIFY_READ EXT_IOCTL "
-		    "sturct. cmd=%x arg=%p.\n", __func__, cmd, arg);)
-		return (ret);
-	}
-
 	/* Allocate ioctl structure buffer to support multiple concurrent
 	 * entries.
 	 */
@@ -314,16 +302,6 @@ qla2x00_ioctl(Scsi_Device *dev, int cmd, void *arg)
 		return (ret);
 	}
 
-	/* Verify before update status fields in EXT_IOCTL struct. */
-	ret = verify_area(VERIFY_WRITE, (void *)arg, sizeof(EXT_IOCTL));
-	if (ret) {
-		DEBUG9_10(printk("%s: ERROR VERIFY_WRITE EXT_IOCTL "
-		    "sturct. cmd=%x arg=%p.\n", __func__, cmd, arg);)
-
-		KMEM_FREE(pext, sizeof(EXT_IOCTL));
-		return (ret);
-	}
-
 	/* check signature of this ioctl */
 	temp = (uint8_t *) &pext->Signature;
 
@@ -340,7 +318,7 @@ qla2x00_ioctl(Scsi_Device *dev, int cmd, void *arg)
 		DEBUG9_10(printk("%s: signature did not match. "
 		    "cmd=%x arg=%p.\n", __func__, cmd, arg);)
 		pext->Status = EXT_STATUS_INVALID_PARAM;
-		ret = copy_to_user((void *)arg, (void *)pext, sizeof(EXT_IOCTL));
+		ret = copy_to_user(arg, pext, sizeof(EXT_IOCTL));
 
 		KMEM_FREE(pext, sizeof(EXT_IOCTL));
 		return (ret);
@@ -351,11 +329,9 @@ qla2x00_ioctl(Scsi_Device *dev, int cmd, void *arg)
 		printk(KERN_WARNING
 		    "qla2x00: ioctl interface version not supported = %d.\n",
 		    pext->Version);
-		pext->Status = EXT_STATUS_UNSUPPORTED_VERSION;
-		ret = copy_to_user((void *)arg, (void *)pext, sizeof(EXT_IOCTL));
 
 		KMEM_FREE(pext, sizeof(EXT_IOCTL));
-		return (ret);
+		return (-EINVAL);
 	}
 
 	/* check for special cmds used during application's setup time. */
@@ -365,8 +341,7 @@ qla2x00_ioctl(Scsi_Device *dev, int cmd, void *arg)
 
 		pext->Instance = num_hosts;
 		pext->Status = EXT_STATUS_OK;
-		ret = copy_to_user((void *)arg, (void *)pext,
-		    sizeof(EXT_IOCTL));
+		ret = copy_to_user(arg, pext, sizeof(EXT_IOCTL));
 
 		KMEM_FREE(pext, sizeof(EXT_IOCTL));
 		return (ret);
@@ -393,7 +368,8 @@ qla2x00_ioctl(Scsi_Device *dev, int cmd, void *arg)
 			 */
 			if (qla2x00_find_curr_ha(pext->Instance, &ha) != 0) {
 				pext->Status = EXT_STATUS_DEV_NOT_FOUND;
-				ret = copy_to_user(arg, pext, sizeof(EXT_IOCTL));
+				ret = copy_to_user(arg, pext,
+				    sizeof(EXT_IOCTL));
 				DEBUG9_10(printk("%s: SETINSTANCE invalid inst "
 				    "%d. num_hosts=%d ha=%p ret=%d.\n",
 				    __func__, pext->Instance, num_hosts, ha,
@@ -425,7 +401,7 @@ qla2x00_ioctl(Scsi_Device *dev, int cmd, void *arg)
 
 	case EXT_CC_DRIVER_SPECIFIC:
 		ret = qla2x00_get_driver_specifics(pext);
-		tmp_rval = copy_to_user(arg, (void *)pext, sizeof(EXT_IOCTL));
+		tmp_rval = copy_to_user(arg, pext, sizeof(EXT_IOCTL));
 
 		if (ret == 0)
 			ret = tmp_rval;
@@ -598,7 +574,6 @@ qla2x00_ioctl(Scsi_Device *dev, int cmd, void *arg)
 	   case EXT_CC_PLATFORM_REG:
 	   break;
 	 */
-
 	/* Failover IOCTLs */
 	case FO_CC_GET_PARAMS:
 	case FO_CC_SET_PARAMS:
@@ -623,7 +598,7 @@ qla2x00_ioctl(Scsi_Device *dev, int cmd, void *arg)
 	} /* end of CC decode switch */
 
 	/* Always try to copy values back regardless what happened before. */
-	tmp_rval = copy_to_user(arg, (void *)pext, sizeof(EXT_IOCTL));
+	tmp_rval = copy_to_user(arg, pext, sizeof(EXT_IOCTL));
 
 	if (ret == 0)
 		ret = tmp_rval;
@@ -896,193 +871,6 @@ qla2x00_free_ioctl_scrap_mem(scsi_qla_host_t *ha)
 	    __func__, ha->host_no);)
 }
 
-#if defined(ISP2300)
-/*
- * qla2x00_get_next_free_pub_id
- *	Find the next free public loop ID to use, starting from the old
- *	loop ID passed in.  If the old loop ID is invalid, this function
- *	will start the search from beginning.
- *
- * Input:
- *	ha		= adapter block pointer.
- *	ploop_id	= pointer to a 16bit var containing the old loop
- *			ID which is also to be used to get the new loop ID.
- *
- * Returns:
- *      QL_STATUS_SUCCESS - Found an usable loop ID
- *      QL_STATUS_RESOURCE_ERROR - No more free loop ID
- */
-STATIC uint8_t
-qla2x00_get_next_free_pub_id(scsi_qla_host_t *ha, uint16_t *ploop_id)
-{
-	uint8_t		retval = QL_STATUS_SUCCESS;
-	uint16_t	index;
-	uint16_t	old_id;
-
-	DEBUG9(printk("%s(%ld): inst=%ld entered.\n",
-	    __func__, ha->host_no, ha->instance);)
-
-	old_id = *ploop_id;
-	if (old_id >= LAST_SNS_LOOP_ID) {
-		/* set a starting point */
-		old_id = ha->min_external_loopid;
-	}
-
-	for (index = old_id; index < LAST_SNS_LOOP_ID; index++) {
-		if (!ha->fabricid[index].in_use) {
-			ha->fabricid[index].in_use = TRUE;
-			*ploop_id = index;
-			DEBUG9(printk("%s(%ld): found Lid %02x.\n",
-			    __func__, ha->host_no, index);)
-			break;
-		}
-	}
-	if (index >= LAST_SNS_LOOP_ID) {
-		/* no more free ID */
-		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR no more free LID "
-		    "available.\n", __func__, ha->host_no, ha->instance);)
-
-		retval = QL_STATUS_RESOURCE_ERROR;
-	}
-
-	DEBUG9(printk("%s(%ld): inst=%ld exiting. retval=%d.\n",
-	     __func__, ha->host_no, ha->instance, retval);)
-
-	return retval;
-}
-
-/*
- * qla2x00_host_relogin
- *	Issue fabric login command to a host in the host_db which
- *	had somehow been lost before. All updates are passed back
- *	via pdevice. No update will be done to any of ha's database.
- *
- * Input:
- *	ha = adapter block pointer.
- *	pdevice = pointer to FC device type structure.
- *
- * Returns:
- *      QL_STATUS_SUCCESS - Login successfully
- *      QL_STATUS_ERROR - Login failed
- *      QL_STATUS_FATAL_ERROR - Fatal error
- */
-STATIC uint8_t
-qla2x00_host_relogin(scsi_qla_host_t *ha, fcdev_t *pdevice) 
-{
-	uint8_t		retval = QL_STATUS_SUCCESS;
-	uint16_t	status[3];
-	uint16_t	tmp_loop_id;
-
-	DEBUG9(printk("%s(%ld): inst=%ld entered.\n",
-	    __func__, ha->host_no, ha->instance);)
-
-	/* pdevice->loop_id is assumed to be straight from the current
-	 * database content.
-	 */
-	tmp_loop_id = pdevice->loop_id & 0xff;
-	if (tmp_loop_id >= LAST_SNS_LOOP_ID) {
-		/* Invalid value.  We need to find a valid ID to use. */
-		if (qla2x00_get_next_free_pub_id(ha, &tmp_loop_id) != 0) {
-			/* no more free IDs to use */
-			DEBUG9_10(printk("%s(%ld): inst=%ld no free loop_id "
-			    " available for login.\n",
-			    __func__, ha->host_no, ha->instance);)
-
-			return QL_STATUS_ERROR;
-		}
-	}
-
-	for (;;) {
-		DEBUG9(printk("%s(%ld): Login w/loop id 0x%02x for port %06x\n",
-		    __func__, ha->host_no, pdevice->loop_id,
-		    pdevice->d_id.b24);)
-
-		/* Login device on switch. */
-		qla2x00_login_fabric(ha,
-		    tmp_loop_id, pdevice->d_id.b.domain,
-		    pdevice->d_id.b.area, pdevice->d_id.b.al_pa, 
-		    &status[0], 0);
-
-		if (status[0] != MBS_CMD_CMP &&
-		    status[0] != MBS_PORT_ID_IN_USE &&
-		    status[0] != MBS_LOOP_ID_IN_USE) {
-
-	 		DEBUG9_10(printk("%s(%ld): inst=%ld "
-			    "ERROR login status[0]=%x status[1]=%x.\n",
-			    __func__, ha->host_no, ha->instance, status[0],
-			    status[1]);)
-
-			retval = QL_STATUS_FATAL_ERROR;
-			break;
-		}
-
-		if (status[0] == MBS_CMD_CMP) {
-			DEBUG9(printk("%s(%ld): inst=%ld "
-			    " host login success; loop_id=%x.\n",
-			    __func__, ha->host_no, ha->instance, tmp_loop_id);)
-
-			pdevice->loop_id = tmp_loop_id;
-			retval = QL_STATUS_SUCCESS;
-			break;
-
-		} else if (status[0] == MBS_PORT_ID_IN_USE) {
-			ha->fabricid[tmp_loop_id].in_use = FALSE;
-			tmp_loop_id = status[1];
-
-			DEBUG9(printk("%s(%ld): inst=%ld "
-			    "port %06x already using loop id=0x%02x in "
-			    "f/w database. Retrying.\n",
-			    __func__, ha->host_no, ha->instance,
-			    pdevice->d_id.b24, tmp_loop_id);)
-
-			if (tmp_loop_id <= LAST_SNS_LOOP_ID) {
-				ha->fabricid[tmp_loop_id].in_use = TRUE;
-			} else {
-				/* Error */
-				DEBUG9_10(printk("%s(%ld): inst=%ld "
-				    "PORT_ID_IN_USE - invalid loop id %02x "
-				    "returned.\n",
-				    __func__, ha->host_no, ha->instance,
-				    pdevice->loop_id);)
-				retval = QL_STATUS_ERROR;
-				break;
-			}
-
-		} else if (status[0] == MBS_LOOP_ID_IN_USE) {
-			/* loop id already used by others; try another one */
-			DEBUG9_10(printk("%s(%ld): inst=%ld "
-			    "loop id %02x already used.\n",
-			    __func__, ha->host_no, ha->instance,
-			    pdevice->loop_id);)
-
-			/* Search for another usable loop_id */
-			if (qla2x00_get_next_free_pub_id(ha,
-			    &tmp_loop_id) == 0) {
-
-				DEBUG9(printk("%s(%ld): previous loop "
-				    "id in use. Retry with 0x%02x.\n",
-				    __func__, ha->host_no, tmp_loop_id);)
-
-				ha->fabricid[tmp_loop_id].in_use = TRUE;
-			} else {
-				/* Error */
-				DEBUG9_10(printk("%s(%ld): inst=%ld loop id "
-				    "in use; no more free loop id.\n",
-				    __func__, ha->host_no, ha->instance);)
-
-				retval = QL_STATUS_ERROR;
-				break;
-			}
-		}
-	}
-
-	DEBUG9(printk("%s(%ld): inst=%ld exiting. retval=%d.\n",
-	     __func__, ha->host_no, ha->instance, retval);)
-
-	return (retval);
-}
-#endif
-
 /*
  * qla2x00_find_curr_ha
  *	Searches and returns the pointer to the adapter host_no specified.
@@ -1160,21 +948,11 @@ qla2x00_get_driver_specifics(EXT_IOCTL *pext)
 	data.DrvVer.Patch = QLA_DRIVER_PATCH_VER;
 	data.DrvVer.Beta = QLA_DRIVER_BETA_VER;
 
-	ret = verify_area(VERIFY_WRITE, (void *)pext->ResponseAdr,
+	ret = copy_to_user(pext->ResponseAdr, &data,
 	    sizeof(EXT_LN_DRIVER_DATA));
 	if (ret) {
 		pext->Status = EXT_STATUS_COPY_ERR;
-		DEBUG9_10(printk("%s: ERROR verify write resp buf\n",
-		    __func__);)
-
-		return (ret);
-	}
-
-	ret = copy_to_user(pext->ResponseAdr, &data, sizeof(EXT_LN_DRIVER_DATA));
-	if (ret) {
-		pext->Status = EXT_STATUS_COPY_ERR;
-		DEBUG9_10(printk("%s: ERROR copy resp buf\n",
-		    __func__);)
+		DEBUG9_10(printk("%s: ERROR copy resp buf\n", __func__);)
 	}
 
 	DEBUG9(printk("%s: exiting. ret=%d.\n",
@@ -1208,17 +986,8 @@ qla2x00_aen_reg(scsi_qla_host_t *ha, EXT_IOCTL *cmd, int mode)
 	DEBUG9(printk("%s(%ld): inst %ld entered.\n",
 	    __func__, ha->host_no, ha->instance);)
 
-	rval = verify_area(VERIFY_READ, (void *)cmd->RequestAdr,
+	rval = copy_from_user(&reg_struct, cmd->RequestAdr,
 	    sizeof(EXT_REG_AEN));
-	if (rval) {
-		cmd->Status = EXT_STATUS_COPY_ERR;
-		DEBUG9_10(printk("%s(%ld): inst %ld ERROR verify read req buf\n",
-		    __func__, ha->host_no, ha->instance);)
-
-		return (rval);
-	}
-
-	rval = copy_from_user(&reg_struct, cmd->RequestAdr, sizeof(EXT_REG_AEN));
 	if (rval == 0) {
 		cmd->Status = EXT_STATUS_OK;
 		if (reg_struct.Enable) {
@@ -1338,18 +1107,6 @@ qla2x00_aen_get(scsi_qla_host_t *ha, EXT_IOCTL *cmd, int mode)
 	/* Copy the entire queue to user's buffer. */
 	ret_len = (uint32_t)(queue_cnt * sizeof(EXT_ASYNC_EVENT));
 	if (queue_cnt != 0) {
-		rval = verify_area(VERIFY_WRITE, (void *)cmd->ResponseAdr,
-		    ret_len);
-		if (rval != 0) {
-			cmd->Status = EXT_STATUS_COPY_ERR;
-			DEBUG9_10(printk(
-			    "%s(%ld): inst=%ld ERROR verify write resp buf.\n",
-			    __func__, ha->host_no, ha->instance);)
-
-			qla2x00_free_ioctl_scrap_mem(ha);
-			return (rval);
-		}
-
 		rval = copy_to_user(cmd->ResponseAdr, paen, ret_len);
 	}
 	cmd->ResponseLen = ret_len;
@@ -1549,6 +1306,7 @@ qla2x00_query_hba_node(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	uint32_t	i, transfer_size;
 	EXT_HBA_NODE	*ptmp_hba_node;
 	qla_boards_t	*bdp;
+	uint8_t		*next_str;
 
 
 	DEBUG9(printk("%s(%ld): inst=%ld entered.\n",
@@ -1580,25 +1338,46 @@ qla2x00_query_hba_node(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	sprintf((char *)(ptmp_hba_node->FWVersion),"%2d.%02d.%02d",
 	    bdp->fwver[0], bdp->fwver[1], bdp->fwver[2]);
 
-	sprintf((char *)(ptmp_hba_node->OptRomVersion),"%d.%d",
-	    ha->optrom_major, ha->optrom_minor);
+	/* Option ROM version string. */
+	memset(ptmp_hba_node->OptRomVersion, 0,
+	    sizeof(ptmp_hba_node->OptRomVersion));
+	next_str = ptmp_hba_node->OptRomVersion;
+	sprintf(next_str, "0.00");
+	if (test_bit(ROM_CODE_TYPE_BIOS, &ha->code_types)) {
+		sprintf(next_str, "%d.%02d", ha->bios_revision[1],
+		    ha->bios_revision[0]);
+	}
+	/* Extended Option ROM versions. */
+	ptmp_hba_node->BIValid = 0;
+	memset(ptmp_hba_node->BIFwVersion, 0,
+	    sizeof(ptmp_hba_node->BIFwVersion));
+	memset(ptmp_hba_node->BIEfiVersion, 0,
+	    sizeof(ptmp_hba_node->BIEfiVersion));
+	memset(ptmp_hba_node->BIFCodeVersion, 0,
+	    sizeof(ptmp_hba_node->BIFCodeVersion));
+	if (test_bit(ROM_CODE_TYPE_FCODE, &ha->code_types)) {
+		unsigned int barray[3];
+
+		memset (barray, 0, sizeof(barray));
+		ptmp_hba_node->BIValid |= EXT_HN_BI_FCODE_VALID;
+		sscanf(ha->fcode_revision, "%u.%u.%u", &barray[0], &barray[1],
+		    &barray[2]);
+		ptmp_hba_node->BIFCodeVersion[0] = barray[0];
+		ptmp_hba_node->BIFCodeVersion[1] = barray[1];
+		ptmp_hba_node->BIFCodeVersion[2] = barray[2];
+	}
+	if (test_bit(ROM_CODE_TYPE_EFI, &ha->code_types)) {
+		ptmp_hba_node->BIValid |= EXT_HN_BI_FCODE_VALID;
+		ptmp_hba_node->BIEfiVersion[0] = ha->efi_revision[1];
+		ptmp_hba_node->BIEfiVersion[1] = ha->efi_revision[0];
+	}
 
 	ptmp_hba_node->InterfaceType = EXT_DEF_FC_INTF_TYPE;
 	ptmp_hba_node->PortCount = 1;
 
-
-	ptmp_hba_node->DriverAttr = (ha->flags.failover_enabled) ?
-	    DRVR_FO_ENABLED : 0;
-
-	ret = verify_area(VERIFY_WRITE, (void  *)pext->ResponseAdr,
-	    sizeof(EXT_HBA_NODE));
-	if (ret) {
-		pext->Status = EXT_STATUS_COPY_ERR;
-		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR verify wrt rsp buf\n",
-		    __func__, ha->host_no, ha->instance);)
-		qla2x00_free_ioctl_scrap_mem(ha);
-		return (ret);
-	}
+	ptmp_hba_node->DriverAttr = 0;
+	if (ha->flags.failover_enabled)
+		ptmp_hba_node->DriverAttr = DRVR_FO_ENABLED;
 
 	/* now copy up the HBA_NODE to user */
 	if (pext->ResponseLen < sizeof(EXT_HBA_NODE))
@@ -1606,8 +1385,7 @@ qla2x00_query_hba_node(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	else
 		transfer_size = sizeof(EXT_HBA_NODE);
 
-	ret = copy_to_user((uint8_t *)pext->ResponseAdr,
-	    (uint8_t *)ptmp_hba_node, transfer_size);
+	ret = copy_to_user(pext->ResponseAdr, ptmp_hba_node, transfer_size);
 	if (ret) {
 		pext->Status = EXT_STATUS_COPY_ERR;
 		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR copy rsp buffer.\n",
@@ -1697,7 +1475,7 @@ qla2x00_query_hba_port(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	}
 
 	port_cnt = 0;
-	for (fcport = ha->fcport; (fcport); fcport = fcport->next) {
+	list_for_each_entry(fcport, &ha->fcports, list) {
 		/* if removed or missing */
 		if (atomic_read(&fcport->state) != FC_ONLINE) {
 			DEBUG9_10(printk(
@@ -1737,10 +1515,9 @@ qla2x00_query_hba_port(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	ptmp_hba_port->DiscPortCount   = port_cnt;
 	ptmp_hba_port->DiscTargetCount = tgt_cnt;
 
-	if (atomic_read(&ha->loop_state) == LOOP_DOWN) {
-
+	if (atomic_read(&ha->loop_state) == LOOP_DOWN ||
+	    atomic_read(&ha->loop_state) == LOOP_DEAD) {
 		ptmp_hba_port->State = EXT_DEF_HBA_LOOP_DOWN;
-
 	} else if (atomic_read(&ha->loop_state) != LOOP_READY ||
 	    test_bit(ABORT_ISP_ACTIVE, &ha->dpc_flags) ||
 	    test_bit(CFG_ACTIVE, &ha->cfg_flags) || ABORTS_ACTIVE) {
@@ -1785,24 +1562,13 @@ qla2x00_query_hba_port(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 
 	ptmp_hba_port->PortSpeed = ha->current_speed;
 
-	ret = verify_area(VERIFY_WRITE, (void *)pext->ResponseAdr ,
-	    sizeof(EXT_HBA_PORT));
-	if (ret) {
-		pext->Status = EXT_STATUS_COPY_ERR;
-		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR verify wrt rsp buf\n",
-		    __func__, ha->host_no, ha->instance);)
-		qla2x00_free_ioctl_scrap_mem(ha);
-		return (ret);
-	}
-
 	/* now copy up the HBA_PORT to user */
 	if (pext->ResponseLen < sizeof(EXT_HBA_PORT))
 		transfer_size = pext->ResponseLen;
 	else
 		transfer_size = sizeof(EXT_HBA_PORT);
 
-	ret = copy_to_user((uint8_t *)pext->ResponseAdr,
-	    (uint8_t *)ptmp_hba_port, transfer_size);
+	ret = copy_to_user(pext->ResponseAdr, ptmp_hba_port, transfer_size);
 	if (ret) {
 		pext->Status = EXT_STATUS_COPY_ERR;
 		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR copy rsp buffer.\n",
@@ -1845,12 +1611,17 @@ qla2x00_query_disc_port(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	fc_port_t	*fcport;
 	os_tgt_t	*tq;
 	EXT_DISC_PORT	*ptmp_disc_port;
+	int found;
 
 	DEBUG9(printk("%s(%ld): inst=%ld entered. Port inst=%02d.\n",
 	    __func__, ha->host_no, ha->instance, pext->Instance);)
 
 	inst = 0;
-	for (fcport = ha->fcport; fcport != NULL; fcport = fcport->next) {
+	found = 0;
+	list_for_each_entry(fcport, &ha->fcports, list) {
+		if(fcport->port_type != FCT_TARGET)
+			continue;
+
 		if (atomic_read(&fcport->state) != FC_ONLINE) {
 			/* port does not exist anymore */
 			DEBUG9_10(printk("%s(%ld): fcport marked lost. "
@@ -1885,10 +1656,11 @@ qla2x00_query_disc_port(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		    fcport->loop_id);)
 
 		/* Found the matching port still connected. */
+		found++;
 		break;
 	}
 
-	if (fcport == NULL) {
+	if (!found) {
 		DEBUG9_10(printk("%s(%ld): inst=%ld dev not found.\n",
 		    __func__, ha->host_no, ha->instance);)
 
@@ -1950,24 +1722,13 @@ qla2x00_query_disc_port(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		}
 	}
 
-	ret = verify_area(VERIFY_WRITE, (void *)pext->ResponseAdr ,
-	    sizeof(EXT_DISC_PORT));
-	if (ret) {
-		pext->Status = EXT_STATUS_COPY_ERR;
-		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR verify wrt rsp buf\n",
-		    __func__, ha->host_no, ha->instance);)
-		qla2x00_free_ioctl_scrap_mem(ha);
-		return (ret);
-	}
-
 	/* now copy up the DISC_PORT to user */
 	if (pext->ResponseLen < sizeof(EXT_DISC_PORT))
 		transfer_size = pext->ResponseLen;
 	else
 		transfer_size = sizeof(EXT_DISC_PORT);
 
-	ret = copy_to_user((uint8_t *)pext->ResponseAdr,
-	    (uint8_t *)ptmp_disc_port, transfer_size);
+	ret = copy_to_user(pext->ResponseAdr, ptmp_disc_port, transfer_size);
 	if (ret) {
 		pext->Status = EXT_STATUS_COPY_ERR;
 		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR copy rsp buffer.\n",
@@ -1984,6 +1745,28 @@ qla2x00_query_disc_port(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	    __func__, ha->host_no, ha->instance);)
 
 	return (ret);
+}
+
+UINT8
+qla2x00_is_fcport_in_config(scsi_qla_host_t *ha, fc_port_t *fcport)
+{
+	if (ha->flags.failover_enabled) {
+		return (qla2x00_is_fcport_in_foconfig(ha, fcport));
+	} else {
+ 		os_tgt_t   *tq;	
+ 		uint16_t   tgt;	
+  
+ 		/* When ConfigRequired is set, OS tgt is allocated
+ 		 * only for targets found in configuration */
+ 		for (tgt = 0; tgt < MAX_TARGETS; tgt++) {
+ 			if ((tq = TGT_Q(ha, tgt)) == NULL)
+ 				continue;
+ 			if (memcmp(fcport->port_name, tq->port_name,
+			    EXT_DEF_WWN_NAME_SIZE) == 0)
+				return(TRUE);
+		}
+	}
+	return (FALSE);
 }
 
 /*
@@ -2127,24 +1910,13 @@ qla2x00_query_disc_tgt(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	    tgt_fcport->port_name[7],
 	    cnt);)
 
-	ret = verify_area(VERIFY_WRITE, (void *)pext->ResponseAdr,
-	    sizeof(EXT_DISC_TARGET));
-	if (ret) {
-		pext->Status = EXT_STATUS_COPY_ERR;
-		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR verify wrt rsp buf\n",
-		    __func__, ha->host_no, ha->instance);)
-		qla2x00_free_ioctl_scrap_mem(ha);
-		return (ret);
-	}
-
 	/* now copy up the DISC_PORT to user */
 	if (pext->ResponseLen < sizeof(EXT_DISC_PORT))
 		transfer_size = pext->ResponseLen;
 	else
 		transfer_size = sizeof(EXT_DISC_TARGET);
 
-	ret = copy_to_user((uint8_t *)pext->ResponseAdr,
-	    (uint8_t *)ptmp_disc_target, transfer_size);
+	ret = copy_to_user(pext->ResponseAdr, ptmp_disc_target, transfer_size);
 	if (ret) {
 		pext->Status = EXT_STATUS_COPY_ERR;
 		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR copy rsp buffer.\n",
@@ -2219,24 +1991,13 @@ qla2x00_query_chip(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	for (i = 0; i < 8; i++)
 		ptmp_isp->OutMbx[i] = 0;
 
-	ret = verify_area(VERIFY_WRITE, (void *)pext->ResponseAdr,
-	    sizeof(EXT_CHIP));
-	if (ret) {
-		pext->Status = EXT_STATUS_COPY_ERR;
-		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR verify wrt rsp buf\n",
-		    __func__, ha->host_no, ha->instance);)
-		qla2x00_free_ioctl_scrap_mem(ha);
-		return (ret);
-	}
-
 	/* now copy up the ISP to user */
 	if (pext->ResponseLen < sizeof(EXT_CHIP))
 		transfer_size = pext->ResponseLen;
 	else
 		transfer_size = sizeof(EXT_CHIP);
 
-	ret = copy_to_user((uint8_t *)pext->ResponseAdr, (uint8_t *)ptmp_isp,
-	    transfer_size);
+	ret = copy_to_user(pext->ResponseAdr, ptmp_isp, transfer_size);
 	if (ret) {
 		pext->Status = EXT_STATUS_COPY_ERR;
 		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR copy rsp buffer.\n",
@@ -2347,16 +2108,6 @@ qla2x00_get_statistics(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 
 	DEBUG9(printk("%s(%ld): inst=%ld entered.\n",
 	    __func__, ha->host_no, ha->instance);)
-
-	ret = verify_area(VERIFY_WRITE, (void *)pext->ResponseAdr,
-	    sizeof(EXT_HBA_PORT_STAT));
-	if (ret) {
-		pext->Status = EXT_STATUS_COPY_ERR;
-		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR VERIFY_WRITE "
-		    "EXT_HBA_PORT_STAT.\n",
-		    __func__, ha->host_no, ha->instance);)
-		return (ret);
-	}
 
 	/* check on loop down */
 	if (atomic_read(&ha->loop_state) != LOOP_READY || 
@@ -2505,19 +2256,11 @@ qla2x00_get_fc_statistics(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	uint8_t		*req_name;
 	uint16_t	mb_stat[1];
 	uint32_t	transfer_size;
+	int	found;
 
 
 	DEBUG9(printk("%s(%ld): inst=%ld entered.\n",
 	    __func__, ha->host_no, ha->instance);)
-
-	ret = verify_area(VERIFY_WRITE, (void *)pext->ResponseAdr,
-	    sizeof(EXT_HBA_PORT_STAT));
-	if (ret) {
-		pext->Status = EXT_STATUS_COPY_ERR;
-		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR VERIFY_WRITE.\n",
-		    __func__, ha->host_no, ha->instance);)
-		return (ret);
-	}
 
 	ret = copy_from_user(&addr_struct, pext->RequestAdr, pext->RequestLen);
 	if (ret) {
@@ -2528,12 +2271,14 @@ qla2x00_get_fc_statistics(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	}
 
 	/* find the device's loop_id */
+	found = 0;
 	switch (addr_struct.DestType) {
 	case EXT_DEF_DESTTYPE_WWPN:
 		req_name = addr_struct.DestAddr.WWPN;
-		for (fcport = ha->fcport; fcport; fcport = fcport->next) {
+		list_for_each_entry(fcport, &ha->fcports, list) {
 			if (memcmp(fcport->port_name, req_name,
 			    EXT_DEF_WWN_NAME_SIZE) == 0) {
+				found++;
 				break;
 			}
 		}
@@ -2553,7 +2298,7 @@ qla2x00_get_fc_statistics(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		break;
 	}
 
-	if (fcport == NULL) {
+	if (!found) {
 		/* not found */
 		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR device port %02x%02x"
 		    "%02x%02x%02x%02x%02x%02x not found.\n",
@@ -2702,6 +2447,7 @@ qla2x00_get_port_summary(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	uint32_t	port_cnt = 0;
 	uint32_t	top_xfr_size;
 	uint32_t	usr_no_of_entries = 0;
+	uint32_t	device_types;
 	void		*start_of_entry_list;
 	fc_port_t	*fcport;
 
@@ -2734,6 +2480,19 @@ qla2x00_get_port_summary(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		return (ret);
 	}
 
+	/* Get device types to query. */
+	device_types = 0;
+	ret = copy_from_user(&device_types, pext->RequestAdr,
+	    sizeof(device_types));
+	if (ret) {
+		pext->Status = EXT_STATUS_COPY_ERR;
+		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR"
+		    "copy_from_user() of struct failed (%d).\n",
+		    __func__, ha->host_no, ha->instance, ret);)
+		qla2x00_free_ioctl_scrap_mem(ha);
+		return (ret);
+	}
+
 	/* Get maximum number of entries allowed in response buf */
 	usr_no_of_entries = pext->ResponseLen / sizeof(EXT_DEVICEDATAENTRY);
 
@@ -2744,9 +2503,8 @@ qla2x00_get_port_summary(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	start_of_entry_list = (void *)(pext->ResponseAdr) + top_xfr_size;
 
 	/* Start copying from devices that exist. */
-	ret = qla2x00_get_fcport_summary(ha, pdd_entry,
-	    start_of_entry_list, usr_no_of_entries,
-	    &entry_cnt, &pext->Status);
+	ret = qla2x00_get_fcport_summary(ha, pdd_entry, start_of_entry_list,
+	    device_types, usr_no_of_entries, &entry_cnt, &pext->Status);
 
 	DEBUG9(printk("%s(%ld): after get_fcport_summary, entry_cnt=%d.\n",
 	    __func__, ha->host_no, entry_cnt);)
@@ -2755,16 +2513,15 @@ qla2x00_get_port_summary(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	 * in config file which don't actually exist (missing).
 	 */
 	if (ret == 0) {
-		if (!ha->flags.failover_enabled) {
-			ret = qla2x00_std_missing_port_summary(ha, pdd_entry,
-			    start_of_entry_list, usr_no_of_entries,
-			    &entry_cnt, &pext->Status);
-		} else {
+		if (ha->flags.failover_enabled) {
 			ret = qla2x00_fo_missing_port_summary(ha, pdd_entry,
 			    start_of_entry_list, usr_no_of_entries,
 			    &entry_cnt, &pext->Status);
-
-		}
+		} else {
+  			ret = qla2x00_std_missing_port_summary(ha, pdd_entry,
+  			    start_of_entry_list, usr_no_of_entries,
+  			    &entry_cnt, &pext->Status);
+  		}
 	}
 
 	DEBUG9(printk(
@@ -2779,8 +2536,11 @@ qla2x00_get_port_summary(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	}
 
 	pdevicedata->ReturnListEntryCount = entry_cnt;
-	for (fcport = ha->fcport; fcport != NULL; fcport = fcport->next) {
+	list_for_each_entry(fcport, &ha->fcports, list) {
 		/* count all ports that exist */
+		if (fcport->port_type != FCT_TARGET)
+			continue;
+	
 		port_cnt++;
 	}
 	if (port_cnt > entry_cnt)
@@ -2796,16 +2556,6 @@ qla2x00_get_port_summary(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	/* copy top of devicedata, which is everything other than the
 	 * actual entry list data.
 	 */
-	ret = verify_area(VERIFY_WRITE, (void *)(pext->ResponseAdr),
-	    top_xfr_size);
-	if (ret) {
-		pext->Status = EXT_STATUS_COPY_ERR;
-		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR verify wrt rsp buf\n",
-		    __func__, ha->host_no, ha->instance);)
-		qla2x00_free_ioctl_scrap_mem(ha);
-		return (ret);
-	}
-
 	usr_temp   = (uint8_t *)pext->ResponseAdr;
 	kernel_tmp = (uint8_t *)pdevicedata;
 	ret = copy_to_user(usr_temp, kernel_tmp, top_xfr_size);
@@ -2850,8 +2600,8 @@ qla2x00_get_port_summary(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
  */
 STATIC int
 qla2x00_get_fcport_summary(scsi_qla_host_t *ha, EXT_DEVICEDATAENTRY *pdd_entry,
-    void *pstart_of_entry_list, uint32_t max_entries, uint32_t *pentry_cnt,
-    uint32_t *ret_status)
+    void *pstart_of_entry_list, uint32_t device_types, uint32_t max_entries,
+    uint32_t *pentry_cnt, uint32_t *ret_status)
 {
 	int		ret = QL_STATUS_SUCCESS;
 	uint8_t		*usr_temp, *kernel_tmp;
@@ -2868,8 +2618,22 @@ qla2x00_get_fcport_summary(scsi_qla_host_t *ha, EXT_DEVICEDATAENTRY *pdd_entry,
 	DEBUG9(printk("%s(%ld): inst=%ld entered.\n",
 	    __func__, ha->host_no, ha->instance);)
 
-	for (fcport = ha->fcport; fcport && *pentry_cnt < max_entries;
-	    fcport = fcport->next) {
+	list_for_each_entry(fcport, &ha->fcports, list) {
+		if (*pentry_cnt >= max_entries)
+			break;
+
+		/* Don't report initiators or broadcast devices. */
+		if (fcport->port_type != FCT_TARGET) {
+			DEBUG2_9_10(printk("%s(%ld): not reporting non-target "
+			    "fcport %02x%02x%02x%02x%02x%02x%02x%02x. "
+			    "port_type=%x.\n",
+			    __func__, ha->host_no, fcport->port_name[0],
+			    fcport->port_name[1], fcport->port_name[2],
+			    fcport->port_name[3], fcport->port_name[4],
+			    fcport->port_name[5], fcport->port_name[6],
+			    fcport->port_name[7], fcport->port_type));
+			continue;
+		}
 
 		if ((atomic_read(&fcport->state) != FC_ONLINE) &&
 		    !qla2x00_is_fcport_in_config(ha, fcport)) {
@@ -2913,7 +2677,9 @@ qla2x00_get_fcport_summary(scsi_qla_host_t *ha, EXT_DEVICEDATAENTRY *pdd_entry,
 
 				pdd_entry->TargetAddress.Target = tgt;
 
-				if (fcport->flags & FC_XP_DEVICE) {
+				if ((fcport->flags & FC_XP_DEVICE) &&
+				    !(device_types &
+					EXT_DEF_GET_TRUE_NN_DEVICE)) {
 					memcpy(pdd_entry->NodeWWN,
 					    tq->node_name, WWN_SIZE);
 				} else {
@@ -2931,12 +2697,22 @@ qla2x00_get_fcport_summary(scsi_qla_host_t *ha, EXT_DEVICEDATAENTRY *pdd_entry,
 				memcpy(pdd_entry->NodeWWN,
 				    tq->node_name, WWN_SIZE);
 */
-			if (((host = qla2x00_cfg_find_host(ha)) != NULL) &&
-				 (fcport->flags & FC_XP_DEVICE)) {
-				if((tmp_dp = qla2x00_find_mp_dev_by_portname(
-					host, fcport->port_name, &idx)) != NULL)
-				memcpy(pdd_entry->NodeWWN,
-				    		tmp_dp->nodename, WWN_SIZE);
+			if (ha->flags.failover_enabled) {
+				if (((host = qla2x00_cfg_find_host(ha)) != NULL)
+				    	&& (fcport->flags & FC_XP_DEVICE) &&
+					!(device_types &
+					    EXT_DEF_GET_TRUE_NN_DEVICE)) {
+					if((tmp_dp = 
+					    qla2x00_find_mp_dev_by_portname(
+						host, fcport->port_name, &idx))
+							!= NULL)
+					memcpy(pdd_entry->NodeWWN,
+						tmp_dp->nodename, WWN_SIZE);
+				}
+/* XXX */
+				else
+					memcpy(pdd_entry->NodeWWN,
+					    fcport->node_name, WWN_SIZE);
 			} else {
 				memcpy(pdd_entry->NodeWWN,
 				    fcport->node_name, WWN_SIZE);
@@ -2961,18 +2737,6 @@ qla2x00_get_fcport_summary(scsi_qla_host_t *ha, EXT_DEVICEDATAENTRY *pdd_entry,
 		current_offset = *pentry_cnt * sizeof(EXT_DEVICEDATAENTRY);
 
 		transfer_size = sizeof(EXT_DEVICEDATAENTRY);
-		ret = verify_area(VERIFY_WRITE,
-		    (uint8_t *)pstart_of_entry_list + current_offset,
-		    transfer_size);
-
-		if (ret) {
-			*ret_status = EXT_STATUS_COPY_ERR;
-			DEBUG9_10(printk("%s(%ld): inst=%ld ERROR verify WRITE "
-			    "rsp bufaddr=%p\n",
-			    __func__, ha->host_no, ha->instance,
-			    (uint8_t *)pstart_of_entry_list + current_offset);)
-			return (ret);
-		}
 
 		/* now copy up this dd_entry to user */
 		usr_temp = (uint8_t *)pstart_of_entry_list + current_offset;
@@ -3031,45 +2795,38 @@ qla2x00_std_missing_port_summary(scsi_qla_host_t *ha,
 	uint32_t	b;
 	uint32_t	current_offset;
 	uint32_t	transfer_size;
-	fcdev_t		*pdev;
+	os_tgt_t	*tq;
 
 	DEBUG9(printk("%s(%ld): inst=%ld entered.\n",
 	    __func__, ha->host_no, ha->instance);)
 
 	for (idx = 0; idx < MAX_FIBRE_DEVICES && *pentry_cnt < max_entries;
 	    idx++) {
-		pdev = &ha->fc_db[idx];
 
-		if (pdev->loop_id == PORT_UNUSED)
+		if ((tq = TGT_Q(ha, idx)) == NULL)
 			continue;
-
-		/* RLU: sanity check */
-		/*
-		if (qla2x00_is_wwn_zero(pdev->wwn) &&
-		   qla2x00_is_wwn_zero(pdev->name) && pdev->d_id.b24 == 0) {
-			continue;
-		}
-		*/
-
-		if (pdev->loop_id == PORT_AVAILABLE) {
+		/* Target present in configuration data but 
+		 * missing during device discovery*/
+		if (tq->vis_port == NULL) {
 			DEBUG10(printk("%s: returning missing device "
 			    "%02x%02x%02x%02x%02x%02x%02x%02x.\n",
 			    __func__,
-			    pdev->wwn[0], pdev->wwn[1],
-			    pdev->wwn[2], pdev->wwn[3],
-			    pdev->wwn[4], pdev->wwn[5],
-			    pdev->wwn[6], pdev->wwn[7]);)
+			    tq->port_name[0],tq->port_name[1],
+			    tq->port_name[2],tq->port_name[3],
+			    tq->port_name[4],tq->port_name[5],
+			    tq->port_name[6],tq->port_name[7]);)
 
 			/* This device was not found. Return
 			 * as unconfigured.
 			 */
-			memcpy(pdd_entry->NodeWWN, pdev->name, WWN_SIZE);
-			memcpy(pdd_entry->PortWWN, pdev->wwn, WWN_SIZE);
+			memcpy(pdd_entry->NodeWWN, tq->node_name, WWN_SIZE);
+			memcpy(pdd_entry->PortWWN, tq->port_name, WWN_SIZE);
 
 			for (b = 0; b < 3 ; b++)
 				pdd_entry->PortID[b] = 0;
 
-			/* assume fabric dev so api won't translate the portid from loopid */
+			/* assume fabric dev so api won't translate 
+			 * the portid from loopid */
 			pdd_entry->ControlFlags = EXT_DEF_GET_FABRIC_DEVICE;
 
 			pdd_entry->TargetAddress.Bus    = 0;
@@ -3083,36 +2840,22 @@ qla2x00_std_missing_port_summary(scsi_qla_host_t *ha,
 			    sizeof(EXT_DEVICEDATAENTRY);
 
 			transfer_size = sizeof(EXT_DEVICEDATAENTRY);
-			ret = verify_area(VERIFY_WRITE,
-			    (uint8_t *)pstart_of_entry_list + current_offset,
+
+			/* now copy up this dd_entry to user */
+			usr_temp = (uint8_t *)pstart_of_entry_list +
+			    current_offset;
+			kernel_tmp = (uint8_t *)pdd_entry;
+			ret = copy_to_user(usr_temp, kernel_tmp,
 			    transfer_size);
-
-			if (ret == 0) {
-
-				/* now copy up this dd_entry to user */
-				usr_temp = (uint8_t *)pstart_of_entry_list +
-				    current_offset;
-				kernel_tmp = (uint8_t *)pdd_entry;
-			 	ret = copy_to_user(usr_temp, kernel_tmp,
-				    transfer_size);
-				if (ret) {
-					*ret_status = EXT_STATUS_COPY_ERR;
-					DEBUG9_10(printk("%s(%ld): inst=%ld "
-					    "ERROR copy rsp list buffer.\n",
-					    __func__, ha->host_no,
-					    ha->instance);)
-					break;
-				} else {
-					*pentry_cnt+=1;
-				}
-			} else {
+			if (ret) {
 				*ret_status = EXT_STATUS_COPY_ERR;
 				DEBUG9_10(printk("%s(%ld): inst=%ld "
-				    "ERROR verify wrt rsp bufaddr=%p\n",
-				    __func__, ha->host_no, ha->instance,
-				    (uint8_t *)pstart_of_entry_list +
-				    current_offset);)
+				    "ERROR copy rsp list buffer.\n",
+				    __func__, ha->host_no,
+				    ha->instance);)
 				break;
+			} else {
+				*pentry_cnt+=1;
 			}
 		}
 
@@ -3126,7 +2869,6 @@ qla2x00_std_missing_port_summary(scsi_qla_host_t *ha,
 
 	return (ret);
 }
-
 
 /*
  * qla2x00_query_driver
@@ -3182,16 +2924,6 @@ qla2x00_query_driver(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		transfer_size = pext->ResponseLen;
 	else
 		transfer_size = sizeof(EXT_DRIVER);
-
-	ret = verify_area(VERIFY_WRITE, (void *)pext->ResponseAdr ,
-	    transfer_size);
-	if (ret) {
-		pext->Status = EXT_STATUS_COPY_ERR;
-		DEBUG10(printk("%s(%ld): inst=%ld ERROR verify wrt rsp buf.\n",
-		    __func__, ha->host_no, ha->instance);)
-		qla2x00_free_ioctl_scrap_mem(ha);
-		return (ret);
-	}
 
 	/* now copy up the ISP to user */
 	usr_temp   = (uint8_t *)pext->ResponseAdr;
@@ -3261,16 +2993,6 @@ qla2x00_query_fw(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	pfw_prop->Version[2] = bdp->fwver[2];
 
 	transfer_size = sizeof(EXT_FW);
-
-	ret = verify_area(VERIFY_WRITE, (void *)pext->ResponseAdr ,
-	    transfer_size);
-	if (ret) {
-		pext->Status = EXT_STATUS_COPY_ERR;
-		DEBUG10(printk("%s(%ld): inst=%ld ERROR verify wrt rsp buf.\n",
-		    __func__, ha->host_no, ha->instance);)
-		qla2x00_free_ioctl_scrap_mem(ha);
-		return (ret);
-	}
 
 	usr_temp   = (uint8_t *)pext->ResponseAdr;
 	kernel_tmp = (uint8_t *)pfw_prop;
@@ -3342,17 +3064,6 @@ qla2x00_msiocb_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext, int cmd,
 		DEBUG9(printk("%s(%ld): inst=%ld rsp buf length larger than "
 		    "existing size. Additional mem alloc successful.\n",
 		    __func__, ha->host_no, ha->instance);)
-	}
-
-	ret = verify_area(VERIFY_READ, (void *)pext->RequestAdr,
-	    pext->RequestLen);
-	if (ret) {
-		pext->Status = EXT_STATUS_COPY_ERR;
-		DEBUG9_10(printk(
-		    "%s(%ld): inst=%ld ERROR verify read req buf\n",
-		    __func__, ha->host_no, ha->instance);)
-
-		return (ret);
 	}
 
 	DEBUG9(printk("%s(%ld): inst=%ld req buf verified.\n",
@@ -3446,23 +3157,18 @@ qla2x00_send_els_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 {
 	int		ret = 0;
 
-	uint8_t		index;
 	uint8_t		invalid_wwn = FALSE;
-	uint8_t		port_found;
 	uint8_t		*ptmp_stat;
 	uint8_t		*pusr_req_buf;
 	uint8_t		*presp_payload;
 	uint32_t	payload_len;
 	uint32_t	usr_req_len;
 
-	fcdev_t		tmpdev;
-
-	fc_port_t	*pfcport;
+	int		found;
+	uint16_t	next_loop_id;
+	fc_port_t	*fcport;
 
 	EXT_ELS_PT_REQ	*pels_pt_req;
-
-	struct list_head *fcil;
-	fc_initiator_t	*fcinitiator;
 
 
 	DEBUG9(printk("%s(%ld): inst=%ld entered.\n",
@@ -3584,138 +3290,30 @@ qla2x00_send_els_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 	/* Now find the loop ID */
 	/************************/
 
-	/* 1st: scan thru our HBA database */
-	index = 0;
-	port_found = FALSE;
-	fcinitiator = NULL;
-	if (!invalid_wwn) {
-		/* search with WWPN */
-		list_for_each(fcil, &ha->fcinitiators) {
-			fcinitiator = list_entry(fcil, fc_initiator_t, list);
+	found = 0;
+	fcport = NULL;
+	list_for_each_entry(fcport, &ha->fcports, list) {
+		if (fcport->port_type != FCT_INITIATOR ||
+		    fcport->port_type != FCT_TARGET)
+			continue;
 
-			if (memcmp(pels_pt_req->WWPN, fcinitiator->port_name,
-				 EXT_DEF_WWN_NAME_SIZE) == 0) {
-
-				port_found = TRUE;
-				pels_pt_req->Lid = fcinitiator->loop_id;
-
-				DEBUG9(printk("%s(%ld): inst=%ld found host "
-				    "w/ WWN. loop_id = %02x.\n",
-				    __func__, ha->host_no, ha->instance,
-				    pels_pt_req->Lid);)
-
-				break;
-			}
-		}
-	} else {
-		/* search with PID */
-		list_for_each(fcil, &ha->fcinitiators) {
-			fcinitiator = list_entry(fcil, fc_initiator_t, list);
-
-			if (pels_pt_req->Id[1] == fcinitiator->d_id.r.d_id[2]
-			    && pels_pt_req->Id[2] == fcinitiator->d_id.r.d_id[1]
-			    && pels_pt_req->Id[3] ==
-				    fcinitiator->d_id.r.d_id[0]) {
-
-				port_found = TRUE;
-				pels_pt_req->Lid = fcinitiator->loop_id;
-
-				DEBUG9(printk("%s(%ld): inst=%ld found host "
-				    "w/ WWN. loop_id = %02x.\n",
-				    __func__, ha->host_no, ha->instance,
-				    pels_pt_req->Lid);)
-
-				break;
-			}
-		}
-	}
-
-	/* If this is for a host device, check if we need to perform login */
-	if (port_found && (fcinitiator->loop_id >= LAST_SNS_LOOP_ID)) {
-
-		DEBUG9_10(printk("%s(%ld): inst=%ld need to relogin to "
-		    "dest host.\n",
-		    __func__, ha->host_no, ha->instance);)
-
-		if (fcinitiator->d_id.b24 == 0) {
-			/* Either RSCN hasn't been processed yet or
-			 * this host is no longer connected to us.
-			 */
-			pext->Status = EXT_STATUS_DEV_NOT_FOUND;
-			DEBUG9_10(printk("%s(%ld): inst=%ld ERROR dest host "
-			    "port lost.\n",
-			    __func__, ha->host_no, ha->instance);)
-
-			return (ret);
-		}
-
-		/* login and update database */
-		tmpdev.d_id.b24 = fcinitiator->d_id.b24;
-		tmpdev.loop_id = fcinitiator->loop_id;
-
-		if (qla2x00_host_relogin(ha, &tmpdev) != 0) {
-			/* login failed. */
-			pext->Status = EXT_STATUS_DEV_NOT_FOUND;
-
-			DEBUG9_10(printk("%s(%ld): inst=%ld ERROR login to "
-			    "host port failed. loop_id=%02x pid=%06x ret=%d.\n",
-			    __func__, ha->host_no, ha->instance, tmpdev.loop_id,
-			    tmpdev.d_id.b24, ret);)
-
-			return (ret);
+		if (!invalid_wwn) {
+			/* search with WWPN */
+			if (memcmp(pels_pt_req->WWPN, fcport->port_name,
+			    EXT_DEF_WWN_NAME_SIZE))
+				continue;
 		} else {
-			fcinitiator->loop_id = tmpdev.loop_id;
-			pels_pt_req->Lid = tmpdev.loop_id;
-
-			DEBUG9(printk("%s(%ld): inst=%ld success login to "
-			    "remote host; Lid=%02x.\n",
-			    __func__, ha->host_no, ha->instance,
-			    fcinitiator->loop_id);)
+			/* search with PID */
+			if (pels_pt_req->Id[1] != fcport->d_id.r.d_id[2]
+			    || pels_pt_req->Id[2] != fcport->d_id.r.d_id[1]
+			    || pels_pt_req->Id[3] != fcport->d_id.r.d_id[0])
+				continue;
 		}
+
+		found++;
 	}
-	
-	/* 2nd: scan thru our fcport database */
-	if (!invalid_wwn) {
-		/* search with WWPN */
-		for (pfcport = ha->fcport;
-		    (!port_found) && pfcport != NULL; pfcport = pfcport->next) {
 
-			if (memcmp(pfcport->port_name, pels_pt_req->WWPN,
-			    EXT_DEF_WWN_NAME_SIZE) == 0) {
-
-				port_found = TRUE;
-				pels_pt_req->Lid = pfcport->loop_id;
-
-				DEBUG9(printk("%s(%ld): inst=%ld found fcport "
-				    "w/ WWN. loop_id = %02x.\n",
-				    __func__, ha->host_no, ha->instance,
-				    pels_pt_req->Lid);)
-				break;
-			}
-		}
-	} else {
-		/* search with PID */
-		for (pfcport = ha->fcport;
-		    (!port_found) && pfcport != NULL; pfcport = pfcport->next) {
-
-			if (pels_pt_req->Id[1] == pfcport->d_id.r.d_id[2]
-			    && pels_pt_req->Id[2] == pfcport->d_id.r.d_id[1]
-			    && pels_pt_req->Id[3] == pfcport->d_id.r.d_id[0]) {
-
-				port_found = TRUE;
-				pels_pt_req->Lid = pfcport->loop_id;
-
-				DEBUG9(printk("%s(%ld): inst=%ld found fcport "
-				    "w/ PID. loop_id = %02x.\n",
-				    __func__, ha->host_no, ha->instance,
-				    pels_pt_req->Lid);)
-
-				break;
-			}
-		}
-	}
-	
-	if (!port_found) {
+	if (!found) {
 		/* invalid WWN or PID specified */
 		pext->Status = EXT_STATUS_INVALID_PARAM;
 		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR WWPN/PID invalid.\n",
@@ -3724,7 +3322,30 @@ qla2x00_send_els_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 		return (ret);
 	}
 
+	/* If this is for a host device, check if we need to perform login */
+	if (fcport->port_type == FCT_INITIATOR &&
+	    fcport->loop_id >= SNS_LAST_LOOP_ID) {
+
+		next_loop_id = 0;
+		ret = qla2x00_fabric_login(ha, fcport, &next_loop_id);
+		if (ret != QL_STATUS_SUCCESS) {
+			/* login failed. */
+			pext->Status = EXT_STATUS_DEV_NOT_FOUND;
+
+			DEBUG9_10(printk("%s(%ld): inst=%ld ERROR login to "
+			    "host port failed. loop_id=%02x pid=%02x%02x%02x "
+			    "ret=%d.\n",
+			    __func__, ha->host_no, ha->instance,
+			    fcport->loop_id, fcport->d_id.b.domain,
+			    fcport->d_id.b.area, fcport->d_id.b.al_pa, ret);)
+
+			return (ret);
+		}
+	}
+
 	/* queue command */
+	pels_pt_req->Lid = fcport->loop_id;
+
 	if ((ret = qla2x00_ioctl_ms_queuecommand(ha, pext, pscsi_cmd,
 	    ptmp_fcport, ptmp_fclun, pels_pt_req))) {
 		return (ret);
@@ -3757,20 +3378,8 @@ qla2x00_send_els_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 	/* The data returned include FC frame header */
 	presp_payload = (uint8_t *)pext->ResponseAdr + sizeof(EXT_ELS_PT_REQ);
 
-	ret = verify_area(VERIFY_WRITE, (void *)presp_payload, payload_len);
-	if (ret) {
-		pext->Status = EXT_STATUS_COPY_ERR;
-
-		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR verify wrt rsp "
-		    "buffer. ha=%p.\n",
-		    __func__, ha->host_no, ha->instance, ha);)
-
-		return (ret);
-	}
-
 	/* copy back data returned to response buffer */
-	ret = copy_to_user(presp_payload, (uint8_t *)ha->ioctl_mem,
-	    payload_len);
+	ret = copy_to_user(presp_payload, ha->ioctl_mem, payload_len);
 	if (ret) {
 		pext->Status = EXT_STATUS_COPY_ERR;
 		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR copy rsp buffer.\n",
@@ -3865,20 +3474,8 @@ qla2x00_send_fcct(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 		return (ret);
 	}
 
-	/* getting device data and putting in pext->ResponseAdr */
-	ret = verify_area(VERIFY_WRITE, (void *)pext->ResponseAdr ,
-	    pext->ResponseLen);
-	if (ret) {
-		pext->Status = EXT_STATUS_COPY_ERR;
-		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR verify wrt rsp "
-		    "buffer. ha=%p.\n",
-		    __func__, ha->host_no, ha->instance, ha);)
-		return (ret);
-	}
-
 	/* sending back data returned from Management Server */
-	ret = copy_to_user((uint8_t *)pext->ResponseAdr,
-	    (uint8_t *)ha->ioctl_mem, pext->ResponseLen);
+	ret = copy_to_user(pext->ResponseAdr, ha->ioctl_mem, pext->ResponseLen);
 	if (ret) {
 		pext->Status = EXT_STATUS_COPY_ERR;
 		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR copy rsp buffer.\n",
@@ -3927,7 +3524,6 @@ qla2x00_ioctl_ms_queuecommand(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 	pfclun->fcport = pfcport;
 	pfclun->lun = 0;
 	pfclun->flags = 0;
-	pfclun->next = NULL;
 	plq->fclun = pfclun;
 	plq->fclun->fcport->ha = ha;
 
@@ -4029,7 +3625,7 @@ qla2x00_start_ms_cmd(scsi_qla_host_t *ha, EXT_IOCTL *pext, srb_t *sp,
 	
 		pkt->control_flags = __constant_cpu_to_le16(CF_ELS_PASSTHRU);
 #if defined(EXTENDED_IDS)
-		pkt->loop_id = __constant_cpu_to_le16(pels_pt_req->Lid);
+		pkt->loop_id = cpu_to_le16(pels_pt_req->Lid);
 #else
 		pkt->loop_id = pels_pt_req->Lid;
 #endif
@@ -4066,13 +3662,13 @@ qla2x00_start_ms_cmd(scsi_qla_host_t *ha, EXT_IOCTL *pext, srb_t *sp,
 	/* loading command payload address. user request is assumed
 	 * to have been copied to ioctl_mem.
 	 */
-	pkt->dseg_req_address[0] = cpu_to_le32(LS_64BITS(ha->ioctl_mem_phys));
-	pkt->dseg_req_address[1] = cpu_to_le32(MS_64BITS(ha->ioctl_mem_phys));
+	pkt->dseg_req_address[0] = cpu_to_le32(LSD(ha->ioctl_mem_phys));
+	pkt->dseg_req_address[1] = cpu_to_le32(MSD(ha->ioctl_mem_phys));
 	pkt->dseg_req_length = usr_req_len;
 
 	/* loading response payload address */
-	pkt->dseg_rsp_address[0] = cpu_to_le32(LS_64BITS(ha->ioctl_mem_phys));
-	pkt->dseg_rsp_address[1] = cpu_to_le32(MS_64BITS(ha->ioctl_mem_phys));
+	pkt->dseg_rsp_address[0] = cpu_to_le32(LSD(ha->ioctl_mem_phys));
+	pkt->dseg_rsp_address[1] = cpu_to_le32(MSD(ha->ioctl_mem_phys));
 	pkt->dseg_rsp_length = usr_resp_len;
 
 	/* set flag to indicate IOCTL MSIOCB cmd in progress */
@@ -4152,16 +3748,6 @@ qla2x00_wwpn_to_scsiaddr(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		return (ret);
 	}
 
-	ret = verify_area(VERIFY_READ, (void *)pext->RequestAdr,
-	    pext->RequestLen);
-	if (ret) {
-		DEBUG9_10(printk(
-		    "%s(%ld): inst=%ld ERROR VERIFY_READ req buf\n",
-		    __func__, ha->host_no, ha->instance);)
-		pext->Status = EXT_STATUS_COPY_ERR;
-		return (ret);
-	}
-
 	ret = copy_from_user(tmp_wwpn, pext->RequestAdr, pext->RequestLen);
 	if (ret) {
 		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR copy_from_user "
@@ -4219,17 +3805,7 @@ qla2x00_wwpn_to_scsiaddr(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	if (pext->ResponseLen > sizeof(EXT_SCSI_ADDR))
 		pext->ResponseLen = sizeof(EXT_SCSI_ADDR);
 
-	ret = verify_area(VERIFY_WRITE, (void *)pext->ResponseAdr,
-	    pext->ResponseLen);
-	if (ret) {
-		pext->Status = EXT_STATUS_COPY_ERR;
-		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR VERIFY wrt rsp buf\n",
-		    __func__, ha->host_no, ha->instance);)
-		return (ret);
-	}
-
-	ret = copy_to_user((uint8_t *)pext->ResponseAdr, &tmp_addr,
-	    pext->ResponseLen);
+	ret = copy_to_user(pext->ResponseAdr, &tmp_addr, pext->ResponseLen);
 	if (ret) {
 		pext->Status = EXT_STATUS_COPY_ERR;
 		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR copy rsp buffer.\n",
@@ -4332,9 +3908,6 @@ qla2x00_scsi_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	return (ret);
 }
 
-/* Returns either QL_STATUS_SUCCESS or QL_STATUS_ERROR or other driver
- * specific return values.
- */
 STATIC int
 qla2x00_ioctl_scsi_queuecommand(scsi_qla_host_t *ha, EXT_IOCTL *pext,
     Scsi_Cmnd *pscsi_cmd, Scsi_Device *pscsi_dev, fc_port_t *pfcport,
@@ -4442,19 +4015,6 @@ qla2x00_ioctl_scsi_queuecommand(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 
 	if (pscsi_cmd->sc_data_direction == SCSI_DATA_WRITE) {
 		/* sending user data from pext->ResponseAdr to device */
-		ret = verify_area(VERIFY_READ, (void *)pext->ResponseAdr,
-		    pext->ResponseLen);
-		if (ret) {
-			pext->Status = EXT_STATUS_COPY_ERR;
-			DEBUG9_10(printk("%s(%ld): inst=%ld ERROR verify read "
-			    "ResponseAdr.\n",
-			    __func__, ha->host_no, ha->instance);)
-			atomic_set(&sp->ref_count, 0);
-			add_to_free_queue (ha, sp);
-
-			return (QL_STATUS_ERROR);
-		}
-
 		usr_temp   = (uint8_t *)pext->ResponseAdr;
 		kernel_tmp = (uint8_t *)ha->ioctl_mem;
 		ret = copy_from_user(kernel_tmp, usr_temp, pext->ResponseLen);
@@ -4466,7 +4026,7 @@ qla2x00_ioctl_scsi_queuecommand(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 			atomic_set(&sp->ref_count, 0);
 			add_to_free_queue (ha, sp);
 
-			return (QL_STATUS_ERROR);
+			return (ret);
 		}
 	}
 
@@ -4560,7 +4120,7 @@ qla2x00_ioctl_scsi_queuecommand(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 
 			atomic_set(&sp->ref_count, 0);
 			add_to_free_queue (ha, sp);
-			return (ret2);
+			return (QL_STATUS_ERROR);
 		}
 	}
 
@@ -4589,7 +4149,6 @@ qla2x00_ioctl_scsi_queuecommand(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 
 	DEBUG9(printk("%s(%ld): exiting.\n",
 	    __func__, ha->host_no);)
-
 	return (ret);
 }
 
@@ -4633,16 +4192,6 @@ qla2x00_sc_scsi_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 		    "returning busy.\n",
 		    __func__, ha->host_no, ha->instance);)
 		pext->Status = EXT_STATUS_BUSY;
-		return (ret);
-	}
-
-	ret = verify_area(VERIFY_READ, (void *)pext->RequestAdr,
-	    sizeof(EXT_SCSI_PASSTHRU));
-	if (ret) {
-		pext->Status = EXT_STATUS_COPY_ERR;
-		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR verify READ "
-		    "req buf.\n",
-		    __func__, ha->host_no, ha->instance);)
 		return (ret);
 	}
 
@@ -4835,15 +4384,6 @@ qla2x00_sc_scsi_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 		    (uint8_t *)&pscsi_pass->SenseData[0],
 		    CMD_ACTUAL_SNSLEN(pscsi_cmd));)
 
-		ret = verify_area(VERIFY_WRITE, (void *)pext->RequestAdr,
-		    sizeof(EXT_SCSI_PASSTHRU));
-		if (ret) {
-			pext->Status = EXT_STATUS_COPY_ERR;
-			DEBUG9_10(printk("%s(%ld): inst=%ld ERROR verify WRITE "
-			    "req buf.\n", __func__, ha->host_no, ha->instance);)
-			return (ret);
-		}
-
 		usr_temp   = (uint8_t *)pext->RequestAdr;
 		kernel_tmp = (uint8_t *)pscsi_pass;
 		ret = copy_to_user(usr_temp, kernel_tmp,
@@ -4860,17 +4400,6 @@ qla2x00_sc_scsi_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 	if (pscsi_pass->Direction == EXT_DEF_SCSI_PASSTHRU_DATA_IN) {
 		DEBUG9(printk("%s(%ld): inst=%ld copying data.\n",
 		    __func__, ha->host_no, ha->instance);)
-
-		/* getting device data and putting in pext->ResponseAdr */
-		ret = verify_area(VERIFY_WRITE, (void *)pext->ResponseAdr ,
-		    pext->ResponseLen);
-		if (ret) {
-			pext->Status = EXT_STATUS_COPY_ERR;
-			DEBUG9_10(printk("%s(%ld): inst=%ld ERROR verify write "
-			    "ResponseAdr.\n",
-			    __func__, ha->host_no, ha->instance);)
-			return (ret);
-		}
 
 		/* now copy up the READ data to user */
 		if ((CMD_COMPL_STATUS(pscsi_cmd) == CS_DATA_UNDERRUN) &&
@@ -4936,6 +4465,7 @@ qla2x00_sc_fc_scsi_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 	uint32_t		i;
 
 	uint32_t		transfer_len;
+	int found_fcp, found_fcl;
 
 	EXT_FC_SCSI_PASSTHRU	*pfc_scsi_pass;
 
@@ -4976,17 +4506,6 @@ qla2x00_sc_fc_scsi_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 	/* clear ioctl_mem to be used */
 	memset(ha->ioctl_mem, 0, ha->ioctl_mem_size);
 
-	ret = verify_area(VERIFY_READ, (void *)pext->RequestAdr,
-	    sizeof(EXT_FC_SCSI_PASSTHRU));
-	if (ret) {
-		pext->Status = EXT_STATUS_COPY_ERR;
-		DEBUG9_10(printk(
-		    "%s(%ld): inst=%ld ERROR verify READ req buf.\n",
-		    __func__, ha->host_no, ha->instance);)
-
-		return (ret);
-	}
-
 	if (pext->ResponseLen > ha->ioctl_mem_size) {
 		if (qla2x00_get_new_ioctl_dma_mem(ha, pext->ResponseLen) !=
 		    QL_STATUS_SUCCESS) {
@@ -5023,23 +4542,27 @@ qla2x00_sc_fc_scsi_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 	}
 
 	fclun = NULL;
-	for (fcport = ha->fcport; (fcport); fcport = fcport->next) {
+	found_fcp = 0;
+	found_fcl = 0;
+	list_for_each_entry(fcport, &ha->fcports, list) {
 		if (memcmp(fcport->port_name,
 		    pfc_scsi_pass->FCScsiAddr.DestAddr.WWPN, 8) != 0) {
 			continue;
 
 		}
 
-		for (fclun = fcport->fclun; fclun; fclun = fclun->next) {
+		found_fcp++;
+		list_for_each_entry(fclun, &fcport->fcluns, list) {
 			if (fclun->lun == pfc_scsi_pass->FCScsiAddr.Lun) {
 				/* Found the right LUN */
+				found_fcl++;
 				break;
 			}
 		}
 		break;
 	}
 
-	if (fcport == NULL) {
+	if (!found_fcp) {
 		pext->Status = EXT_STATUS_DEV_NOT_FOUND;
 		DEBUG9_10(printk("%s(%ld): inst=%ld FC AddrFormat - DID NOT "
 		    "FIND Port matching WWPN.\n",
@@ -5047,13 +4570,12 @@ qla2x00_sc_fc_scsi_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 		return (ret);
 	}
 
-	if (fclun == NULL) {
+	if (!found_fcl) {
 		/* Use a temporary fclun to send out the command. */
 		fclun = &temp_fclun;
 		fclun->fcport = fcport;
 		fclun->lun = pfc_scsi_pass->FCScsiAddr.Lun;
 		fclun->flags = 0;
-		fclun->next = NULL;
 	}
 
 	/* set target coordinates */
@@ -5208,16 +4730,6 @@ qla2x00_sc_fc_scsi_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 			pfc_scsi_cmd->sense_buffer[i];
 		}
 
-		ret = verify_area(VERIFY_WRITE, (void *)pext->RequestAdr,
-		    sizeof(EXT_FC_SCSI_PASSTHRU));
-		if (ret) {
-			pext->Status = EXT_STATUS_COPY_ERR;
-			DEBUG9_10(printk("%s(%ld): inst=%ld ERROR verify WRITE "
-			    "RequestAdr.\n",
-			    __func__, ha->host_no, ha->instance);)
-			return (ret);
-		}
-
 		usr_temp = (uint8_t *)pext->RequestAdr;
 		kernel_tmp = (uint8_t *)pfc_scsi_pass;
 		ret = copy_to_user(usr_temp, kernel_tmp,
@@ -5235,19 +4747,6 @@ qla2x00_sc_fc_scsi_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 
 		DEBUG9(printk("%s(%ld): inst=%ld copying data.\n",
 		    __func__, ha->host_no, ha->instance);)
-
-		/* getting device data and putting in pext->ResponseAdr */
-		ret = verify_area(VERIFY_WRITE, (void *)pext->ResponseAdr,
-		    pext->ResponseLen);
-		if (ret) {
-			pext->Status = EXT_STATUS_COPY_ERR;
-
-			DEBUG9_10(printk("%s(%ld): inst=%ld ERROR verify write "
-			    "ResponseAdr.\n",
-			    __func__, ha->host_no, ha->instance);)
-
-			return (ret);
-		}
 
 		/* now copy up the READ data to user */
 		if ((CMD_COMPL_STATUS(pfc_scsi_cmd) == CS_DATA_UNDERRUN) &&
@@ -5310,6 +4809,7 @@ qla2x00_sc_scsi3_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 	uint8_t			*pmore_cdb = NULL;
 	uint32_t		transfer_len;
 	uint32_t		i;
+	int found;
 
 	EXT_FC_SCSI_PASSTHRU	*pscsi3_pass;
 
@@ -5351,15 +4851,6 @@ qla2x00_sc_scsi3_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 
 	/* clear ioctl_mem to be used */
 	memset(ha->ioctl_mem, 0, ha->ioctl_mem_size);
-
-	ret = verify_area(VERIFY_READ, (void *)pext->RequestAdr,
-	    sizeof(EXT_FC_SCSI_PASSTHRU));
-	if (ret) {
-		pext->Status = EXT_STATUS_COPY_ERR;
-		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR verify READ "
-		    "req buf.\n", __func__, ha->host_no, ha->instance);)
-		return (ret);
-	}
 
 	if (pext->ResponseLen > ha->ioctl_mem_size) {
 		if (qla2x00_get_new_ioctl_dma_mem(ha, pext->ResponseLen) !=
@@ -5409,13 +4900,15 @@ qla2x00_sc_scsi3_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 		return (ret);
 	}
 
-	for (fcport = ha->fcport; (fcport); fcport = fcport->next) {
+	found = 0;
+	list_for_each_entry(fcport, &ha->fcports, list) {
 		if (memcmp(fcport->port_name,
 		    pscsi3_pass->FCScsiAddr.DestAddr.WWPN, 8) == 0) {
+			found++;
 			break;
 		}
 	}
-	if (fcport == NULL) {
+	if (!found) {
 		pext->Status = EXT_STATUS_DEV_NOT_FOUND;
 
 		DEBUG9_10(printk("%s(%ld): inst=%ld DID NOT FIND Port for WWPN "
@@ -5438,7 +4931,6 @@ qla2x00_sc_scsi3_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 	fclun->fcport = fcport;
 	fclun->lun = pscsi3_pass->FCScsiAddr.Lun;
 	fclun->flags = 0;
-	fclun->next = NULL;
 
 	/* set target coordinates */
 	pscsi3_cmd->target = 0xff;  /* not used. just put something there. */
@@ -5577,16 +5069,6 @@ qla2x00_sc_scsi3_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 			    pscsi3_cmd->sense_buffer[i];
 		}
 
-		ret = verify_area(VERIFY_WRITE, (void *)pext->RequestAdr,
-		    sizeof(EXT_FC_SCSI_PASSTHRU));
-		if (ret) {
-			pext->Status = EXT_STATUS_COPY_ERR;
-			DEBUG9_10(printk("%s(%ld): inst=%ld ERROR verify WRITE "
-			    "RequestAdr.\n",
-			    __func__, ha->host_no, ha->instance);)
-			return (ret);
-		}
-
 		usr_temp = (uint8_t *)pext->RequestAdr;
 		kernel_tmp = (uint8_t *)pscsi3_pass;
 		ret = copy_to_user(usr_temp, kernel_tmp,
@@ -5604,19 +5086,6 @@ qla2x00_sc_scsi3_passthru(scsi_qla_host_t *ha, EXT_IOCTL *pext,
 
 		DEBUG9(printk("%s(%ld): inst=%ld copying data.\n",
 		    __func__, ha->host_no, ha->instance);)
-
-		/* getting device data and putting in pext->ResponseAdr */
-		ret = verify_area(VERIFY_WRITE, (void *)pext->ResponseAdr,
-		    pext->ResponseLen);
-		if (ret) {
-			pext->Status = EXT_STATUS_COPY_ERR;
-
-			DEBUG9_10(printk("%s(%ld): inst=%ld ERROR verify write "
-			    "ResponseAdr.\n",
-			    __func__, ha->host_no, ha->instance);)
-
-			return (ret);
-		}
 
 		/* now copy up the READ data to user */
 		if ((CMD_COMPL_STATUS(pscsi3_cmd) == CS_DATA_UNDERRUN) &&
@@ -5676,14 +5145,11 @@ qla2x00_send_els_rnid(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 
 	EXT_RNID_REQ	*tmp_rnid;
 	int		ret = 0;
-	uint8_t 	dev_found = 0;
-	uint16_t	dev_loop_id = 0;
 	uint16_t	mb[MAILBOX_REGISTER_COUNT];
 	uint32_t	copy_len;
-	fc_port_t	*fcport;
 	int		found;
-	struct list_head *fcil;
-	fc_initiator_t	*fcinitiator;
+	uint16_t	next_loop_id;
+	fc_port_t	*fcport;
 
 	DEBUG9(printk("%s(%ld): inst=%ld entered.\n",
 	    __func__, ha->host_no, ha->instance);)
@@ -5707,17 +5173,6 @@ qla2x00_send_els_rnid(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		DEBUG9_10(printk("%s(%ld): inst=%ld invalid req length %d.\n",
 		    __func__, ha->host_no, ha->instance, pext->RequestLen);)
 		pext->Status = EXT_STATUS_INVALID_PARAM;
-		return (ret);
-	}
-
-	ret = verify_area(VERIFY_READ, (void *)pext->RequestAdr,
-	    pext->RequestLen);
-
-	if (ret != 0) {
-		pext->Status = EXT_STATUS_COPY_ERR;
-		DEBUG9_10(printk(
-		    "%s(%ld): inst=%ld req buf verify READ FAILED\n",
-		    __func__, ha->host_no, ha->instance);)
 		return (ret);
 	}
 
@@ -5746,159 +5201,80 @@ qla2x00_send_els_rnid(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	}
 
 	/* Find loop ID of the device */
-	fcinitiator = NULL;
+	found = 0;
+	fcport = NULL;
 	switch (tmp_rnid->Addr.Type) {
 	case EXT_DEF_TYPE_WWNN:
 
 		DEBUG9(printk("%s(%ld): inst=%ld got node name.\n",
 		    __func__, ha->host_no, ha->instance);)
 
-		for (fcport = ha->fcport; (fcport); fcport = fcport->next) {
-			/* if removed or missing */
-			if (atomic_read(&fcport->state) == FC_ONLINE &&
-			    memcmp((void *)tmp_rnid->Addr.FcAddr.WWNN,
-			    (void *)fcport->node_name,
-			    EXT_DEF_WWN_NAME_SIZE) == 0) {
-				break;
-			}
-		}
-		if (fcport != NULL) {
-			DEBUG9(printk("%s(%ld): inst=%ld found tgt dev; "
-			    "loop_id=%x.\n",
-			    __func__, ha->host_no, ha->instance,
-			    fcport->loop_id);)
-
-			dev_found = TGT_DEV;
-			dev_loop_id = fcport->loop_id;
-			break;
-		}
-
-		found = 0;
-		fcinitiator = NULL;
-		list_for_each(fcil, &ha->fcinitiators) {
-			fcinitiator = list_entry(fcil, fc_initiator_t, list);
+		list_for_each_entry(fcport, &ha->fcports, list) {
+			if (fcport->port_type != FCT_INITIATOR ||
+			    fcport->port_type != FCT_TARGET)
+				continue;
 
 			if (memcmp(tmp_rnid->Addr.FcAddr.WWNN,
-				 fcinitiator->node_name,
-				 EXT_DEF_WWN_NAME_SIZE) == 0 &&
-				fcinitiator->d_id.b24 != 0) {
+			    fcport->node_name, EXT_DEF_WWN_NAME_SIZE))
+				continue;
 
-				found++;
-				break;
+			if (fcport->port_type == FCT_TARGET) {
+				if (atomic_read(&fcport->state) != FC_ONLINE)
+					continue;
+			} else { /* FCT_INITIATOR */
+				if (!fcport->d_id.b24)
+					continue;
 			}
-		}
-		if (found) {
-			DEBUG9(printk("%s(%ld): inst=%ld found host device; "
-			    "loop_id=%x.\n",
-			    __func__, ha->host_no, ha->instance,
-			    fcinitiator->loop_id);)
 
-			dev_found = HOST_DEV;
-			dev_loop_id = fcinitiator->loop_id;
-			break;
+			found++;
 		}
-
 		break;
-
 
 	case EXT_DEF_TYPE_WWPN:
 		DEBUG9(printk("%s(%ld): inst=%ld got port name.\n",
 		    __func__, ha->host_no, ha->instance);)
 
-		for (fcport = ha->fcport; (fcport); fcport = fcport->next) {
-			/* if removed or missing */
-			if (atomic_read(&fcport->state) == FC_ONLINE &&
-			    memcmp((void *)tmp_rnid->Addr.FcAddr.WWPN,
-			    (void *)fcport->port_name,
-			    EXT_DEF_WWN_NAME_SIZE) == 0) {
-				break;
-			}
-		}
-		if (fcport != NULL) {
-			DEBUG9(printk("%s(%ld): inst=%ld found tgt dev; "
-			    "loop_id=%x.\n",
-			    __func__, ha->host_no, ha->instance,
-			    fcport->loop_id);)
-
-			dev_found = TGT_DEV; /* target device */
-			dev_loop_id = fcport->loop_id;
-			break;
-		}
-
-		found = 0;
-		fcinitiator = NULL;
-		list_for_each(fcil, &ha->fcinitiators) {
-			fcinitiator = list_entry(fcil, fc_initiator_t, list);
+		list_for_each_entry(fcport, &ha->fcports, list) {
+			if (fcport->port_type != FCT_INITIATOR ||
+			    fcport->port_type != FCT_TARGET)
+				continue;
 
 			if (memcmp(tmp_rnid->Addr.FcAddr.WWPN,
-				 fcinitiator->port_name,
-				 EXT_DEF_WWN_NAME_SIZE) == 0 &&
-				fcinitiator->d_id.b24 != 0) {
+			    fcport->port_name, EXT_DEF_WWN_NAME_SIZE))
+				continue;
 
-				found++;
-				break;
+			if (fcport->port_type == FCT_TARGET) {
+				if (atomic_read(&fcport->state) != FC_ONLINE)
+					continue;
+			} else { /* FCT_INITIATOR */
+				if (!fcport->d_id.b24)
+					continue;
 			}
-		}
-		if (found) {
-			DEBUG9(printk("%s(%ld): inst=%ld found host device; "
-			    "loop_id=%x.\n",
-			    __func__, ha->host_no, ha->instance,
-			    fcinitiator->loop_id);)
 
-			dev_found = HOST_DEV;
-			dev_loop_id = fcinitiator->loop_id;
-			break;
+			found++;
 		}
-
 		break;
 
 	case EXT_DEF_TYPE_PORTID:
 		DEBUG9(printk("%s(%ld): inst=%ld got port ID.\n",
 		    __func__, ha->host_no, ha->instance);)
 
-		/* PORTID bytes entered must already be big endian */
-		for (fcport = ha->fcport; (fcport); fcport = fcport->next) {
-			/* if removed or missing */
-			if (atomic_read(&fcport->state) == FC_ONLINE &&
-			    memcmp((void *)&tmp_rnid->Addr.FcAddr.Id[1],
-			    (void *)(fcport->d_id.r.d_id),
-			    EXT_DEF_PORTID_SIZE_ACTUAL) == 0) {
-				break;
-			}
-		}
-		if (fcport != NULL) {
-			DEBUG9(printk("%s(%ld): inst=%ld found tgt dev; "
-			    "loop_id=%x.\n",
-			    __func__, ha->host_no, ha->instance,
-			    fcport->loop_id);)
+		list_for_each_entry(fcport, &ha->fcports, list) {
+			if (fcport->port_type != FCT_INITIATOR ||
+			    fcport->port_type != FCT_TARGET)
+				continue;
 
-			dev_found = TGT_DEV; /* target device */
-			dev_loop_id = fcport->loop_id;
-			break;
-		}
-
-		found = 0;
-		fcinitiator = NULL;
-		list_for_each(fcil, &ha->fcinitiators) {
-			fcinitiator = list_entry(fcil, fc_initiator_t, list);
-
+			/* PORTID bytes entered must already be big endian */
 			if (memcmp(&tmp_rnid->Addr.FcAddr.Id[1],
-				&fcinitiator->d_id,
-				EXT_DEF_PORTID_SIZE_ACTUAL) == 0) {
+			    &fcport->d_id, EXT_DEF_PORTID_SIZE_ACTUAL))
+				continue;
 
-				found++;
-				break;
+			if (fcport->port_type == FCT_TARGET) {
+				if (atomic_read(&fcport->state) != FC_ONLINE)
+					continue;
 			}
-		}
-		if (found) {
-			DEBUG9(printk("%s(%ld): inst=%ld found host device; "
-			    "loop_id=%x.\n",
-			    __func__, ha->host_no, ha->instance,
-			    fcinitiator->loop_id);)
 
-			dev_found = HOST_DEV;
-			dev_loop_id = fcinitiator->loop_id;
-			break;
+			found++;
 		}
 
 		break;
@@ -5911,17 +5287,12 @@ qla2x00_send_els_rnid(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		return (ret);
 	}
 
-	if (!dev_found ||
-	    (dev_found == TGT_DEV && dev_loop_id > LAST_SNS_LOOP_ID)) {
+	if (!found || (fcport->port_type == FCT_TARGET &&
+	    fcport->loop_id > SNS_LAST_LOOP_ID)) {
 		/* No matching device or the target device is not
 		 * configured; just return error.
 		 */
 		pext->Status = EXT_STATUS_DEV_NOT_FOUND;
-		DEBUG9_10(printk(
-		    "%s(%ld): inst=%ld device not found. dev_found=%d "
-		    "dev_loop_id=%x.\n",
-		    __func__, ha->host_no, ha->instance, dev_found,
-		    dev_loop_id);)
 		qla2x00_free_ioctl_scrap_mem(ha);
 		return (ret);
 	}
@@ -5940,109 +5311,21 @@ qla2x00_send_els_rnid(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		return (ret);
 	}
 
-	/* Check whether we need to login first. */
-	if (dev_found == HOST_DEV && dev_loop_id > LAST_SNS_LOOP_ID) {
-		/*
-		 * Search for a usable loop ID before try to login to it.
-		 */
-		if ((dev_loop_id &= ~PORT_LOST_ID) > LAST_SNS_LOOP_ID) {
-			/* Just start searching from first possible ID. */
-			dev_loop_id = ha->min_external_loopid;
-		}
-		for (;;) {
-			if (ha->fabricid[dev_loop_id].in_use == TRUE) {
-				dev_loop_id++;
-			} else {
-				ha->fabricid[dev_loop_id].in_use = TRUE;
-				break;
-			}
-		}
+	/* If this is for a host device, check if we need to perform login */
+	if (fcport->port_type == FCT_INITIATOR &&
+	    fcport->loop_id >= SNS_LAST_LOOP_ID) {
+		next_loop_id = 0;
+		ret = qla2x00_fabric_login(ha, fcport, &next_loop_id);
+		if (ret != QL_STATUS_SUCCESS) {
+			/* login failed. */
+			pext->Status = EXT_STATUS_DEV_NOT_FOUND;
 
-		DEBUG9(printk("%s(%ld): inst=%ld try relogin to host dev; "
-		    "dev_loop_id=%x.\n",
-		    __func__, ha->host_no, ha->instance, dev_loop_id);)
-
-		for (;;) {
-			if (dev_loop_id > LAST_SNS_LOOP_ID) {
-				/* error */
-				DEBUG10(printk("%s(%ld): inst=%ld "
-				    "no valid loop_id for login.\n",
-				    __func__, ha->host_no, ha->instance);)
-
-				break;
-			}
-
-			qla2x00_login_fabric(ha, 
-			    dev_loop_id,
-			    fcinitiator->d_id.b.domain,
-			    fcinitiator->d_id.b.area,
-			    fcinitiator->d_id.b.al_pa,
-			    &mb[0], 0);
-
-			if (mb[0] != MBS_CMD_CMP &&
-			    mb[0] != MBS_PORT_ID_IN_USE &&
-			    mb[0] != MBS_LOOP_ID_IN_USE) {
-
-	 			DEBUG10(printk("%s(%ld): inst=%ld "
-				    "ERROR login mb[0]=%x mb[1]=%x.\n",
-				    __func__, ha->host_no, ha->instance,
-				    mb[0], mb[1]);)
-				break;
-			}
-
-			if (mb[0] == MBS_CMD_CMP) {
-				DEBUG9(printk("%s(%ld): inst=%ld host login "
-				    "success; loop_id=%x.\n",
-				    __func__, ha->host_no, ha->instance,
-				    dev_loop_id);)
-
-				fcinitiator->loop_id = dev_loop_id;
-				break;
-			} else if (mb[0] == MBS_PORT_ID_IN_USE) {
-				ha->fabricid[dev_loop_id].in_use = FALSE;
-				dev_loop_id = mb[1];
-
-				DEBUG9(printk("%s(%ld): inst=%ld port %06x "
-				    "using loop id=0x%04x.\n",
-				    __func__, ha->host_no, ha->instance,
-				    fcinitiator->d_id.b24,
-				    dev_loop_id);)
-
-				if (dev_loop_id <= LAST_SNS_LOOP_ID)
-					ha->fabricid[dev_loop_id].in_use = TRUE;
-				else
-					/* Error */
-					break;
-
-			} else if (mb[0] == MBS_LOOP_ID_IN_USE) {
-				/* Search for another usable loop_id */
-				dev_loop_id++;
-				while (ha->fabricid[dev_loop_id].in_use) {
-					if (dev_loop_id++ > LAST_SNS_LOOP_ID) {
-						/* Error */
-						break;
-					}
-				}
-
-				if (dev_loop_id <= LAST_SNS_LOOP_ID) {
-					DEBUG9(printk(
-					    "%s(%ld): inst=%ld previous loop "
-					    "id in use. Retry with 0x%04x.\n",
-					    __func__, ha->host_no, ha->instance,
-					    dev_loop_id);)
-
-					ha->fabricid[dev_loop_id].in_use = TRUE;
-				} else {
-					/* Error */
-					break;
-				}
-			}
-		}
-
-		if (mb[0] != MBS_CMD_CMP) {
-			pext->Status = EXT_STATUS_ERR;
-			DEBUG9_10(printk( "%s(%ld): inst=%ld login failed.\n",
-			    __func__, ha->host_no, ha->instance);)
+			DEBUG9_10(printk("%s(%ld): inst=%ld ERROR login to "
+			    "host port failed. loop_id=%02x pid=%02x%02x%02x "
+			    "ret=%d.\n",
+			    __func__, ha->host_no, ha->instance,
+			    fcport->loop_id, fcport->d_id.b.domain,
+			    fcport->d_id.b.area, fcport->d_id.b.al_pa, ret);)
 
 			qla2x00_free_ioctl_scrap_mem(ha);
 			return (ret);
@@ -6053,7 +5336,7 @@ qla2x00_send_els_rnid(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	DEBUG9(printk("%s(%ld): inst=%ld sending rnid cmd.\n",
 	    __func__, ha->host_no, ha->instance);)
 
-	ret = qla2x00_send_rnid_mbx(ha, dev_loop_id,
+	ret = qla2x00_send_rnid_mbx(ha, fcport->loop_id,
 	    (uint8_t)tmp_rnid->DataFormat, ha->ioctl_mem_phys,
 	    SEND_RNID_RSP_SIZE, &mb[0]);
 
@@ -6074,38 +5357,27 @@ qla2x00_send_els_rnid(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	copy_len = (pext->ResponseLen > SEND_RNID_RSP_SIZE) ?
 	    SEND_RNID_RSP_SIZE : pext->ResponseLen;
 
-	ret = verify_area(VERIFY_WRITE, (void  *)pext->ResponseAdr,
-	    copy_len);
-
-	if (ret != 0) {
+	ret = copy_to_user(pext->ResponseAdr, ha->ioctl_mem, copy_len);
+	if (ret) {
 		pext->Status = EXT_STATUS_COPY_ERR;
 		DEBUG9_10(printk(
-		    "%s(%ld): inst=%ld rsp buf verify WRITE error\n",
+		    "%s(%ld): inst=%ld ERROR copy rsp buf\n",
+		    __func__, ha->host_no, ha->instance);)
+		qla2x00_free_ioctl_scrap_mem(ha);
+		return (ret);
+	}
+
+	if (SEND_RNID_RSP_SIZE > pext->ResponseLen) {
+		pext->Status = EXT_STATUS_DATA_OVERRUN;
+		DEBUG9(printk("%s(%ld): inst=%ld data overrun. exiting "
+		    "normally.\n",
 		    __func__, ha->host_no, ha->instance);)
 	} else {
-		ret = copy_to_user((uint8_t *)pext->ResponseAdr,
-		    (uint8_t *)ha->ioctl_mem, copy_len);
-		if (ret) {
-			pext->Status = EXT_STATUS_COPY_ERR;
-			DEBUG9_10(printk(
-			    "%s(%ld): inst=%ld ERROR copy rsp buf\n",
-			    __func__, ha->host_no, ha->instance);)
-			qla2x00_free_ioctl_scrap_mem(ha);
-			return (ret);
-		}
-
-		if (SEND_RNID_RSP_SIZE > pext->ResponseLen) {
-			pext->Status = EXT_STATUS_DATA_OVERRUN;
-			DEBUG9(printk("%s(%ld): inst=%ld data overrun. "
-			    "exiting normally.\n",
-			    __func__, ha->host_no, ha->instance);)
-		} else {
-			pext->Status = EXT_STATUS_OK;
-			DEBUG9(printk("%s(%ld): inst=%ld exiting normally.\n",
-			    __func__, ha->host_no, ha->instance);)
-		}
-		pext->ResponseLen = copy_len;
+		pext->Status = EXT_STATUS_OK;
+		DEBUG9(printk("%s(%ld): inst=%ld exiting normally.\n",
+		    __func__, ha->host_no, ha->instance);)
 	}
+	pext->ResponseLen = copy_len;
 
 	qla2x00_free_ioctl_scrap_mem(ha);
 	return (ret);
@@ -6167,39 +5439,30 @@ qla2x00_get_rnid_params(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	/* Copy the response */
 	copy_len = (pext->ResponseLen > sizeof(EXT_RNID_DATA)) ?
 	    (uint32_t)sizeof(EXT_RNID_DATA) : pext->ResponseLen;
-	ret = verify_area(VERIFY_WRITE, (void  *)pext->ResponseAdr,
-	    copy_len);
 
-	if (ret != 0) {
+	ret = copy_to_user(pext->ResponseAdr, ha->ioctl_mem, copy_len);
+	if (ret) {
 		pext->Status = EXT_STATUS_COPY_ERR;
-		DEBUG9_10(printk("%s(%ld): inst=%ld verify WRITE rsp buf error\n",
+		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR copy rsp buf\n",
+		    __func__, ha->host_no, ha->instance);)
+		return (ret);
+	}
+
+	pext->ResponseLen = copy_len;
+	if (copy_len < sizeof(EXT_RNID_DATA)) {
+		pext->Status = EXT_STATUS_DATA_OVERRUN;
+		DEBUG9_10(printk("%s(%ld): inst=%ld data overrun. "
+		    "exiting normally.\n",
+		    __func__, ha->host_no, ha->instance);)
+	} else if (pext->ResponseLen > sizeof(EXT_RNID_DATA)) {
+		pext->Status = EXT_STATUS_DATA_UNDERRUN;
+		DEBUG9_10(printk("%s(%ld): inst=%ld data underrun. "
+		    "exiting normally.\n",
 		    __func__, ha->host_no, ha->instance);)
 	} else {
-		ret = copy_to_user((void *)pext->ResponseAdr,
-		    (void *)ha->ioctl_mem, copy_len);
-		if (ret) {
-			pext->Status = EXT_STATUS_COPY_ERR;
-			DEBUG9_10(printk("%s(%ld): inst=%ld ERROR copy rsp buf\n",
-			    __func__, ha->host_no, ha->instance);)
-			return (ret);
-		}
-
-		pext->ResponseLen = copy_len;
-		if (copy_len < sizeof(EXT_RNID_DATA)) {
-			pext->Status = EXT_STATUS_DATA_OVERRUN;
-			DEBUG9_10(printk("%s(%ld): inst=%ld data overrun. "
-			    "exiting normally.\n",
-			    __func__, ha->host_no, ha->instance);)
- 		} else if (pext->ResponseLen > sizeof(EXT_RNID_DATA)) {
- 			pext->Status = EXT_STATUS_DATA_UNDERRUN;
- 			DEBUG9_10(printk("%s(%ld): inst=%ld data underrun. "
- 			    "exiting normally.\n",
- 			    __func__, ha->host_no, ha->instance);)
-		} else {
-			pext->Status = EXT_STATUS_OK;
-			DEBUG9(printk("%s(%ld): inst=%ld exiting normally.\n",
-			    __func__, ha->host_no, ha->instance);)
-		}
+		pext->Status = EXT_STATUS_OK;
+		DEBUG9(printk("%s(%ld): inst=%ld exiting normally.\n",
+		    __func__, ha->host_no, ha->instance);)
 	}
 
 	return (ret);
@@ -6230,17 +5493,6 @@ qla2x00_get_led_state(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 
 	DEBUG9(printk("%s(%ld): inst=%ld entered.\n",
 	    __func__, ha->host_no, ha->instance);)
-
-	ret = verify_area(VERIFY_WRITE, (void *)pext->ResponseAdr,
-	    sizeof(EXT_BEACON_CONTROL));
-
-	if (ret) {
-		pext->Status = EXT_STATUS_COPY_ERR;
-		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR VERIFY_WRITE "
-		    "EXT_HBA_PORT_STAT.\n",
-		    __func__, ha->host_no, ha->instance);)
-		return (ret);
-	}
 
 	if (test_bit(ABORT_ISP_ACTIVE, &ha->dpc_flags)) {
 		 pext->Status = EXT_STATUS_BUSY;
@@ -6372,16 +5624,6 @@ qla2x00_set_rnid_params(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		return(ret);
 	}
 
-	ret = verify_area(VERIFY_READ, (void *)pext->RequestAdr,
-	    pext->RequestLen);
-
-	if (ret != 0) {
-		pext->Status = EXT_STATUS_COPY_ERR;
-		DEBUG9_10(printk("%s(%ld): inst=%ld verify READ request buf.\n",
-		    __func__, ha->host_no, ha->instance);)
-		return(ret);
-	}
-
 	if (qla2x00_get_ioctl_scrap_mem(ha, (void **)&tmp_set,
 	    sizeof(EXT_SET_RNID_REQ))) {
 		/* not enough memory */
@@ -6468,17 +5710,6 @@ qla2x00_set_led_state(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 	DEBUG9(printk("%s(%ld): inst=%ld entered.\n",
 	    __func__, ha->host_no, ha->instance);)
 
-	ret = verify_area(VERIFY_READ, (void *)pext->RequestAdr,
-	    sizeof(EXT_BEACON_CONTROL));
-
-	if (ret) {
-		pext->Status = EXT_STATUS_COPY_ERR;
-		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR VERIFY_WRITE "
-		    "EXT_HBA_PORT_STAT.\n",
-		    __func__, ha->host_no, ha->instance);)
-		return (ret);
-	}
-
 	if (test_bit(ABORT_ISP_ACTIVE, &ha->dpc_flags)) {
 		pext->Status = EXT_STATUS_BUSY;
 		DEBUG9_10(printk("%s(%ld): inst=%ld abort isp active.\n",
@@ -6486,8 +5717,8 @@ qla2x00_set_led_state(scsi_qla_host_t *ha, EXT_IOCTL *pext, int mode)
 		return (ret);
 	}
 
-	ret = copy_from_user(&ptmp_led_state, 
-	    pext->RequestAdr, pext->RequestLen);
+	ret = copy_from_user(&ptmp_led_state, pext->RequestAdr,
+	    pext->RequestLen);
 	if (ret) {
 		pext->Status = EXT_STATUS_COPY_ERR;
 		DEBUG9_10(printk("%s(%ld): inst=%ld ERROR copy req buf.\n",

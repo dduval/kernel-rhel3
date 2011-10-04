@@ -223,6 +223,7 @@ extern void update_mctime (struct inode *);
 #define UPDATE_ATIME(inode) update_atime (inode)
 
 extern void buffer_init(unsigned long);
+extern void inode_init_early(unsigned long);
 extern void inode_init(unsigned long);
 extern void mnt_init(unsigned long);
 extern void files_init(unsigned long mempages);
@@ -1145,6 +1146,7 @@ extern int filp_close(struct file *, fl_owner_t id);
 extern char * getname(const char *);
 
 /* fs/dcache.c */
+extern void dcache_init_early(unsigned long);
 extern void vfs_caches_init(unsigned long);
 
 #define __getname()	kmem_cache_alloc(names_cachep, SLAB_KERNEL)
