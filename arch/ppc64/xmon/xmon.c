@@ -262,7 +262,9 @@ xmon(struct pt_regs *excp)
 		 caller's state.
 		 */
 		asm volatile ("std	0,0(%0)\n\
-			std	1,8(%0)\n\
+			ld	0,0(1)\n\
+			std	0,8(%0)\n\
+			ld	0,0(%0)\n\
 			std	2,16(%0)\n\
 			std	3,24(%0)\n\
 			std	4,32(%0)\n\

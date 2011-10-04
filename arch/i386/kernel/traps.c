@@ -576,7 +576,7 @@ int mem_nmi_panic = 0;
 
 static spinlock_t nmi_print_lock = SPIN_LOCK_UNLOCKED;
 
-void die_nmi (struct pt_regs *regs, const char *msg)
+void die_nmi(struct pt_regs *regs, const char *msg)
 {
 	spin_lock(&nmi_print_lock);
 	/*
@@ -584,9 +584,8 @@ void die_nmi (struct pt_regs *regs, const char *msg)
 	 * to get a message out.
 	 */
 	bust_spinlocks(1);
-	printk(msg);
-	printk(" on CPU%d, eip %08lx, registers:\n",
-			smp_processor_id(), regs->eip);
+	printk("%s on CPU%d, eip %08lx, registers:\n",
+		msg, smp_processor_id(), regs->eip);
 	show_registers(regs);
 	try_crashdump(regs);
 	printk("console shuts up ...\n");
@@ -595,7 +594,6 @@ void die_nmi (struct pt_regs *regs, const char *msg)
 	bust_spinlocks(0);
 	do_exit(SIGSEGV);
 }
-
 
 static void default_do_nmi(struct pt_regs * regs)
 {
@@ -614,7 +612,7 @@ static void default_do_nmi(struct pt_regs * regs)
 #endif
 		if (unknown_nmi_panic) {
 			char buf[64];
-			sprintf(buf, "NMI received for unknown reason %02x\n", reason);
+			sprintf(buf, "NMI received for unknown reason %02x", reason);
 			die_nmi(regs, buf);
 		}
 		unknown_nmi_error(reason, regs);
@@ -623,7 +621,7 @@ static void default_do_nmi(struct pt_regs * regs)
 	if (reason & 0x80) {
 		if (mem_nmi_panic) {
 			char buf[64];
-			sprintf(buf, "NMI received for possible memory parity error %02x\n", reason);
+			sprintf(buf, "NMI received for possible memory parity error %02x", reason);
 			die_nmi(regs, buf);
 		}
 		mem_parity_error(reason, regs);

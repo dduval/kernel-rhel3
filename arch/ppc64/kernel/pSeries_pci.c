@@ -230,6 +230,14 @@ pci_read_irq_line(struct pci_dev *Pci_Dev)
 	return 0;
 }
 
+void __init init_pci_config_tokens (void)
+{
+	read_pci_config = rtas_token("read-pci-config");
+	write_pci_config = rtas_token("write-pci-config");
+	ibm_read_pci_config = rtas_token("ibm,read-pci-config");
+	ibm_write_pci_config = rtas_token("ibm,write-pci-config");
+}
+
 /******************************************************************
  * Find all PHBs in the system and initialize a set of data 
  * structures to represent them.
@@ -250,11 +258,7 @@ find_and_init_phbs(void)
 	int has_isa = 0;
         PPCDBG(PPCDBG_PHBINIT, "find_and_init_phbs\n"); 
 
-	read_pci_config = rtas_token("read-pci-config");
-	write_pci_config = rtas_token("write-pci-config");
-	ibm_read_pci_config = rtas_token("ibm,read-pci-config");
-	ibm_write_pci_config = rtas_token("ibm,write-pci-config");
-
+	init_pci_config_tokens();
 	if (naca->interrupt_controller == IC_OPEN_PIC) {
 		opprop = (unsigned int *)get_property(find_path_device("/"),
 				"platform-open-pic", NULL);
@@ -409,12 +413,42 @@ find_and_init_phbs(void)
 	return 0;	 /*Success */
 }
 
+unsigned long __init get_phb_buid (struct device_node *phb)
+{
+	int addr_cells;
+	unsigned int *buid_vals;
+	unsigned int len;
+	unsigned long buid;
+
+	if (ibm_read_pci_config == -1) return 0;
+
+	/* PHB's will always be children of the root node,
+	 * or so it is promised by the current firmware. */
+	if (phb->parent == NULL) 
+		return 0;
+	if (phb->parent->parent) 
+		return 0;
+
+	buid_vals = (unsigned int *) get_property(phb, "reg", &len);
+	if (buid_vals == NULL) 
+		return 0;
+
+	addr_cells = prom_n_addr_cells(phb);
+	if (addr_cells == 1) {
+		buid = (unsigned long) buid_vals[0];
+	} else {
+		buid = (((unsigned long)buid_vals[0]) << 32UL) |
+			(((unsigned long)buid_vals[1]) & 0xffffffff);
+	}
+	return buid;
+}
+
 /******************************************************************
  *
  * Allocate and partially initialize a structure to represent a PHB.
  *
  ******************************************************************/
-struct pci_controller *
+static struct pci_controller *
 alloc_phb(struct device_node *dev, char *model, unsigned int addr_size_words)
 {
 	struct pci_controller *phb;
@@ -422,7 +456,6 @@ alloc_phb(struct device_node *dev, char *model, unsigned int addr_size_words)
 	struct reg_property64 reg_struct;
 	struct property *of_prop;
 	int *bus_range;
-	int *buid_vals;
 
 	PPCDBG(PPCDBG_PHBINIT, "alloc_phb: %s\n", dev->full_name); 
 	PPCDBG(PPCDBG_PHBINIT, "\tdev             = 0x%lx\n", dev); 
@@ -576,12 +609,9 @@ alloc_phb(struct device_node *dev, char *model, unsigned int addr_size_words)
 	phb->arch_data   = dev;
 	phb->ops = &rtas_pci_ops;
 
-	buid_vals = (int *) get_property(dev, "ibm,fw-phb-id", &len);
+	phb->buid = get_phb_buid(dev);
 	
-  if (buid_vals == NULL) {
-		phb->buid = 0;
-	} 
-  else {
+	if (phb->buid != 0) {
 		struct pci_bus check;
 		if (sizeof(check.number) == 1 || sizeof(check.primary) == 1 ||
 		    sizeof(check.secondary) == 1 || sizeof(check.subordinate) == 1) {
@@ -591,14 +621,8 @@ alloc_phb(struct device_node *dev, char *model, unsigned int addr_size_words)
 			panic("pSeries_pci:  this system has large bus numbers and the kernel was not\n"
 			      "built with the patch that fixes include/linux/pci.h struct pci_bus so\n"
 			      "number, primary, secondary and subordinate are ints.\n");
-    }
+		}
     
-    if (len < 2 * sizeof(int))
-      phb->buid = (unsigned long)buid_vals[0];  // Support for new OF that only has 1 integer for buid.
-    else
-      phb->buid = (((unsigned long)buid_vals[0]) << 32UL) |
-                  (((unsigned long)buid_vals[1]) & 0xffffffff);
-  	
 		phb->first_busno += (phb->global_number << 8);
 		phb->last_busno += (phb->global_number << 8);
 	}

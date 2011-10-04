@@ -55,6 +55,7 @@ static unsigned long num_dma_physpages;
 
 struct curr_mem_request {
 	unsigned long requested;
+	unsigned long min_physaddr;
 	int found;
 };
 
@@ -95,6 +96,47 @@ page_is_ram (unsigned long pagenr)
 	efi_memmap_walk(verify_physaddr, &cr);
 
 	return cr.found;
+}
+
+static int
+find_next (unsigned long start, unsigned long end, void *arg)
+{
+	struct curr_mem_request *cr = (struct curr_mem_request *)arg;
+
+	start = __pa(start);
+	end = __pa(end);
+
+	if ((cr->requested >= start) && (cr->requested + PAGE_SIZE) <= end) {
+		cr->min_physaddr = cr->requested;
+		cr->found = 1;
+		return -1;
+	}
+	if ((cr->requested < start) && (start + PAGE_SIZE) <= end)
+		if (start < cr->min_physaddr) {
+			cr->min_physaddr = start;
+			cr->found = 1;
+		}
+
+	return 0;
+}
+
+unsigned long
+next_ram_page (unsigned long pagenr)
+{
+	struct curr_mem_request cr;
+
+	pagenr++;
+
+	cr.requested = pagenr << PAGE_SHIFT;
+	cr.found = 0;
+	cr.min_physaddr = ULONG_MAX;
+
+	efi_memmap_walk(find_next, &cr);
+
+	if (cr.found)
+		return cr.min_physaddr >> PAGE_SHIFT;
+	else
+		return ULONG_MAX;
 }
 
 int

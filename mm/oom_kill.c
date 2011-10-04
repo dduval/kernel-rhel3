@@ -221,6 +221,15 @@ retry:
 	 * for more memory.
 	 */
 	yield();
+#ifdef CONFIG_K8_NUMA
+	{
+		extern int numa_nodes;
+		if (numa_nodes > 1) {
+			printk(KERN_INFO "OOM kill occurred on an x86_64 NUMA system!\n");
+			printk(KERN_INFO "The numa=off boot option might help avoid this.\n");
+		}
+	}
+#endif
 	return;
 }
 

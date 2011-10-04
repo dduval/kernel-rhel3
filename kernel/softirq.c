@@ -19,9 +19,8 @@
 
 /*
  * Defer softirqs to ksoftirqd if free stack less than this.
- * defaults to 2048 bytes on 32-bit architectures.
  */
-unsigned int stack_defer_threshold = 64 * BITS_PER_LONG;
+unsigned int stack_defer_threshold = (THREAD_SIZE <= 8192) ? 2048 : 4096;
 
 /*
    - No shared variables, all the data are CPU local.
@@ -92,8 +91,7 @@ asmlinkage void do_softirq()
 	if (pending) {
 		struct softirq_action *h;
 
-#if !defined(CONFIG_PARISC) && \
-    !defined(CONFIG_ARCH_S390) && !defined(CONFIG_X86_64)
+#if !defined(CONFIG_PARISC) && !defined(CONFIG_ARCH_S390)
 		{
 			unsigned long esp = (unsigned long)&esp;
 			unsigned long tsk = (unsigned long)current;
@@ -106,7 +104,7 @@ asmlinkage void do_softirq()
 				return;
 			}
 		}
-#endif /* !CONFIG_PARISC !CONFIG_ARCH_S390 !CONFIG_X86_64 */
+#endif /* !CONFIG_PARISC && !CONFIG_ARCH_S390 */
 
 		local_bh_disable();
 restart:

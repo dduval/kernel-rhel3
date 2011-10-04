@@ -3022,11 +3022,12 @@ int init_module(void)
 	/* Work out how many ports we have, then get parport_share to parse
 	   the irq values. */
 	unsigned int i;
-	int ret;
+
 	for (i = 0; i < PARPORT_PC_MAX_PORTS && io[i]; i++);
 	if (i) {
-		if (parport_parse_irqs(i, irq, irqval)) return 1;
-		if (parport_parse_dmas(i, dma, dmaval)) return 1;
+		if (parport_parse_irqs(i, irq, irqval) ||
+		    parport_parse_dmas(i, dma, dmaval))
+			return -EINVAL;
 	}
 	else {
 		/* The user can make us use any IRQs or DMAs we find. */
@@ -3059,11 +3060,13 @@ int init_module(void)
 			}
 	}
 
-	ret = !parport_pc_init (io, io_hi, irqval, dmaval);
-	if (ret && registered_parport)
-		pci_unregister_driver (&parport_pc_pci_driver);
+	if (parport_pc_init(io, io_hi, irqval, dmaval) <= 0) {
+		if (registered_parport)
+			pci_unregister_driver(&parport_pc_pci_driver);
+		return -ENODEV;
+	}
 
-	return ret;
+	return 0;
 }
 
 void cleanup_module(void)

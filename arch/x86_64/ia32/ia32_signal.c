@@ -54,7 +54,7 @@ static int ia32_copy_siginfo_to_user(siginfo_t32 *to, siginfo_t *from)
 	   3 ints plus the relevant union member.  */
 	err = __put_user(from->si_signo, &to->si_signo);
 	err |= __put_user(from->si_errno, &to->si_errno);
-	err |= __put_user(from->si_code, &to->si_code);
+	err |= __put_user((short)from->si_code, &to->si_code);
 	if (from->si_code < 0) {
 		err |= __copy_to_user (&to->_sifields._pad, &from->_sifields._pad, SI_PAD_SIZE);
 	} else {
@@ -280,16 +280,8 @@ asmlinkage long sys32_rt_sigreturn(struct pt_regs regs)
 	if (ia32_restore_sigcontext(&regs, &frame->uc.uc_mcontext, &eax))
 		goto badframe;
 
-	if (__copy_from_user(&st, &frame->uc.uc_stack, sizeof(st)))
+	if (sys32_sigaltstack(&frame->uc.uc_stack, NULL, regs) == -EFAULT)
 		goto badframe;
-	/* It is more difficult to avoid calling this function than to
-	   call it and ignore errors.  */
-	{
-		mm_segment_t oldds = get_fs(); 
-		set_fs(KERNEL_DS); 
-		do_sigaltstack(&st, NULL, regs.rsp);
-		set_fs(oldds);  
-	}
 
 	return eax;
 
@@ -369,7 +361,7 @@ get_sigframe(struct k_sigaction *ka, struct pt_regs * regs, size_t frame_size)
 
 	/* This is the X/Open sanctioned signal stack switching.  */
 	if (ka->sa.sa_flags & SA_ONSTACK) {
-		if (! on_sig_stack(rsp))
+		if (sas_ss_flags(rsp) == 0)
 			rsp = current->sas_ss_sp + current->sas_ss_size;
 	}
 

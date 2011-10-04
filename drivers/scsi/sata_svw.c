@@ -49,7 +49,7 @@
 #endif /* CONFIG_PPC_OF */
 
 #define DRV_NAME	"sata_svw"
-#define DRV_VERSION	"1.04"
+#define DRV_VERSION	"1.05"
 
 /* Taskfile registers offsets */
 #define K2_SATA_TF_CMD_OFFSET		0x00
@@ -148,7 +148,73 @@ static void k2_sata_tf_read(struct ata_port *ap, struct ata_taskfile *tf)
         }
 }
 
+/**
+ *	k2_bmdma_setup_mmio - Set up PCI IDE BMDMA transaction (MMIO)
+ *	@qc: Info associated with this ATA transaction.
+ *
+ *	LOCKING:
+ *	spin_lock_irqsave(host_set lock)
+ */
 
+void k2_bmdma_setup_mmio (struct ata_queued_cmd *qc)
+{
+	struct ata_port *ap = qc->ap;
+	unsigned int rw = (qc->tf.flags & ATA_TFLAG_WRITE);
+	u8 dmactl;
+	void *mmio = (void *) ap->ioaddr.bmdma_addr;
+	/* load PRD table addr. */
+	mb();	/* make sure PRD table writes are visible to controller */
+	writel(ap->prd_dma, mmio + ATA_DMA_TABLE_OFS);
+
+	/* specify data direction, triple-check start bit is clear */
+	dmactl = readb(mmio + ATA_DMA_CMD);
+	dmactl &= ~(ATA_DMA_WR | ATA_DMA_START);
+	if (!rw)
+		dmactl |= ATA_DMA_WR;
+	writeb(dmactl, mmio + ATA_DMA_CMD);
+
+	/* issue r/w command if this is not a ATA DMA command*/
+	if (qc->tf.protocol != ATA_PROT_DMA)
+		ap->ops->exec_command(ap, &qc->tf);
+}
+
+/**
+ *	k2_bmdma_start_mmio - Start a PCI IDE BMDMA transaction (MMIO)
+ *	@qc: Info associated with this ATA transaction.
+ *
+ *	LOCKING:
+ *	spin_lock_irqsave(host_set lock)
+ */
+
+void k2_bmdma_start_mmio (struct ata_queued_cmd *qc)
+{
+	struct ata_port *ap = qc->ap;
+	void *mmio = (void *) ap->ioaddr.bmdma_addr;
+	u8 dmactl;
+
+	/* start host DMA transaction */
+	dmactl = readb(mmio + ATA_DMA_CMD);
+	writeb(dmactl | ATA_DMA_START, mmio + ATA_DMA_CMD);
+	/* There is a race condition in certain SATA controllers that can 
+	   be seen when the r/w command is given to the controller before the 
+	   host DMA is started. On a Read command, the controller would initiate
+	   the command to the drive even before it sees the DMA start. When there
+	   are very fast drives connected to the controller, or when the data request 
+	   hits in the drive cache, there is the possibility that the drive returns a part
+	   or all of the requested data to the controller before the DMA start is issued.
+	   In this case, the controller would become confused as to what to do with the data.
+	   In the worst case when all the data is returned back to the controller, the
+	   controller could hang. In other cases it could return partial data returning
+	   in data corruption. This problem has been seen in PPC systems and can also appear
+	   on an system with very fast disks, where the SATA controller is sitting behind a 
+	   number of bridges, and hence there is significant latency between the r/w command
+	   and the start command. */
+	/* issue r/w command if the access is to ATA*/
+	if (qc->tf.protocol == ATA_PROT_DMA)
+		ap->ops->exec_command(ap, &qc->tf);
+}
+
+									      
 static u8 k2_stat_check_status(struct ata_port *ap)
 {
        	return readl((void *) ap->ioaddr.status_addr);
@@ -179,7 +245,7 @@ static int k2_sata_proc_info(struct Scsi_Host *shost, char *page, char **start,
 		return 0;
 
 	/* Find the OF node for the PCI device proper */
-	np = pci_device_to_OF_node(ap->host_set->pdev);
+	np = pci_device_to_OF_node(to_pci_dev(ap->host_set->dev));
 	if (np == NULL)
 		return 0;
 
@@ -207,7 +273,7 @@ static Scsi_Host_Template k2_sata_sht = {
 	.name			= DRV_NAME,
 	.detect			= ata_scsi_detect,
 	.release		= ata_scsi_release,
-	.ioctl                  = ata_scsi_ioctl,
+	.ioctl			= ata_scsi_ioctl,
 	.queuecommand		= ata_scsi_queuecmd,
 	.eh_strategy_handler	= ata_scsi_error,
 	.can_queue		= ATA_DEF_QUEUE,
@@ -231,10 +297,13 @@ static struct ata_port_operations k2_sata_ops = {
 	.tf_load		= k2_sata_tf_load,
 	.tf_read		= k2_sata_tf_read,
 	.check_status		= k2_stat_check_status,
-	.exec_command		= ata_exec_command_mmio,
+	.exec_command		= ata_exec_command,
+	.dev_select		= ata_std_dev_select,
 	.phy_reset		= sata_phy_reset,
-	.bmdma_setup            = ata_bmdma_setup_mmio,
-	.bmdma_start            = ata_bmdma_start_mmio,
+	.bmdma_setup		= k2_bmdma_setup_mmio,
+	.bmdma_start		= k2_bmdma_start_mmio,
+	.bmdma_stop		= ata_bmdma_stop,
+	.bmdma_status		= ata_bmdma_status,
 	.qc_prep		= ata_qc_prep,
 	.qc_issue		= ata_qc_issue_prot,
 	.eng_timeout		= ata_eng_timeout,
@@ -272,6 +341,7 @@ static int k2_sata_init_one (struct pci_dev *pdev, const struct pci_device_id *e
 	struct ata_probe_ent *probe_ent = NULL;
 	unsigned long base;
 	void *mmio_base;
+	int pci_dev_busy = 0;
 	int rc;
 
 	if (!printed_version++)
@@ -293,8 +363,10 @@ static int k2_sata_init_one (struct pci_dev *pdev, const struct pci_device_id *e
 
 	/* Request PCI regions */
 	rc = pci_request_regions(pdev, DRV_NAME);
-	if (rc)
+	if (rc) {
+		pci_dev_busy = 1;
 		goto err_out;
+	}
 
 	rc = pci_set_dma_mask(pdev, ATA_DMA_MASK);
 	if (rc)
@@ -307,7 +379,7 @@ static int k2_sata_init_one (struct pci_dev *pdev, const struct pci_device_id *e
 	}
 
 	memset(probe_ent, 0, sizeof(*probe_ent));
-	probe_ent->pdev = pdev;
+	probe_ent->dev = pci_dev_to_dev(pdev);
 	INIT_LIST_HEAD(&probe_ent->node);
 
 	mmio_base = ioremap(pci_resource_start(pdev, 5),
@@ -362,13 +434,16 @@ err_out_free_ent:
 err_out_regions:
 	pci_release_regions(pdev);
 err_out:
-	pci_disable_device(pdev);
+	if (!pci_dev_busy)
+		pci_disable_device(pdev);
 	return rc;
 }
 
 
 static struct pci_device_id k2_sata_pci_tbl[] = {
 	{ 0x1166, 0x0240, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0 },
+	{ 0x1166, 0x0241, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0 },
+	{ 0x1166, 0x0242, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0 },
 	{ }
 };
 
@@ -414,6 +489,7 @@ MODULE_AUTHOR("Benjamin Herrenschmidt");
 MODULE_DESCRIPTION("low-level driver for K2 SATA controller");
 MODULE_LICENSE("GPL");
 MODULE_DEVICE_TABLE(pci, k2_sata_pci_tbl);
+MODULE_VERSION(DRV_VERSION);
 
 module_init(k2_sata_init);
 module_exit(k2_sata_exit);

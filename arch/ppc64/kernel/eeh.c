@@ -628,6 +628,16 @@ void eeh_init(void)
 	ibm_read_slot_reset_state = rtas_token("ibm,read-slot-reset-state");
 	ibm_slot_error_detail = rtas_token("ibm,slot-error-detail");
 
+	eeh_error_buf_size = rtas_token("rtas-error-log-max");
+	if (eeh_error_buf_size == RTAS_UNKNOWN_SERVICE)
+		eeh_error_buf_size = RTAS_ERROR_LOG_MAX;
+	if (eeh_error_buf_size > RTAS_ERROR_LOG_MAX) {
+		printk(KERN_WARNING "EEH: rtas-error-log-max is bigger than "
+		       "allocated buffer! (%d vs %d)", eeh_error_buf_size,
+		       RTAS_ERROR_LOG_MAX);
+		eeh_error_buf_size = RTAS_ERROR_LOG_MAX;
+	}
+
 	/* Allow user to force eeh mode on or off -- even if the hardware
 	 * doesn't exist.  This allows driver writers to at least test use
 	 * of I/O macros even if we can't actually test for EEH failure.
@@ -647,22 +657,16 @@ void eeh_init(void)
 
 
 	/* Enable EEH for all adapters.  Note that eeh requires buid's */
+	init_pci_config_tokens();
 	info.adapters_enabled = 0;
 	for (phb = find_devices("pci"); phb; phb = phb->next) {
-		int len;
-		int *buid_vals = (int *) get_property(phb, "ibm,fw-phb-id", &len);
-		if (!buid_vals)
+		unsigned long buid;
+		buid = get_phb_buid(phb);
+		if (buid == 0)
 			continue;
-		if (len == sizeof(int)) {
-			info.buid_lo = buid_vals[0];
-			info.buid_hi = 0;
-		} else if (len == sizeof(int)*2) {
-			info.buid_hi = buid_vals[0];
-			info.buid_lo = buid_vals[1];
-		} else {
-			printk("EEH: odd ibm,fw-phb-id len returned: %d\n", len);
-			continue;
-		}
+
+		info.buid_lo = BUID_LO(buid);
+		info.buid_hi = BUID_HI(buid);
 		traverse_pci_devices(phb, early_enable_eeh, NULL, &info);
 	}
 	if (info.adapters_enabled) {

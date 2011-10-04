@@ -145,6 +145,7 @@
 #include "hosts.h"
 #include "constants.h"
 #include "sd.h"
+#include "scsi_dump.h"
 
 #include <linux/types.h>
 
@@ -13813,6 +13814,11 @@ out:
 
 	ncr_flush_done_cmds(done_list);
 
+#if defined(CONFIG_DISKDUMP) || defined(CONFIG_DISKDUMP_MODULE)
+	if (crashdump_mode())
+		ncr_init(np, 1, bootverbose ? "diskdump" : NULL, HS_RESET);
+#endif
+
 	return sts;
 }
 
@@ -14752,6 +14758,40 @@ sym_read_Tekram_nvram (ncr_slot *np, u_short device_id, Tekram_nvram *nvram)
 
 #endif	/* SCSI_NCR_NVRAM_SUPPORT */
 
+#if defined(CONFIG_DISKDUMP) || defined(CONFIG_DISKDUMP_MODULE)
+static int sym53c8xx_sanity_check_handler(struct scsi_device *sd)
+{
+	ncb_p np = ((struct host_data *)sd->host->hostdata)->ncb;
+
+	if (np == NULL)
+		return -ENXIO;
+
+	del_timer_sync(&np->timer);
+	add_timer(&np->timer);
+
+	return 0;
+}
+
+static void sym53c8xx_poll_handler(struct scsi_device *sd)
+{
+	ncb_p np = ((struct host_data *)sd->host->hostdata)->ncb;
+	Scsi_Cmnd *done_list;
+
+	ncr_exception(np);
+
+	done_list = np->done_list;
+	np->done_list = 0;
+
+	if (done_list)
+		ncr_flush_done_cmds(done_list);
+}
+
+static struct scsi_dump_ops sym53c8xx_dump_ops = {
+	.sanity_check   = sym53c8xx_sanity_check_handler,
+	.poll           = sym53c8xx_poll_handler
+};
+#endif
+
 /*
 **	Module stuff
 */
@@ -14762,6 +14802,11 @@ MODULE_LICENSE("GPL");
 static
 #endif
 #if LINUX_VERSION_CODE >= LinuxVersionCode(2,4,0) || defined(MODULE)
+#if defined(CONFIG_DISKDUMP) || defined(CONFIG_DISKDUMP_MODULE)
+Scsi_Host_Template_dump driver_template_dump = SYM53C8XX;
+#define driver_template        (driver_template_dump.hostt)
+#else
 Scsi_Host_Template driver_template = SYM53C8XX;
+#endif
 #include "scsi_module.c"
 #endif

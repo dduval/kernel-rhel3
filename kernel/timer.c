@@ -382,6 +382,7 @@ repeat:
 		goto repeat;
 	}
 	list_del(&timer->entry);
+	smp_wmb();
 	timer->base = NULL;
 	spin_unlock_irqrestore(&base->lock, flags);
 
@@ -498,9 +499,9 @@ repeat:
  			fn = timer->function;
  			data = timer->data;
 
+			list_del(&timer->entry);
 			set_running_timer(base, timer);
 			smp_wmb();
-			list_del(&timer->entry);
 			timer->base = NULL;
 			spin_unlock_irq(&base->lock);
 			fn(data);

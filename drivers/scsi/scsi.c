@@ -214,7 +214,11 @@ void  scsi_initialize_queue(Scsi_Device * SDpnt, struct Scsi_Host * SHpnt)
 	q->queuedata = (void *) SDpnt;
 
 	q->max_segments = SHpnt->sg_tablesize;
-	blk_queue_superbh(q, SHpnt->max_sectors);
+
+        if (SHpnt->hostt->vary_io)
+                blk_queue_large_superbh(q, SHpnt->max_sectors, q->max_segments);
+        else
+                blk_queue_superbh(q, SHpnt->max_sectors);
 }
 
 #ifdef MODULE

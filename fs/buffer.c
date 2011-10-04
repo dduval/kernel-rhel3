@@ -1464,7 +1464,7 @@ int try_to_reclaim_buffers(int priority, unsigned int gfp_mask)
 	 * don't bother reclaiming any if the buffer heads take up less
 	 * than 10% of pageable low memory.
 	 */
-	if (nr_unused_buffer_heads * sizeof(struct buffer_head) * 10 <
+	if (nr_used_buffer_heads * sizeof(struct buffer_head) * 10 <
 					freeable_lowmem() * PAGE_SIZE)
 			return 0;
 

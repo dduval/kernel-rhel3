@@ -198,6 +198,20 @@ char *disk_name (struct gendisk *hd, int minor, char *buf)
 			sprintf(buf, "%s/d%dp%d", maj, disk, part);
 		return buf;
 	}
+#if defined(CONFIG_VIODASD) || defined(CONFIG_VIODASD_MODULE)
+	if (hd->major == VIODASD_MAJOR) {
+		if ((unit + 'a') > 'z') {
+			unit -= 26;
+			if (part)
+				sprintf(buf, "%s%c%c%d", maj, 'a' + unit / 26,
+						'a' + unit % 26, part);
+			else
+				sprintf(buf, "%s%c%c", maj, 'a' + unit / 26,
+						'a' + unit % 26);
+			return buf;
+		}
+	}
+#endif
 	if (part)
 		sprintf(buf, "%s%c%d", maj, unit+'a', part);
 	else
@@ -208,7 +222,7 @@ char *disk_name (struct gendisk *hd, int minor, char *buf)
 /*
  * Add a partitions details to the devices partition description.
  */
-void add_gd_partition(struct gendisk *hd, int minor, int start, int size)
+void add_gd_partition(struct gendisk *hd, int minor, unsigned long start, unsigned long size)
 {
 #ifndef CONFIG_DEVFS_FS
 	char buf[40];
@@ -377,15 +391,24 @@ void devfs_register_partitions (struct gendisk *dev, int minor, int unregister)
  * done
  */
 
+#ifdef __GENKSYMS__ /* preserve KMI/ABI ksyms compatibility for mod linkage */
 void register_disk(struct gendisk *gdev, kdev_t dev, unsigned minors,
 	struct block_device_operations *ops, long size)
+#else
+void register_disk(struct gendisk *gdev, kdev_t dev, unsigned minors,
+	struct block_device_operations *ops, unsigned long size)
+#endif /* __GENKSYMS__ */
 {
 	if (!gdev)
 		return;
 	grok_partitions(gdev, MINOR(dev)>>gdev->minor_shift, minors, size);
 }
 
+#ifdef __GENKSYMS__ /* preserve KMI/ABI ksyms compatibility for mod linkage */
 void grok_partitions(struct gendisk *dev, int drive, unsigned minors, long size)
+#else
+void grok_partitions(struct gendisk *dev, int drive, unsigned minors, unsigned long size)
+#endif /* __GENKSYMS__ */
 {
 	int i;
 	int first_minor	= drive << dev->minor_shift;

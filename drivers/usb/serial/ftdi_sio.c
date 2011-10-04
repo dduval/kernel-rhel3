@@ -912,6 +912,7 @@ static void ftdi_close (struct usb_serial_port *port, struct file *filp)
 	struct usb_serial *serial;
 	unsigned int c_cflag = port->tty->termios->c_cflag;
 	char buf[1];
+	int err;
 
 	dbg("%s", __FUNCTION__);
 
@@ -937,15 +938,17 @@ static void ftdi_close (struct usb_serial_port *port, struct file *filp)
 			/* drop RTS */
 			if (set_rts(port, LOW) < 0) {
 				err("Error from RTS LOW urb");
-			}	
-			/* shutdown our bulk read */
-			if (port->read_urb) {
-				usb_unlink_urb (port->read_urb);	
 			}
-			/* unlink the running write urbs */
-			
-
 		} /* Note change no line is hupcl is off */
+
+		/* shutdown our bulk read */
+		if (port->read_urb) {
+			err = usb_unlink_urb (port->read_urb);
+			if (err < 0 && err != -ENODEV)
+				err("Error unlinking urb (%d)", err);
+		}
+		/* unlink the running write urbs */
+
 	} /* if (serial->dev) */
 
 

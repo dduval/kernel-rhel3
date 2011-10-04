@@ -126,7 +126,7 @@ static inline void kernel_fpu_begin(void)
 
 static inline void save_init_fpu( struct task_struct *tsk )
 {
-	asm volatile( "fxsave %0 ; fnclex"
+	asm volatile( "rex64; fxsave %0 ; fnclex"
 		      : "=m" (tsk->thread.i387.fxsave));
 	tsk->flags &= ~PF_USEDFPU;
 	stts();

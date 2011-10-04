@@ -546,6 +546,29 @@ static void unknown_nmi_error(unsigned char reason, struct pt_regs * regs)
 	printk("Do you have a strange power saving mode enabled?\n");
 }
 
+int unknown_nmi_panic = 0;
+
+static spinlock_t nmi_print_lock = SPIN_LOCK_UNLOCKED;
+
+void die_nmi(struct pt_regs *regs, const char *msg)
+{
+	spin_lock(&nmi_print_lock);
+	/*
+	 * We are in trouble anyway, lets at least try
+	 * to get a message out.
+	 */
+	bust_spinlocks(1);
+	printk("%s on CPU%d, rip %16lx, registers:\n",
+		msg, safe_smp_processor_id(), regs->rip);
+	show_registers(regs);
+	try_crashdump(regs);
+	printk("console shuts up ...\n");
+	console_silent();
+	spin_unlock(&nmi_print_lock);
+	bust_spinlocks(0);
+	do_exit(SIGSEGV);
+}
+
 static void default_do_nmi(struct pt_regs * regs)
 {
 	unsigned char reason = inb(0x61);
@@ -561,6 +584,13 @@ static void default_do_nmi(struct pt_regs * regs)
 			return;
 		}
 #endif
+		if (unknown_nmi_panic) {
+			char buf[64];
+			if (notify_die(DIE_NMI, "nmi", regs, reason, 2, SIGINT) == NOTIFY_BAD)
+				return;
+			sprintf(buf, "NMI received for unknown reason %02x", reason);
+			die_nmi(regs, buf);
+		}
 		unknown_nmi_error(reason, regs);
 		return;
 	}

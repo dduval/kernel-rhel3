@@ -60,15 +60,11 @@ static unsigned char netdump_daddr[6] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff} ;
 static unsigned char netlog_daddr[6] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff} ;
 static unsigned char syslog_daddr[6] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff} ;
 
-static unsigned int mhz = 500, idle_timeout;
+static unsigned int mhz = 1000, idle_timeout;
 static unsigned long long mhz_cycles, jiffy_cycles;
 
 #include "netconsole.h"
-#if defined(__i386__)
-#include <asm-i386/netdump.h>
-#else
-#include <asm-generic/netdump.h>
-#endif
+#include <asm/netdump.h>
 
 #define MAX_UDP_CHUNK 1460
 #define MAX_PRINT_CHUNK (MAX_UDP_CHUNK-HEADER_LEN)
@@ -91,6 +87,8 @@ static unsigned long long mhz_cycles, jiffy_cycles;
 static spinlock_t netconsole_lock = SPIN_LOCK_UNLOCKED;
 static int nr_netconsole_skbs;
 static struct sk_buff *netconsole_skbs;
+
+static asmlinkage void do_netdump(struct pt_regs *regs, void *arg);
 
 #define MAX_SKB_SIZE \
 		(MAX_UDP_CHUNK + sizeof(struct udphdr) + \
@@ -281,8 +279,8 @@ static void transmit_netconsole_skb(struct sk_buff *skb, struct net_device *dev,
 	iph = (struct iphdr *)skb_push(skb, sizeof(*iph));
 	skb->nh.iph   = iph;
 
-	iph->version  = 4;
-	iph->ihl      = 5;
+/*	iph->version  = 4; iph->ihl      = 5; */
+        put_unaligned(0x45, (unsigned char *)iph);
 	iph->tos      = 0;
 	iph->tot_len  = htons(ip_len);
 	iph->id       = 0;
@@ -290,9 +288,9 @@ static void transmit_netconsole_skb(struct sk_buff *skb, struct net_device *dev,
 	iph->ttl      = 64;
 	iph->protocol = IPPROTO_UDP;
 	iph->check    = 0;
-	iph->saddr    = source_ip;
-	iph->daddr    = target_ip;
-	iph->check    = ip_fast_csum((unsigned char *)iph, iph->ihl);
+        put_unaligned(source_ip, &(iph->saddr));
+        put_unaligned(target_ip, &(iph->daddr));
+	iph->check    = ip_fast_csum((unsigned char *)iph, 5);
 
 	eth = (struct ethhdr *) skb_push(skb, ETH_HLEN);
 
@@ -765,32 +763,42 @@ int netconsole_receive_skb(struct sk_buff *skb)
 	return ret;
 }
 
-#define INVALID_PAGE "page is not valid!\n"
-
 static void send_netdump_mem (struct net_device *dev, req_t *req)
 {
 	int i;
 	char *kaddr;
 	char str[1024];
-	struct page *page;
+	struct page *page = NULL;
 	unsigned long nr = req->from;
 	int nr_chunks = PAGE_SIZE/1024;
 	reply_t reply;
 	
 	reply.nr = req->nr;
 	reply.info = 0;
-	if (req->from >= max_mapnr) {
-		sprintf(str, "page %08lx is bigger than max page # %08lx!\n", nr, max_mapnr);
+	if (req->from >= platform_max_pfn()) {
+		sprintf(str, "page %08lx is bigger than max page # %08lx!\n", 
+			nr, platform_max_pfn());
 		reply.code = REPLY_ERROR;
 		send_netdump_skb(dev, str, strlen(str), &reply);
 		return;
 	}
-	if (page_is_ram(nr))
-		page = mem_map + nr;
-	else
-		page = ZERO_PAGE(0);
-
-	kaddr = (char *)kmap_atomic(page, KM_NETDUMP);
+        if (platform_page_is_ram(nr)) {
+                page = pfn_to_page(nr);
+                if (page_to_pfn(page) == nr) {
+			kaddr = (char *)kmap_atomic(page, KM_NETDUMP);
+			if (!kern_addr_valid((unsigned long)kaddr)) {
+				kunmap_atomic(kaddr, KM_NETDUMP);
+				page = NULL;
+			}
+		} else
+                        page = NULL;
+        }
+        if (!page) {
+                reply.code = REPLY_RESERVED;
+                reply.info = platform_next_available(nr);
+                send_netdump_skb(dev, str, 0, &reply);
+                return;
+	}
 
 	for (i = 0; i < nr_chunks; i++) {
 		unsigned int offset = i*1024;
@@ -801,6 +809,8 @@ static void send_netdump_mem (struct net_device *dev, req_t *req)
 
 	kunmap_atomic(kaddr, KM_NETDUMP);
 }
+
+static unsigned char effective_version = NETCONSOLE_VERSION;
 
 /*
  * This function waits for the client to acknowledge the receipt
@@ -821,10 +831,13 @@ static void netdump_startup_handshake(struct net_device *dev)
 	netdump_mode = 1;
 
 repeat:
-	sprintf(tmp, "NETDUMP start, waiting for start-ACK.\n");
+        sprintf(tmp,
+            "task_struct:0x%lx page_offset:0x%llx netdump_magic:0x%llx\n",
+                (unsigned long)current, (unsigned long long)PAGE_OFFSET,
+                (unsigned long long)netconsole_magic);
 	reply.code = REPLY_START_NETDUMP;
-	reply.nr = 0;
-	reply.info = 0;
+	reply.nr = platform_machine_type();
+	reply.info = NETDUMP_VERSION_MAX;
 	send_netdump_skb(dev, tmp, strlen(tmp), &reply);
 
 	for (i = 0; i < 10000; i++) {
@@ -843,6 +856,17 @@ repeat:
 		kfree(req);
 		goto repeat;
 	}
+
+        /*
+         *  Negotiate an effective version that works with the server.
+         */
+        if ((effective_version = platform_effective_version(req)) == 0) {
+                printk(KERN_ERR
+                        "netdump: server cannot handle this client -- rebooting.\n");
+                mdelay(3000);
+                machine_restart(NULL);
+        }
+
 	kfree(req);
 
 	printk("NETDUMP START!\n");
@@ -891,22 +915,13 @@ static char cpus_frozen[NR_CPUS] = { 0 };
 static void freeze_cpu (void * dummy)
 {
 	cpus_frozen[smp_processor_id()] = 1;
-#if CLI
-	for (;;) __cli();
-#else
-	for (;;) __sti();
-#endif
+	platform_freeze_cpu();
 }
 #endif
 
 static void netconsole_netdump (struct pt_regs *regs)
 {
-	reply_t reply;
-	char tmp[200];
 	unsigned long flags;
-	struct net_device *dev = netconsole_dev;
-	struct pt_regs myregs;
-	req_t *req;
 #ifdef CONFIG_SMP
 	int i;
 #endif
@@ -914,7 +929,7 @@ static void netconsole_netdump (struct pt_regs *regs)
 	__save_flags(flags);
 	__cli();
 #ifdef CONFIG_SMP
-	smp_call_function(freeze_cpu, NULL, 1, -1);
+	dump_smp_call_function(freeze_cpu, NULL);
 	mdelay(3000);
 	for (i = 0; i < NR_CPUS; i++) {
 		if (cpus_frozen[i])
@@ -926,6 +941,22 @@ static void netconsole_netdump (struct pt_regs *regs)
 	mdelay(1000);
 #endif /* CONFIG_SMP */
 
+        platform_start_netdump(do_netdump, regs);
+
+	__restore_flags(flags);
+}
+
+static char command_tmp[1024];
+
+static asmlinkage void do_netdump(struct pt_regs *regs, void *platform_arg)
+{
+        reply_t reply;
+        char *tmp = command_tmp;
+        struct net_device *dev = netconsole_dev;
+        struct pt_regs myregs;
+	struct sysinfo si;
+        req_t *req;
+
 	/*
 	 * Just in case we are crashing within the networking code
 	 * ... attempt to fix up.
@@ -936,7 +967,7 @@ static void netconsole_netdump (struct pt_regs *regs)
 
 	platform_timestamp(t0);
 
-	printk("< netdump activated - performing handshake with the client. >\n");
+	printk("< netdump activated - performing handshake with the server. >\n");
 	netdump_startup_handshake(dev);
 
 	printk("< handshake completed - listening for dump requests. >\n");
@@ -994,39 +1025,34 @@ static void netconsole_netdump (struct pt_regs *regs)
 			break;
 
 		case COMM_GET_REGS:
-		{
-			char *tmp2 = tmp;
-			elf_gregset_t elf_regs;
-
-			reply.code = REPLY_REGS;
-			reply.nr = req->nr;
-			reply.info = max_mapnr;
-			tmp2 = tmp + sprintf(tmp, "Sending register info.\n");
-			ELF_CORE_COPY_REGS(elf_regs, (&myregs));
-			memcpy(tmp2, &elf_regs, sizeof(elf_regs));
-			send_netdump_skb(dev, tmp, strlen(tmp) + sizeof(elf_regs), &reply);
+                        reply.code = REPLY_REGS;
+                        reply.nr = req->nr;
+			si_meminfo(&si);
+                        reply.info = (u32)si.totalram;
+			send_netdump_skb(dev, tmp, platform_get_regs(tmp, &myregs), &reply);
 			break;
-		}
 
 		case COMM_GET_NR_PAGES:
 			reply.code = REPLY_NR_PAGES;
 			reply.nr = req->nr;
-			reply.info = max_mapnr;
-			sprintf(tmp, "Number of pages: %ld\n", max_mapnr);
+			reply.info = platform_max_pfn();
+			sprintf(tmp, "Number of pages: %ld\n", platform_max_pfn());
 			send_netdump_skb(dev, tmp, strlen(tmp), &reply);
 			break;
 
 		case COMM_SHOW_STATE:
+			/* send response first */
+			reply.code = REPLY_SHOW_STATE;
+			reply.nr = req->nr;
+			reply.info = 0;
+			send_netdump_skb(dev, tmp, strlen(tmp), &reply);
+
 			netdump_mode = 0;
 			if (regs)
 				show_regs(regs);
 			show_state();
 			show_mem();
 			netdump_mode = 1;
-			reply.code = REPLY_SHOW_STATE;
-			reply.nr = req->nr;
-			reply.info = 0;
-			send_netdump_skb(dev, tmp, strlen(tmp), &reply);
 			break;
 
 		default:
@@ -1047,7 +1073,6 @@ static void netconsole_netdump (struct pt_regs *regs)
 	reply.info = 0;
 	send_netdump_skb(dev, tmp, strlen(tmp), &reply);
 	printk("NETDUMP END!\n");
-	__restore_flags(flags);
 }
 
 static char *dev;
@@ -1253,8 +1278,7 @@ static int init_netconsole(void)
 		printk(KERN_INFO "netlog: using syslog target ethernet address %02x:%02x:%02x:%02x:%02x:%02x.\n",
 				syslog_daddr[0], syslog_daddr[1], syslog_daddr[2], syslog_daddr[3], syslog_daddr[4], syslog_daddr[5]);
 
-	mhz_cycles = (unsigned long long)mhz * 1000000ULL;
-	jiffy_cycles = (unsigned long long)mhz * (1000000/HZ);
+	platform_cycles(mhz, &jiffy_cycles, &mhz_cycles);
 
 	INIT_LIST_HEAD(&request_list);
 

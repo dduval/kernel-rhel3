@@ -1340,6 +1340,8 @@ static void vioHandleBlockEvent(struct HvLpEvent *event)
 			device->sectors = data->mSectors;
 			device->bytesPerSector = data->mBytesPerSector;
 			viodasd_max_disk = data->mMaxDisks;
+			if (viodasd_max_disk > MAX_DISKNO - 1)
+				viodasd_max_disk = MAX_DISKNO - 1;
 		}
 		up(pwe->sem);
 		break;

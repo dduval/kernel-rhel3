@@ -95,6 +95,8 @@ extern int leases_enable, dir_notify_enable, lease_break_time;
 #define FS_ODD_RENAME	32768	/* Temporary stuff; will go away as soon
 				  * as nfs_rename() will be cleaned up
 				  */
+#define FS_AIO_SYNC	262144 /* Used by NFS */
+
 /*
  * These are the fs-independent mount-flags: up to 32 flags are supported
  */

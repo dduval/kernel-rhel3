@@ -58,12 +58,15 @@ tab[] =
     { "IA64_TASK_PROCESSOR_OFFSET",	offsetof (struct task_struct, cpu) },
     { "IA64_TASK_THREAD_OFFSET",	offsetof (struct task_struct, thread) },
     { "IA64_TASK_THREAD_KSP_OFFSET",	offsetof (struct task_struct, thread.ksp) },
+    { "IA64_TASK_THREAD_CSD_OFFSET",	offsetof (struct task_struct, thread.csd) },
+    { "IA64_TASK_THREAD_SSD_OFFSET",	offsetof (struct task_struct, thread.ssd) },
 #ifdef CONFIG_PERFMON
     { "IA64_TASK_PFM_OVFL_BLOCK_RESET_OFFSET",
 					offsetof(struct task_struct, thread.pfm_ovfl_block_reset) },
 #endif
     { "IA64_TASK_PID_OFFSET",		offsetof (struct task_struct, pid) },
     { "IA64_TASK_MM_OFFSET",		offsetof (struct task_struct, mm) },
+    { "IA64_TASK_CPU_OFFSET",		offsetof (struct task_struct, cpu) },
     { "IA64_PT_REGS_CR_IPSR_OFFSET",	offsetof (struct pt_regs, cr_ipsr) },
     { "IA64_PT_REGS_CR_IIP_OFFSET",	offsetof (struct pt_regs, cr_iip) },
     { "IA64_PT_REGS_CR_IFS_OFFSET",	offsetof (struct pt_regs, cr_ifs) },

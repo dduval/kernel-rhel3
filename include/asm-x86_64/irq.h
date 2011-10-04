@@ -23,8 +23,10 @@
  */
 #ifdef CONFIG_X86_IO_APIC
 #define NR_IRQS 224
+#define NR_IRQ_VECTORS 1024
 #else
 #define NR_IRQS 16
+#define NR_IRQ_VECTORS NR_IRQS
 #endif
 
 static __inline__ int irq_cannonicalize(int irq)

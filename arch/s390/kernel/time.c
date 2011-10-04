@@ -215,24 +215,14 @@ static inline __u32 div64_32(__u64 dividend, __u32 divisor)
  * timer_interrupt() needs to keep up the real-time clock,
  * as well as call the "do_timer()" routine every clocktick
  */
-static void do_comparator_interrupt(struct pt_regs *regs, __u16 error_code)
+void account_ticks(struct pt_regs *regs)
 {
 	int cpu = smp_processor_id();
 	u64 tmp;
 	u32 ticks;
 
-	/*
-	 * Calculate how many ticks have passed.
-	 *
-	 * This segment uses STCK as the 2.4.19 IBM stream did.
-	 * The reset is taken from the RHEL patch by Jan Gauber,
-	 * with additional case against fixpoint division fault (on boot)
-	 * by Martin Schwidefsky (if delta<0 return). XXX Wrapping?
-	 */
-	asm volatile ("STCK 0(%0)" : : "a" (&tmp) : "memory", "cc");
-	if (tmp < S390_lowcore.jiffy_timer)
-		return;
-	tmp = tmp - S390_lowcore.jiffy_timer;
+	/* Calculate how many ticks have passed. */
+	tmp = S390_lowcore.int_clock - S390_lowcore.jiffy_timer;
 	if (tmp >= 2*CLK_TICKS_PER_JIFFY) {
 		ticks = div64_32(tmp >> 1, CLK_TICKS_PER_JIFFY >> 1) + 1;
 		S390_lowcore.jiffy_timer +=
@@ -341,7 +331,7 @@ void __init time_init(void)
         tod_to_timeval(set_time_cc, &xtime);
 
         /* request the 0x1004 external interrupt */
-        if (register_early_external_interrupt(0x1004, do_comparator_interrupt,
+        if (register_early_external_interrupt(0x1004, NULL,
 					      &ext_int_info_timer) != 0)
                 panic("Couldn't request external interrupt 0x1004");
 

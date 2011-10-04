@@ -82,6 +82,10 @@ extern int acpi_parse_ioapic (acpi_table_entry_header *header);
 
 u8 bios_cpu_apicid[NR_CPUS] = { [0 ... NR_CPUS-1] = BAD_APICID };
 
+/* which logical CPU number maps to which CPU (physical APIC ID) */
+u8 x86_cpu_to_apicid[NR_CPUS] = { [0 ... NR_CPUS-1] = BAD_APICID };
+u8 x86_cpu_to_log_apicid[NR_CPUS] = { [0 ... NR_CPUS-1] = BAD_APICID };
+
 
 /*
  * Intel MP BIOS table parsing routines:
@@ -123,6 +127,7 @@ static void __init MP_processor_info (struct mpc_config_processor *m)
 	if (m->mpc_apicid > MAX_APICS) {
 		printk(KERN_ERR "Processor #%d INVALID. (Max ID: %d).\n",
 			m->mpc_apicid, MAX_APICS);
+		--num_processors;
 		return;
 	}
 	ver = m->mpc_apicver;
@@ -486,6 +491,7 @@ static struct intel_mp_floating *mpf_found;
 void __init get_smp_config (void)
 {
 	struct intel_mp_floating *mpf = mpf_found;
+	extern void clustered_apic_check(void);
 
 	/*
  	 * ACPI may be used to obtain the entire SMP configuration or just to 
@@ -495,6 +501,7 @@ void __init get_smp_config (void)
  	 */
  	if (acpi_lapic && acpi_ioapic) {
  		printk(KERN_INFO "Using ACPI (MADT) for SMP configuration information\n");
+		clustered_apic_check();
  		return;
 	}
  	else if (acpi_lapic)
@@ -554,6 +561,7 @@ void __init get_smp_config (void)
 	/*
 	 * Only use the first configuration found.
 	 */
+	clustered_apic_check();
 }
 
 static int __init smp_scan_config (unsigned long base, unsigned long length)

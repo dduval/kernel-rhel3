@@ -439,9 +439,8 @@ static void disk_dump(struct pt_regs *regs, void *platform_arg)
 	Dbg("notify dump start.");
 	notifier_call_chain(&disk_dump_notifier_list, 0, NULL);
 
-	dump_header.tasks[smp_processor_id()] = current;
 #if CONFIG_SMP
-	smp_call_function(freeze_cpu, NULL, 1, -1);
+	dump_smp_call_function(freeze_cpu, NULL);
 	mdelay(3000);
 	printk("CPU frozen: ");
 	for (i = 0; i < NR_CPUS; i++) {
@@ -454,6 +453,7 @@ static void disk_dump(struct pt_regs *regs, void *platform_arg)
 #else
 	mdelay(1000);
 #endif
+	dump_header.tasks[smp_processor_id()] = current;
 
 	platform_fix_regs();
 

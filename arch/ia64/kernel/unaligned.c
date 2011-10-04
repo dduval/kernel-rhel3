@@ -1339,7 +1339,7 @@ ia64_handle_unaligned (unsigned long ifa, struct pt_regs *regs)
 		if ((current->thread.flags & IA64_THREAD_UAC_SIGBUS) != 0)
 			goto force_sigbus;
 
-		if (honor_uac_noprint &&
+		if (honor_uac_noprint > 0 &&
 		    !(current->thread.flags & IA64_THREAD_UAC_NOPRINT)
 		    && within_logging_rate_limit())
 		{
@@ -1353,7 +1353,7 @@ ia64_handle_unaligned (unsigned long ifa, struct pt_regs *regs)
 			printk(KERN_WARNING "%s", buf);	/* watch for command names containing %s */
 		}
 	} else {
-		if (within_logging_rate_limit())
+		if (honor_uac_noprint >= 0 && within_logging_rate_limit())
 			printk(KERN_WARNING "kernel unaligned access to 0x%016lx, ip=0x%016lx\n",
 			       ifa, regs->cr_iip + ipsr->ri);
 		set_fs(KERNEL_DS);

@@ -56,7 +56,7 @@
 #if 0 /* Not in RHEL3 */
 #include <linux/dma-mapping.h>
 #endif
-#include <asm/bitops.h>
+#include <linux/bitops.h>
 #include <asm/io.h>
 #include <asm/irq.h>
 #include <linux/capability.h>
@@ -66,7 +66,6 @@
 #include <linux/udp.h>
 #include <net/pkt_sched.h>
 #include <linux/list.h>
-#include <linux/rtnetlink.h>
 #include <linux/reboot.h>
 #ifdef NETIF_F_TSO
 #include <net/checksum.h>
@@ -75,9 +74,6 @@
 #include <linux/mii.h>
 #include <linux/ethtool.h>
 #include <linux/if_vlan.h>
-#if 0 /* Not in RHEL3 */
-#include <linux/moduleparam.h>
-#endif
 
 #define BAR_0		0
 #define BAR_1		1
@@ -88,8 +84,8 @@
 
 struct e1000_adapter;
 
-#include "e1000_hw.h"
 #include "e1000_compat.h"
+#include "e1000_hw.h"
 
 #ifdef DBG
 #define E1000_DBG(args...) printk(KERN_DEBUG "e1000: " args)

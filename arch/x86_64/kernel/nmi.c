@@ -322,7 +322,6 @@ void __pminit setup_apic_nmi_watchdog (void)
 	nmi_pm_init();
 }
 
-static spinlock_t nmi_print_lock = SPIN_LOCK_UNLOCKED;
 
 /*
  * the best way to detect whether a CPU has a 'hard lockup' problem
@@ -355,6 +354,8 @@ void touch_nmi_watchdog (void)
 		alert_counter[i] = 0;
 }
 
+extern void die_nmi(struct pt_regs *, const char *msg);
+
 void nmi_watchdog_tick (struct pt_regs * regs, unsigned reason)
 {
 
@@ -384,19 +385,7 @@ void nmi_watchdog_tick (struct pt_regs * regs, unsigned reason)
 			} 
 
 
-			spin_lock(&nmi_print_lock);
-			/*
-			 * We are in trouble anyway, lets at least try
-			 * to get a message out.
-			 */
-			bust_spinlocks(1);
-			printk("NMI Watchdog detected LOCKUP on CPU%d, eip %16lx, registers:\n", cpu, regs->rip);
-			show_registers(regs);
-			printk("console shuts up ...\n");
-			console_silent();
-			spin_unlock(&nmi_print_lock);
-			bust_spinlocks(0);
-			do_exit(SIGSEGV);
+			die_nmi(regs, "NMI Watchdog detected LOCKUP");
 		}
 	} else {
 		last_irq_sums[cpu] = sum;

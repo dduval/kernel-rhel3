@@ -197,6 +197,14 @@ EXPORT_SYMBOL(_outsl_ns);
 EXPORT_SYMBOL(ioremap);
 EXPORT_SYMBOL(__ioremap);
 EXPORT_SYMBOL(iounmap);
+EXPORT_SYMBOL(show_mem);
+EXPORT_SYMBOL(show_state);
+EXPORT_SYMBOL(show_regs);
+extern int page_is_ram (unsigned long);
+EXPORT_SYMBOL(page_is_ram);
+extern unsigned long next_ram_page(unsigned long);
+EXPORT_SYMBOL_GPL(next_ram_page);
+
 
 #ifdef CONFIG_PCI
 EXPORT_SYMBOL(pci_alloc_consistent);
@@ -244,6 +252,7 @@ EXPORT_SYMBOL(__global_sti);
 EXPORT_SYMBOL(__global_save_flags);
 EXPORT_SYMBOL(__global_restore_flags);
 EXPORT_SYMBOL(smp_call_function);
+EXPORT_SYMBOL(dump_smp_call_function);
 #ifdef CONFIG_PPC_ISERIES
 EXPORT_SYMBOL(__no_use_restore_flags);
 EXPORT_SYMBOL(__no_use_save_flags);

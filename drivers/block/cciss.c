@@ -17,6 +17,7 @@
  *    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  *    Questions/Comments/Bugfixes to Cciss-discuss@lists.sourceforge.net
+ *    Questions/Comments/Bugfixes to ISS_StorageDev@hp.com 
  *
  */
 
@@ -46,13 +47,14 @@
 #include <linux/genhd.h>
 
 #define CCISS_DRIVER_VERSION(maj,min,submin) ((maj<<16)|(min<<8)|(submin))
-#define DRIVER_NAME "HP CISS Driver (v 2.4.52.RH2)"
-#define DRIVER_VERSION CCISS_DRIVER_VERSION(2,4,52)
+#define DRIVER_NAME "HP CISS Driver (v 2.4.54.RH1)"
+#define DRIVER_VERSION CCISS_DRIVER_VERSION(2,4,54)
 
 /* Embedded module documentation macros - see modules.h */
 MODULE_AUTHOR("Hewlett-Packard Company");
-MODULE_DESCRIPTION("Driver for HP SA5xxx SA6xxx Controllers version 2.4.52.RH2");
-MODULE_SUPPORTED_DEVICE("HP SA5i SA5i+ SA532 SA5300 SA5312 SA641 SA642 SA6400 SA6i SA6422 V100"); 
+MODULE_DESCRIPTION("Driver for HP SA5xxx SA6xxx Controllers version 2.4.54.RH1");
+MODULE_SUPPORTED_DEVICE("HP SA5i SA5i+ SA532 SA5300 SA5312 SA641 SA642 SA6400"
+		" SA6i P600"); 
 MODULE_LICENSE("GPL");
 
 #include "cciss_cmd.h"
@@ -79,10 +81,8 @@ const struct pci_device_id cciss_pci_device_id[] = {
                         0x0E11, 0x409D, 0, 0, 0},
 	{ PCI_VENDOR_ID_COMPAQ, PCI_DEVICE_ID_COMPAQ_CISSC,
                         0x0E11, 0x4091, 0, 0, 0},
-	{ PCI_VENDOR_ID_COMPAQ, PCI_DEVICE_ID_COMPAQ_CISSC,
-                        0x0E11, 0x409E, 0, 0, 0},
-	{ PCI_VENDOR_ID_HP, PCI_DEVICE_ID_HP_CISS,
-                        0x103C, 0x3211, 0, 0, 0},
+	{ PCI_VENDOR_ID_HP, PCI_DEVICE_ID_HP_CISSA,
+                        0x103C, 0x3225, 0, 0, 0},
 	{0,}
 };
 MODULE_DEVICE_TABLE(pci, cciss_pci_device_id);
@@ -103,8 +103,7 @@ static struct board_type products[] = {
 	{ 0x409C0E11, "Smart Array 6400", &SA5_access},
 	{ 0x409D0E11, "Smart Array 6400 EM", &SA5_access},
 	{ 0x40910E11, "Smart Array 6i", &SA5_access},
-	{ 0x409E0E11, "Smart Array 6422", &SA5_access},
-	{ 0x3211103C, "Smart Array V100", &SA5_access},
+	{ 0x3225103C, "Smart Array P600", &SA5_access},
 };
 
 /* How long to wait (in millesconds) for board to go into simple mode */
@@ -1082,7 +1081,8 @@ static int cciss_ioctl(struct inode *inode, struct file *filep,
 					goto cleanup1;			
 				   }
 				} else {
-					memset(buff[sg_used], 0, buff_size[sg_used]);
+					memset(buff[sg_used], 0, 
+						buff_size[sg_used]);
 				}
 				size_left_alloc -= buff_size[sg_used];
 				data_ptr += buff_size[sg_used];
@@ -3380,7 +3380,7 @@ static int __devinit cciss_init_one(struct pci_dev *pdev,
         q->front_merge_fn = cpq_front_merge_fn;
         q->merge_requests_fn = cpq_merge_requests_fn;
 	q->max_segments = MAXSGENTRIES;
-	blk_queue_superbh(q, MAX_SECTORS);
+	blk_queue_large_superbh(q, MAX_SECTORS, MAXSGENTRIES);
 
 	/* Fill in the gendisk data */ 	
 	hba[i]->gendisk.major = MAJOR_NR + i;

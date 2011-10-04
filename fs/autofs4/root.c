@@ -23,7 +23,6 @@
 #include <linux/module.h>
 #include "autofs_i.h"
 
-static struct dentry *autofs4_dir_lookup(struct inode *,struct dentry *);
 static int autofs4_dir_symlink(struct inode *,struct dentry *,const char *);
 static int autofs4_dir_unlink(struct inode *,struct dentry *);
 static int autofs4_dir_rmdir(struct inode *,struct dentry *);
@@ -33,7 +32,7 @@ static int autofs4_dir_open(struct inode *inode, struct file *file);
 static int autofs4_dir_close(struct inode *inode, struct file *file);
 static int autofs4_dir_readdir(struct file * filp, void * dirent, filldir_t filldir);
 static int autofs4_root_readdir(struct file * filp, void * dirent, filldir_t filldir);
-static struct dentry *autofs4_root_lookup(struct inode *,struct dentry *);
+static struct dentry *autofs4_lookup(struct inode *,struct dentry *);
 static int autofs4_dcache_readdir(struct file *, void *, filldir_t);
 
 struct file_operations autofs4_root_operations = {
@@ -50,7 +49,7 @@ struct file_operations autofs4_dir_operations = {
 };
 
 struct inode_operations autofs4_root_inode_operations = {
-	lookup:		autofs4_root_lookup,
+	lookup:		autofs4_lookup,
 	unlink:		autofs4_dir_unlink,
 	symlink:	autofs4_dir_symlink,
 	mkdir:		autofs4_dir_mkdir,
@@ -58,7 +57,7 @@ struct inode_operations autofs4_root_inode_operations = {
 };
 
 struct inode_operations autofs4_dir_inode_operations = {
-	lookup:		autofs4_dir_lookup,
+	lookup:		autofs4_lookup,
 	unlink:		autofs4_dir_unlink,
 	symlink:	autofs4_dir_symlink,
 	mkdir:		autofs4_dir_mkdir,
@@ -434,23 +433,8 @@ static struct dentry_operations autofs4_dentry_operations = {
 	d_release:	autofs4_dentry_release,
 };
 
-/* Lookups in non-root dirs never find anything - if it's there, it's
-   already in the dcache */
-static struct dentry *autofs4_dir_lookup(struct inode *dir, struct dentry *dentry)
-{
-#if 0
-	DPRINTK(("autofs4_dir_lookup: ignoring lookup of %.*s/%.*s\n",
-		 dentry->d_parent->d_name.len, dentry->d_parent->d_name.name,
-		 dentry->d_name.len, dentry->d_name.name));
-#endif
-
-	dentry->d_fsdata = NULL;
-	d_add(dentry, NULL);
-	return NULL;
-}
-
 /* Lookups in the root directory */
-static struct dentry *autofs4_root_lookup(struct inode *dir, struct dentry *dentry)
+static struct dentry *autofs4_lookup(struct inode *dir, struct dentry *dentry)
 {
 	struct autofs_sb_info *sbi;
 	int oz_mode;

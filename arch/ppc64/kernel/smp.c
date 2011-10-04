@@ -489,6 +489,7 @@ void smp_send_stop(void)
  * Stolen from the i386 version.
  */
 static spinlock_t call_lock __cacheline_aligned_in_smp = SPIN_LOCK_UNLOCKED;
+static spinlock_t dump_call_lock __cacheline_aligned_in_smp = SPIN_LOCK_UNLOCKED;
 
 static struct call_data_struct {
 	void (*func) (void *info);
@@ -496,7 +497,52 @@ static struct call_data_struct {
 	atomic_t started;
 	atomic_t finished;
 	int wait;
-} *call_data;
+};
+
+static struct call_data_struct *call_data;
+static struct call_data_struct *saved_call_data;
+
+/*
+ * dump version of smp_call_function to avoid deadlock in call_lock
+ */
+void dump_smp_call_function (void (*func) (void *info), void *info)
+{
+	struct call_data_struct dumpdata;
+	int waitcount;
+
+	spin_lock_bh(&dump_call_lock);
+	/* if another cpu beat us, they win! */
+	if (dumpdata.func) {
+		spin_unlock(&dump_call_lock);
+		func(info);
+		for (;;);
+		/* NOTREACHED */
+	}
+
+	/* freeze call_lock or wait for on-going IPIs to settle down */
+	waitcount = 0;
+	while (!spin_trylock(&call_lock)) {
+		if (waitcount++ > 1000) {
+			/* save original for dump analysis */
+			saved_call_data = call_data;
+			break;
+		}
+		udelay(1000);
+		barrier();
+	}
+
+	dumpdata.func = func;
+	dumpdata.info = info;
+	dumpdata.wait = 0; /* not used */
+	atomic_set(&dumpdata.started, 0); /* not used */
+	atomic_set(&dumpdata.finished, 0); /* not used */
+
+	call_data = &dumpdata;
+	mb();
+	smp_message_pass(MSG_ALL_BUT_SELF, PPC_MSG_CALL_FUNCTION, 0, 0);
+	/* Don't wait */
+	spin_unlock_bh(&dump_call_lock);
+}
 
 /*
  * This function sends a 'generic call function' IPI to all other CPUs

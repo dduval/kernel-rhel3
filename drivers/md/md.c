@@ -982,7 +982,7 @@ static int write_disk_sb(mdk_rdev_t * rdev)
 	dev = rdev->dev;
 	sb_offset = calc_dev_sboffset(dev, rdev->mddev, 1);
 	if (rdev->sb_offset != sb_offset) {
-		printk(KERN_INFO "%s's sb offset has changed from %ld to %ld, skipping\n",
+		printk(KERN_INFO "%s's sb offset has changed from %lu to %lu, skipping\n",
 		       partition_name(dev), rdev->sb_offset, sb_offset);
 		goto skip;
 	}
@@ -993,12 +993,12 @@ static int write_disk_sb(mdk_rdev_t * rdev)
 	 */
 	size = calc_dev_size(dev, rdev->mddev, 1);
 	if (size != rdev->size) {
-		printk(KERN_INFO "%s's size has changed from %ld to %ld since import, skipping\n",
+		printk(KERN_INFO "%s's size has changed from %lu to %lu since import, skipping\n",
 		       partition_name(dev), rdev->size, size);
 		goto skip;
 	}
 
-	dprintk(KERN_INFO "(write) %s's sb offset: %ld\n", partition_name(dev), sb_offset);
+	dprintk(KERN_INFO "(write) %s's sb offset: %lu\n", partition_name(dev), sb_offset);
 
 	if (!sync_page_io(dev, sb_offset<<1, MD_SB_BYTES, rdev->sb_page, WRITE)) {
 		printk("md: write_disk_sb failed for device %s\n", partition_name(dev));
@@ -1598,7 +1598,7 @@ static int device_size_calculation(mddev_t * mddev)
 		rdev->size = calc_dev_size(rdev->dev, mddev, persistent);
 		if (rdev->size < sb->chunk_size / 1024) {
 			printk(KERN_WARNING
-				"md: Dev %s smaller than chunk_size: %ldk < %dk\n",
+				"md: Dev %s smaller than chunk_size: %luk < %uk\n",
 				partition_name(rdev->dev),
 				rdev->size, sb->chunk_size / 1024);
 			return -EINVAL;
@@ -1653,7 +1653,7 @@ static int device_size_calculation(mddev_t * mddev)
 		mdidx(mddev), readahead*(PAGE_SIZE/1024));
 
 	printk(KERN_INFO
-		"md%d: %d data-disks, max readahead per data-disk: %ldk\n",
+		"md%d: %d data-disks, max readahead per data-disk: %luk\n",
 			mdidx(mddev), data_disks, readahead/data_disks*(PAGE_SIZE/1024));
 	return 0;
 abort:
@@ -3260,6 +3260,7 @@ static void md_seq_stop(struct seq_file *seq, void *v)
 static int md_seq_show(struct seq_file *seq, void *v)
 {
 	int j, size;
+	int err;
 
 	struct md_list_head *tmp2;
 	mdk_rdev_t *rdev;
@@ -3289,6 +3290,15 @@ static int md_seq_show(struct seq_file *seq, void *v)
 		return 0;
 	}
 
+	/* Lock device before reading its information */
+	err = lock_mddev(mddev);
+	if (err) {
+		seq_printf(seq, "md%d : interrupted while waiting for "
+			   "read lock\n", mdidx(mddev));
+		return -EINTR;
+	}
+
+	/* Lock acquired, proceed */
 	seq_printf(seq, "md%d : %sactive", mdidx(mddev),
 		   mddev->pers ? "" : "in");
 	if (mddev->pers) {
@@ -3329,6 +3339,8 @@ static int md_seq_show(struct seq_file *seq, void *v)
 		}
 	}
 	seq_printf(seq, "\n");
+
+	unlock_mddev(mddev);
 
 	return 0;
 }

@@ -333,7 +333,8 @@ static request_queue_t *sd_find_queue(kdev_t dev)
 
 static int sd_init_command(Scsi_Cmnd * SCpnt)
 {
-	int dev, block, this_count;
+	int dev, this_count;
+	unsigned int block;
 	struct hd_struct *ppnt;
 	Scsi_Disk *dpnt;
 #if CONFIG_SCSI_LOGGING
@@ -1017,10 +1018,23 @@ static int sd_init_onedisk(int i)
 		 */
 		rscsi_disks[i].ready = 1;
 
-		rscsi_disks[i].capacity = 1 + ((buffer[0] << 24) |
-					       (buffer[1] << 16) |
-					       (buffer[2] << 8) |
-					       buffer[3]);
+		/*
+		 * We only support READ CAPACITY (8).  If 2TB limit is detected
+		 * set limit to 2TB minus two sectors.  This will prevent an
+		 * overflow, and leave us with an even sector count.
+		 */
+
+		if (buffer[0] == 0xFF &&
+		    buffer[1] == 0xFF &&
+		    buffer[2] == 0xFF &&
+		    (buffer[3] == 0xFF || buffer[3] == 0xFE )) {
+			rscsi_disks[i].capacity = 0xFFFFFFFE;
+		} else {
+			rscsi_disks[i].capacity = 1 + ((buffer[0] << 24) |
+						       (buffer[1] << 16) |
+						       (buffer[2] << 8) |
+						        buffer[3]);
+		}
 
 		sector_size = (buffer[4] << 24) |
 		    (buffer[5] << 16) | (buffer[6] << 8) | buffer[7];
@@ -1064,8 +1078,18 @@ static int sd_init_onedisk(int i)
 			 * Jacques Gelinas (Jacques@solucorp.qc.ca)
 			 */
 			int m;
-			int hard_sector = sector_size;
-			unsigned int sz = (rscsi_disks[i].capacity/2) * (hard_sector/256);
+			unsigned int hard_sector = sector_size;
+			unsigned int sz = rscsi_disks[i].capacity *
+				(hard_sector / 256);
+
+			if (sz < rscsi_disks[i].capacity) {
+				/* redo computations avoiding "sz" overflow */
+				sz = (rscsi_disks[i].capacity / 1950) *
+					(hard_sector / 256);
+				sz = sz/2 - sz/1250 + 974;
+			} else {
+				sz = (sz/2 - sz/1250 + 974) / 1950;
+			}
 
 			/* There are 16 minors allocated for each major device */
 			for (m = i << 4; m < ((i + 1) << 4); m++) {
@@ -1073,9 +1097,9 @@ static int sd_init_onedisk(int i)
 			}
 
 			printk("SCSI device %s: "
-			       "%u %d-byte hdwr sectors (%d MB)\n",
+			       "%u %u-byte hdwr sectors (%u MB)\n",
 			       nbuff, rscsi_disks[i].capacity,
-			       hard_sector, (sz - sz/625 + 974)/1950);
+			       hard_sector, sz);
 		}
 
 		/* Rescale capacity to 512-byte units */

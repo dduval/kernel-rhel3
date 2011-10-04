@@ -39,7 +39,8 @@ obj-$(CONFIG_X86_CPUID)	+= cpuid.o
 obj-$(CONFIG_ACPI)	+= acpi.o
 obj-$(CONFIG_SMP)	+= smp.o smpboot.o trampoline.o
 obj-$(CONFIG_X86_LOCAL_APIC)	+= apic.o  nmi.o
-obj-$(CONFIG_X86_IO_APIC)	+= io_apic.o mpparse.o
+obj-$(CONFIG_X86_IO_APIC)	+= io_apic.o mpparse.o \
+		genapic.o genapic_cluster.o genapic_flat.o
 obj-$(CONFIG_EARLY_PRINTK) +=  early_printk.o
 obj-$(CONFIG_GART_IOMMU) += pci-gart.o aperture.o
 obj-$(CONFIG_DUMMY_IOMMU) += pci-nommu.o

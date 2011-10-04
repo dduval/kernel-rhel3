@@ -336,6 +336,7 @@ int hugetlb_prefault(struct address_space *mapping, struct vm_area_struct *vma)
 	struct mm_struct *mm = current->mm;
 	unsigned long addr;
 	int ret = 0;
+	extern void free_one_pmd(pmd_t *);
 
 	BUG_ON(vma->vm_start & ~HPAGE_MASK);
 	BUG_ON(vma->vm_end & ~HPAGE_MASK);
@@ -350,8 +351,9 @@ int hugetlb_prefault(struct address_space *mapping, struct vm_area_struct *vma)
 			ret = -ENOMEM;
 			goto out;
 		}
+		/* if a ptepage already exists from a previous mapping, get rid of it */
 		if (!pte_none(*pte))
-			continue;
+			free_one_pmd((pmd_t *)pte);
 
 		idx = ((addr - vma->vm_start) >> HPAGE_SHIFT)
 			+ (vma->vm_pgoff >> (HPAGE_SHIFT - PAGE_SHIFT));

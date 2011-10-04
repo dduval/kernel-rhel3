@@ -150,6 +150,7 @@ EXPORT_SYMBOL(__global_cli);
 EXPORT_SYMBOL(__global_sti);
 EXPORT_SYMBOL(__global_save_flags);
 EXPORT_SYMBOL(__global_restore_flags);
+EXPORT_SYMBOL(dump_smp_call_function);
 EXPORT_SYMBOL(smp_call_function);
 
 /* TLB flushing */
@@ -212,6 +213,8 @@ EXPORT_SYMBOL_GPL(show_state);
 EXPORT_SYMBOL_GPL(show_regs);
 extern int page_is_ram (unsigned long);
 EXPORT_SYMBOL_GPL(page_is_ram);
+extern unsigned long next_ram_page(unsigned long);
+EXPORT_SYMBOL_GPL(next_ram_page);
 
 extern unsigned long long __PAGE_KERNEL;
 EXPORT_SYMBOL_GPL(__PAGE_KERNEL);

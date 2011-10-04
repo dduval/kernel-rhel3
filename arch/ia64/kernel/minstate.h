@@ -54,7 +54,13 @@
  * go virtual and dont want to destroy the iip or ipsr.
  */
 #define MINSTATE_START_SAVE_MIN_PHYS								\
-(pKern) movl sp=ia64_init_stack+IA64_STK_OFFSET-IA64_PT_REGS_SIZE;				\
+(pKern) adds r16=IA64_TASK_CPU_OFFSET,r1;;	/* current->cpu */				\
+(pKern) ld4 r16=[r16];				/* smp_processor_id */				\
+(pKern) movl r1=ia64_init_stack_addr;;								\
+(pKern) shladd r1=r16,3,r1;;			/* ia64_init_stack_addr[cpu] */			\
+(pKern) dep r16=0,r1,61,3;;			/* compute physical addr */			\
+(pKern) ld8 r1=[r16];;				/* ia64_init_stack[cpu] */ 			\
+(pKern) addl sp=IA64_STK_OFFSET-IA64_PT_REGS_SIZE,r1;;						\
 (pUser)	mov ar.rsc=0;		/* set enforced lazy mode, pl 0, little-endian, loadrs=0 */	\
 (pUser)	addl rKRBS=IA64_RBS_OFFSET,r1;		/* compute base of register backing store */	\
 	;;											\

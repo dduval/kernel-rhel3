@@ -191,7 +191,7 @@ static inline int dup_mmap(struct mm_struct * mm)
 	struct vm_area_struct * mpnt, *tmp, **pprev;
 	rb_node_t **rb_link, *rb_parent;
 	int retval;
-	unsigned long charge = 0;
+	unsigned long charge;
 
 	flush_cache_mm(current->mm);
 	mm->locked_vm = 0;
@@ -225,11 +225,12 @@ static inline int dup_mmap(struct mm_struct * mm)
 		retval = -ENOMEM;
 		if(mpnt->vm_flags & VM_DONTCOPY)
 			continue;
+		charge = 0;
 		if(mpnt->vm_flags & VM_ACCOUNT) {
 			unsigned int len = (mpnt->vm_end - mpnt->vm_start) >> PAGE_SHIFT;
 			if(!vm_enough_memory(len))
 				goto fail_nomem;
-			charge += len;
+			charge = len;
 		}
 		tmp = kmem_cache_alloc(vm_area_cachep, SLAB_KERNEL);
 		if (!tmp)
@@ -1002,8 +1003,10 @@ struct task_struct *copy_process(unsigned long clone_flags,
 		attach_pid(p, PIDTYPE_TGID, p->tgid);
 		attach_pid(p, PIDTYPE_PGID, p->pgrp);
 		attach_pid(p, PIDTYPE_SID, p->session);
-	} else
-		link_pid(p, p->pids + PIDTYPE_TGID, &p->group_leader->pids[PIDTYPE_TGID].pid);
+	} else {
+		link_pid(p, p->pids + PIDTYPE_TGID,
+			&p->group_leader->pids[PIDTYPE_TGID].pid);
+	}
 
 	/* clear controlling tty of new task if parent's was just cleared */
 	if (!current->tty && p->tty)

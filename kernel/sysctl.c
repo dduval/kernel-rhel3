@@ -60,8 +60,10 @@ extern int core_setuid_ok;
 extern char core_pattern[];
 extern int cad_pid;
 extern int pid_max;
-#if defined(CONFIG_X86) && !defined(CONFIG_X86_64)
+#if defined(CONFIG_X86) || defined(CONFIG_X86_64)
 extern int unknown_nmi_panic;
+#endif
+#if defined(CONFIG_X86) && !defined(CONFIG_X86_64)
 extern int mem_nmi_panic;
 #endif
 
@@ -342,9 +344,11 @@ static ctl_table kern_table[] = {
 	{KERN_HONOR_UAC_NOPRINT, "honor_uac_noprint_prctl", &honor_uac_noprint,
 	 sizeof(int), 0644, NULL, &proc_dointvec},
 #endif
-#if defined(CONFIG_X86) && !defined(CONFIG_X86_64)
+#if defined(CONFIG_X86) || defined(CONFIG_X86_64)
 	{KERN_UNKNOWN_NMI_PANIC, "unknown_nmi_panic", &unknown_nmi_panic,
 	 sizeof(int), 0644, NULL, &proc_dointvec},
+#endif
+#if defined(CONFIG_X86) && !defined(CONFIG_X86_64)
 	{KERN_MEM_NMI_PANIC, "mem_nmi_panic", &mem_nmi_panic,
 	 sizeof(int), 0644, NULL, &proc_dointvec},
 #endif
@@ -399,6 +403,7 @@ static ctl_table proc_table[] = {
 };
 
 extern int user_pinned_pages;
+extern int kiobuf_cache_max;
 
 static ctl_table fs_table[] = {
 	{FS_NRINODE, "inode-nr", &inodes_stat, 2*sizeof(int),
@@ -429,10 +434,12 @@ static ctl_table fs_table[] = {
 	 0644, NULL, &proc_dointvec},
 	{FS_AIO_MAX_SIZE, "aio-max-size", &aio_max_size, sizeof(aio_max_size),
 	 0644, NULL, &proc_dointvec},
-	{FS_AIO_MAX_PINNED, "aio-max-pinned", &aio_max_pinned, sizeof(aio_max_pinned),
-	 0644, NULL, &proc_dointvec},
-	{FS_AIO_MAX_PINNED+1, "aio-pinned", &user_pinned_pages, 4,
-	 0644, NULL, &proc_dointvec},
+	{FS_AIO_MAX_PINNED, "aio-max-pinned", &aio_max_pinned,
+	 sizeof(aio_max_pinned), 0644, NULL, &proc_dointvec},
+	{FS_AIO_PINNED, "aio-pinned", &user_pinned_pages,
+	 sizeof(user_pinned_pages), 0644, NULL, &proc_dointvec},
+	{FS_KIOBUF_CACHE_MAX, "kiobuf-cache-max", &kiobuf_cache_max,
+	 sizeof(kiobuf_cache_max), 0644, NULL, &proc_dointvec},
 	{0}
 };
 

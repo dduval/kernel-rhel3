@@ -92,7 +92,7 @@ static int get_last_sector( kdev_t dev, const void *param );
 int add_partition(kdev_t dev, struct blkpg_partition *p) {
 	struct gendisk *g;
 	long long ppstart, pplength;
-	long pstart, plength;
+	unsigned long pstart, plength;
 	int i, drive, first_minor, end_minor, minor;
 
 	/* convert bytes to sectors, check for fit in a hd_struct */

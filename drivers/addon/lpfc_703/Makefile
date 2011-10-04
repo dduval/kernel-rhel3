@@ -4,11 +4,10 @@
 #
 
 O_TARGET := lpfc_703.o
-EXTRA_CFLAGS := -I../../scsi
-obj-$(CONFIG_SCSI_LPFC)	+= lpfc_703.o
+EXTRA_CFLAGS += -I$(TOPDIR)/drivers/scsi
+obj-m:= $(O_TARGET)
 
-LPFCOBJS= \
-	lpfc_clock.o		\
+obj-y:= lpfc_clock.o 		\
 	lpfc_ct.o		\
 	lpfc_els.o		\
 	lpfc_fcp.o		\
@@ -23,9 +22,3 @@ LPFCOBJS= \
 	lpfc_sli.o
 
 include $(TOPDIR)/Rules.make
-
-lpfc_703.o: $(LPFCOBJS)
-	$(LD) -o $@ -r $(LPFCOBJS)
-
-clean:
-	rm -f *.o

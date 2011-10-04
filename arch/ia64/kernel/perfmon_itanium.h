@@ -2,7 +2,7 @@
  * This file contains the Itanium PMU register description tables
  * and pmc checker used by perfmon.c.
  *
- * Copyright (C) 2002  Hewlett Packard Co
+ * Copyright (C) 2002-2003  Hewlett Packard Co
  *               Stephane Eranian <eranian@hpl.hp.com>
  */
 
@@ -12,7 +12,7 @@
 #error "This file is only valid when CONFIG_ITANIUM is defined"
 #endif
 
-static int pfm_ita_pmc_check(struct task_struct *task, unsigned int cnum, unsigned long *val, struct pt_regs *regs);
+static int pfm_ita_pmc_check(struct task_struct *task, pfm_context_t *ctx, unsigned int cnum, unsigned long *val, struct pt_regs *regs);
 static int pfm_write_ibr_dbr(int mode, struct task_struct *task, void *arg, int count, struct pt_regs *regs);
 
 static pfm_reg_desc_t pfm_ita_pmc_desc[PMU_MAX_PMCS]={
@@ -59,31 +59,34 @@ static pfm_reg_desc_t pfm_ita_pmd_desc[PMU_MAX_PMDS]={
  * impl_pmcs, impl_pmds are computed at runtime to minimize errors!
  */
 static pmu_config_t pmu_conf={
-	disabled:	1,
-	ovfl_val:	(1UL << 32) - 1,
-	num_ibrs:	8,
-	num_dbrs:	8,
-	pmd_desc:	pfm_ita_pmd_desc,
-	pmc_desc:	pfm_ita_pmc_desc
+	.pmu_name      = "Itanium",
+	.pmu_family    = 0x7,
+	.enabled       = 0,
+	.ovfl_val      = (1UL << 32) - 1,
+	.pmd_desc      = pfm_ita_pmd_desc,
+	.pmc_desc      = pfm_ita_pmc_desc,
+	.num_ibrs      = 8,
+	.num_dbrs      = 8,
+	.use_rr_dbregs = 1 /* debug register are use for range retrictions */
 };
 
-
 static int
-pfm_ita_pmc_check(struct task_struct *task, unsigned int cnum, unsigned long *val, struct pt_regs *regs)
+pfm_ita_pmc_check(struct task_struct *task, pfm_context_t *ctx, unsigned int cnum, unsigned long *val, struct pt_regs *regs)
 {
-	pfm_context_t *ctx = task->thread.pfm_context;
 	int ret;
 
 	/*
 	 * we must clear the (instruction) debug registers if pmc13.ta bit is cleared
-	 * before they are written (fl_using_dbreg==0) to avoid picking up stale information. 
+	 * before they are written (fl_using_dbreg==0) to avoid picking up stale information.
 	 */
 	if (cnum == 13 && ((*val & 0x1) == 0UL) && ctx->ctx_fl_using_dbreg == 0) {
 
-		/* don't mix debug with perfmon */
-		if ((task->thread.flags & IA64_THREAD_DBG_VALID) != 0) return -EINVAL;
+		DBprintk(("pmc[%d]=0x%lx has active pmc13.ta cleared, clearing ibr\n", cnum, *val));
 
-		/* 
+		/* don't mix debug with perfmon */
+		if (task && (task->thread.flags & IA64_THREAD_DBG_VALID) != 0) return -EINVAL;
+
+		/*
 		 * a count of 0 will mark the debug registers as in use and also
 		 * ensure that they are properly cleared.
 		 */
@@ -93,14 +96,16 @@ pfm_ita_pmc_check(struct task_struct *task, unsigned int cnum, unsigned long *va
 
 	/*
 	 * we must clear the (data) debug registers if pmc11.pt bit is cleared
-	 * before they are written (fl_using_dbreg==0) to avoid picking up stale information. 
+	 * before they are written (fl_using_dbreg==0) to avoid picking up stale information.
 	 */
 	if (cnum == 11 && ((*val >> 28)& 0x1) == 0 && ctx->ctx_fl_using_dbreg == 0) {
 
-		/* don't mix debug with perfmon */
-		if ((task->thread.flags & IA64_THREAD_DBG_VALID) != 0) return -EINVAL;
+		DBprintk(("pmc[%d]=0x%lx has active pmc11.pt cleared, clearing dbr\n", cnum, *val));
 
-		/* 
+		/* don't mix debug with perfmon */
+		if (task && (task->thread.flags & IA64_THREAD_DBG_VALID) != 0) return -EINVAL;
+
+		/*
 		 * a count of 0 will mark the debug registers as in use and also
 		 * ensure that they are properly cleared.
 		 */

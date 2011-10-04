@@ -266,7 +266,7 @@ static struct stripe_head *get_active_stripe(raid5_conf_t *conf, unsigned long s
 			 * assert that we want to change it again
 			 */
 			int oldsize = conf->buffer_size;
-			PRINTK("get_stripe %ld/%d buffer_size is %d, %d active\n", sector, size, conf->buffer_size, atomic_read(&conf->active_stripes));
+			PRINTK("get_stripe %lu/%d buffer_size is %d, %d active\n", sector, size, conf->buffer_size, atomic_read(&conf->active_stripes));
 			if (size==0)
 				wait_event_lock_irq(conf->wait_for_stripe,
 						    conf->buffer_size,
@@ -277,7 +277,7 @@ static struct stripe_head *get_active_stripe(raid5_conf_t *conf, unsigned long s
 					wait_event_lock_irq(conf->wait_for_stripe,
 							    atomic_read(&conf->active_stripes)==0 || conf->buffer_size,
 							    conf->device_lock);
-					PRINTK("waited and now  %ld/%d buffer_size is %d - %d active\n", sector, size,
+					PRINTK("waited and now  %lu/%d buffer_size is %d - %d active\n", sector, size,
 					       conf->buffer_size, atomic_read(&conf->active_stripes));
 				}
 
@@ -787,7 +787,7 @@ static void add_stripe_bh (struct stripe_head *sh, struct buffer_head *bh, int d
 	else
 		bhp = &sh->bh_write[dd_idx];
 	while (*bhp) {
-		printk(KERN_NOTICE "raid5: multiple %d requests for sector %ld\n", rw, sh->sector);
+		printk(KERN_NOTICE "raid5: multiple %d requests for sector %lu\n", rw, sh->sector);
 		bhp = & (*bhp)->b_reqnext;
 	}
 	*bhp = bh;
@@ -831,7 +831,7 @@ static void handle_stripe(struct stripe_head *sh)
 	int failed_num=0;
 	struct buffer_head *bh;
 
-	PRINTK("handling stripe %ld, cnt=%d, pd_idx=%d\n", sh->sector, atomic_read(&sh->count), sh->pd_idx);
+	PRINTK("handling stripe %lu, cnt=%d, pd_idx=%d\n", sh->sector, atomic_read(&sh->count), sh->pd_idx);
 	memset(action, 0, sizeof(action));
 
 	spin_lock(&sh->lock);
@@ -1007,7 +1007,7 @@ static void handle_stripe(struct stripe_head *sh)
 				else rcw += 2*disks;
 			}
 		}
-		PRINTK("for sector %ld, rmw=%d rcw=%d\n", sh->sector, rmw, rcw);
+		PRINTK("for sector %lu, rmw=%d rcw=%d\n", sh->sector, rmw, rcw);
 		set_bit(STRIPE_HANDLE, &sh->state);
 		if (rmw < rcw && rmw > 0)
 			/* prefer read-modify-write, but need to get some data */
@@ -1146,13 +1146,13 @@ static void handle_stripe(struct stripe_head *sh)
 				bh->b_dev = spare->dev;
 			else skip=1;
 			if (!skip) {
-				PRINTK("for %ld schedule op %d on disc %d\n", sh->sector, action[i]-1, i);
+				PRINTK("for %lu schedule op %d on disc %d\n", sh->sector, action[i]-1, i);
 				atomic_inc(&sh->count);
 				bh->b_rdev = bh->b_dev;
 				bh->b_rsector = bh->b_blocknr * (bh->b_size>>9);
 				generic_make_request(action[i]-1, bh);
 			} else {
-				PRINTK("skip op %d on disc %d for sector %ld\n", action[i]-1, i, sh->sector);
+				PRINTK("skip op %d on disc %d for sector %lu\n", action[i]-1, i, sh->sector);
 				clear_bit(BH_Lock, &bh->b_state);
 				set_bit(STRIPE_HANDLE, &sh->state);
 			}
@@ -1659,12 +1659,12 @@ static void print_sh (struct stripe_head *sh)
 {
 	int i;
 
-	printk("sh %lu, size %d, pd_idx %d, state %ld.\n", sh->sector, sh->size, sh->pd_idx, sh->state);
+	printk("sh %lu, size %d, pd_idx %d, state %lu.\n", sh->sector, sh->size, sh->pd_idx, sh->state);
 	printk("sh %lu,  count %d.\n", sh->sector, atomic_read(&sh->count));
 	printk("sh %lu, ", sh->sector);
 	for (i = 0; i < MD_SB_DISKS; i++) {
 		if (sh->bh_cache[i])
-			printk("(cache%d: %p %ld) ", i, sh->bh_cache[i], sh->bh_cache[i]->b_state);
+			printk("(cache%d: %p %lu) ", i, sh->bh_cache[i], sh->bh_cache[i]->b_state);
 	}
 	printk("\n");
 }

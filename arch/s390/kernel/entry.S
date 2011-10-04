@@ -727,6 +727,10 @@ io_int_handler:
         SAVE_ALL __LC_IO_OLD_PSW,0
 	mc	0,0
         GET_CURRENT               # load pointer to task_struct to R9
+	stck	__LC_INT_CLOCK
+	clc	__LC_INT_CLOCK(8),__LC_JIFFY_TIMER
+	bhe	BASED(io_handle_tick)
+io_call_handler:
         l       %r1,BASED(.Ldo_IRQ)        # load address of do_IRQ
         la      %r2,SP_PTREGS(%r15) # address of register-save area
         sr      %r3,%r3
@@ -759,6 +763,15 @@ io_return_bh:
 io_leave:
         stnsm   24(%r15),0xfc            # disable I/O and ext. interrupts
         RESTORE_ALL 0
+
+#
+# account tick
+#
+io_handle_tick:
+	l	%r1,BASED(.Laccount_ticks)
+	la	%r2,SP_PTREGS(%r15)    # address of register-save area
+	la	%r14,BASED(io_call_handler)
+	br	%r1
 
 #
 # call do_softirq
@@ -797,6 +810,10 @@ ext_int_handler:
 	mc	0,0
         GET_CURRENT                    # load pointer to task_struct to R9
 	lh	%r6,__LC_EXT_INT_CODE  # get interruption code
+	stck	__LC_INT_CLOCK
+	clc	__LC_INT_CLOCK(8),__LC_JIFFY_TIMER
+	bhe	BASED(ext_handle_tick)
+ext_call_handler:
 	lr	%r1,%r6		       # calculate index = code & 0xff
 	n	%r1,BASED(.Lc0xff)
 	sll	%r1,2
@@ -816,6 +833,15 @@ ext_int_next:
 	icm	%r7,15,0(%r7)	       # next list entry
 	bnz	BASED(ext_int_loop)
 	b	BASED(io_return)
+
+#
+# account tick
+#
+ext_handle_tick:
+	l	%r1,BASED(.Laccount_ticks)
+	la	%r2,SP_PTREGS(%r15)    # address of register-save area
+	la	%r14,BASED(ext_call_handler)
+	br	%r1
 
 /*
  * Machine check handler routines
@@ -911,3 +937,4 @@ restart_go:
 
 .Lschedtail:   .long  schedule_tail
 
+.Laccount_ticks:.long account_ticks

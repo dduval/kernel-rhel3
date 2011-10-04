@@ -918,6 +918,10 @@ static inline unsigned int page_pin_hash(struct page *p)
 #define page_mapping_pinned(p) \
 	(atomic_read(page_pin_counter(p)) != 0)
 
+#ifdef CONFIG_IA64
+int in_gate_area(struct task_struct *task, unsigned long addr);
+struct vm_area_struct *get_gate_vma(struct task_struct *tsk);
+#endif /*CONFIG_IA64*/
 #endif /* __KERNEL__ */
 
 #endif

@@ -247,6 +247,7 @@ xics_ops pSeriesLP_ops = {
 
 
 int vtermno;	/* virtual terminal# for udbg  */
+int udbgwait = 0;
 
 static void udbg_putcLP(unsigned char c)
 {
@@ -296,6 +297,9 @@ static int udbg_getc_pollLP(void)
 static unsigned char udbg_getcLP(void)
 {
 	int ch;
+	udbgwait = 1;
+	mb();
+
 	for (;;) {
 		ch = udbg_getc_pollLP();
 		if (ch == -1) {
@@ -304,9 +308,12 @@ static unsigned char udbg_getcLP(void)
 			for (delay=0; delay < 2000000; delay++)
 				;
 		} else {
-			return ch;
+			break;
 		}
 	}
+	udbgwait = 0;
+	mb();
+	return ch;
 }
 
 
@@ -315,6 +322,9 @@ static unsigned char udbg_getcLP(void)
 int hvc_get_chars(int index, char *buf, int count)
 {
 	unsigned long got;
+
+	if (udbgwait)
+		return 0;
 
 	if (plpar_hcall(H_GET_TERM_CHAR, index, 0, 0, 0, &got,
 		(unsigned long *)buf, (unsigned long *)buf+1) == H_Success) {

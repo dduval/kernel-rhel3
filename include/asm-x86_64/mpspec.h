@@ -14,9 +14,9 @@
 #define SMP_MAGIC_IDENT	(('_'<<24)|('P'<<16)|('M'<<8)|'_')
 
 /*
- * a maximum of 16 APICs with the current APIC ID architecture.
+ * A maximum of 255 APICs with the current APIC ID architecture.
  */
-#define MAX_APICS 16
+#define MAX_APICS 128
 
 struct intel_mp_floating
 {
@@ -156,7 +156,11 @@ struct mpc_config_lintsrc
  *	7	2 CPU MCA+PCI
  */
 
-#define MAX_MP_BUSSES 257
+/*
+ * Assume max PCI and 8 chassis x366 system (with 8 ISA):  256 + 8 = 264.
+ * Call it 270 for safety.
+ */
+#define MAX_MP_BUSSES	270
 #define MAX_IRQ_SOURCES (MAX_MP_BUSSES*4)
 enum mp_bustype {
 	MP_BUS_ISA = 1,

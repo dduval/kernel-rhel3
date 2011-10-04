@@ -383,6 +383,14 @@ nfs_lock(struct file *filp, int cmd, struct file_lock *fl)
 			fl->fl_type, fl->fl_flags,
 			(long long)fl->fl_start, (long long)fl->fl_end);
 
+	/*
+	 * Return success on attempts to request BSD flocks over NFS.
+	 * This prevents ENOLCK errors from being returned to user space,
+	 * but file locking will be enforced solely on the local client.
+	 */
+	if (fl->fl_flags & FL_FLOCK)
+		return 0;
+
 	if (!inode)
 		return -EINVAL;
 

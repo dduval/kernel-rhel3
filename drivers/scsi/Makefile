@@ -127,6 +127,7 @@ obj-$(CONFIG_SCSI_MAC53C94)	+= mac53c94.o
 obj-$(CONFIG_SCSI_PLUTO)	+= pluto.o
 obj-$(CONFIG_SCSI_DECNCR)	+= NCR53C9x.o	dec_esp.o
 obj-$(CONFIG_BLK_DEV_3W_XXXX_RAID) += 3w-xxxx.o
+obj-$(CONFIG_BLK_DEV_3W_9XXX_RAID) += 3w-9xxx.o
 obj-$(CONFIG_SCSI_ZALON)	+= zalon7xx_mod.o
 obj-$(CONFIG_SCSI_PPA)		+= ppa.o
 obj-$(CONFIG_SCSI_IMM)		+= imm.o
@@ -137,6 +138,7 @@ obj-$(CONFIG_SCSI_FCAL)		+= fcal.o
 obj-$(CONFIG_SCSI_CPQFCTS)	+= cpqfc.o
 obj-$(CONFIG_SCSI_LASI700)	+= lasi700.o 53c700.o
 obj-$(CONFIG_SCSI_NSP32)	+= nsp32.o
+obj-$(CONFIG_SCSI_SATA_AHCI)	+= libata.o ahci.o
 obj-$(CONFIG_SCSI_SATA_SVW)	+= libata.o sata_svw.o
 obj-$(CONFIG_SCSI_ATA_PIIX)	+= libata.o ata_piix.o
 obj-$(CONFIG_SCSI_SATA_PROMISE)	+= libata.o sata_promise.o
@@ -146,6 +148,7 @@ obj-$(CONFIG_SCSI_SATA_VITESSE)	+= libata.o sata_vsc.o
 obj-$(CONFIG_SCSI_SATA_SIS)	+= libata.o sata_sis.o
 obj-$(CONFIG_SCSI_SATA_SX4)	+= libata.o sata_sx4.o
 obj-$(CONFIG_SCSI_SATA_NV)	+= libata.o sata_nv.o
+obj-$(CONFIG_SCSI_SATA_ULI)	+= libata.o sata_uli.o
 
 subdir-$(CONFIG_ARCH_ACORN)	+= ../acorn/scsi
 obj-$(CONFIG_ARCH_ACORN)	+= ../acorn/scsi/acorn-scsi.o
@@ -157,6 +160,8 @@ obj-$(CONFIG_BLK_DEV_SR)	+= sr_mod.o
 obj-$(CONFIG_CHR_DEV_SG)	+= sg.o
 
 obj-$(CONFIG_SCSI_DUMP)		+= scsi_dump.o
+obj-$(CONFIG_SCSI_DUMP)		+= scsi_dump_register.o
+export-objs += scsi_dump_register.o
 
 list-multi	:= scsi_mod.o sd_mod.o sr_mod.o initio.o a100u2w.o cpqfc.o \
 			zalon7xx_mod.o libata.o
@@ -172,7 +177,7 @@ a100u2w-objs	:= inia100.o i60uscsi.o
 zalon7xx_mod-objs := zalon7xx.o ncr53c8xx.o
 cpqfc-objs	:= cpqfcTSinit.o cpqfcTScontrol.o cpqfcTSi2c.o \
 		   cpqfcTSworker.o cpqfcTStrigger.o
-libata-objs	:= libata-core.o libata-scsi.o
+libata-objs	:= libata-core.o libata-scsi.o libata-dump.o
 
 include $(TOPDIR)/Rules.make
 

@@ -222,8 +222,14 @@ struct sec_size {
 
 extern struct sec_size * blk_sec[MAX_BLKDEV];
 extern struct blk_dev_struct blk_dev[MAX_BLKDEV];
+#ifdef __GENKSYMS__ /* preserve KMI/ABI ksyms compatibility for mod linkage */
 extern void grok_partitions(struct gendisk *dev, int drive, unsigned minors, long size);
 extern void register_disk(struct gendisk *dev, kdev_t first, unsigned minors, struct block_device_operations *ops, long size);
+#else
+extern void grok_partitions(struct gendisk *dev, int drive, unsigned minors, unsigned long size);
+extern void register_disk(struct gendisk *dev, kdev_t first, unsigned minors, struct block_device_operations *ops, unsigned long size);
+#endif /* __GENKSYMS__ */
+
 extern void generic_make_request(int rw, struct buffer_head * bh);
 extern inline request_queue_t *blk_get_queue(kdev_t dev);
 extern void blkdev_release_request(struct request *);
@@ -237,6 +243,7 @@ extern void blk_start_queue_timer(request_queue_t * q);
 extern void blk_cleanup_queue(request_queue_t *);
 extern void blk_queue_headactive(request_queue_t *, int);
 extern void blk_queue_superbh(request_queue_t *, int);
+extern void blk_queue_large_superbh(request_queue_t *, int, int);
 extern void blk_queue_make_request(request_queue_t *, make_request_fn *);
 extern void generic_unplug_device(void *);
 extern inline int blk_seg_merge_ok(struct buffer_head *, struct buffer_head *);
@@ -257,7 +264,11 @@ extern char * blkdev_varyio[MAX_BLKDEV];
 
 #define MAX_SEGMENTS 128
 #define MAX_SECTORS 255
+/* General-case limit for superbh size: */
 #define MAX_SUPERBH 32768	/* must fit info ->b_size right now */
+
+/* Limit for superbh when we're certain it cannot be bounce-buffered: */
+#define MAX_SUPERBH_NOBOUNCE (1024*1024) /* must fit info ->b_size right now */
 
 /*
  * bh abuse :/

@@ -273,7 +273,7 @@ static inline void __remove_wait_queue(wait_queue_head_t *head,
 		wq_write_lock_irqsave(&(q)->lock, flags);	\
 		(wait)->flags = 0;				\
 		__add_wait_queue((q), (wait));			\
-		rmb();						\
+		mb();						\
 		if (!(cond)) {					\
 			_raced = 1;				\
 			__remove_wait_queue((q), (wait));	\
@@ -289,7 +289,7 @@ static inline void __remove_wait_queue(wait_queue_head_t *head,
 		wq_write_lock_irqsave(&(q)->lock, flags);	\
 		(wait)->flags = WQ_FLAG_EXCLUSIVE;		\
 		__add_wait_queue_tail((q), (wait));		\
-		rmb();						\
+		mb();						\
 		if (!(cond)) {					\
 			_raced = 1;				\
 			__remove_wait_queue((q), (wait));	\

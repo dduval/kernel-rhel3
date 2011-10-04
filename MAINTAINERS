@@ -352,14 +352,10 @@ W:	http://www.coda.cs.cmu.edu/
 S:	Maintained
 
 HP FIBRE CHANNEL 64-bit/66MHz PCI non-intelligent HBA
-P:      Chirag Kantharia
-M:      chirag.kantharia@hp.com 
 L:	iss_storagedev@hp.com
 S:      Odd Fixes
 
 HP SMART2 RAID DRIVER
-P:      Chirag Kantharia
-M:      chirag.kantharia@hp.com 
 L:	iss_storagedev@hp.com
 S:	Odd Fixes
 

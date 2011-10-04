@@ -51,6 +51,7 @@ extern void smp_commence(void);
  */
 extern int smp_call_function (void (*func) (void *info), void *info,
 			      int retry, int wait);
+extern void dump_smp_call_function (void (*func) (void *info), void *info);
 
 /*
  * Call a function on all processors

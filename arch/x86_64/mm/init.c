@@ -349,6 +349,29 @@ int page_is_ram(unsigned long pagenr)
 	return 0;
 }
 
+unsigned long next_ram_page (unsigned long pagenr)
+{
+	int i;
+	unsigned long min_pageno = ULONG_MAX;
+
+	pagenr++;
+
+	for (i = 0; i < e820.nr_map; i++) {
+		unsigned long addr, end;
+
+		if (e820.map[i].type != E820_RAM)	/* not usable memory */
+			continue;
+
+		addr = (e820.map[i].addr+PAGE_SIZE-1) >> PAGE_SHIFT;
+		end = (e820.map[i].addr+e820.map[i].size) >> PAGE_SHIFT;
+		if  ((pagenr >= addr) && (pagenr < end))
+			return pagenr;
+		if ((pagenr < addr) && (addr < min_pageno))
+			min_pageno = addr;
+	}
+	return min_pageno;
+}
+
 void __init mem_init(void)
 {
 	unsigned long codesize, reservedpages, datasize, initsize;

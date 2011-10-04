@@ -1099,6 +1099,10 @@ try_again:
        	 	if (!(vma = find_vma_prev(mm, addr, &prev_vma)))
                         return -ENOMEM;
 
+		/* Do not allocate non-MAP_FIXED all the way down to zero. */
+		if (addr < SHLIB_BASE)
+			goto fail;
+
 		/* new region fits between prev_vma->vm_end and vma->vm_start, use it */
 		if (addr+len <= vma->vm_start && (!prev_vma || (addr >= prev_vma->vm_end))) {
 			/* remember the address as a hint for next time */
@@ -1113,6 +1117,7 @@ try_again:
 		addr = vma->vm_start-len;
         } while (len <= vma->vm_start);
 
+fail:
 	/* if hint left us with no space for the requested mapping try again */
 	if (first_time && len <= stack_limit) {
 		first_time = 0;

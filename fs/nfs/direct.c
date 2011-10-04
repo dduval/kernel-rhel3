@@ -468,7 +468,7 @@ nfs_file_direct_IO(int rw, struct file *filp, char *buf, size_t count,
 
 	retval = filemap_fdatasync(mapping);
 	if (retval == 0)
-		retval = fsync_inode_data_buffers(inode);
+		retval = nfs_wb_all(inode);
 	if (retval == 0)
 		retval = filemap_fdatawait(mapping);
 	if (retval < 0)

@@ -886,6 +886,35 @@ int __get_user_pages(struct task_struct *tsk, struct mm_struct *mm, unsigned lon
 
 		vma = find_extend_vma(mm, start);
 
+#ifdef CONFIG_IA64
+		if (!vma && in_gate_area(tsk, start)) {
+			unsigned long pg = start & PAGE_MASK;
+			struct vm_area_struct *gate_vma = get_gate_vma(tsk);
+			pgd_t *pgd;
+			pmd_t *pmd;
+			pte_t *pte;
+			if (write) /* user gate pages are read-only */
+				return i ? : -EFAULT;
+			pgd = pgd_offset_k(pg);
+			BUG_ON(pgd_none(*pgd));
+			pmd = pmd_offset(pgd, pg);
+			BUG_ON(pmd_none(*pmd));
+			pte = pte_offset_map(pmd, pg);
+			BUG_ON(pte_none(*pte));
+			if (pages) {
+				pages[i] = pte_page(*pte);
+				get_page(pages[i]);
+			}
+			pte_unmap(pte);
+			if (vmas)
+				vmas[i] = gate_vma;
+			i++;
+			start += PAGE_SIZE;
+			len--;
+			continue;
+		}
+#endif
+
 		if ( !vma || (pages && vma->vm_flags & VM_IO) || !(flags & vma->vm_flags) )
 			return i ? : -EFAULT;
 		if (is_vm_hugetlb_page(vma)) {
@@ -900,7 +929,8 @@ int __get_user_pages(struct task_struct *tsk, struct mm_struct *mm, unsigned lon
 		spin_lock(&mm->page_table_lock);
 		do {
 			struct page *map;
-			while (!(map = follow_page(mm, start, write))) {
+			int lookup_write = write;
+			while (!(map = follow_page(mm, start, lookup_write))) {
 #ifndef CONFIG_X86_4G
 				if (!write &&
 				    untouched_anonymous_page(mm, vma, start)) {
@@ -923,6 +953,14 @@ int __get_user_pages(struct task_struct *tsk, struct mm_struct *mm, unsigned lon
 					if (i) return i;
 					return -ENOMEM;
 				}
+				/*
+				 * Now that we have performed a write fault
+				 * and surely no longer have a shared page we
+				 * shouldn't write, we shouldn't ignore an
+				 * unwritable page in the page table if
+				 * we are forcing write access.
+				 */
+				lookup_write = write && !force;
 				spin_lock(&mm->page_table_lock);
 			}
 			if (pages) {
@@ -1369,6 +1407,8 @@ int remap_page_range(struct vm_area_struct *vma, unsigned long from,
 	return error;
 }
 
+
+
 /*
  * Establish a new mapping:
  *  - flush the old one
@@ -1388,15 +1428,31 @@ static inline void establish_pte(struct vm_area_struct * vma, unsigned long addr
 }
 
 /*
+ * Do pte_mkwrite, but only if the vma says VM_WRITE.  We do this when
+ * servicing faults for write access.  In the normal case, do always want
+ * pte_mkwrite.  But get_user_pages can cause write faults for mappings
+ * that do not have writing enabled, when used by access_process_vm.
+ */
+static inline pte_t maybe_mkwrite(pte_t pte, struct vm_area_struct *vma)
+{
+	if (likely(vma->vm_flags & VM_WRITE))
+		pte = pte_mkwrite(pte);
+	return pte;
+}
+
+/*
  * We hold the mm semaphore for reading and vma->vm_mm->page_table_lock
  */
 static inline void break_cow(struct vm_area_struct * vma, struct page * new_page, unsigned long address, 
 		pte_t *page_table)
 {
+	pte_t entry;
+
 	invalidate_vcache(address, vma->vm_mm, new_page);
 	flush_page_to_ram(new_page);
 	flush_cache_page(vma, address);
-	establish_pte(vma, address, page_table, pte_mkwrite(pte_mkdirty(mk_pte(new_page, vma->vm_page_prot))));
+	entry = maybe_mkwrite(pte_mkdirty(mk_pte(new_page, vma->vm_page_prot)), vma);
+	establish_pte(vma, address, page_table, entry);
 }
 
 /*
@@ -1425,6 +1481,7 @@ static int do_wp_page(struct mm_struct *mm, struct vm_area_struct * vma,
 	struct page *old_page, *new_page;
 	struct pte_chain * pte_chain = NULL;
 	int old_page_locked = 0;
+	pte_t entry;
 
 	old_page = pte_page(pte);
 	if (!VALID_PAGE(old_page))
@@ -1436,7 +1493,8 @@ static int do_wp_page(struct mm_struct *mm, struct vm_area_struct * vma,
 		if (reuse) {
 			unlock_page(old_page);
 			flush_cache_page(vma, address);
-			establish_pte(vma, address, page_table, pte_mkyoung(pte_mkdirty(pte_mkwrite(pte))));
+			entry = maybe_mkwrite(pte_mkyoung(pte_mkdirty(pte)), vma);
+			establish_pte(vma, address, page_table, entry);
 			pte_unmap(page_table);
 			spin_unlock(&mm->page_table_lock);
 			return 1;	/* Minor fault */
@@ -1676,7 +1734,7 @@ static int do_swap_page(struct mm_struct * mm,
 	mm->rss++;
 	pte = mk_pte(page, vma->vm_page_prot);
 	if (write_access && can_share_swap_page(page))
-		pte = pte_mkdirty(pte_mkwrite(pte));
+		pte = maybe_mkwrite(pte_mkdirty(pte), vma);
 	unlock_page(page);
 
 	flush_page_to_ram(page);
@@ -1732,7 +1790,7 @@ static int do_anonymous_page(struct mm_struct * mm, struct vm_area_struct * vma,
 		}
 		mm->rss++;
 		flush_page_to_ram(page);
-		entry = pte_mkwrite(pte_mkdirty(mk_pte(page, vma->vm_page_prot)));
+		entry = maybe_mkwrite(pte_mkdirty(mk_pte(page, vma->vm_page_prot)), vma);
 		lru_cache_add(page);
 	}
 
@@ -1826,7 +1884,7 @@ int do_no_page(struct mm_struct * mm, struct vm_area_struct * vma,
 		flush_icache_page(vma, new_page);
 		entry = mk_pte(new_page, vma->vm_page_prot);
 		if (write_access)
-			entry = pte_mkwrite(pte_mkdirty(entry));
+			entry = maybe_mkwrite(pte_mkdirty(entry), vma);
 		vm_set_pte(vma, address, page_table, entry);
 		pte_chain = page_add_rmap(new_page, page_table, pte_chain);
 		pte_unmap(page_table);
@@ -2357,3 +2415,31 @@ int map_user_kiobuf_iovecs(int rw, struct kiobuf *iobuf, const struct iovec *iov
 	dprintk ("map_user_kiobuf_iovecs: end OK\n");
 	return 0;
 }
+
+#ifdef CONFIG_IA64
+
+struct vm_area_struct gate_vma;
+
+static int __init gate_vma_init(void) {
+	printk("Call gate_vma_init\n");
+	gate_vma.vm_mm = NULL;
+	gate_vma.vm_start = GATE_ADDR;
+	gate_vma.vm_end = PERCPU_ADDR;
+	gate_vma.vm_page_prot = PAGE_READONLY;
+	gate_vma.vm_flags = 0;
+	return 0;
+}
+
+struct vm_area_struct *get_gate_vma(struct task_struct *tsk) {
+	return &gate_vma;
+}
+
+int in_gate_area(struct task_struct *task, unsigned long addr) {
+	if ((addr >= GATE_ADDR) && (addr < PERCPU_ADDR))
+		return 1;
+	return 0;
+}
+
+__initcall(gate_vma_init);
+#endif
+

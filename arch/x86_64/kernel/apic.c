@@ -30,8 +30,7 @@
 #include <asm/mpspec.h>
 #include <asm/pgalloc.h>
 #include <asm/timex.h>
-
-int apic_disabled;
+#include <asm/mach_apic.h>
 
 extern spinlock_t i8253_lock;
 
@@ -285,10 +284,8 @@ void __init setup_local_APIC (void)
 
 	/*
 	 * Double-check wether this APIC is really registered.
-	 * This is meaningless in clustered apic mode, so we skip it.
 	 */
-	if (!clustered_apic_mode &&
-	    !test_bit(GET_APIC_ID(apic_read(APIC_ID)), &phys_cpu_present_map))
+	if (!apic_id_registered())
 		BUG();
 
 	/*
@@ -296,23 +293,7 @@ void __init setup_local_APIC (void)
 	 * an APIC.  See e.g. "AP-388 82489DX User's Manual" (Intel
 	 * document number 292116).  So here it goes...
 	 */
-
-	if (!clustered_apic_mode) {
-		/*
-		 * In clustered apic mode, the firmware does this for us
-		 * Put the APIC into flat delivery mode.
-		 * Must be "all ones" explicitly for 82489DX.
-		 */
-		apic_write_around(APIC_DFR, 0xffffffff);
-
-		/*
-		 * Set up the logical destination ID.
-		 */
-		value = apic_read(APIC_LDR);
-		value &= ~APIC_LDR_MASK;
-		value |= (1<<(smp_processor_id()+24));
-		apic_write_around(APIC_LDR, value);
-	}
+	init_apic_ldr();
 
 	/*
 	 * Set Task Priority to 'accept all'. We never change this
@@ -1057,13 +1038,7 @@ asmlinkage void smp_error_interrupt(void)
  */
 int __init APIC_init_uniprocessor (void)
 {
-	if (apic_disabled) {
-		printk(KERN_INFO "Apic disabled\n");
-		return -1;
-	}
-
 	if (!smp_found_config && !cpu_has_apic) { 
-		apic_disabled = 1;
 		return -1;
 	} 
 
@@ -1073,7 +1048,6 @@ int __init APIC_init_uniprocessor (void)
 	if (!cpu_has_apic && APIC_INTEGRATED(apic_version[boot_cpu_id])) {
 		printk(KERN_ERR "BIOS bug, local APIC #%d not detected!...\n",
 			boot_cpu_id);
-		apic_disabled = 1;
 		return -1;
 	}
 
@@ -1101,18 +1075,11 @@ int __init APIC_init_uniprocessor (void)
 	return 0;
 }
 
-static int __init disableapic(char *str)
-{
-	apic_disabled = 1;
-	return 1;
-}
-
 static int __init disableapictimer(char *str)
 {
 	dont_use_local_apic_timer = 1;
 	return 1;
 }
 
-__setup("disableapic", disableapic);
 __setup("noapictimer", disableapictimer);
 

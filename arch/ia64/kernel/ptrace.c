@@ -25,7 +25,7 @@
 #include <asm/uaccess.h>
 #include <asm/unwind.h>
 #ifdef CONFIG_PERFMON
-# include <asm/perfmon.h>
+#include <asm/perfmon.h>
 #endif
 
 /*

@@ -114,6 +114,7 @@ static int ftsodell;
 static int strict_clocking;
 static unsigned int clocking;
 static int spdif_locked;
+static int ac97_quirk = AC97_TUNE_DEFAULT;
 
 //#define DEBUG
 //#define DEBUG2
@@ -306,6 +307,8 @@ static struct pci_device_id i810_pci_tbl [] = {
 	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, NVIDIA_NFORCE},
 	{PCI_VENDOR_ID_NVIDIA, PCI_DEVICE_ID_NVIDIA_MCP3_AUDIO,
 	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, NVIDIA_NFORCE},
+	{PCI_VENDOR_ID_NVIDIA, PCI_DEVICE_ID_NVIDIA_CK804_AUDIO,
+	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, NVIDIA_NFORCE},
 	{PCI_VENDOR_ID_AMD, PCI_DEVICE_ID_AMD_OPUS_7445,
 	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, AMD768},
 	{PCI_VENDOR_ID_AMD, PCI_DEVICE_ID_AMD_8111_AUDIO,
@@ -313,6 +316,8 @@ static struct pci_device_id i810_pci_tbl [] = {
 	{PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_ESB_5,
 	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, INTELICH4},
 	{PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_ICH6_18,
+	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, INTELICH4},
+	{PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_ICH7_20,
 	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, INTELICH4},
 
 	{0,}
@@ -484,6 +489,124 @@ struct i810_card {
 /* set LVI from CIV */
 #define CIV_TO_LVI(card, port, off) \
 	I810_IOWRITEB(MODULOP2(GET_CIV((card), (port)) + (off), SG_LEN), (card), (port) + OFF_LVI)
+
+static struct ac97_quirk ac97_quirks[] __devinitdata = {
+	{
+		.vendor = 0x0e11,
+		.device = 0x00b8,
+		.name = "Compaq Evo D510C",
+		.type = AC97_TUNE_HP_ONLY
+	},
+	{
+		.vendor = 0x1028,
+		.device = 0x00d8,
+		.name = "Dell Precision 530",   /* AD1885 */
+		.type = AC97_TUNE_HP_ONLY
+	},
+	{
+		.vendor = 0x1028,
+		.device = 0x0126,
+		.name = "Dell Optiplex GX260",  /* AD1981A */
+		.type = AC97_TUNE_HP_ONLY
+	},
+	{
+		.vendor = 0x1028,
+		.device = 0x012d,
+		.name = "Dell Precision 450",   /* AD1981B*/
+		.type = AC97_TUNE_HP_ONLY
+	},
+	{       /* FIXME: which codec? */
+		.vendor = 0x103c,
+		.device = 0x00c3,
+		.name = "HP xw6000",
+		.type = AC97_TUNE_HP_ONLY
+	},
+	{
+		.vendor = 0x103c,
+		.device = 0x129d,
+		.name = "HP xw8000",
+		.type = AC97_TUNE_HP_ONLY
+	},
+	{
+		.vendor = 0x103c,
+		.device = 0x12f1,
+		.name = "HP xw8200",    /* AD1981B*/
+		.type = AC97_TUNE_HP_ONLY
+	},
+	{
+		.vendor = 0x103c,
+		.device = 0x12f2,
+		.name = "HP xw6200",
+		.type = AC97_TUNE_HP_ONLY
+	},
+	{
+		.vendor = 0x103c,
+		.device = 0x3008,
+		.name = "HP xw4200",    /* AD1981B*/
+		.type = AC97_TUNE_HP_ONLY
+	},
+	{
+		.vendor = 0x10f1,
+		.device = 0x2665,
+		.name = "Fujitsu-Siemens Celsius",      /* AD1981? */
+		.type = AC97_TUNE_HP_ONLY
+	},
+	{
+		.vendor = 0x10f1,
+		.device = 0x2885,
+		.name = "AMD64 Mobo",   /* ALC650 */
+		.type = AC97_TUNE_HP_ONLY
+	},
+	{
+		.vendor = 0x110a,
+		.device = 0x0056,
+		.name = "Fujitsu-Siemens Scenic",       /* AD1981? */
+		.type = AC97_TUNE_HP_ONLY
+	},
+	{
+		.vendor = 0x11d4,
+		.device = 0x5375,
+		.name = "ADI AD1985 (discrete)",
+		.type = AC97_TUNE_HP_ONLY
+	},
+	{
+		.vendor = 0x1462,
+		.device = 0x5470,
+		.name = "MSI P4 ATX 645 Ultra",
+		.type = AC97_TUNE_HP_ONLY
+	},
+	{
+		.vendor = 0x1734,
+		.device = 0x0088,
+		.name = "Fujitsu-Siemens D1522",	/* AD1981 */
+		.type = AC97_TUNE_HP_ONLY
+	},
+	{
+		.vendor = 0x8086,
+		.device = 0x4856,
+		.name = "Intel D845WN (82801BA)",
+		.type = AC97_TUNE_SWAP_HP
+	},
+	{
+		.vendor = 0x8086,
+		.device = 0x4d44,
+		.name = "Intel D850EMV2",       /* AD1885 */
+		.type = AC97_TUNE_HP_ONLY
+	},
+	{
+		.vendor = 0x8086,
+		.device = 0x4d56,
+		.name = "Intel ICH/AD1885",
+		.type = AC97_TUNE_HP_ONLY
+	},
+	{
+		.vendor = 0x1028,
+		.device = 0x012d,
+		.name = "Dell Precision 450",   /* AD1981B*/
+		.type = AC97_TUNE_HP_ONLY
+	},
+	{ } /* terminator */
+};
 
 static struct i810_card *devs = NULL;
 
@@ -1081,9 +1204,19 @@ static void __i810_update_lvi(struct i810_state *state, int rec)
 	if (count < fragsize)
 		return;
 
+	/* if we are currently stopped, then our CIV is actually set to our
+	 * *last* sg segment and we are ready to wrap to the next.  However,
+	 * if we set our LVI to the last sg segment, then it won't wrap to
+	 * the next sg segment, it won't even get a start.  So, instead, when
+	 * we are stopped, we set both the LVI value and also we increment
+	 * the CIV value to the next sg segment to be played so that when
+	 * we call start, things will operate properly
+	 */
 	if (!dmabuf->enable && dmabuf->ready) {
 		if (!(dmabuf->trigger & trigger))
 			return;
+
+		CIV_TO_LVI(state->card, port, 1);
 
 		start(state);
 		while (!(I810_IOREADB(state->card, port + OFF_CR) & ((1<<4) | (1<<2))))
@@ -2762,6 +2895,7 @@ static int is_new_ich(u16 pci_id)
 	case PCI_DEVICE_ID_INTEL_82801EB_5:
 	case PCI_DEVICE_ID_INTEL_ESB_5:
 	case PCI_DEVICE_ID_INTEL_ICH6_18:
+	case PCI_DEVICE_ID_INTEL_ICH7_20:
 		return 1;
 	default:
 		break;
@@ -3049,6 +3183,9 @@ static int __devinit i810_ac97_init(struct i810_card *card)
 
 		card->ac97_codec[num_ac97] = codec;
 	}
+
+	/* tune up the primary codec */
+	ac97_tune_hardware(card->pci_dev, ac97_quirks, ac97_quirk);
 
 	/* pick the minimum of channels supported by ICHx or codec(s) */
 	card->channels = (card->channels > total_channels)?total_channels:card->channels;
@@ -3466,6 +3603,8 @@ MODULE_PARM(ftsodell, "i");
 MODULE_PARM(clocking, "i");
 MODULE_PARM(strict_clocking, "i");
 MODULE_PARM(spdif_locked, "i");
+MODULE_PARM(ac97_quirk, "i");
+MODULE_PARM_DESC(ac97_quirk, "AC'97 workaround for strange hardware.");
 
 #define I810_MODULE_NAME "intel810_audio"
 

@@ -73,6 +73,13 @@ if [ "$CONFIG_S390_TAPE" != "n" ]; then
   comment 'S/390 tape hardware support'
   dep_tristate '   Support for 3480/3490 tape hardware' CONFIG_S390_TAPE_34XX $CONFIG_S390_TAPE
 fi
+
+comment 'Watchdog Cards'
+bool 'Watchdog Timer Support'   CONFIG_WATCHDOG 
+if [ "$CONFIG_WATCHDOG" != "n" ]; then
+   bool '  Disable watchdog shutdown on close' CONFIG_WATCHDOG_NOWAYOUT
+   tristate '  Software Watchdog' CONFIG_SOFT_WATCHDOG
+fi
 endmenu
 
 if [ "$CONFIG_NET" = "y" ]; then

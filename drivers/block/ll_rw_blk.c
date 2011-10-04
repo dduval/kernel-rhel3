@@ -198,12 +198,40 @@ void blk_cleanup_queue(request_queue_t * q)
  * @superbh: Max size in sectors
  *
  **/
-void blk_queue_superbh(request_queue_t *q, int superbh)
+void __blk_queue_superbh(request_queue_t *q, int superbh, int limit)
 {
-	if ((superbh << 9) > MAX_SUPERBH)
-		superbh = MAX_SUPERBH >> 9;
+	int i = 0;
 
-	q->superbh_queue = superbh << 9;
+	if ((superbh << 9) > limit)
+		superbh = limit >> 9;
+
+	/* Force it to be a power of 2 */
+	if (superbh)
+		for (i = 1; (i<<1) <= superbh; i <<= 1);
+
+	q->superbh_queue = i << 9;
+}
+
+void blk_queue_superbh(request_queue_t *q, int sectors)
+{
+	__blk_queue_superbh(q, sectors, MAX_SUPERBH);
+}
+
+/* Allow a driver to request a larger superbh limit: we only expect
+ * varyio-capable drivers to call this.
+ *
+ * Limit the larger superbh depending on the caller's scatter-gather
+ * segment limit.  We determine the maximum size that a scatter- gather
+ * list can be given the number of sg segments, and use that as an upper
+ * bound for the superbh.  In no cases do we force the superbh to be
+ * below the old limit of MAX_SUPERBH due to this new bound.
+ */
+void blk_queue_large_superbh(request_queue_t *q, int sectors, int segments)
+{
+	int seg_sectors = (PAGE_SIZE / 512) * segments + 1;
+	if (sectors > seg_sectors && seg_sectors > (MAX_SUPERBH >> 9))
+		sectors = seg_sectors;
+	__blk_queue_superbh(q, sectors, MAX_SUPERBH_NOBOUNCE);
 }
 
 /**
@@ -1220,7 +1248,7 @@ void generic_make_request (int rw, struct buffer_head * bh)
 			   when mounting a device. */
 			printk(KERN_INFO
 			       "attempt to access beyond end of device\n");
-			printk(KERN_INFO "%s: rw=%d, want=%ld, limit=%d\n",
+			printk(KERN_INFO "%s: rw=%d, want=%lu, limit=%u\n",
 			       kdevname(bh->b_rdev), rw,
 			       (sector + count)>>1, minorsize);
 
@@ -1242,7 +1270,7 @@ void generic_make_request (int rw, struct buffer_head * bh)
 		if (!q) {
 			printk(KERN_ERR
 			       "generic_make_request: Trying to access "
-			       "nonexistent block-device %s (%ld)\n",
+			       "nonexistent block-device %s (%lu)\n",
 			       kdevname(bh->b_rdev), bh->b_rsector);
 			buffer_IO_error(bh);
 			break;
@@ -1331,6 +1359,16 @@ void superbh_end_io(struct buffer_head *superbh, int uptodate)
 	} while ((bh = next_bh));
 }
 
+static inline int bounce_initialised(void)
+{
+#ifdef CONFIG_HIGHMEM
+	extern int emergency_bounce_initialised;
+	return emergency_bounce_initialised;
+#else
+	return 0;
+#endif
+}
+
 /**
  * submit_bh_linked: submit a list of buffer_heads for I/O
  * @rw: whether to %READ or %WRITE, or maybe to %READA (read ahead)
@@ -1380,6 +1418,15 @@ queue_next:
 		goto punt;
 
 	max_size = q->superbh_queue;
+
+	/* If this queue may need bounce buffering, enforce a stricter
+	 * upper bound on the superbh size for bounce buffer deadlock
+	 * safety. */
+	if (q->bounce_pfn < blk_max_pfn && bounce_initialised() &&
+	    superbh_will_bounce(q->bounce_pfn, bh)) {
+		if (max_size > MAX_SUPERBH)
+			max_size = MAX_SUPERBH;
+	}
 
 	/*
 	 * doesn't support superbh queueing, punt
@@ -1750,6 +1797,7 @@ EXPORT_SYMBOL(blk_get_queue);
 EXPORT_SYMBOL(blk_cleanup_queue);
 EXPORT_SYMBOL(blk_queue_headactive);
 EXPORT_SYMBOL(blk_queue_superbh);
+EXPORT_SYMBOL(blk_queue_large_superbh);
 EXPORT_SYMBOL(blk_queue_make_request);
 EXPORT_SYMBOL_GPL(blk_start_queue_timer);
 EXPORT_SYMBOL(generic_make_request);

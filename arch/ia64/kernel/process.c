@@ -326,9 +326,13 @@ copy_thread (int nr, unsigned long clone_flags,
 	/* copy parts of thread_struct: */
 	p->thread.ksp = (unsigned long) child_stack - 16;
 
-	/* stop some PSR bits from being inherited: */
+	/* stop some PSR bits from being inherited.
+	 * the psr.pp bits must be cleared on fork but inherited on execve()
+	 * therefore we must specify them explicitely here and not include them in
+	 * IA64_PSR_BITS_TO_CLEAR. The psr.up bit is handled by perfmon.
+	 */
 	child_ptregs->cr_ipsr =  ((child_ptregs->cr_ipsr | IA64_PSR_BITS_TO_SET)
-				  & ~IA64_PSR_BITS_TO_CLEAR);
+			      & ~(IA64_PSR_BITS_TO_CLEAR | IA64_PSR_PP));
 
 	/*
 	 * NOTE: The calling convention considers all floating point registers in the high
@@ -703,10 +707,7 @@ machine_power_off (void)
 void
 ia64_freeze_cpu (struct unw_frame_info *info, void *arg)
 {
-	struct switch_stack **dst = arg;
-
 	current->thread.ksp = (__u64)info->sw - 16;
-	*dst = info->sw;
 	for (;;) __cli();
 }
 

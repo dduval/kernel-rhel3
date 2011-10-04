@@ -436,6 +436,9 @@ static int lvm_blocksizes[MAX_LV];
 static int lvm_hardsectsizes[MAX_LV];
 static int lvm_size[MAX_LV];
 
+/* varyio */
+static uchar lvm_blkdev_varyio[MAX_LV];
+
 static mempool_t *lvm_callback_mempool;
 
 static struct gendisk lvm_gendisk =
@@ -556,6 +559,7 @@ static void lvm_cleanup(void)
 	blk_size[MAJOR_NR] = NULL;
 	blksize_size[MAJOR_NR] = NULL;
 	hardsect_size[MAJOR_NR] = NULL;
+	blkdev_varyio[MAJOR_NR] = NULL;
 
 #ifdef LVM_HD_NAME
 	/* reference from linux/drivers/block/genhd.c */
@@ -2192,6 +2196,39 @@ static void __update_hardsectsize(lv_t *lv)
 	lvm_hardsectsizes[MINOR(lv->lv_dev)] = max_hardsectsize;
 }
 
+/* Check if all devices the LV maps support varyio. */
+static uchar __check_org_varyio(lv_t *lv)
+{
+	uint le;
+	
+	for (le = 0; le < lv->lv_allocated_le; le++) {
+		if (!get_blkdev_varyio(lv->lv_current_pe[le].dev))
+			return 0;
+	}
+
+	return 1;
+}
+
+static uchar __check_snap_varyio(lv_t *snap)
+{
+	uint e;
+
+	for (e = 0; e < snap->lv_remap_end; e++) {
+		if (!get_blkdev_varyio(snap->lv_block_exception[e].rdev_new))
+			return 0;
+	}
+
+	return 1;
+}
+
+static void __check_varyio(lv_t *lv)
+{
+	lvm_blkdev_varyio[MINOR(lv->lv_dev)] =
+		(lv->lv_access & LV_SNAPSHOT) ? __check_snap_varyio(lv) :
+					        __check_org_varyio(lv);
+
+}
+
 /*
  * character device support function logical volume create
  */
@@ -2287,6 +2324,7 @@ static int lvm_do_lv_create(int minor, char *lv_name, lv_t *lv)
 					vg_ptr->pv[p]->pe_allocated++;
 			}
 		}
+		__check_varyio(lv_ptr);
 	} else {
 		/* Get snapshot exception data and block list */
 		if (lvbe != NULL) {
@@ -2369,6 +2407,7 @@ static int lvm_do_lv_create(int minor, char *lv_name, lv_t *lv)
 					return -EINVAL;
 				}
 				init_waitqueue_head(&lv_ptr->lv_snapshot_wait);
+				__check_varyio(lv_ptr);
 			} else {
 				kfree(lv_ptr);
 				vg_ptr->lv[l] = NULL;
@@ -2731,6 +2770,7 @@ static int lvm_do_lv_extend_reduce(int minor, char *lv_name, lv_t *new_lv)
 		vg_ptr->pe_allocated -= old_lv->lv_allocated_snapshot_le;
 		vg_ptr->pe_allocated += new_lv->lv_allocated_le;
 		old_lv->lv_allocated_snapshot_le = new_lv->lv_allocated_le;
+		__check_varyio(old_lv);
 	} else {
 
 		vfree(old_lv->lv_current_pe);
@@ -2743,6 +2783,7 @@ static int lvm_do_lv_extend_reduce(int minor, char *lv_name, lv_t *new_lv)
 		lvm_gendisk.part[MINOR(old_lv->lv_dev)].nr_sects =
 			old_lv->lv_size;
 		lvm_size[MINOR(old_lv->lv_dev)] = old_lv->lv_size >> 1;
+		__check_varyio(old_lv);
 
 		if (old_lv->lv_access & LV_SNAPSHOT_ORG) {
 			lv_t *snap;
@@ -3036,11 +3077,13 @@ static void __init lvm_geninit(struct gendisk *lvm_gdisk)
 		lvm_gendisk.part[i].start_sect = -1;	/* avoid partition check */
 		lvm_size[i] = lvm_gendisk.part[i].nr_sects = 0;
 		lvm_blocksizes[i] = BLOCK_SIZE;
+		lvm_blkdev_varyio[i] = 0;
 	}
 
 	blk_size[MAJOR_NR] = lvm_size;
 	blksize_size[MAJOR_NR] = lvm_blocksizes;
 	hardsect_size[MAJOR_NR] = lvm_hardsectsizes;
+	blkdev_varyio[MAJOR_NR] = lvm_blkdev_varyio;
 
 	return;
 } /* lvm_gen_init() */

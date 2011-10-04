@@ -122,11 +122,11 @@ int sb_min_blocksize(struct super_block *sb, int size)
 
 static int blkdev_get_block(struct inode * inode, long iblock, struct buffer_head * bh, int create)
 {
-	if (iblock >= max_block(inode->i_rdev))
+	if ((unsigned long)iblock >= max_block(inode->i_rdev))
 		return -EIO;
 
 	bh->b_dev = inode->i_rdev;
-	bh->b_blocknr = iblock;
+	bh->b_blocknr = (unsigned long)iblock;
 	bh->b_state |= 1UL << BH_Mapped;
 	return 0;
 }

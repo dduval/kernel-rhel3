@@ -97,7 +97,8 @@ u64				ia64_mca_proc_state_dump[512];
 u64				ia64_mca_stack[1024] __attribute__((aligned(16)));
 u64				ia64_mca_stackframe[32];
 u64				ia64_mca_bspstore[1024];
-u64				ia64_init_stack[INIT_TASK_SIZE/8] __attribute__((aligned(16)));
+u64				ia64_init_stack[NR_CPUS*INIT_TASK_SIZE/8] __attribute__((aligned(16)));
+u64				ia64_init_stack_addr[NR_CPUS];
 u64				ia64_mca_serialize;
 
 /* In mca_asm.S */
@@ -432,6 +433,8 @@ fetch_min_state (pal_min_state_area_t *ms, struct pt_regs *pt, struct switch_sta
 int init_dump = 0;
 static spinlock_t init_dump_lock = SPIN_LOCK_UNLOCKED;
 static spinlock_t show_regs_lock = SPIN_LOCK_UNLOCKED;
+static spinlock_t show_stack_lock = SPIN_LOCK_UNLOCKED;
+extern void ia64_freeze_cpu(struct unw_frame_info *, void *arg);
 
 static void
 init_handler_platform (pal_min_state_area_t *ms,
@@ -464,12 +467,23 @@ init_handler_platform (pal_min_state_area_t *ms,
 	 */
 	printk("Delaying for 5 seconds...\n");
 	udelay(5*1000000);
+	spin_lock(&show_stack_lock);
 	show_min_state(ms);
 
 	printk("Backtrace of current task (pid %d, %s)\n", current->pid, current->comm);
 	fetch_min_state(ms, pt, sw);
 	unw_init_from_interruption(&info, current, pt, sw);
 	ia64_do_show_stack(&info, NULL);
+	spin_unlock(&show_stack_lock);
+
+	if (netdump_func || diskdump_func)
+		init_dump = 1;
+	if (init_dump) {
+		if (spin_trylock(&init_dump_lock))
+			try_crashdump(pt);
+		else
+			unw_init_running(ia64_freeze_cpu, NULL);
+	}
 
 #ifdef CONFIG_SMP
 	/* read_trylock() would be handy... */
@@ -1276,6 +1290,11 @@ ia64_mca_init(void)
 		       "(status %ld)\n", rc);
 		return;
 	}
+
+	/* Register stack for os init handler */
+	for(i = 0 ; i < NR_CPUS; i++)
+		ia64_init_stack_addr[i] =
+			(u64)&ia64_init_stack[i*INIT_TASK_SIZE/8];
 
 	IA64_MCA_DEBUG("%s: registered OS INIT handler with SAL\n", __FUNCTION__);
 

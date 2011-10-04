@@ -159,7 +159,8 @@ static int meminfo_read_proc(char *page, char **start, off_t off,
 	struct sysinfo i;
 	int len;
 	int pg_size ;
-	int committed;
+	unsigned long committed;
+	unsigned long allowed;
 
 /*
  * display in kilobytes.
@@ -170,6 +171,8 @@ static int meminfo_read_proc(char *page, char **start, off_t off,
 	si_swapinfo(&i);
 	pg_size = atomic_read(&page_cache_size) - i.bufferram ;
 	committed = atomic_read(&vm_committed_space);
+	allowed = (i.totalram * sysctl_overcommit_ratio / 100)
+		  + total_swap_pages;
 
 	len = sprintf(page, "        total:    used:    free:  shared: buffers:  cached:\n"
 		"Mem:  %8Lu %8Lu %8Lu %8Lu %8Lu %8Lu\n"
@@ -203,7 +206,8 @@ static int meminfo_read_proc(char *page, char **start, off_t off,
 		"LowFree:      %8lu kB\n"
 		"SwapTotal:    %8lu kB\n"
 		"SwapFree:     %8lu kB\n"
-		"Committed_AS: %8u kB\n",
+		"CommitLimit:  %8lu kB\n"
+		"Committed_AS: %8lu kB\n",
 		K(i.totalram),
 		K(i.freeram),
 		K(i.sharedram),
@@ -223,6 +227,7 @@ static int meminfo_read_proc(char *page, char **start, off_t off,
 		K(i.freeram-i.freehigh),
 		K(i.totalswap),
 		K(i.freeswap),
+		K(allowed),
 		K(committed));
 
 	len += hugetlb_report_meminfo(page + len);

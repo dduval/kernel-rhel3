@@ -148,7 +148,7 @@ audit_fileset_match(struct aud_file_object *obj, struct sysarg_data *tgt)
 #endif
 
 	/* See if the name matches */
-	if (path && !strcmp(obj->name, path)) {
+	if (path && !strncmp(obj->name, path, strnlen(obj->name, PATH_MAX))) {
 		match = 1;
 		goto out;
 	} else

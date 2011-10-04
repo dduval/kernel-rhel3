@@ -12,7 +12,7 @@ obj-            :=
 mod-subdirs     := cipe megarac ips_70015 cmpci_564 aep bcm \
 		   qla2200 qla2200_70003RH1 lpfc lpfc_703 \
 		   megaraid_2106 fusion_20505 fusion_20511 \
-		   aacraid_10102 iscsi_sfnet
+		   aacraid_10102 iscsi_sfnet 3w-xxxx_10200033
 
 O_TARGET := addon.o
 
@@ -23,6 +23,7 @@ export-objs     :=
 list-multi	:=
 
 
+subdir-$(CONFIG_BLK_DEV_3W_XXXX_RAID) += 3w-xxxx_10200033
 subdir-$(CONFIG_CIPE) += cipe
 subdir-$(CONFIG_MEGARAC) += megarac
 subdir-$(CONFIG_SCSI_IPS) += ips_70015

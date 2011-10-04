@@ -48,7 +48,7 @@
 #include <linux/mtio.h>
 #include <linux/cdrom.h>
 #include <linux/loop.h>
-#include <linux/auto_fs.h>
+#include <linux/auto_fs4.h>
 #include <linux/devfs_fs.h>
 #include <linux/tty.h>
 #include <linux/vt_kern.h>
@@ -1301,7 +1301,7 @@ static int sg_ioctl_trans(unsigned int fd, unsigned int cmd, unsigned long arg)
 			goto out;
 		}
 	} else {
-		if (sg_io64.dxfer_len > 4*PAGE_SIZE) {
+		if (sg_io64.dxfer_len > 8*PAGE_SIZE) {
 			err = -EINVAL;
 			goto out;
 		}
@@ -4247,6 +4247,11 @@ COMPATIBLE_IOCTL(AUTOFS_IOC_FAIL),
 COMPATIBLE_IOCTL(AUTOFS_IOC_CATATONIC),
 COMPATIBLE_IOCTL(AUTOFS_IOC_PROTOVER),
 COMPATIBLE_IOCTL(AUTOFS_IOC_EXPIRE),
+COMPATIBLE_IOCTL(AUTOFS_IOC_EXPIRE_MULTI),
+COMPATIBLE_IOCTL(AUTOFS_IOC_PROTOSUBVER),
+COMPATIBLE_IOCTL(AUTOFS_IOC_ASKREGHOST),
+COMPATIBLE_IOCTL(AUTOFS_IOC_TOGGLEREGHOST),
+COMPATIBLE_IOCTL(AUTOFS_IOC_ASKUMOUNT),
 /* DEVFS */
 COMPATIBLE_IOCTL(DEVFSDIOC_GET_PROTO_REV),
 COMPATIBLE_IOCTL(DEVFSDIOC_SET_EVENT_MASK),

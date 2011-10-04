@@ -62,16 +62,14 @@ int smp_num_cpus = 1;
 
 /* Number of siblings per CPU package */
 int smp_num_siblings = 1;
-int phys_proc_id[NR_CPUS]; /* Package ID of each logical CPU */
+/* Package ID of each logical CPU */
+u8 __initdata phys_proc_id[NR_CPUS] = { [0 ... NR_CPUS-1] = BAD_APICID };
 int cpu_sibling_map[NR_CPUS] __cacheline_aligned;
 
 static int test_ht;
 
 /* Bitmask of currently online CPUs */
 unsigned long cpu_online_map;
-
-/* which logical CPU number maps to which CPU (physical APIC ID) */
-volatile int x86_cpu_to_apicid[NR_CPUS];
 
 static volatile unsigned long cpu_callin_map;
 static volatile unsigned long cpu_callout_map;
@@ -171,6 +169,9 @@ void __init smp_store_cpu_info(int id)
 	*c = boot_cpu_data;
 	identify_cpu(c);
 }
+
+#undef Dprintk
+#define Dprintk	printk
 
 /*
  * Architecture specific routine called by the kernel just before init is
@@ -766,7 +767,8 @@ static int __init do_boot_cpu (int apicid)
 		}
 	}
 	if (send_status || accept_status || boot_status) {
-		x86_cpu_to_apicid[cpu] = -1;
+		x86_cpu_to_apicid[cpu] = BAD_APICID;
+		x86_cpu_to_log_apicid[cpu] = BAD_APICID;
 		cpucount--;
 	}
 
@@ -901,7 +903,6 @@ void __init smp_boot_cpus(void)
 		io_apic_irqs = 0;
 		cpu_online_map = phys_cpu_present_map = 1;
 		smp_num_cpus = 1;
-		apic_disabled = 1;
 		goto smp_done;
 	}
 
@@ -916,7 +917,6 @@ void __init smp_boot_cpus(void)
 		io_apic_irqs = 0;
 		cpu_online_map = phys_cpu_present_map = 1;
 		smp_num_cpus = 1;
-		apic_disabled = 1;
 		goto smp_done;
 	}
 
@@ -941,9 +941,9 @@ void __init smp_boot_cpus(void)
 		if (apicid == boot_cpu_id || (apicid == BAD_APICID))
 			continue;
 
-		if (!(phys_cpu_present_map & (1 << apicid)))
+		if (!(phys_cpu_present_map & (1u << apicid)))
 			continue;
-		if (((1<<apicid) & cpu_mask) == 0) 
+		if (((1u<<apicid) & cpu_mask) == 0)
 			continue;
 		if ((max_cpus >= 0) && (max_cpus <= cpucount+1))
 			continue;
@@ -953,8 +953,7 @@ void __init smp_boot_cpus(void)
 		/*
 		 * Make sure we unmap all failed CPUs
 		 */
-		if ((x86_cpu_to_apicid[cpu] == -1) && 
-				(phys_cpu_present_map & (1 << apicid))) {
+		if (cpu < 0) {
 			printk("phys CPU #%d not responding - cannot use it.\n",apicid);
 			continue;
 		} else if (cpu > maxcpu) 

@@ -19,7 +19,7 @@
 /*
  * Driver version 
  */
-#define QLA2100_VERSION      "7.01.01"
+#define QLA2100_VERSION      "7.01.01-RH1"
 
 #define QLA_DRIVER_MAJOR_VER	7
 #define QLA_DRIVER_MINOR_VER	1

@@ -1509,6 +1509,21 @@ prom_parse_cmd_line(char *line)
 #endif
 }
 
+static void __init prom_close_stdin(void)
+{
+	unsigned long offset = reloc_offset();
+	struct prom_t *_prom = PTRRELOC(&prom);
+	u32 val;
+
+	if ((long)call_prom(RELOC("getprop"), 4, 1, _prom->chosen,
+			RELOC("stdin"), &val,
+			sizeof(val)) <= 0)
+		return;
+
+	call_prom(RELOC("close"), 1, 0, val);
+}
+
+
 /*
  * We enter here early on, when the Open Firmware prom is still
  * handling exceptions and the MMU hash table for us.
@@ -1763,6 +1778,9 @@ prom_init(unsigned long r3, unsigned long r4, unsigned long pp,
 		prom_print(RELOC(" (translate ok) "));
 		phys = (unsigned long)_prom->args.rets[3];
 	}
+
+	/* in case stdin is USB and still active */
+	prom_close_stdin();
 
 	/* If OpenFirmware version >= 3, then use quiesce call */
 	if (_prom->version >= 3) {

@@ -198,7 +198,8 @@ int fat_search_long(struct inode *inode, const char *name, int name_len,
 	int uni_xlate = MSDOS_SB(sb)->options.unicode_xlate;
 	int utf8 = MSDOS_SB(sb)->options.utf8;
 	unsigned short opt_shortname = MSDOS_SB(sb)->options.shortname;
-	int ino, chl, i, j, last_u, res = 0;
+	int chl, i, j, last_u, res = 0;
+	u64 ino;
 	loff_t cpos = 0;
 
 	while(1) {
@@ -368,7 +369,8 @@ static int fat_readdirx(struct inode *inode, struct file *filp, void *dirent,
 	int utf8 = MSDOS_SB(sb)->options.utf8;
 	int nocase = MSDOS_SB(sb)->options.nocase;
 	unsigned short opt_shortname = MSDOS_SB(sb)->options.shortname;
-	int ino, inum, chi, chl, i, i2, j, last, last_u, dotoffset = 0;
+	int inum, chi, chl, i, i2, j, last, last_u, dotoffset = 0;
+	u64 ino;
 	loff_t cpos;
 
 	cpos = filp->f_pos;
@@ -693,7 +695,8 @@ int fat_dir_empty(struct inode *dir)
 	loff_t pos;
 	struct buffer_head *bh;
 	struct msdos_dir_entry *de;
-	int ino,result = 0;
+	int result = 0;
+	u64 ino;
 
 	pos = 0;
 	bh = NULL;
@@ -717,7 +720,7 @@ int fat_dir_empty(struct inode *dir)
 /* This assumes that size of cluster is above the 32*slots */
 
 int fat_add_entries(struct inode *dir,int slots, struct buffer_head **bh,
-		  struct msdos_dir_entry **de, int *ino)
+		  struct msdos_dir_entry **de, u64 *ino)
 {
 	struct super_block *sb = dir->i_sb;
 	loff_t offset, curr;

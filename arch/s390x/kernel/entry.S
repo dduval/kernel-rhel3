@@ -761,6 +761,10 @@ io_int_handler:
         SAVE_ALL __LC_IO_OLD_PSW,0
 	mc	0,0
         GET_CURRENT                    # load pointer to task_struct to R9
+	stck	__LC_INT_CLOCK
+	clc	__LC_INT_CLOCK(8),__LC_JIFFY_TIMER
+	jhe	io_handle_tick
+io_call_handler:
         la      %r2,SP_PTREGS(%r15)    # address of register-save area
 	llgh    %r3,__LC_SUBCHANNEL_NR # load subchannel number
         llgf    %r4,__LC_IO_INT_PARM   # load interuption parm
@@ -818,6 +822,14 @@ io_signal_return:
 	larl    %r14,io_leave
         jg      do_signal           # return point is io_leave
 
+#
+# account tick
+#
+io_handle_tick:
+	la	%r2,SP_PTREGS(%r15)    # address of register-save area
+	larl	%r14,io_call_handler
+	jg	account_ticks
+
 /*
  * External interrupt handler routine
  */
@@ -827,6 +839,10 @@ ext_int_handler:
 	mc	0,0
         GET_CURRENT                    # load pointer to task_struct to R9
 	llgh	%r6,__LC_EXT_INT_CODE  # get interruption code
+	stck	__LC_INT_CLOCK
+	clc	__LC_INT_CLOCK(8),__LC_JIFFY_TIMER
+	jhe	ext_handle_tick
+ext_call_handler:
 	lgr	%r1,%r6		       # calculate index = code & 0xff
 	nill	%r1,0xff
 	sll	%r1,3
@@ -848,6 +864,14 @@ ext_int_next:
 	ltgr	%r7,%r7
 	jnz	ext_int_loop
 	j	io_return
+
+#
+# account tick
+#
+ext_handle_tick:
+	la	%r2,SP_PTREGS(%r15)    # address of register-save area
+	larl	%r14,ext_call_handler
+	jg	account_ticks
 
 /*
  * Machine check handler routines

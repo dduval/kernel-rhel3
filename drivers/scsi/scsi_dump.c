@@ -63,8 +63,6 @@
 /* blocks to 512byte sectors */
 #define BLOCK_SECTOR(s)	((s) << (DUMP_BLOCK_SHIFT - 9))
 
-#define TEMPLATE_EXT(host)	container_of((host)->hostt, Scsi_Host_Template_dump, hostt)
-
 
 static int quiesce_ok = 0;
 static Scsi_Cmnd scsi_dump_cmnd;
@@ -78,6 +76,17 @@ static void rw_intr(Scsi_Cmnd * scmd)
 
 static void eh_timeout(unsigned long data)
 {
+}
+
+static struct scsi_dump_ops *get_dump_ops(Scsi_Host_Template *hostt)
+{
+	Scsi_Host_Template_dump *hostt_dump = (Scsi_Host_Template_dump *)hostt;
+	struct scsi_dump_ops *ops;
+
+	if (hostt->disk_dump)
+		return hostt_dump->dump_ops;
+
+	return scsi_dump_find_template(hostt);
 }
 
 /*
@@ -288,8 +297,10 @@ static int send_command(Scsi_Cmnd *scmd)
 {
 	struct Scsi_Host *host = scmd->host;
 	Scsi_Device *sdev = scmd->device;
-	Scsi_Host_Template_dump *hostt = (Scsi_Host_Template_dump *)host->hostt;
+	struct scsi_dump_ops *dump_ops = get_dump_ops(host->hostt);
 	int ret;
+
+	BUG_ON(!dump_ops);
 
 	do {
 		if (!sdev->online) {
@@ -306,7 +317,7 @@ static int send_command(Scsi_Cmnd *scmd)
 		spin_unlock(host->host_lock);
 
 		while (scmd->done != NULL) {
-			hostt->dump_ops->poll(scmd->device);
+			dump_ops->poll(scmd->device);
 			udelay(100);
 			diskdump_update();
 		}
@@ -372,10 +383,11 @@ scsi_dump_sanity_check(struct disk_dump_device *dump_device)
 {
 	Scsi_Device *sdev = dump_device->device;
 	struct Scsi_Host *host = sdev->host;
-	Scsi_Host_Template_dump *hostt;
-	hostt = (Scsi_Host_Template_dump *)host->hostt;
+	struct scsi_dump_ops *dump_ops = get_dump_ops(host->hostt);
 	int adapter_sanity = 0;
 	int sanity = 0;
+
+	BUG_ON(!dump_ops);
 
 	if (!check_crc_module()) {
 		Err("checksum error. scsi dump module may be compromised.");
@@ -393,8 +405,8 @@ scsi_dump_sanity_check(struct disk_dump_device *dump_device)
 		return -EIO;
 	}
 
-	if (hostt->dump_ops->sanity_check) {
-		adapter_sanity = hostt->dump_ops->sanity_check(sdev);
+	if (dump_ops->sanity_check) {
+		adapter_sanity = dump_ops->sanity_check(sdev);
 		if (adapter_sanity < 0) {
 			Warn("adapter status is not sane");
 			return adapter_sanity;
@@ -482,19 +494,21 @@ scsi_dump_quiesce(struct disk_dump_device *dump_device)
 {
 	Scsi_Device *sdev = dump_device->device;
 	struct Scsi_Host *host = sdev->host;
-	Scsi_Host_Template_dump *hostt = TEMPLATE_EXT(host);
+	struct scsi_dump_ops *dump_ops = get_dump_ops(host->hostt);
 	int ret;
 	int enable_cache;
 
-	enable_cache = !hostt->dump_ops->no_write_cache_enable;
+	BUG_ON(!dump_ops);
 
-	if (hostt->dump_ops->quiesce) {
-		ret = hostt->dump_ops->quiesce(sdev);
+	enable_cache = !dump_ops->no_write_cache_enable;
+
+	if (dump_ops->quiesce) {
+		ret = dump_ops->quiesce(sdev);
 		if (ret < 0)
 			return ret;
 	}
 
-	diskdump_register_poll(sdev, (void (*)(void *))hostt->dump_ops->poll);
+	diskdump_register_poll(sdev, (void (*)(void *))dump_ops->poll);
 
 	Dbg("do bus reset");
 	if ((ret = scsi_dump_reset(sdev)) < 0)
@@ -534,19 +548,21 @@ scsi_dump_shutdown(struct disk_dump_device *dump_device)
 {
 	Scsi_Device *sdev = dump_device->device;
 	struct Scsi_Host *host = sdev->host;
-	Scsi_Host_Template_dump *hostt = TEMPLATE_EXT(host);
+	struct scsi_dump_ops *dump_ops = get_dump_ops(host->hostt);
 	int ret;
 	int enable_cache;
 
-	enable_cache = !hostt->dump_ops->no_write_cache_enable;
+	BUG_ON(!dump_ops);
+
+	enable_cache = !dump_ops->no_write_cache_enable;
 
 	if (enable_cache && sdev->scsi_level >= SCSI_2) {
 		init_sync_command(sdev, &scsi_dump_cmnd);
 		send_command(&scsi_dump_cmnd);
 	}
 
-	if (hostt->dump_ops->shutdown)
-		return hostt->dump_ops->shutdown(sdev);
+	if (dump_ops->shutdown)
+		return dump_ops->shutdown(sdev);
 
 	return 0;
 }
@@ -554,13 +570,11 @@ scsi_dump_shutdown(struct disk_dump_device *dump_device)
 static void *scsi_dump_probe(kdev_t dev)
 {
 	Scsi_Device *sdev;
-	Scsi_Host_Template_dump *hostt;
 
 	sdev = sd_find_scsi_device(dev);
 	if (sdev == NULL)
 		return NULL;
-	hostt = TEMPLATE_EXT(sdev->host);
-	if (!sdev->host->hostt->disk_dump || !hostt->dump_ops)
+	if (!get_dump_ops(sdev->host->hostt))
 		return NULL;
 
 	return sdev;
@@ -577,9 +591,8 @@ struct disk_dump_device_ops scsi_dump_device_ops = {
 static int scsi_dump_add_device(struct disk_dump_device *dump_device)
 {
 	Scsi_Device *sdev = dump_device->device;
-	Scsi_Host_Template_dump *hostt = TEMPLATE_EXT(sdev->host);
 
-	if (!sdev->host->hostt->disk_dump || !hostt->dump_ops)
+	if (!get_dump_ops(sdev->host->hostt))
 		return -ENOTSUPP;
 
 	if (sdev->host->hostt->module)

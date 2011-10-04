@@ -290,6 +290,8 @@ struct thread_struct {
 	__u64 old_iob;			/* old IOBase value */
 # define INIT_THREAD_IA32	0, 0, 0x17800000037fULL, 0, 0, 0, 0, 0, 0,
 #else
+	__u64 csd;
+	__u64 ssd;
 # define INIT_THREAD_IA32
 #endif /* CONFIG_IA32_SUPPORT */
 #ifdef CONFIG_PERFMON
@@ -326,7 +328,7 @@ struct thread_struct {
 
 #define start_thread(regs,new_ip,new_sp) do {							\
 	set_fs(USER_DS);									\
-	regs->cr_ipsr = ((regs->cr_ipsr | (IA64_PSR_BITS_TO_SET | IA64_PSR_CPL | IA64_PSR_SP))	\
+	regs->cr_ipsr = ((regs->cr_ipsr | (IA64_PSR_BITS_TO_SET | IA64_PSR_CPL))		\
 			 & ~(IA64_PSR_BITS_TO_CLEAR | IA64_PSR_RI | IA64_PSR_IS));		\
 	regs->cr_iip = new_ip;									\
 	regs->ar_rsc = 0xf;		/* eager mode, privilege level 3 */			\

@@ -1336,9 +1336,18 @@ int do_coredump(long signr, int exit_code, struct pt_regs * regs)
 	}
 	mm->dumpable = 0;
 	init_completion(&mm->core_done);
+	spin_lock_irq(&current->sighand->siglock);
 	current->signal->group_exit = 1;
 	current->signal->group_exit_code = exit_code;
+	spin_unlock_irq(&current->sighand->siglock);
 	coredump_wait(mm);
+
+	/*
+	 * Clear any false indication of pending signals that might
+	 * be seen by the filesystem code called to write the core file.
+	 */
+	current->signal->group_stop_count = 0;
+	current->sigpending = 0;
 
 	if (current->rlim[RLIMIT_CORE].rlim_cur < binfmt->min_coredump)
 		goto fail_unlock;

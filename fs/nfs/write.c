@@ -1078,6 +1078,9 @@ nfs_writeback_done(struct rpc_task *task)
 			SetPageError(page);
 			if (req->wb_file)
 				req->wb_file->f_error = task->tk_status;
+			if (task->tk_status == -ESTALE)
+				NFS_FLAGS(inode) |= NFS_INO_STALE;
+
 			nfs_inode_remove_request(req);
 			dprintk(", error = %d\n", task->tk_status);
 			goto next;
@@ -1228,6 +1231,9 @@ nfs_commit_done(struct rpc_task *task)
 		if (task->tk_status < 0) {
 			if (req->wb_file)
 				req->wb_file->f_error = task->tk_status;
+			if (task->tk_status == -ESTALE)
+				NFS_FLAGS(inode) |= NFS_INO_STALE;
+
 			nfs_inode_remove_request(req);
 			dprintk(", error = %d\n", task->tk_status);
 			goto next;

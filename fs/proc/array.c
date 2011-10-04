@@ -159,7 +159,7 @@ static inline char * task_state(struct task_struct *p, char *buffer)
 		"Uid:\t%d\t%d\t%d\t%d\n"
 		"Gid:\t%d\t%d\t%d\t%d\n",
 		get_task_state(p), p->tgid,
-		p->pid, p->pid ? p->real_parent->pid : 0, 0,
+		p->pid, p->pid ? p->group_leader->real_parent->tgid : 0, 0,
 		p->uid, p->euid, p->suid, p->fsuid,
 		p->gid, p->egid, p->sgid, p->fsgid);
 	read_unlock(&tasklist_lock);	
@@ -357,7 +357,7 @@ int proc_pid_stat(struct task_struct *task, char * buffer)
 	nice = task_nice(task);
 
 	read_lock(&tasklist_lock);
-	ppid = task->pid ? task->real_parent->pid : 0;
+	ppid = task->pid ? task->group_leader->real_parent->tgid : 0;
 	read_unlock(&tasklist_lock);
 	res = sprintf(buffer,"%d (%s) %c %d %d %d %d %d %lu %lu \
 %lu %lu %lu %lu %lu %ld %ld %ld %ld %ld %ld %lu %lu %ld %lu %lu %lu %lu %lu \

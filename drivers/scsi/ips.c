@@ -286,7 +286,8 @@ static Scsi_Host_Template ips_driver_template = {
 	.cmd_per_lun		= 3,
 	.use_clustering		= ENABLE_CLUSTERING,
 	.use_new_eh_code	= 1,
-	.vary_io		= 1,
+/* Testing has shown that vary i/o causes adapter hangs. */
+/* 	.vary_io		= 1,			 */
 	.highmem_io		= 1,   
 };
 

@@ -125,14 +125,14 @@ static int linear_make_request (mddev_t *mddev,
         linear_conf_t *conf = mddev_to_conf(mddev);
         struct linear_hash *hash;
         dev_info_t *tmp_dev;
-        long block;
+        unsigned long block;
 
 	block = bh->b_rsector >> 1;
 	hash = conf->hash_table + (block / conf->smallest->size);
   
 	if (block >= (hash->dev0->size + hash->dev0->offset)) {
 		if (!hash->dev1) {
-			printk ("linear_make_request : hash->dev1==NULL for block %ld\n",
+			printk ("linear_make_request : hash->dev1==NULL for block %lu\n",
 						block);
 			buffer_IO_error(bh);
 			return 0;
@@ -143,7 +143,7 @@ static int linear_make_request (mddev_t *mddev,
     
 	if (block >= (tmp_dev->size + tmp_dev->offset)
 				|| block < tmp_dev->offset) {
-		printk ("linear_make_request: Block %ld out of bounds on dev %s size %ld offset %ld\n", block, kdevname(tmp_dev->dev), tmp_dev->size, tmp_dev->offset);
+		printk ("linear_make_request: Block %lu out of bounds on dev %s size %lu offset %lu\n", block, kdevname(tmp_dev->dev), tmp_dev->size, tmp_dev->offset);
 		buffer_IO_error(bh);
 		return 0;
 	}

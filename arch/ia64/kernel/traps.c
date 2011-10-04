@@ -117,6 +117,8 @@ die (const char *str, struct pt_regs *regs, long err)
 		printk(KERN_ERR "Recursive die() failure, output suppressed\n");
 
 	try_crashdump(regs);
+	if (panic_on_oops)
+		panic("Fatal exception");
 	bust_spinlocks(0);
 	die.lock_owner = -1;
 	spin_unlock_irq(&die.lock);

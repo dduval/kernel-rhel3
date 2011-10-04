@@ -33,6 +33,7 @@
 #include <asm/smp.h>
 #include <asm/desc.h>
 #include <asm/acpi.h>
+#include <asm/mach_apic.h>
 
 #undef APIC_LOCKUP_DEBUG
 
@@ -627,8 +628,8 @@ void __init setup_IO_APIC_irqs(void)
 		 */
 		memset(&entry,0,sizeof(entry));
 
-		entry.delivery_mode = dest_LowestPrio;
-		entry.dest_mode = INT_DELIVERY_MODE;
+		entry.delivery_mode = INT_DELIVERY_MODE;
+		entry.dest_mode = INT_DEST_MODE;
 		entry.mask = 0;				/* enable IRQ */
 		entry.dest.logical.logical_dest = TARGET_CPUS;
 
@@ -702,10 +703,10 @@ void __init setup_ExtINT_IRQ0_pin(unsigned int pin, int vector)
 	 * We use logical delivery to get the timer IRQ
 	 * to the first CPU.
 	 */
-	entry.dest_mode = INT_DELIVERY_MODE;
+	entry.dest_mode = INT_DEST_MODE;
 	entry.mask = 0;					/* unmask IRQ now */
 	entry.dest.logical.logical_dest = TARGET_CPUS;
-	entry.delivery_mode = dest_LowestPrio;
+	entry.delivery_mode = INT_DELIVERY_MODE;
 	entry.polarity = 0;
 	entry.trigger = 0;
 	entry.vector = vector;
@@ -1041,7 +1042,6 @@ void disable_IO_APIC(void)
 static void __init setup_ioapic_ids_from_mpc (void)
 {
 	struct IO_APIC_reg_00 reg_00;
-	unsigned long phys_id_present_map = phys_cpu_present_map;
 	int apic;
 	int i;
 	unsigned char old_id;
@@ -1063,35 +1063,7 @@ static void __init setup_ioapic_ids_from_mpc (void)
 		
 		old_id = mp_ioapics[apic].mpc_apicid;
 
-		if (mp_ioapics[apic].mpc_apicid >= 0xf) {
-			printk(KERN_ERR "BIOS bug, IO-APIC#%d ID is %d in the MPC table!...\n",
-				apic, mp_ioapics[apic].mpc_apicid);
-			printk(KERN_ERR "... fixing up to %d. (tell your hw vendor)\n",
-				reg_00.ID);
-			mp_ioapics[apic].mpc_apicid = reg_00.ID;
-		}
-
-		/*
-		 * Sanity check, is the ID really free? Every APIC in a
-		 * system must have a unique ID or we get lots of nice
-		 * 'stuck on smp_invalidate_needed IPI wait' messages.
-	 	 */
-		if (phys_id_present_map & (1 << mp_ioapics[apic].mpc_apicid)) {
-			printk(KERN_ERR "BIOS bug, IO-APIC#%d ID %d is already used!...\n",
-				apic, mp_ioapics[apic].mpc_apicid);
-			for (i = 0; i < 0xf; i++)
-				if (!(phys_id_present_map & (1 << i)))
-					break;
-			if (i >= 0xf)
-				panic("Max APIC ID exceeded!\n");
-			printk(KERN_ERR "... fixing up to %d. (tell your hw vendor)\n",
-				i);
-			phys_id_present_map |= 1 << i;
-			mp_ioapics[apic].mpc_apicid = i;
-		} else {
-			printk("Setting %d in the phys_id_present_map\n", mp_ioapics[apic].mpc_apicid);
-			phys_id_present_map |= 1 << mp_ioapics[apic].mpc_apicid;
-		}
+		printk(KERN_INFO "Using IO-APIC %d\n", mp_ioapics[apic].mpc_apicid);
 
 
 		/*
@@ -1314,10 +1286,12 @@ static void set_ioapic_affinity (unsigned int irq, unsigned long mask)
 	if (no_valid_irqaffinity)
 		return;
 
+	mask = cpu_mask_to_apicid(mask);
+
 	/*
-	 * Only the first 8 bits are valid.
+	 * Only the high 8 bits are valid.
 	 */
-	mask = mask << 24;
+	mask = SET_APIC_LOGICAL_ID(mask);
 
 	spin_lock_irqsave(&ioapic_lock, flags);
 	__DO_ACTION(1, = mask, )
@@ -1670,7 +1644,7 @@ void __init setup_IO_APIC(void)
 
 #ifdef CONFIG_ACPI_BOOT
 
-#define IO_APIC_MAX_ID		15
+#define IO_APIC_MAX_ID		0xFE
 
 int __init io_apic_get_unique_id (int ioapic, int apic_id)
 {
@@ -1787,8 +1761,8 @@ int io_apic_set_pci_routing (int ioapic, int pin, int irq, int edge_level, int a
 
 	memset(&entry,0,sizeof(entry));
 
-	entry.delivery_mode = dest_LowestPrio;
-	entry.dest_mode = INT_DELIVERY_MODE;
+	entry.delivery_mode = INT_DELIVERY_MODE;
+	entry.dest_mode = INT_DEST_MODE;
 	entry.dest.logical.logical_dest = TARGET_CPUS;
 	entry.mask = 1;					 /* Disabled (masked) */
 	entry.trigger = edge_level;

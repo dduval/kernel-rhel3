@@ -1018,6 +1018,11 @@ void show_free_areas_core(pg_data_t *pgdat)
 extern int slabpages;
 extern int nr_threads;
 extern atomic_t lowmem_pagetables, highmem_pagetables;
+#ifdef CONFIG_HIGHMEM
+extern atomic_t bouncepages;
+extern int nr_emergency_pages;
+#endif
+
 void show_free_areas(void)
 {
 	show_free_areas_core(pgdat_list);
@@ -1026,6 +1031,10 @@ void show_free_areas(void)
 	printk("%d lowmem pagetables, %d highmem pagetables\n", 
 		atomic_read(&lowmem_pagetables),
 		atomic_read(&highmem_pagetables));
+#ifdef CONFIG_HIGHMEM
+	printk("%d bounce buffer pages, %d are on the emergency list\n",
+		atomic_read(&bouncepages), nr_emergency_pages);
+#endif
 }
 
 /*

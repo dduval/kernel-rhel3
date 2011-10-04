@@ -180,7 +180,7 @@ struct vfat_slot_info {
 	int total_slots;	       /* total slots (long and short) */
 	loff_t longname_offset;	       /* dir offset for longname start */
 	loff_t shortname_offset;       /* dir offset for shortname start */
-	int ino;		       /* ino for the file */
+	u64 ino;		       /* ino for the file */
 };
 
 /* Determine whether this FS has kB-aligned data. */
@@ -264,7 +264,7 @@ extern int fat_dir_ioctl(struct inode * inode, struct file * filp,
 			 unsigned int cmd, unsigned long arg);
 extern int fat_dir_empty(struct inode *dir);
 extern int fat_add_entries(struct inode *dir, int slots, struct buffer_head **bh,
-			   struct msdos_dir_entry **de, int *ino);
+			   struct msdos_dir_entry **de, u64 *ino);
 extern int fat_new_dir(struct inode *dir, struct inode *parent, int is_vfat);
 
 /* fat/file.c */
@@ -280,11 +280,11 @@ extern void fat_truncate(struct inode *inode);
 
 /* fat/inode.c */
 extern void fat_hash_init(void);
-extern void fat_attach(struct inode *inode, int i_pos);
+extern void fat_attach(struct inode *inode, u64 i_pos);
 extern void fat_detach(struct inode *inode);
-extern struct inode *fat_iget(struct super_block *sb, int i_pos);
+extern struct inode *fat_iget(struct super_block *sb, u64 i_pos);
 extern struct inode *fat_build_inode(struct super_block *sb,
-				     struct msdos_dir_entry *de, int ino, int *res);
+				     struct msdos_dir_entry *de, u64 ino, int *res);
 extern void fat_delete_inode(struct inode *inode);
 extern void fat_clear_inode(struct inode *inode);
 extern void fat_put_super(struct super_block *sb);
@@ -307,10 +307,10 @@ extern int date_dos2unix(unsigned short time, unsigned short date);
 extern void fat_date_unix2dos(int unix_date, unsigned short *time,
 			      unsigned short *date);
 extern int fat__get_entry(struct inode *dir, loff_t *pos, struct buffer_head **bh,
-			  struct msdos_dir_entry **de, int *ino);
+			  struct msdos_dir_entry **de, u64 *ino);
 static __inline__ int fat_get_entry(struct inode *dir, loff_t *pos,
 				    struct buffer_head **bh,
-				    struct msdos_dir_entry **de, int *ino)
+				    struct msdos_dir_entry **de, u64 *ino)
 {
 	/* Fast stuff first */
 	if (*bh && *de &&
@@ -325,7 +325,7 @@ static __inline__ int fat_get_entry(struct inode *dir, loff_t *pos,
 extern int fat_subdirs(struct inode *dir);
 extern int fat_scan(struct inode *dir, const char *name,
 		    struct buffer_head **res_bh,
-		    struct msdos_dir_entry **res_de, int *ino);
+		    struct msdos_dir_entry **res_de, u64 *ino);
 
 /* msdos/namei.c  - these are for Umsdos */
 extern void msdos_put_super(struct super_block *sb);

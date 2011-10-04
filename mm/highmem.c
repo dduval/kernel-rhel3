@@ -208,6 +208,8 @@ static LIST_HEAD(emergency_pages);
 int nr_emergency_bhs;
 static LIST_HEAD(emergency_bhs);
 
+atomic_t bouncepages = ATOMIC_INIT(0);
+
 /*
  * Simple bounce buffer support for highmem pages.
  * This will be moved to the block layer in 2.5.
@@ -253,9 +255,10 @@ static inline void bounce_end_io (struct buffer_head *bh, int uptodate)
 	page = bh->b_page;
 
 	spin_lock_irqsave(&emergency_lock, flags);
-	if (nr_emergency_pages >= POOL_SIZE)
+	if (nr_emergency_pages >= POOL_SIZE) {
 		__free_page(page);
-	else {
+		atomic_dec(&bouncepages);
+	} else {
 		/*
 		 * We are abusing page->list to manage
 		 * the highmem emergency pool:
@@ -280,6 +283,8 @@ static inline void bounce_end_io (struct buffer_head *bh, int uptodate)
 	spin_unlock_irqrestore(&emergency_lock, flags);
 }
 
+int emergency_bounce_initialised;
+
 static __init int init_emergency_pool(void)
 {
 	struct sysinfo i;
@@ -288,6 +293,7 @@ static __init int init_emergency_pool(void)
         
         if (!i.totalhigh)
         	return 0;
+	emergency_bounce_initialised = 1;
 
 	spin_lock_irq(&emergency_lock);
 	while (nr_emergency_pages < POOL_SIZE) {
@@ -296,6 +302,7 @@ static __init int init_emergency_pool(void)
 			printk("couldn't refill highmem emergency pages");
 			break;
 		}
+		atomic_inc(&bouncepages);
 		list_add(&page->list, &emergency_pages);
 		nr_emergency_pages++;
 	}
@@ -337,8 +344,10 @@ struct page *alloc_bounce_page (void)
 	struct page *page;
 
 	page = alloc_page(GFP_ATOMIC);
-	if (page)
+	if (page) {
+		atomic_inc(&bouncepages);
 		return page;
+	}
 	/*
 	 * No luck. First, kick the VM so it doesn't idle around while
 	 * we are using up our emergency rations.
@@ -469,6 +478,17 @@ struct buffer_head * create_bounce(int rw, struct buffer_head * bh_orig)
 
 static int superbh_users;
 static DECLARE_WAIT_QUEUE_HEAD(superbh_wait);
+
+int superbh_will_bounce(unsigned long pfn, struct buffer_head *bh)
+{
+	bh = superbh_bh(bh);
+	do {
+		if (bounce_page(bh->b_page, pfn))
+			return 1;
+	} while ((bh = bh->b_reqnext) != NULL);
+	return 0;
+}
+
 
 static struct buffer_head *
 superbh_bounce(unsigned long pfn, int rw, struct buffer_head *bh)

@@ -68,12 +68,27 @@
 #if (LINUX_VERSION_CODE >= 0x020400) || defined(HOSTS_C) || defined(MODULE)
 
 #include <scsi/scsicam.h>
+#include <linux/diskdumplib.h>
+
+/******************************** Disk dump ***********************************/
+#if defined(CONFIG_DISKDUMP) || defined(CONFIG_DISKDUMP_MODULE)
+#undef  add_timer
+#define add_timer	diskdump_add_timer
+#undef  del_timer_sync
+#define del_timer_sync	diskdump_del_timer
+#undef  del_timer
+#define del_timer	diskdump_del_timer
+#undef  mod_timer
+#define mod_timer	diskdump_mod_timer
+#endif
 
 int sym53c8xx_abort(Scsi_Cmnd *);
 int sym53c8xx_detect(Scsi_Host_Template *tpnt);
 const char *sym53c8xx_info(struct Scsi_Host *host);
 int sym53c8xx_queue_command(Scsi_Cmnd *, void (*done)(Scsi_Cmnd *));
 int sym53c8xx_reset(Scsi_Cmnd *, unsigned int);
+static int sym53c8xx_sanity_check_handler(struct scsi_device *sd);
+static void sym53c8xx_poll_handler(struct scsi_device *sd);
 
 #ifdef MODULE
 int sym53c8xx_release(struct Scsi_Host *);
@@ -84,7 +99,7 @@ int sym53c8xx_release(struct Scsi_Host *);
 
 #if	LINUX_VERSION_CODE >= LinuxVersionCode(2,1,75)
 
-#define SYM53C8XX {     name:           "",			\
+#define _SYM53C8XX	name:           "",			\
 			detect:         sym53c8xx_detect,	\
 			release:        sym53c8xx_release,	\
 			info:           sym53c8xx_info, 	\
@@ -98,20 +113,32 @@ int sym53c8xx_release(struct Scsi_Host *);
 			cmd_per_lun:    SCSI_NCR_CMD_PER_LUN,	\
 			max_sectors:    MAX_SEGMENTS*8,		\
 			use_clustering: DISABLE_CLUSTERING,	\
-			highmem_io:	1}
+			highmem_io:	1
 
 #else
 
-#define SYM53C8XX {	NULL, NULL, NULL, NULL,				\
+#define _SYM53C8XX 	NULL, NULL, NULL, NULL,				\
 			NULL,			sym53c8xx_detect,	\
 			sym53c8xx_release,	sym53c8xx_info,	NULL,	\
 			sym53c8xx_queue_command,sym53c8xx_abort,	\
 			sym53c8xx_reset, NULL,	scsicam_bios_param,	\
 			SCSI_NCR_CAN_QUEUE,	7,			\
 			SCSI_NCR_SG_TABLESIZE,	SCSI_NCR_CMD_PER_LUN,	\
-			0,	0,	DISABLE_CLUSTERING} 
+			0,	0,	DISABLE_CLUSTERING 
  
 #endif /* LINUX_VERSION_CODE */
+
+#if defined(CONFIG_DISKDUMP) || defined(CONFIG_DISKDUMP_MODULE)
+#define SYM53C8XX {							\
+	.hostt = {							\
+		_SYM53C8XX,						\
+		.disk_dump		= 1				\
+	},								\
+	.dump_ops			= &sym53c8xx_dump_ops		\
+}
+#else
+#define SYM53C8XX { _SYM53C8XX }
+#endif
 
 #endif /* defined(HOSTS_C) || defined(MODULE) */ 
 

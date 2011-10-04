@@ -43,4 +43,21 @@ typedef struct SHT_dump {
 	struct scsi_dump_ops *dump_ops;
 } Scsi_Host_Template_dump;
 
+
+extern struct scsi_dump_ops *scsi_dump_find_template(Scsi_Host_Template *);
+#if defined(CONFIG_SCSI_DUMP) || defined(CONFIG_SCSI_DUMP_MODULE)
+extern int scsi_dump_register(Scsi_Host_Template *, struct scsi_dump_ops *);
+extern int scsi_dump_unregister(Scsi_Host_Template *);
+#else
+static inline int scsi_dump_register(Scsi_Host_Template *hostt,
+				     struct scsi_dump_ops *dump_ops)
+{
+	return 0;
+}
+static inline int scsi_dump_unregister(Scsi_Host_Template *hostt)
+{
+	return 0;
+}
+#endif
+
 #endif /* _SCSI_DUMP_H */

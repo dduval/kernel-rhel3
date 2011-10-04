@@ -478,10 +478,6 @@ acpi_boot_init (char * cmdline)
                printk(KERN_NOTICE PREFIX "BIOS passes blacklist\n");
 
 
-	extern int apic_disabled;
-	if (apic_disabled)
-		return 0;
-
 #ifdef CONFIG_X86_LOCAL_APIC
 
 	/* 

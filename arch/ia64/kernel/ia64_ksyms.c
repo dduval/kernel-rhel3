@@ -88,6 +88,7 @@ EXPORT_SYMBOL(smp_flush_tlb_all);
 EXPORT_SYMBOL(synchronize_irq);
 
 #include <asm/smp.h>
+EXPORT_SYMBOL(dump_smp_call_function);
 EXPORT_SYMBOL(smp_call_function);
 EXPORT_SYMBOL(smp_call_function_single);
 EXPORT_SYMBOL(cpu_online_map);
@@ -191,10 +192,18 @@ extern void ia64_do_copy_regs (struct unw_frame_info *info, void *arg);
 EXPORT_SYMBOL(ia64_do_copy_regs);
 extern void ia64_freeze_cpu (struct unw_frame_info *info, void *arg);
 EXPORT_SYMBOL(ia64_freeze_cpu);
+extern void ia64_start_dump(struct unw_frame_info *, void *arg);
+EXPORT_SYMBOL(ia64_start_dump);
 
 extern int page_is_ram (unsigned long pagenr);
 EXPORT_SYMBOL(page_is_ram);
 EXPORT_SYMBOL(unw_init_running);
+extern unsigned long next_ram_page(unsigned long);
+EXPORT_SYMBOL_GPL(next_ram_page);
 
 extern int init_dump;
 EXPORT_SYMBOL(init_dump);
+
+EXPORT_SYMBOL_GPL(show_mem);
+EXPORT_SYMBOL_GPL(show_state);
+EXPORT_SYMBOL_GPL(show_regs);

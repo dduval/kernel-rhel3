@@ -27,6 +27,8 @@
     82801BA		2443           
     82801CA/CAM		2483           
     82801DB		24C3   (HW PEC supported, 32 byte buffer not supported)
+    ICH6		266a
+    ICH7		27da
 
     This driver supports several versions of Intel's I/O Controller Hubs (ICH).
     For SMBus support, they are similar to the PIIX4 and are part
@@ -70,12 +72,24 @@ MODULE_LICENSE("GPL");
 #endif
 #define PCI_DEVICE_ID_INTEL_82801CA_SMBUS	0x2483
 #define PCI_DEVICE_ID_INTEL_82801DB_SMBUS	0x24C3
+#ifndef PCI_DEVICE_ID_INTEL_82801EB_SMBUS
+#define PCI_DEVICE_ID_INTEL_82801EB_SMBUS	0x24D3
+#endif
+#ifndef PCI_DEVICE_ID_INTEL_ICH6_16
+#define PCI_DEVICE_ID_INTEL_ICH6_16		0x266a
+#endif
+#ifndef PCI_DEVICE_ID_INTEL_ICH7_17
+#define PCI_DEVICE_ID_INTEL_ICH6_17		0x27da
+#endif
 
 static int supported[] = {PCI_DEVICE_ID_INTEL_82801AA_3,
                           PCI_DEVICE_ID_INTEL_82801AB_3,
                           PCI_DEVICE_ID_INTEL_82801BA_2,
 			  PCI_DEVICE_ID_INTEL_82801CA_SMBUS,
 			  PCI_DEVICE_ID_INTEL_82801DB_SMBUS,
+			  PCI_DEVICE_ID_INTEL_82801EB_SMBUS,
+			  PCI_DEVICE_ID_INTEL_ICH6_16,
+			  PCI_DEVICE_ID_INTEL_ICH7_17,
                           0 };
 
 /* I801 SMBus address offsets */
@@ -214,7 +228,8 @@ int i801_setup(void)
 		error_return = -ENODEV;
 		goto END;
 	}
-	isich4 = *num == PCI_DEVICE_ID_INTEL_82801DB_SMBUS;
+	isich4 = ((*num == PCI_DEVICE_ID_INTEL_82801DB_SMBUS)
+	       || (*num == PCI_DEVICE_ID_INTEL_82801EB_SMBUS));
 
 /* Determine the address of the SMBus areas */
 	if (force_addr) {

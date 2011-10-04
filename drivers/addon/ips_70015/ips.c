@@ -277,7 +277,8 @@ static Scsi_Host_Template ips_driver_template = {
 	.use_clustering		= ENABLE_CLUSTERING,
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,5,0)
 	.use_new_eh_code	= 1,
-	.vary_io		= 1,
+/* Testing has shown that vary i/o causes adapter hangs. */
+/* 	.vary_io		= 1,			 */
 #endif
 };
 

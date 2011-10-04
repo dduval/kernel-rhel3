@@ -31,6 +31,8 @@
 
 #define NETCONSOLE_VERSION 0x04
 
+#define NETDUMP_VERSION_MAX 0x5
+
 enum netdump_commands {
 	COMM_NONE = 0,
 	COMM_SEND_MEM = 1,

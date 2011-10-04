@@ -1004,30 +1004,48 @@ static int hid_submit_out(struct hid_device *hid)
 static void hid_ctrl(struct urb *urb)
 {
 	struct hid_device *hid = urb->context;
+	unsigned long flags;
 
 	if (urb->status)
 		warn("ctrl urb status %d received", urb->status);
 
+	spin_lock_irqsave(&hid->outlock, flags);
+
 	hid->outtail = (hid->outtail + 1) & (HID_CONTROL_FIFO_SIZE - 1);
 
-	if (hid->outhead != hid->outtail)
-		hid_submit_out(hid);
+	if (hid->outhead != hid->outtail) {
+		if (hid_submit_out(hid)) {
+			clear_bit(HID_OUT_RUNNING, &hid->iofl);
+		}
+		spin_unlock_irqrestore(&hid->outlock, flags);
+		return;
+	}
+
+	clear_bit(HID_OUT_RUNNING, &hid->iofl);
+	spin_unlock_irqrestore(&hid->outlock, flags);
 }
 
 void hid_write_report(struct hid_device *hid, struct hid_report *report)
 {
+	unsigned long flags;
+
 	hid_output_report(report, hid->out[hid->outhead].buffer);
 
 	hid->out[hid->outhead].dr.wValue = cpu_to_le16(0x200 | report->id);
 	hid->out[hid->outhead].dr.wLength = cpu_to_le16((report->size + 7) >> 3);
+
+	spin_lock_irqsave(&hid->outlock, flags);
 
 	hid->outhead = (hid->outhead + 1) & (HID_CONTROL_FIFO_SIZE - 1);
 
 	if (hid->outhead == hid->outtail)
 		hid->outtail = (hid->outtail + 1) & (HID_CONTROL_FIFO_SIZE - 1);
 
-	if (hid->urbout.status != -EINPROGRESS)
-		hid_submit_out(hid);
+	if (!test_and_set_bit(HID_OUT_RUNNING, &hid->iofl))
+		if (hid_submit_out(hid))
+			clear_bit(HID_OUT_RUNNING, &hid->iofl);
+
+	spin_unlock_irqrestore(&hid->outlock, flags);
 }
 
 int hid_open(struct hid_device *hid)
@@ -1075,10 +1093,13 @@ void hid_init_reports(struct hid_device *hid)
 
 #define USB_VENDOR_ID_WACOM		0x056a
 #define USB_DEVICE_ID_WACOM_PENPARTNER	0x0000
+#define USB_DEVICE_ID_WACOM_PTU		0x0003
 #define USB_DEVICE_ID_WACOM_GRAPHIRE	0x0010
 #define USB_DEVICE_ID_WACOM_INTUOS	0x0020
 #define USB_DEVICE_ID_WACOM_PL		0x0030
-#define USB_DEVICE_ID_WACOM_INTUOS2	0x0041
+#define USB_DEVICE_ID_WACOM_INTUOS2	0x0040
+#define USB_DEVICE_ID_WACOM_VOLITO	0x0060
+#define USB_DEVICE_ID_WACOM_INTUOS3	0x00B0
 
 #define USB_VENDOR_ID_KBGEAR		0x084e
 #define USB_DEVICE_ID_KBGEAR_JAMSTUDIO	0x1001
@@ -1114,9 +1135,12 @@ struct hid_blacklist {
 	unsigned quirks;
 } hid_blacklist[] = {
 	{ USB_VENDOR_ID_WACOM, USB_DEVICE_ID_WACOM_PENPARTNER, HID_QUIRK_IGNORE },
+	{ USB_VENDOR_ID_WACOM, USB_DEVICE_ID_WACOM_PTU, HID_QUIRK_IGNORE },
 	{ USB_VENDOR_ID_WACOM, USB_DEVICE_ID_WACOM_GRAPHIRE, HID_QUIRK_IGNORE },
 	{ USB_VENDOR_ID_WACOM, USB_DEVICE_ID_WACOM_GRAPHIRE + 1, HID_QUIRK_IGNORE },
 	{ USB_VENDOR_ID_WACOM, USB_DEVICE_ID_WACOM_GRAPHIRE + 2, HID_QUIRK_IGNORE },
+	{ USB_VENDOR_ID_WACOM, USB_DEVICE_ID_WACOM_GRAPHIRE + 3, HID_QUIRK_IGNORE },
+	{ USB_VENDOR_ID_WACOM, USB_DEVICE_ID_WACOM_GRAPHIRE + 4, HID_QUIRK_IGNORE },
 	{ USB_VENDOR_ID_WACOM, USB_DEVICE_ID_WACOM_INTUOS, HID_QUIRK_IGNORE },
 	{ USB_VENDOR_ID_WACOM, USB_DEVICE_ID_WACOM_INTUOS + 1, HID_QUIRK_IGNORE },
 	{ USB_VENDOR_ID_WACOM, USB_DEVICE_ID_WACOM_INTUOS + 2, HID_QUIRK_IGNORE },
@@ -1128,11 +1152,18 @@ struct hid_blacklist {
 	{ USB_VENDOR_ID_WACOM, USB_DEVICE_ID_WACOM_PL + 3, HID_QUIRK_IGNORE },
 	{ USB_VENDOR_ID_WACOM, USB_DEVICE_ID_WACOM_PL + 4, HID_QUIRK_IGNORE },
 	{ USB_VENDOR_ID_WACOM, USB_DEVICE_ID_WACOM_PL + 5, HID_QUIRK_IGNORE },
-	{ USB_VENDOR_ID_WACOM, USB_DEVICE_ID_WACOM_INTUOS2, HID_QUIRK_IGNORE },
 	{ USB_VENDOR_ID_WACOM, USB_DEVICE_ID_WACOM_INTUOS2 + 1, HID_QUIRK_IGNORE },
 	{ USB_VENDOR_ID_WACOM, USB_DEVICE_ID_WACOM_INTUOS2 + 2, HID_QUIRK_IGNORE },
 	{ USB_VENDOR_ID_WACOM, USB_DEVICE_ID_WACOM_INTUOS2 + 3, HID_QUIRK_IGNORE },
 	{ USB_VENDOR_ID_WACOM, USB_DEVICE_ID_WACOM_INTUOS2 + 4, HID_QUIRK_IGNORE },
+	{ USB_VENDOR_ID_WACOM, USB_DEVICE_ID_WACOM_INTUOS2 + 5, HID_QUIRK_IGNORE },
+	/* Intuos2 6x8 reports as 0x47 instead of 0x42 */
+	{ USB_VENDOR_ID_WACOM, USB_DEVICE_ID_WACOM_INTUOS2 + 7, HID_QUIRK_IGNORE },
+	{ USB_VENDOR_ID_WACOM, USB_DEVICE_ID_WACOM_VOLITO, HID_QUIRK_IGNORE },
+	{ USB_VENDOR_ID_WACOM, USB_DEVICE_ID_WACOM_INTUOS3, HID_QUIRK_IGNORE },
+	{ USB_VENDOR_ID_WACOM, USB_DEVICE_ID_WACOM_INTUOS3 + 1, HID_QUIRK_IGNORE },
+	{ USB_VENDOR_ID_WACOM, USB_DEVICE_ID_WACOM_INTUOS3 + 2, HID_QUIRK_IGNORE },
+
 	{ USB_VENDOR_ID_KBGEAR, USB_DEVICE_ID_KBGEAR_JAMSTUDIO, HID_QUIRK_IGNORE },
 	{ USB_VENDOR_ID_ATEN, USB_DEVICE_ID_ATEN_UC100KM, HID_QUIRK_NOGET },
 	{ USB_VENDOR_ID_ATEN, USB_DEVICE_ID_ATEN_CS124U, HID_QUIRK_NOGET },
@@ -1231,6 +1262,8 @@ static struct hid_device *usb_hid_configure(struct usb_device *dev, int ifnum)
 		hid_free_device(hid);
 		return NULL;
 	}
+
+	spin_lock_init(&hid->outlock);
 
 	hid->version = hdesc->bcdHID;
 	hid->country = hdesc->bCountryCode;

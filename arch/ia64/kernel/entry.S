@@ -286,8 +286,12 @@ GLOBAL_ENTRY(save_switch_stack)
 	;;
 	st8 [r14]=r16		// save ar.pfs
 	st8 [r15]=r21		// save ar.lc
+	add r22=IA64_TASK_THREAD_CSD_OFFSET, r13
 	stf.spill [r2]=f16,32
 	stf.spill [r3]=f17,32
+	add r23=IA64_TASK_THREAD_SSD_OFFSET, r13
+	mov r24 = ar.csd
+	mov r25 = ar.ssd
 	;;
 	stf.spill [r2]=f18,32
 	stf.spill [r3]=f19,32
@@ -317,6 +321,8 @@ GLOBAL_ENTRY(save_switch_stack)
 	;;
 	st8 [r2]=r29,16		// save ar.unat
 	st8 [r3]=r19,16		// save ar.rnat
+	st8 [r22] = r24		// save csd
+	st8 [r23] = r25		// save ssd
 	;;
 	st8 [r2]=r20		// save ar.bspstore
 	st8 [r3]=r21		// save predicate registers
@@ -359,12 +365,16 @@ ENTRY(load_switch_stack)
 	;;
 	ld8 r28=[r2]		// restore pr
 	ld8 r30=[r3]		// restore rnat
+	add r2=IA64_TASK_THREAD_CSD_OFFSET, r13
 	;;
 	ld8 r18=[r14],16	// restore caller's unat
 	ld8 r19=[r15],24	// restore fpsr
+	add r3=IA64_TASK_THREAD_SSD_OFFSET, r13
 	;;
 	ldf.fill f2=[r14],32
 	ldf.fill f3=[r15],32
+	ld8 r20=[r2]		// load ar.csd
+	ld8 r31=[r3]		// load ar.ssd
 	;;
 	ldf.fill f4=[r14],32
 	ldf.fill f5=[r15],32
@@ -380,6 +390,8 @@ ENTRY(load_switch_stack)
 	;;
 	ldf.fill f16=[r14],32
 	ldf.fill f17=[r15],32
+	mov ar.csd = r20
+	mov ar.ssd = r31
 	;;
 	ldf.fill f18=[r14],32
 	ldf.fill f19=[r15],32

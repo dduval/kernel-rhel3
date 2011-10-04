@@ -200,7 +200,7 @@ static u64 size_or_mask, size_and_mask;
 
 static void get_mtrr (unsigned int reg, u64 *base, u32 *size, mtrr_type * type)
 {
-	u32 count, tmp, mask_lo, mask_hi;
+	u32 tmp, mask_lo, mask_hi;
 	int i;
 	u32 base_lo, base_hi;
 
@@ -215,16 +215,11 @@ static void get_mtrr (unsigned int reg, u64 *base, u32 *size, mtrr_type * type)
 
 	rdmsr (MSR_MTRRphysBase(reg), base_lo, base_hi);
 
-	count = 0;
-	tmp = mask_lo >> MTRR_BEG_BIT;
-	for (i=MTRR_BEG_BIT; i <= 31; i++, tmp = tmp >> 1)
-		count = (count << (~tmp & 1)) | (~tmp & 1);
+	/* Stuff the relevant bits from mask_hi and mask_lo into tmp. */
+	tmp = (mask_hi << 32-PAGE_SHIFT) | (mask_lo >> PAGE_SHIFT);
 
-	tmp = mask_hi;
-	for (i=0; i <= MTRR_END_BIT; i++, tmp = tmp >> 1)
-		count = (count << (~tmp & 1)) | (~tmp & 1);
-
-	*size = (count+1);
+	/* Calculate the size from the mask. */
+	*size = (~tmp + 1) & tmp;
 	*base = base_hi << (32 - PAGE_SHIFT) | base_lo >> PAGE_SHIFT;
 	*type = base_lo & 0xff;
 }

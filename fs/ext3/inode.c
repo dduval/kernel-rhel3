@@ -1471,17 +1471,18 @@ out_stop:
 		if (!ret)
 			ret = err;
 	}
-	if (ret) 
-		goto out;
-	
-	if (!beyond_eof)
-		up(&inode->i_sem);
 
-	ret = brw_kiovec(rw, 1, &iobuf, inode->i_dev, iobuf->blocks, sectsize);
-	iobuf->length = count;
+	if (!ret) {
+		if (!beyond_eof)
+			up(&inode->i_sem);
+
+		ret = brw_kiovec(rw, 1, &iobuf, inode->i_dev,
+				 iobuf->blocks, sectsize);
+		iobuf->length = count;
 	
-	if (!beyond_eof)
-		down(&inode->i_sem);
+		if (!beyond_eof)
+			down(&inode->i_sem);
+	}
 
 	if (orphan) {
 		lock_kernel();
@@ -1491,7 +1492,8 @@ out_stop:
 			unlock_kernel();
 			goto out;
 		}
-		ext3_orphan_del(handle, inode);
+		if (inode->i_nlink != 0)
+			ext3_orphan_del(handle, inode);
 		if (ret > 0) {
 			loff_t end = offset + ret;
 			if (end > inode->i_size) {

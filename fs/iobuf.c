@@ -9,6 +9,7 @@
 #include <linux/slab.h>
 #include <linux/iobuf.h>
 #include <linux/vmalloc.h>
+#include <linux/locks.h>
 
 
 kmem_cache_t *kiobuf_cachep;
@@ -112,13 +113,30 @@ void kiobuf_dtor(void * objp, kmem_cache_t * cachep, unsigned long flag)
 	}
 }
 
+static spinlock_t kiobuf_lock = SPIN_LOCK_UNLOCKED;
+
+struct kiobuf *kiobuf_cache_list = NULL;
+int kiobuf_cache = 0;
+int kiobuf_cache_max = 0;
+
 int alloc_kiovec(int nr, struct kiobuf **bufp)
 {
 	int i;
 	struct kiobuf *iobuf;
+	unsigned long flags;
 	
 	for (i = 0; i < nr; i++) {
-		iobuf = kmem_cache_alloc(kiobuf_cachep, GFP_KERNEL);
+		spin_lock_irqsave(&kiobuf_lock, flags);
+		if (kiobuf_cache) {
+			iobuf = kiobuf_cache_list;
+			kiobuf_cache_list = (struct kiobuf *)iobuf->end_io;
+			iobuf->end_io = NULL;
+			kiobuf_cache--;
+			spin_unlock_irqrestore(&kiobuf_lock, flags);
+		} else {
+			spin_unlock_irqrestore(&kiobuf_lock, flags);
+			iobuf = kmem_cache_alloc(kiobuf_cachep, GFP_KERNEL);
+		}
 		if (unlikely(!iobuf))
 			goto nomem;
 		if (unlikely(!iobuf->initialized)) {
@@ -142,13 +160,29 @@ void free_kiovec(int nr, struct kiobuf **bufp)
 {
 	int i;
 	struct kiobuf *iobuf;
+	unsigned long flags;
 	
 	for (i = 0; i < nr; i++) {
 		iobuf = bufp[i];
 		init_waitqueue_head(&iobuf->wait_queue);
 		iobuf->io_count.counter = 0;
 		iobuf->end_io = NULL;
-		kmem_cache_free(kiobuf_cachep, iobuf);
+		if (kiobuf_cache_max) {
+			spin_lock_irqsave(&kiobuf_lock, flags);
+			if (kiobuf_cache < kiobuf_cache_max) {
+				iobuf->end_io =
+				  (void (*)(struct kiobuf *))kiobuf_cache_list;
+				kiobuf_cache_list = iobuf;
+				kiobuf_cache++;
+				spin_unlock_irqrestore(&kiobuf_lock, flags);
+			} else {
+				spin_unlock_irqrestore(&kiobuf_lock, flags);
+				kiobuf_dtor(iobuf, kiobuf_cachep, 0);
+				kiobuf_ctor(iobuf, kiobuf_cachep, 0);
+				kmem_cache_free(kiobuf_cachep, iobuf);
+			}
+		} else
+			kmem_cache_free(kiobuf_cachep, iobuf);
 	}
 }
 

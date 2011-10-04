@@ -636,7 +636,9 @@ enum
 	FS_AIO_NR=18,		/* int: current number of aio requests */
 	FS_AIO_MAX_NR=19,	/* int: max system wide aio requests */
 	FS_AIO_MAX_SIZE=20,	/* int: max size of read/write chunks */
-	FS_AIO_MAX_PINNED=21,	/* long: max memory pinned (in pages) */
+	FS_AIO_MAX_PINNED=21,	/* int: max memory pinned (in pages) */
+	FS_AIO_PINNED=22,	/* int: cur memory pinned (in pages) */
+	FS_KIOBUF_CACHE_MAX=23,	/* int: max kiobuf cache size */
 };
 
 /* /proc/sys/fs/quota/ */

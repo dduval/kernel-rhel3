@@ -128,6 +128,13 @@ static void destroy_inode(struct inode *inode)
 {
 	if (inode_has_buffers(inode))
 		BUG();
+
+	/* Reinitialise the waitqueue head because __wait_on_freeing_inode()
+	 * may have left stale entries on it which it can't remove (since
+	 * it knows we're freeing the inode right now).
+	 */
+	init_waitqueue_head(&inode->i_wait);
+
 	if (inode->i_sb->s_op->destroy_inode)
 		inode->i_sb->s_op->destroy_inode(inode);
 	else
@@ -209,7 +216,8 @@ void __mark_inode_dirty(struct inode *inode, int flags)
 	if ((inode->i_state & flags) != flags) {
 		inode->i_state |= flags;
 		/* Only add valid (ie hashed) inodes to the dirty list */
-		if (!(inode->i_state & I_LOCK) && !list_empty(&inode->i_hash)) {
+		if (!(inode->i_state & (I_LOCK|I_FREEING|I_CLEAR)) &&
+		    !list_empty(&inode->i_hash)) {
 			list_del(&inode->i_list);
 			list_add(&inode->i_list, &sb->s_dirty);
 		}
@@ -238,6 +246,31 @@ static inline void wait_on_inode(struct inode *inode)
 		__wait_on_inode(inode);
 }
 
+/*
+ * If we try to find an inode in the inode hash while it is being deleted, we
+ * have to wait until the filesystem completes its deletion before reporting
+ * that it isn't found.  This is because iget will immediately call
+ * ->read_inode, and we want to be sure that evidence of the deletion is found
+ * by ->read_inode.
+ *
+ * Unlike the 2.6 version, this call cannot return early, since inodes
+ * do not share wait queue. Therefore, we don't call remove_wait_queue(); it
+ * would be dangerous to do so since the inode may have already been freed,
+ * and it's unnecessary, since the inode is definitely going to get freed.
+ *
+ * This is called with inode_lock held.
+ */
+static void __wait_on_freeing_inode(struct inode *inode)
+{
+	DECLARE_WAITQUEUE(wait, current);
+
+	add_wait_queue(&inode->i_wait, &wait);
+	set_current_state(TASK_UNINTERRUPTIBLE);
+	spin_unlock(&inode_lock);
+	schedule();
+
+	spin_lock(&inode_lock);
+}
 
 static inline void write_inode(struct inode *inode, int sync)
 {
@@ -298,7 +331,7 @@ static inline void __sync_one(struct inode *inode, int sync)
 	list_del(&inode->i_list);
 	list_add(&inode->i_list, &inode->i_sb->s_locked_inodes);
 
-	if (inode->i_state & I_LOCK)
+	if (inode->i_state & (I_LOCK|I_FREEING))
 		BUG();
 
 	/* Set I_LOCK, reset I_DIRTY */
@@ -623,6 +656,12 @@ static void dispose_list(struct list_head * head)
 		if (inode->i_data.nrpages)
 			truncate_inode_pages(&inode->i_data, 0);
 		clear_inode(inode);
+
+		spin_lock(&inode_lock);
+		list_del_init(&inode->i_hash);
+		spin_unlock(&inode_lock);
+		wake_up(&inode->i_wait);
+
 		destroy_inode(inode);
 		/* inodes_stat.nr_inodes maintained by caller */
 	}
@@ -733,6 +772,14 @@ int invalidate_device(kdev_t dev, int do_sync)
  *
  * We don't expect to have to call this very often.
  *
+ * We leave the inode in the inode hash table until *after*
+ * the filesystem's ->delete_inode (in dispose_list) completes.
+ * This ensures that an iget (such as nfsd might instigate) will
+ * always find up-to-date information either in the hash or on disk.
+ *
+ * I_FREEING is set so that no-one will take a new reference
+ * to the inode while it is being deleted.
+ *
  * N.B. The spinlock is released during the call to
  *      dispose_list.
  */
@@ -765,7 +812,6 @@ void prune_icache(int goal)
 		if (atomic_read(&inode->i_count))
 			continue;
 		list_del(tmp);
-		list_del_init(&inode->i_hash);
 		list_add(tmp, freeable);
 		inode->i_state |= I_FREEING;
 		count++;
@@ -891,6 +937,7 @@ static struct inode * find_inode(struct super_block * sb, unsigned long ino, str
 	struct list_head *tmp;
 	struct inode * inode;
 
+repeat:
 	tmp = head;
 	for (;;) {
 		tmp = tmp->next;
@@ -904,6 +951,10 @@ static struct inode * find_inode(struct super_block * sb, unsigned long ino, str
 			continue;
 		if (find_actor && !find_actor(inode, ino, opaque))
 			continue;
+		if (inode->i_state & (I_FREEING|I_CLEAR)) {
+			__wait_on_freeing_inode(inode);
+			goto repeat;
+		}
 		break;
 	}
 	return inode;
@@ -1138,8 +1189,6 @@ void iput(struct inode *inode)
 			return;
 
 		if (!inode->i_nlink) {
-			list_del(&inode->i_hash);
-			INIT_LIST_HEAD(&inode->i_hash);
 			list_del(&inode->i_list);
 			INIT_LIST_HEAD(&inode->i_list);
 			inode->i_state|=I_FREEING;
@@ -1157,6 +1206,12 @@ void iput(struct inode *inode)
 				delete(inode);
 			} else
 				clear_inode(inode);
+
+			spin_lock(&inode_lock);
+			list_del_init(&inode->i_hash);
+			spin_unlock(&inode_lock);
+			wake_up(&inode->i_wait);
+
 			if (inode->i_state != I_CLEAR)
 				BUG();
 		} else {

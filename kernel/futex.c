@@ -310,17 +310,23 @@ static inline void __queue_me(struct futex_q *q, struct page *page,
 }
 
 /* Return 1 if we were still queued (ie. 0 means we were woken) */
+static inline int __unqueue_me(struct futex_q *q)
+{
+	if (!list_empty(&q->list)) {
+		list_del(&q->list);
+		__detach_vcache(&q->vcache);
+		return 1;
+	}
+	return 0;
+}
+
 static inline int unqueue_me(struct futex_q *q)
 {
 	int ret = 0;
 
 	spin_lock(&vcache_lock);
 	spin_lock(&futex_lock);
-	if (!list_empty(&q->list)) {
-		list_del(&q->list);
-		__detach_vcache(&q->vcache);
-		ret = 1;
-	}
+	ret = __unqueue_me(q);
 	spin_unlock(&futex_lock);
 	spin_unlock(&vcache_lock);
 	return ret;
@@ -352,13 +358,18 @@ static inline int futex_wait(unsigned long uaddr,
 	 * Page is pinned, but may no longer be in this address space.
 	 * It cannot schedule, so we access it with the spinlock held.
 	 */
-	if (!access_ok(VERIFY_READ, uaddr, 4))
-		goto out_fault;
+	if (!access_ok(VERIFY_READ, uaddr, 4)) {
+		__unqueue_me(&q);
+		unlock_futex_mm();
+		ret = -EFAULT;
+		goto out;
+	}
 	kaddr = kmap_atomic(page, KM_USER0);
 	curval = *(int*)(kaddr + offset);
 	kunmap_atomic(kaddr, KM_USER0);
 
 	if (curval != val) {
+		__unqueue_me(&q);
 		unlock_futex_mm();
 		ret = -EWOULDBLOCK;
 		goto out;
@@ -383,22 +394,18 @@ static inline int futex_wait(unsigned long uaddr,
 	 */
 	if (time == 0) {
 		ret = -ETIMEDOUT;
-		goto out;
+		goto out_wait;
 	}
 	if (signal_pending(current))
 		ret = -EINTR;
-out:
+out_wait:
 	/* Were we woken up anyway? */
 	if (!unqueue_me(&q))
 		ret = 0;
+out:
 	put_page(q.page);
 
 	return ret;
-
-out_fault:
-	unlock_futex_mm();
-	ret = -EFAULT;
-	goto out;
 }
 
 long do_futex(unsigned long uaddr, int op, int val, unsigned long timeout,

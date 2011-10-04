@@ -117,4 +117,8 @@ extern void dump_Phb_tree(void);
 extern void dump_Bus_tree(void);
 extern void dump_Dev_tree(void);
 
+/* From pSeries_pci.c */
+void init_pci_config_tokens (void);
+unsigned long get_phb_buid (struct device_node *);
+
 #endif /* __PPC_KERNEL_PCI_H__ */

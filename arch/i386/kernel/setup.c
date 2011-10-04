@@ -111,6 +111,7 @@
 #include <asm/system.h>
 #include <asm/io.h>
 #include <asm/smp.h>
+#include <asm/smpboot.h>
 #include <asm/cobalt.h>
 #include <asm/msr.h>
 #include <asm/desc.h>
@@ -2293,6 +2294,8 @@ static struct _cache_table cache_table[] __initdata =
 	{ 0x7A, LVL_2,      256 },
 	{ 0x7B, LVL_2,      512 },
 	{ 0x7C, LVL_2,      1024 },
+	{ 0x7D, LVL_2,      2048 },
+	{ 0x7F, LVL_2,      512 },
 	{ 0x82, LVL_2,      256 },
 	{ 0x83, LVL_2,      512 },
 	{ 0x84, LVL_2,      1024 },
@@ -2470,7 +2473,30 @@ static void __init init_intel(struct cpuinfo_x86 *c)
 			 * systems, we must use hard_smp_processor_id.
 			 * See Intel's IA-32 SW Dev's Manual Vol2 under CPUID.
 			 */
-			phys_proc_id[cpu] = hard_smp_processor_id() & ~(smp_num_siblings - 1);
+			if (clustered_apic_mode == CLUSTERED_APIC_NONE) {
+				int     index_lsb, index_msb, tmp;
+				int     initial_apic_id;
+
+				index_lsb = 0;
+				index_msb = 31;
+
+				tmp = smp_num_siblings;
+				while ((tmp & 1) == 0) {
+					tmp >>=1 ;
+					index_lsb++;
+				}
+				tmp = smp_num_siblings;
+				while ((tmp & 0x80000000 ) == 0) {
+					tmp <<=1 ;
+					index_msb--;
+				}
+				if (index_lsb != index_msb )
+					index_msb++;
+				initial_apic_id = ebx >> 24 & 0xff;
+				phys_proc_id[cpu] = initial_apic_id >> index_msb;
+			} else {
+				phys_proc_id[cpu] = hard_smp_processor_id() & ~(smp_num_siblings - 1);
+			}
 
 			printk(KERN_INFO  "CPU: Physical Processor ID: %d\n",
                                phys_proc_id[cpu]);
@@ -2836,6 +2862,10 @@ void __init identify_cpu(struct cpuinfo_x86 *c)
 			c->x86 = (tfms >> 8) & 15;
 			c->x86_model = (tfms >> 4) & 15;
 			c->x86_mask = tfms & 15;
+			if (c->x86 == 0xf) {
+				c->x86 += (tfms >> 20) & 0xff;
+				c->x86_model += ((tfms >> 16) & 0xf) << 4;
+			}
 		} else {
 			/* Have CPUID level 0 only - unheard of */
 			c->x86 = 4;

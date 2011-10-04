@@ -83,14 +83,14 @@ void fat_hash_init(void)
 	}
 }
 
-static inline unsigned long fat_hash(struct super_block *sb, int i_pos)
+static inline unsigned long fat_hash(struct super_block *sb, u64 i_pos)
 {
 	unsigned long tmp = (unsigned long)i_pos | (unsigned long) sb;
 	tmp = tmp + (tmp >> FAT_HASH_BITS) + (tmp >> FAT_HASH_BITS * 2);
 	return tmp & FAT_HASH_MASK;
 }
 
-void fat_attach(struct inode *inode, int i_pos)
+void fat_attach(struct inode *inode, u64 i_pos)
 {
 	spin_lock(&fat_inode_lock);
 	MSDOS_I(inode)->i_location = i_pos;
@@ -108,7 +108,7 @@ void fat_detach(struct inode *inode)
 	spin_unlock(&fat_inode_lock);
 }
 
-struct inode *fat_iget(struct super_block *sb, int i_pos)
+struct inode *fat_iget(struct super_block *sb, u64 i_pos)
 {
 	struct list_head *p = fat_inode_hashtable + fat_hash(sb, i_pos);
 	struct list_head *walk;
@@ -133,7 +133,7 @@ struct inode *fat_iget(struct super_block *sb, int i_pos)
 static void fat_fill_inode(struct inode *inode, struct msdos_dir_entry *de);
 
 struct inode *fat_build_inode(struct super_block *sb,
-				struct msdos_dir_entry *de, int ino, int *res)
+				struct msdos_dir_entry *de, u64 ino, int *res)
 {
 	struct inode *inode;
 	*res = 0;
@@ -454,6 +454,7 @@ struct dentry *fat_fh_to_dentry(struct super_block *sb, __u32 *fh,
 		 * Will fail if you truncate and then re-write
 		 */
 
+		/* XXX: more than 128Gb and it breaks */
 		inode = fat_iget(sb, fh[2]);
 		if (inode && MSDOS_I(inode)->i_logstart != fh[3]) {
 			iput(inode);

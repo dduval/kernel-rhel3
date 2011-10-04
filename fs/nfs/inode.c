@@ -1399,7 +1399,8 @@ __nfs_refresh_inode(struct inode *inode, struct nfs_fattr *fattr)
 /*
  * File system information
  */
-static DECLARE_FSTYPE(nfs_fs_type, "nfs", nfs_read_super, FS_ODD_RENAME);
+static DECLARE_FSTYPE(nfs_fs_type, "nfs", nfs_read_super,
+	FS_ODD_RENAME|FS_AIO_SYNC);
 
 extern int nfs_init_nfspagecache(void);
 extern void nfs_destroy_nfspagecache(void);

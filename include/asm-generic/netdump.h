@@ -41,8 +41,15 @@ static inline int page_is_ram(unsigned long x) { return 0; }
 
 #define show_regs(x) do { struct pt_regs *z; z = (x); } while (0)
 
-#undef ZERO_PAGE
-static inline struct page *ZERO_PAGE(void *x) { return NULL; }
+#define platform_start_netdump(dumpfunc, regs) do { } while (0)
+#define platform_freeze_cpu() do { } while (0)
+#define platform_machine_type() (EM_NONE)
+#define platform_effective_version(x) (0)
+#define platform_max_pfn() (0)
+#define platform_get_regs(x,y) (0)
+#define platform_page_is_ram(x) (0)
+#define platform_next_available(x) ((u32)0)
+#define platform_cycles(x,y,z) do { } while (0)
 
 #endif /* __KERNEL__ */
 

@@ -429,6 +429,11 @@ show_cpuinfo (struct seq_file *m, void *v)
 		cp = strchr(cp, '\0');
 		mask &= ~1UL;
 	}
+	if (mask & 4) {
+		strcpy(cp, " 16-byte atomic ops");
+		cp = strchr(cp, '\0');
+		mask &= ~4UL;
+	}
 	if (mask)
 		sprintf(cp, " 0x%lx", mask);
 

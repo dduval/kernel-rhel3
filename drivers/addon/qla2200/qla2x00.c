@@ -672,6 +672,9 @@ static int qfull_retry_delay = 2;
 static int extended_error_logging = 0;		/* 0 = off, 1 = log errors */
 static int ql2xplogiabsentdevice = 0;
 static int ql2xfdmienable = 0;
+#if defined(ISP2200)
+static int ql2xriofromnvram = 0;
+#endif
 #if defined(ISP2300)
 static int ql2xintrdelaytimer = 3;
 #endif
@@ -755,6 +758,13 @@ MODULE_PARM(displayConfig, "i");
 MODULE_PARM_DESC(displayConfig,
 		"If 1 then display the configuration used in "
 		"/etc/modules.conf.");
+#if defined(ISP2200)
+MODULE_PARM(ql2xriofromnvram,"i");
+MODULE_PARM_DESC(ql2xriofromnvram,
+		"If 0 then use RIO mode 4 (multiple responses, 32 bit "
+		"handle, delay interrupt). Otherwise use the RIO mode "
+		"specified in the NVRAM. Default is 0: use mode 4.");
+#endif
 #if defined(ISP2300)
 MODULE_PARM(ql2xintrdelaytimer,"i");
 MODULE_PARM_DESC(ql2xintrdelaytimer,
@@ -8131,7 +8141,8 @@ qla2x00_nvram_config(scsi_qla_host_t *ha)
 		additional_firmware_options.enable_fc_confirm = 1;
 #endif
 #if defined(ISP2200)
- 		additional_firmware_options.operation_mode = 4;
+ 		if (ql2xriofromnvram == 0)
+			additional_firmware_options.operation_mode = 4;
  		icb->response_accum_timer = 3;
  		icb->interrupt_delay_timer = 5;
 #endif

@@ -205,6 +205,7 @@ static struct dev_info device_list[] =
 	{"HP", "6586-K", "*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_RETRY_ABORTED_CMD },  /* HP rebadged HITACHI XP Arrays */
 	{"HP", "6588-3", "*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_RETRY_ABORTED_CMD },  /* HP rebadged HITACHI XP Arrays */
 	{"IBM", "ProFibre 4000R", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
+	{"LSI", "ProFibre 4000R", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
 	{"WINSYS","FLASHDISK", "*", BLIST_SPARSELUN},
 	{"WINSYS","Flashdisk", "*", BLIST_SPARSELUN},
 	{"DotHill","SANnet II FC", "*", BLIST_SPARSELUN},	
@@ -249,6 +250,13 @@ static struct dev_info device_list[] =
 	{"APPLE", "Xserve", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
 	{"SanDisk", "ImageMate", "*", BLIST_FORCELUN},
 	{"CBOX3", "USB", "*", BLIST_FORCELUN},
+	{"HP", "HSV200", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
+	{"HP", "HSV210", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
+	{"HP", "MSA CONTROLLER", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
+	{"HP", "MSA VOLUME", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
+	{"STK", "OPENstorage D178", "*", BLIST_SPARSELUN},
+	{"EMC", "Celerra iSCSI", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
+	{"EMC", "iSCSI", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
 
 	/*
 	 * Must be at end of list...

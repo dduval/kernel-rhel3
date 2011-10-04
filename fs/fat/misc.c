@@ -316,7 +316,7 @@ void fat_date_unix2dos(int unix_date,unsigned short *time,
  */
 
 int fat__get_entry(struct inode *dir, loff_t *pos,struct buffer_head **bh,
-    struct msdos_dir_entry **de, int *ino)
+    struct msdos_dir_entry **de, u64 *ino)
 {
 	struct super_block *sb = dir->i_sb;
 	struct msdos_sb_info *sbi = MSDOS_SB(sb);
@@ -343,7 +343,7 @@ int fat__get_entry(struct inode *dir, loff_t *pos,struct buffer_head **bh,
 
 		offset &= sb->s_blocksize - 1;
 		*de = (struct msdos_dir_entry *) ((*bh)->b_data + offset);
-		*ino = (sector << sbi->dir_per_block_bits) + (offset >> MSDOS_DIR_BITS);
+		*ino = ((u64)sector << sbi->dir_per_block_bits) + (offset >> MSDOS_DIR_BITS);
 
 		return 0;
 	}
@@ -401,7 +401,7 @@ int fat__get_entry(struct inode *dir, loff_t *pos,struct buffer_head **bh,
     }
 
 static int raw_scan_sector(struct super_block *sb,int sector,const char *name,
-    int *number,int *ino,struct buffer_head **res_bh,
+    int *number,u64 *ino,struct buffer_head **res_bh,
     struct msdos_dir_entry **res_de)
 {
 	struct buffer_head *bh;
@@ -424,7 +424,7 @@ static int raw_scan_sector(struct super_block *sb,int sector,const char *name,
 		}
 		if (done) {
 			if (ino)
-				*ino = sector * MSDOS_SB(sb)->dir_per_block + entry;
+				*ino = (u64)sector * MSDOS_SB(sb)->dir_per_block + entry;
 			start = CF_LE_W(data[entry].start);
 			if (MSDOS_SB(sb)->fat_bits == 32) {
 				start |= (CF_LE_W(data[entry].starthi) << 16);
@@ -448,7 +448,7 @@ static int raw_scan_sector(struct super_block *sb,int sector,const char *name,
  * requested entry is found or the end of the directory is reached.
  */
 
-static int raw_scan_root(struct super_block *sb,const char *name,int *number,int *ino,
+static int raw_scan_root(struct super_block *sb,const char *name,int *number,u64 *ino,
     struct buffer_head **res_bh,struct msdos_dir_entry **res_de)
 {
 	int count,cluster;
@@ -470,7 +470,7 @@ static int raw_scan_root(struct super_block *sb,const char *name,int *number,int
  */
 
 static int raw_scan_nonroot(struct super_block *sb,int start,const char *name,
-    int *number,int *ino,struct buffer_head **res_bh,struct msdos_dir_entry
+    int *number,u64 *ino,struct buffer_head **res_bh,struct msdos_dir_entry
     **res_de)
 {
 	int count,cluster;
@@ -506,7 +506,7 @@ static int raw_scan_nonroot(struct super_block *sb,int start,const char *name,
  */
 
 static int raw_scan(struct super_block *sb, int start, const char *name,
-    int *number, int *ino, struct buffer_head **res_bh,
+    int *number, u64 *ino, struct buffer_head **res_bh,
     struct msdos_dir_entry **res_de)
 {
 	if (start)
@@ -543,7 +543,7 @@ int fat_subdirs(struct inode *dir)
  */
 
 int fat_scan(struct inode *dir,const char *name,struct buffer_head **res_bh,
-    struct msdos_dir_entry **res_de,int *ino)
+    struct msdos_dir_entry **res_de,u64 *ino)
 {
 	int res;
 

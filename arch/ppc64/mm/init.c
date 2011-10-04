@@ -303,6 +303,56 @@ void iounmap(void *addr)
 #endif
 }
 
+int
+page_is_ram(unsigned long pfn)
+{
+	int i;
+	unsigned long paddr = pfn << PAGE_SHIFT;
+
+	for (i=0; i < lmb.memory.cnt; i++) {
+		unsigned long base;
+
+#ifdef CONFIG_MSCHUNKS
+		base = lmb.memory.region[i].physbase;
+#else
+		base = lmb.memory.region[i].base;
+#endif
+		if ((paddr >= base) &&
+			(paddr < (base + lmb.memory.region[i].size))) {
+			return 1;
+		}
+	}
+                                                                                
+	return 0;
+}
+
+unsigned long next_ram_page(unsigned long pfn)
+{
+        int i;
+        unsigned long paddr, base;
+        unsigned long best_base = (ULONG_MAX << PAGE_SHIFT);
+
+        pfn++;
+        paddr = (pfn << PAGE_SHIFT);
+
+        for (i=0; i < lmb.memory.cnt; i++) {
+#ifdef CONFIG_MSCHUNKS
+                base = lmb.memory.region[i].physbase;
+#else
+                base = lmb.memory.region[i].base;
+#endif
+                if ((paddr >= base)
+                    && (paddr < (base + lmb.memory.region[i].size)))
+                        return (paddr >> PAGE_SHIFT);
+                if ((paddr < base) && (base < best_base))
+                        best_base = base;
+        }
+        if (best_base < (ULONG_MAX << PAGE_SHIFT))
+                return (best_base >> PAGE_SHIFT);
+        else
+                return ULONG_MAX;
+}
+
 /*
  * map_io_page currently only called by __ioremap
  * map_io_page adds an entry to the ioremap page table

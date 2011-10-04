@@ -781,6 +781,7 @@ int rebalance_laundry_zone(struct zone_struct * zone, int max_work, unsigned int
 	int max_loop;
 	int work_done = 0;
 	struct page * page;
+	unsigned long local_count;
 
 	max_loop = max_work;
 	if (max_loop < BATCH_WORK_AMOUNT)
@@ -806,16 +807,25 @@ int rebalance_laundry_zone(struct zone_struct * zone, int max_work, unsigned int
 				
 				/* Page is being freed, waiting on lru lock */
 				if (!atomic_inc_if_nonzero(&page->count)) {
+					local_count = zone->inactive_laundry_pages;
 					lru_unlock(zone);
 					cpu_relax();
 					lru_lock(zone);
+					if (local_count != zone->inactive_laundry_pages)
+						work_done++;
 					continue;
 				}
+				/* move page to tail so every caller won't wait on it */
+				list_del(&page->lru);
+				list_add(&page->lru, &zone->inactive_laundry_list);
+				local_count = zone->inactive_laundry_pages;
 				lru_unlock(zone);
 				run_task_queue(&tq_disk);
 				timed_out = wait_on_page_timeout(page, 5 * HZ);
 				page_cache_release(page);
 				lru_lock(zone);
+				if (local_count != zone->inactive_laundry_pages)
+					work_done++;
 				/*
 				 * If we timed out and the page has been in
 				 * flight for over 30 seconds, this might not
@@ -845,9 +855,12 @@ int rebalance_laundry_zone(struct zone_struct * zone, int max_work, unsigned int
 
 		if (page->buffers) {
 			page_cache_get(page);
+			local_count = zone->inactive_laundry_pages;
 			lru_unlock(zone);
 			try_to_release_page(page, 0);
 			UnlockPage(page);
+			if (local_count != zone->inactive_laundry_pages)
+				work_done++;
 			page_cache_release(page);
 			lru_lock(zone);
 			if (unlikely((page->buffers != NULL)) &&

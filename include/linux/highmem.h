@@ -14,6 +14,7 @@ extern struct page *highmem_start_page;
 unsigned int nr_free_highpages(void);
 
 extern struct buffer_head *create_bounce(int rw, struct buffer_head * bh_orig);
+extern int superbh_will_bounce(unsigned long pfn, struct buffer_head *bh);
 
 static inline char *bh_kmap(struct buffer_head *bh)
 {
@@ -63,6 +64,7 @@ static inline void bh_kunmap_irq(char *buffer, unsigned long *flags)
 
 #else /* CONFIG_HIGHMEM */
 
+static inline int superbh_will_bounce(unsigned long pfn, struct buffer_head *bh) { return 0; }
 static inline unsigned int nr_free_highpages(void) { return 0; }
 
 static inline void *kmap(struct page *page) { return page_address(page); }

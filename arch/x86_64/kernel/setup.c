@@ -458,6 +458,8 @@ static struct _cache_table cache_table[] __initdata =
 	{ 0x7A, LVL_2,      256 },
 	{ 0x7B, LVL_2,      512 },
 	{ 0x7C, LVL_2,      1024 },
+	{ 0x7D, LVL_2,      2048 },
+	{ 0x7F, LVL_2,      512 },
 	{ 0x82, LVL_2,      256 },
 	{ 0x83, LVL_2,      512 },
 	{ 0x84, LVL_2,      1024 },
@@ -554,7 +556,7 @@ static void __init init_intel(struct cpuinfo_x86 *c)
 	
 #ifdef CONFIG_SMP
 	if (test_bit(X86_FEATURE_HT, &c->x86_capability)) {
-		extern	int phys_proc_id[NR_CPUS];
+		extern	u8 phys_proc_id[NR_CPUS];
 		
 		int 	index_lsb, index_msb, tmp;
 		int	initial_apic_id;
@@ -784,7 +786,7 @@ static int show_cpuinfo(struct seq_file *m, void *v)
 	struct cpuinfo_x86 *c = v;
 	int n = c - cpu_data;
 #ifdef CONFIG_SMP
-	extern	int phys_proc_id[NR_CPUS];
+	extern	u8 phys_proc_id[NR_CPUS];
 #endif
 
 	/* 

@@ -21,6 +21,17 @@
 #endif
 #endif
 
+#ifndef ASSEMBLY
+extern u8 bios_cpu_apicid[];
+
+/*
+ * Some lowlevel functions might want to know about
+ * the real APIC ID <-> CPU # mapping.
+ */
+extern u8 x86_cpu_to_log_apicid[NR_CPUS];
+extern u8 x86_cpu_to_apicid[NR_CPUS];
+#endif
+
 #ifdef CONFIG_SMP
 #ifndef ASSEMBLY
 
@@ -38,6 +49,7 @@ extern volatile unsigned long smp_invalidate_needed;
 extern int pic_mode;
 extern int smp_num_siblings;
 extern int cpu_sibling_map[];
+extern u8 phys_proc_id[NR_CPUS];
 
 extern void smp_flush_tlb(void);
 extern void smp_message_irq(int cpl, void *dev_id, struct pt_regs *regs);
@@ -67,12 +79,6 @@ extern inline int cpu_number_map(int cpu)
 	return cpu;
 }
 
-/*
- * Some lowlevel functions might want to know about
- * the real APIC ID <-> CPU # mapping.
- */
-extern volatile int x86_cpu_to_apicid[NR_CPUS];
-
 static inline char x86_apicid_to_cpu(char apicid)
 {
 	int i;
@@ -84,8 +90,6 @@ static inline char x86_apicid_to_cpu(char apicid)
 	return -1;
 }
 
-
-extern u8 bios_cpu_apicid[];
 
 static inline int cpu_present_to_apicid(int mps_cpu)
 {
@@ -119,15 +123,8 @@ extern __inline int hard_smp_processor_id(void)
 	return GET_APIC_ID(*(unsigned *)(APIC_BASE+APIC_ID));
 }
 
-extern int apic_disabled;
 extern int slow_smp_processor_id(void);
-#ifndef CONFIG_IA32E
-#define safe_smp_processor_id() \
-	(!apic_disabled ? hard_smp_processor_id() : slow_smp_processor_id())
-#else
-#define safe_smp_processor_id() \
-	(!apic_disabled ? x86_apicid_to_cpu(hard_smp_processor_id()) : 0)
-#endif
+#define safe_smp_processor_id() x86_apicid_to_cpu(hard_smp_processor_id())
 
 #endif /* !ASSEMBLY */
 
@@ -147,9 +144,7 @@ extern int slow_smp_processor_id(void);
 
 
 
-#endif
-#define INT_DELIVERY_MODE 1     /* logical delivery */
-#define TARGET_CPUS cpu_online_map
+#endif /* CONFIG_SMP */
 
 #ifndef CONFIG_SMP
 #define stack_smp_processor_id() 0

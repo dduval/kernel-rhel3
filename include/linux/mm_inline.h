@@ -80,12 +80,6 @@ static inline int page_dirty(struct page *page)
 extern int shmem_writepage(struct page *);
 static inline int page_anon(struct page * page)
 {
-	/* Pages of an mmap()d file won't trigger this unless they get
-	 * referenced on the inactive list and really are in the working
-	 * set of the process... */
-	if (page->pte.direct)
-		return 1;
-
 	if (!page->mapping && !page->buffers)
 		return 1;
 

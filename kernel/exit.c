@@ -1003,8 +1003,8 @@ asmlinkage long sys_wait4(pid_t pid,unsigned int * stat_addr, int options, struc
 		// rate-limit it to 1 per minute:
 		if (jiffies - last_timestamp > 60*HZ) {
 			last_timestamp = jiffies;
-			printk(KERN_INFO "application bug: %s(%d) has SIGCHLD set to SIG_IGN but calls wait().\n", current->comm, current->pid);
-			printk(KERN_INFO "(see the NOTES section of 'man 2 wait'). Workaround activated.\n");
+			printk(KERN_DEBUG "application bug: %s(%d) has SIGCHLD set to SIG_IGN but calls wait().\n", current->comm, current->pid);
+			printk(KERN_DEBUG "(see the NOTES section of 'man 2 wait'). Workaround activated.\n");
 		}
 		current->sighand->action[SIGCHLD-1].sa.sa_handler = SIG_DFL;
 		workaround = 1;
@@ -1026,10 +1026,10 @@ repeat:
 			ret = eligible_child(pid, options, p);
 			if (!ret)
 				continue;
-			flag = 1;
 
 			switch (p->state) {
 			case TASK_STOPPED:
+				flag = 1;
 				if (!(options & WUNTRACED) &&
 				    !(p->ptrace & PT_PTRACED))
 					continue;
@@ -1047,6 +1047,11 @@ repeat:
 				retval = wait_task_zombie(p, stat_addr, ru);
 				if (retval != 0) /* He released the lock.  */
 					goto end_wait4;
+				break;
+			case TASK_DEAD:
+				break;
+			default:
+				flag = 1;
 				break;
 			}
 		}
