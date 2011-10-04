@@ -83,7 +83,7 @@ static struct
 {
 	int	error;
 	u8	scope;
-} fib_props[RTA_MAX+1] = {
+} fib_props[RTN_MAX+1] = {
         { 0, RT_SCOPE_NOWHERE},		/* RTN_UNSPEC */
 	{ 0, RT_SCOPE_UNIVERSE},	/* RTN_UNICAST */
 	{ 0, RT_SCOPE_HOST},		/* RTN_LOCAL */

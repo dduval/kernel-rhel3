@@ -38,6 +38,10 @@
 #include <asm/uaccess.h>
 #include <asm/pgalloc.h>
 
+#ifndef arch_mmap_check
+#define arch_mmap_check(addr, len, flags)      (0)
+#endif
+
 /*
  * WARNING: the debugging will use recursive algorithms so never enable this
  * unless you know what you are doing.
@@ -515,6 +519,10 @@ unsigned long do_mmap_pgoff(struct file * file, unsigned long addr, unsigned lon
 	if (!len)
 		return addr;
 
+	error = arch_mmap_check(addr, len, flags);
+	if (error)
+		return error;
+
 	len = PAGE_ALIGN(len);
 
 	if (len > TASK_SIZE || len == 0)
@@ -917,6 +925,7 @@ struct vm_area_struct * find_vma_prev(struct mm_struct * mm, unsigned long addr,
 int expand_stack(struct vm_area_struct * vma, unsigned long address)
 {
 	unsigned long grow;
+	unsigned long size;
 
 	if (!(vma->vm_flags & VM_GROWSDOWN))
 		return -EFAULT;
@@ -938,7 +947,14 @@ int expand_stack(struct vm_area_struct * vma, unsigned long address)
 		return 0;
 	}
 
+	size = vma->vm_end - address;
 	grow = (vma->vm_start - address) >> PAGE_SHIFT;
+	
+	/* Check to ensure the stack will not grow into a hugetlb-only region */
+        if (is_hugepage_only_range(vma->vm_end - size, size)) {
+		spin_unlock(&vma->vm_mm->page_table_lock);
+                return -EFAULT;
+	}
 
 	/* Overcommit.. */
 	if(!vm_enough_memory(grow)) {
@@ -1306,6 +1322,7 @@ unsigned long do_brk(unsigned long addr, unsigned long len)
 	struct vm_area_struct * vma, * prev;
 	unsigned long flags;
 	rb_node_t ** rb_link, * rb_parent;
+	int error;
 
 	vm_validate_enough("entering do_brk");
 
@@ -1316,6 +1333,13 @@ unsigned long do_brk(unsigned long addr, unsigned long len)
 
 	if ((addr + len) > TASK_SIZE || (addr + len) < addr)
 		return -EINVAL;
+
+	flags = VM_DATA_DEFAULT_FLAGS | VM_ACCOUNT | mm->def_flags;
+	
+	error = arch_mmap_check(addr, len, flags);
+	if (error)
+		return error;
+
 
 	/*
 	 * mlock MCL_FUTURE?
@@ -1350,8 +1374,6 @@ unsigned long do_brk(unsigned long addr, unsigned long len)
 
 	if (!vm_enough_memory(len >> PAGE_SHIFT))
 		return -ENOMEM;
-
-	flags = VM_DATA_DEFAULT_FLAGS | VM_ACCOUNT | mm->def_flags; 
 
 	/* Can we just expand an old anonymous mapping? */
 	if (rb_parent && vma_merge(mm, prev, rb_parent, addr, addr + len, flags, NULL, 0))

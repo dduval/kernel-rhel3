@@ -804,9 +804,12 @@ int flush_old_exec(struct linux_binprm * bprm)
 #endif
 	flush_thread();
 
-	if (bprm->e_uid != current->euid || bprm->e_gid != current->egid || 
-	    permission(bprm->file->f_dentry->d_inode,MAY_READ))
+	if (bprm->e_uid != current->euid || bprm->e_gid != current->egid) {
 		current->mm->dumpable = 0;
+		current->pdeath_signal = 0;
+	} else if (permission(bprm->file->f_dentry->d_inode,MAY_READ)) {
+		current->mm->dumpable = 0;		
+	}
 
 	/* An exec changes our domain. We are no longer part of the thread
 	   group */
@@ -933,6 +936,7 @@ void compute_creds(struct linux_binprm *bprm)
 	if (bprm->e_uid != current->uid || bprm->e_gid != current->gid ||
 	    !cap_issubset(new_permitted, current->cap_permitted)) {
                 current->mm->dumpable = 0;
+		current->pdeath_signal = 0;
 		
 		lock_kernel();
 		if (must_not_trace_exec(current)
