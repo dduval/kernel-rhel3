@@ -1,0 +1,15 @@
+#
+# IPv6 configuration
+# 
+
+bool 'IPv6: Privacy Extensions (RFC 3041) support' CONFIG_IPV6_PRIVACY
+
+if [ "$CONFIG_NETFILTER" != "n" ]; then
+   source net/ipv6/netfilter/Config.in
+fi
+
+tristate 'IPv6: AH transformation' CONFIG_INET6_AH
+tristate 'IPv6: ESP transformation' CONFIG_INET6_ESP
+tristate 'IPv6: IPComp transformation' CONFIG_INET6_IPCOMP
+
+tristate 'IPv6: IPv6-in-IPv6 tunnel' CONFIG_IPV6_TUNNEL

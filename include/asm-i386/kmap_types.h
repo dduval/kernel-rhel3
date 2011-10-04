@@ -1,0 +1,33 @@
+#ifndef _ASM_KMAP_TYPES_H
+#define _ASM_KMAP_TYPES_H
+
+enum km_type {
+	/*
+	 * IMPORTANT: dont move these 3 entries, the virtual stack
+	 * must be 8K aligned.
+	 */
+	KM_BOUNCE_READ,
+	KM_VSTACK1,
+	KM_VSTACK0,
+
+	KM_LDT_PAGE15,
+	KM_LDT_PAGE0 = KM_LDT_PAGE15 + 16-1,
+	KM_USER_COPY,
+	KM_VSTACK_HOLE,
+	KM_SKB_SUNRPC_DATA,
+	KM_SKB_DATA_SOFTIRQ,
+	KM_USER0,
+	KM_USER1,
+	KM_IRQ0,
+	KM_IRQ1,
+	KM_BH_IRQ,
+	KM_PTE0,
+	KM_PTE1,
+	KM_PTE2,
+	KM_SOFTIRQ0,
+	KM_SOFTIRQ1,
+	KM_NETDUMP,
+	KM_TYPE_NR
+};
+
+#endif

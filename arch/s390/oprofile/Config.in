@@ -1,0 +1,7 @@
+if [ "$CONFIG_EXPERIMENTAL" = "y" ]; then
+   mainmenu_option next_comment
+   comment 'Profiling support'
+   bool 'Profiling support (EXPERIMENTAL)' CONFIG_PROFILING
+   dep_tristate '  OProfile system profiling (EXPERIMENTAL)' CONFIG_OPROFILE $CONFIG_PROFILING
+   endmenu
+fi

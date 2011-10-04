@@ -1,0 +1,11 @@
+#
+# Wireless LAN device configuration
+#
+
+# If Pcmcia is compiled in, offer Pcmcia cards...
+if [ "$CONFIG_PCMCIA" != "n" ]; then
+   comment 'Wireless Pcmcia cards support' 
+
+   tristate '  Hermes support (Orinoco/WavelanIEEE/PrismII/Symbol 802.11b cards)' CONFIG_PCMCIA_HERMES_OLD
+fi
+

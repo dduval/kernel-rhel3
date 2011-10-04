@@ -1,0 +1,4 @@
+#
+# XFRM configuration
+#
+tristate '  IP: IPsec user configuration interface' CONFIG_XFRM_USER

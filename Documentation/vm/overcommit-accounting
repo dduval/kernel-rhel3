@@ -1,0 +1,70 @@
+* This describes the overcommit management facility in the latest kernel
+  tree (FIXME: actually it also describes the stuff that isnt yet done)
+
+The Linux kernel supports four overcommit handling modes
+
+0	-	Heuristic overcommit handling. Obvious overcommits of
+		address space are refused. Used for a typical system. It
+		ensures a seriously wild allocation fails while allowing
+		overcommit to reduce swap usage
+
+1	-	No overcommit handling. Appropriate for some scientific
+		applications
+
+2	-	(NEW) strict overcommit. The total address space commit
+		for the system is not permitted to exceed swap + half ram.
+		In almost all situations this means a process will not be
+		killed while accessing pages but only by malloc failures
+		that are reported back by the kernel mmap/brk code.
+
+3	-	(NEW) paranoid overcommit The total address space commit
+		for the system is not permitted to exceed swap. The machine
+		will never kill a process accessing pages it has mapped
+		except due to a bug (ie report it!)
+
+Gotchas
+-------
+
+The C language stack growth does an implicit mremap. If you want absolute
+guarantees and run close to the edge you MUST mmap your stack for the 
+largest size you think you will need. For typical stack usage is does
+not matter much but its a corner case if you really really care
+
+In modes 2 and 3 the MAP_NORESERVE flag is ignored. 
+
+
+How It Works
+------------
+
+The overcommit is based on the following rules
+
+For a file backed map
+	SHARED or READ-only	-	0 cost (the file is the map not swap)
+	PRIVATE WRITABLE	-	size of mapping per instance
+
+For an anonymous or /dev/zero map
+	SHARED			-	size of mapping
+	PRIVATE READ-only	-	0 cost (but of little use)
+	PRIVATE WRITABLE	-	size of mapping per instance
+
+Additional accounting
+	Pages made writable copies by mmap
+	shmfs memory drawn from the same pool
+
+Status
+------
+
+o	We account mmap memory mappings
+o	We account mprotect changes in commit
+o	We account mremap changes in size
+o	We account brk
+o	We account munmap
+o	We report the commit status in /proc
+o	Account and check on fork
+o	Review stack handling/building on exec
+o	SHMfs accounting
+o	Implement actual limit enforcement
+
+To Do
+-----
+o	Account ptrace pages (this is hard)

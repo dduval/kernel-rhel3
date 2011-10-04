@@ -1,0 +1,20 @@
+#
+# device driver configuration for add-on drivers
+#
+mainmenu_option next_comment
+comment 'Additional device driver support'
+
+dep_tristate '   Support for the Broadcom 5700/5701 Gigabit Ethernet Adapters' CONFIG_NET_BROADCOM $CONFIG_PCI m
+dep_tristate '   CIPE (Crypto IP Encapsulation)' CONFIG_CIPE $CONFIG_INET m
+dep_tristate '   AEP 1000 SSL Accelerator support' CONFIG_CRYPTO_AEP $CONFIG_PCI m
+dep_tristate '   Broadcom 5820 SSL Accelerator support' CONFIG_CRYPTO_BROADCOM $CONFIG_PCI m
+dep_tristate '   Dell MegaRac remote access card support' CONFIG_MEGARAC m
+
+
+dep_tristate '   Experimental QLogic 2100 support' CONFIG_FC_QLA2100 $CONFIG_PCI m
+dep_tristate '   Experimental QLogic 2200 support' CONFIG_FC_QLA2200 $CONFIG_PCI m
+dep_tristate '   Experimental QLogic 2300 support' CONFIG_FC_QLA2300 $CONFIG_PCI m
+dep_tristate '   iSCSI support (scsi-over-network)' CONFIG_SCSI_ISCSI $CONFIG_SCSI m
+
+
+endmenu

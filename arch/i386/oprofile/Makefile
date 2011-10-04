@@ -1,0 +1,15 @@
+# arch/i386/oprofile/Makefile
+
+O_TARGET:=oprofile.o
+obj-m := $(O_TARGET)
+obj-y := init.o timer_int.o \
+         $(addprefix ../../../drivers/oprofile/, \
+           oprof.o cpu_buffer.o buffer_sync.o \
+           event_buffer.o oprofile_files.o \
+           oprofilefs.o oprofile_stats.o )
+
+ifeq ($(CONFIG_X86_LOCAL_APIC),y)
+obj-y += nmi_int.o op_model_athlon.o op_model_ppro.o op_model_p4.o
+endif
+
+include $(TOPDIR)/Rules.make

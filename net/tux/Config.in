@@ -1,0 +1,7 @@
+tristate '  Threaded linUX application protocol accelerator layer (TUX)' CONFIG_TUX
+if [ "$CONFIG_TUX" = "y" -o "$CONFIG_TUX" = "m" ]; then
+  bool     '    External CGI module' CONFIG_TUX_EXTCGI
+  bool     '    extended TUX logging format' CONFIG_TUX_EXTENDED_LOG
+  bool     '    debug TUX' CONFIG_TUX_DEBUG
+fi
+

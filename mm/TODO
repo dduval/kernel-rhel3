@@ -1,0 +1,38 @@
+		VM TODO list
+
+Forever valid TODO entries:
+  - keep up with the official kernel
+  - port over bugfixes
+  - minimise the diff by keeping code in sync where possible
+
+Easy short-term features:
+  - reclaim swap space from refill_inactive()
+  - simplify SMP locking 
+  - replace foo()/foo_pgd()/foo_pmd()/foo_pte() stuff with
+    one single function using a for_each_pte() macro
+       for_each_pte(ptep, mm, start_address, end_address)
+  - fix page_launder() to not eat horrible amounts of CPU or flush
+    all pages to disk at once
+  - better VM balancing, clean vs. dirty ratio
+  - fix loopback device deadlock
+    <akpm> riel: nr_fract=70%, nr_fract_sync=80%
+    <akpm> riel: setup a loopback fs ext2-on-ext2
+    <akpm> riel: boot with mem=64m
+    <akpm> riel: then write a 500 meg file.
+    <akpm> riel: current kernel livelocks.
+  - stabilise pte_highmem and integrate it with rmap
+  - page_cache_size per zone
+  - pte_chain list per zone
+  - get rid of other global structures/stats, make them per zone
+
+Long-term features:
+  - extensive VM statistics
+  - IO clustering for page_launder() and sync_old_buffers()
+  - readahead on per-VMA level (+ drop behind?)
+  - more graceful degradation when the load gets high
+     - reducing readahead
+     - unfair pageout so not all apps fall over
+  - memory objects, using pagecache and tmpfs for storage so
+    the memory object itself doesn't introduce any new overhead
+  - using the memory objects, removing page table copying from fork()
+  - load control able to deal with really extreme loads, swapping
