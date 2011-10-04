@@ -749,7 +749,8 @@ static int shmem_populate(struct vm_area_struct *vma,
 	return 0;
 }
 
-int shmem_lock(struct file * file, int lock)
+int shmem_lock(struct file *file, int lock,
+		struct mm_struct **locker_mm_p, pid_t *locker_pid_p)
 {
 	struct inode * inode = file->f_dentry->d_inode;
 	struct shmem_inode_info * info = SHMEM_I(inode);
@@ -763,15 +764,23 @@ int shmem_lock(struct file * file, int lock)
 		locked += mm->locked_vm;
 		lock_limit = current->rlim[RLIMIT_MEMLOCK].rlim_cur;
 		lock_limit >>= PAGE_SHIFT;
-		if (locked > lock_limit && !capable(CAP_IPC_LOCK))
-			goto out_nomem;
 		if (locked > num_physpages/10*9)
 			goto out_nomem;
+		if (locked > lock_limit && !capable(CAP_IPC_LOCK))
+			goto out_nomem;
 		mm->locked_vm = locked;
+		*locker_mm_p = mm;
+		*locker_pid_p = current->tgid;
 	}
 	if (!lock && info->locked && mm) {
 		locked = inode->i_size >> PAGE_SHIFT;
-		mm->locked_vm -= locked;
+		if (mm == *locker_mm_p &&
+		    current->tgid == *locker_pid_p &&
+		    locked <= mm->locked_vm) {
+			mm->locked_vm -= locked;
+			*locker_mm_p = NULL;
+			*locker_pid_p = 0;
+		}
 	}
 	info->locked = lock;
 	retval = 0;

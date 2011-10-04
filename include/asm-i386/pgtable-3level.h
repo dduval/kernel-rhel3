@@ -42,7 +42,7 @@ static inline int pgd_present(pgd_t pgd)	{ return 1; }
 /* Rules for using set_pte: the pte being assigned *must* be
  * either not present or in a state where the hardware will
  * not attempt to update the pte.  In places where this is
- * not possible, use pte_get_and_clear to obtain the old pte
+ * not possible, use ptep_get_and_clear to obtain the old pte
  * value and then use set_pte to update it.  -ben
  */
 static inline void set_pte(pte_t *ptep, pte_t pte)

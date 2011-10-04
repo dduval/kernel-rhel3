@@ -209,16 +209,15 @@ asmlinkage long sys_mlock(unsigned long start, size_t len)
 	locked = len >> PAGE_SHIFT;
 	locked += current->mm->locked_vm;
 
-	lock_limit = current->rlim[RLIMIT_MEMLOCK].rlim_cur;
-	lock_limit >>= PAGE_SHIFT;
-
-	/* check against resource limits */
-	if (locked > lock_limit && !capable(CAP_IPC_LOCK))
-		goto out;
-
 	/* we may lock at most 90% of physical memory... */
 	/* (this check is pretty bogus, but doesn't hurt) */
 	if (locked > num_physpages/10*9)
+		goto out;
+
+	/* check against resource limits */
+	lock_limit = current->rlim[RLIMIT_MEMLOCK].rlim_cur;
+	lock_limit >>= PAGE_SHIFT;
+	if (locked > lock_limit && !capable(CAP_IPC_LOCK))
 		goto out;
 
 	error = do_mlock(start, len, 1);
@@ -284,16 +283,17 @@ asmlinkage long sys_mlockall(int flags)
 	if (!flags || (flags & ~(MCL_CURRENT | MCL_FUTURE)))
 		goto out;
 
-	lock_limit = current->rlim[RLIMIT_MEMLOCK].rlim_cur;
-	lock_limit >>= PAGE_SHIFT;
-
 	ret = -ENOMEM;
-	if (current->mm->total_vm > lock_limit && !capable(CAP_IPC_LOCK))
-		goto out;
 
 	/* we may lock at most 90% of physical memory... */
 	/* (this check is pretty bogus, but doesn't hurt) */
 	if (current->mm->total_vm > num_physpages/10*9)
+		goto out;
+
+	/* check against resource limits */
+	lock_limit = current->rlim[RLIMIT_MEMLOCK].rlim_cur;
+	lock_limit >>= PAGE_SHIFT;
+	if (current->mm->total_vm > lock_limit && !capable(CAP_IPC_LOCK))
 		goto out;
 
 	ret = do_mlockall(flags);

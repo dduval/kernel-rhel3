@@ -164,11 +164,15 @@ static int proc_pid_environ(struct task_struct *task, char * buffer)
 
 	task_lock(task);
 	mm = task->mm;
-	if (mm)
-		atomic_inc(&mm->mm_users);
+	if (mm) {
+		if (mm->env_end)
+			atomic_inc(&mm->mm_users);
+		else
+			mm = NULL;
+	}
 	task_unlock(task);
 	if (mm) {
-		unsigned int len = mm->env_end - mm->env_start;
+		int len = mm->env_end - mm->env_start;
 		if (len > PAGE_SIZE)
 			len = PAGE_SIZE;
 		res = access_process_vm(task, mm->env_start, buffer, len, 0);
@@ -205,8 +209,7 @@ static int proc_pid_cmdline(struct task_struct *task, char * buffer)
 		    
 		// If the nul at the end of args has been overwritten, then
 		// assume application is using setproctitle(3).
-		if ( res > 0 && buffer[res-1] != '\0' )
-		{
+		if (res > 0 && buffer[res-1] != '\0' && mm->env_end) {
 			len = strnlen( buffer, res );
 			if ( len < res )
 			{

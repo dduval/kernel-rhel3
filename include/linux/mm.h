@@ -662,7 +662,7 @@ extern void clear_page_tables(struct mm_struct *, unsigned long, int);
 extern int fail_writepage(struct page *);
 struct page * shmem_nopage(struct vm_area_struct * vma, unsigned long address, int unused);
 struct file *shmem_file_setup(char * name, loff_t size);
-extern int shmem_lock(struct file * file, int lock);
+extern int shmem_lock(struct file *, int lock, struct mm_struct **, pid_t *);
 extern int shmem_zero_setup(struct vm_area_struct *);
 
 extern void zap_page_range(struct vm_area_struct *vma, unsigned long address, unsigned long size);
@@ -727,6 +727,7 @@ extern void FASTCALL(vm_set_pte(struct vm_area_struct *vma, unsigned long addr, 
 extern pte_t FASTCALL(vm_ptep_get_and_clear(struct vm_area_struct *vma, unsigned long addr, pte_t *ptep));
 extern void vm_pte_clear(struct vm_area_struct *vma, unsigned long address, pte_t *ptep);
 extern void FASTCALL(__free_pte(pte_t pte));
+extern void vm_account(struct vm_area_struct *, pte_t, unsigned long, long);
 
 
 /* mmap.c */
@@ -813,9 +814,9 @@ static inline int __can_vma_merge(struct vm_area_struct * vma, unsigned long vm_
    permission to do any memory locking. */
 static inline int can_do_mlock(void)
 {
-	if (capable(CAP_IPC_LOCK))
-		return 1;
 	if (current->rlim[RLIMIT_MEMLOCK].rlim_cur != 0)
+		return 1;
+	if (capable(CAP_IPC_LOCK))
 		return 1;
 	return 0;
 }

@@ -267,7 +267,7 @@ void unmap_hugepage_range(struct vm_area_struct *vma,
 {
 	struct mm_struct *mm = vma->vm_mm;
 	unsigned long address;
-	pte_t *pte;
+	pte_t *pte, old_pte;
 	struct page *page;
 
 	BUG_ON(start & (HPAGE_SIZE - 1));
@@ -278,7 +278,8 @@ void unmap_hugepage_range(struct vm_area_struct *vma,
 		if (pte_none(*pte))
 			continue;
 		page = pte_page(*pte);	
-		vm_pte_clear(vma, address, pte);
+		old_pte = ptep_get_and_clear(pte);
+		vm_account(vma, old_pte, address, -1);
 		flush_tlb_range(vma, address, address + HPAGE_SIZE);
 		huge_page_release(page);
 	}

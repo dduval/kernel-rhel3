@@ -78,7 +78,7 @@ void page_pin_init(unsigned long mempages)
 							     &page_pin_mask);
 }
 
-static inline void vm_account(struct vm_area_struct *vma, pte_t pte, unsigned long address, long adj)
+void vm_account(struct vm_area_struct *vma, pte_t pte, unsigned long address, long adj)
 {
 	struct mm_struct *mm = vma->vm_mm;
 
@@ -1419,9 +1419,12 @@ int remap_page_range(struct vm_area_struct *vma, unsigned long from,
  */
 static inline void establish_pte(struct vm_area_struct * vma, unsigned long address, pte_t *page_table, pte_t entry)
 {
-	if (!pte_none(*page_table))
-		vm_account_remove(vma, *page_table, address);
-	pte_clear(page_table);
+	pte_t old_pte;
+
+	if (!pte_none(*page_table)) {
+		old_pte = ptep_get_and_clear(page_table);
+		vm_account_remove(vma, old_pte, address);
+	}
 	flush_tlb_page(vma, address);
 	vm_set_pte(vma, address, page_table, entry);
 	update_mmu_cache(vma, address, entry);

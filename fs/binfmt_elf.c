@@ -222,6 +222,9 @@ create_elf_tables(char *p, int argc, int envc,
 
 	__put_user((elf_addr_t)argc,--sp);
 	current->mm->arg_start = (unsigned long) p;
+	current->mm->arg_end = 0UL;
+	current->mm->env_start = 0UL;
+	current->mm->env_end = 0UL;
 	while (argc-->0) {
 		__put_user((elf_caddr_t)(unsigned long)p,argv++);
 		len = strnlen_user(p, PAGE_SIZE*MAX_ARG_PAGES);
@@ -1404,7 +1407,7 @@ static int elf_core_dump(long signr, struct pt_regs * regs, struct file * file)
 	
 	/* first copy the parameters from user space */
 	memset(&psinfo, 0, sizeof(psinfo));
-	{
+	if (current->mm->arg_end) {
 		int i, len;
 
 		len = current->mm->arg_end - current->mm->arg_start;

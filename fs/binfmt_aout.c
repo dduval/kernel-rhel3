@@ -225,6 +225,9 @@ static unsigned long * create_aout_tables(char * p, struct linux_binprm * bprm)
 #endif
 	put_user(argc,--sp);
 	current->mm->arg_start = (unsigned long) p;
+	current->mm->arg_end = 0UL;
+	current->mm->env_start = 0UL;
+	current->mm->env_end = 0UL;
 	while (argc-->0) {
 		char c;
 		put_user(p,argv++);

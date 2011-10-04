@@ -50,7 +50,7 @@ static inline mmu_gather_t *tlb_gather_mmu(struct vm_area_struct *vma)
 }
 
 /* void tlb_remove_page(mmu_gather_t *tlb, pte_t *ptep, unsigned long addr)
- *	Must perform the equivalent to __free_pte(pte_get_and_clear(ptep)), while
+ *	Must perform the equivalent to __free_pte(ptep_get_and_clear(ptep)), while
  *	handling the additional races in SMP caused by other CPUs caching valid
  *	mappings in their TLBs.
  */
