@@ -19068,14 +19068,8 @@ apidev_init(struct Scsi_Host *host)
 			host->hostt->proc_dir->name, 
 			APIDEV_NODE, apidev_major);)
 
-           // XXX: Fix this when proc_mknod works again on main!!!
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,5,0)
-	proc_mknod(APIDEV_NODE, 0777+S_IFCHR, host->hostt->proc_dir,
+	proc_mknod(APIDEV_NODE, 0600+S_IFCHR, host->hostt->proc_dir,
 			(kdev_t)MKDEV(apidev_major, 0));
-#else
-	proc_mknod(APIDEV_NODE, 0777+S_IFCHR, host->hostt->proc_dir,
-			(kdev_t)mk_kdev(apidev_major, 0));
-#endif
 
 #if CONFIG_PPC64 || CONFIG_X86_64
 	apidev_init_ppc64();

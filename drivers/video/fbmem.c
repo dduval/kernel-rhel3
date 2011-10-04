@@ -403,9 +403,7 @@ fb_read(struct file *file, char *buf, size_t count, loff_t *ppos)
 	fb->fb_get_fix(&fix,PROC_CONSOLE(info), info);
 	if (p >= fix.smem_len)
 	    return 0;
-	if (count >= fix.smem_len)
-	    count = fix.smem_len;
-	if (count + p > fix.smem_len)
+	if (count > fix.smem_len - p)
 		count = fix.smem_len - p;
 	if (count) {
 	    char *base_addr;
@@ -414,7 +412,7 @@ fb_read(struct file *file, char *buf, size_t count, loff_t *ppos)
 	    count -= copy_to_user(buf, base_addr+p, count);
 	    if (!count)
 		return -EFAULT;
-	    *ppos += count;
+	    *ppos = p + count;
 	}
 	return count;
 }
@@ -436,10 +434,8 @@ fb_write(struct file *file, const char *buf, size_t count, loff_t *ppos)
 	fb->fb_get_fix(&fix, PROC_CONSOLE(info), info);
 	if (p > fix.smem_len)
 	    return -ENOSPC;
-	if (count >= fix.smem_len)
-	    count = fix.smem_len;
 	err = 0;
-	if (count + p > fix.smem_len) {
+	if (count > fix.smem_len - p) {
 	    count = fix.smem_len - p;
 	    err = -ENOSPC;
 	}
@@ -448,7 +444,7 @@ fb_write(struct file *file, const char *buf, size_t count, loff_t *ppos)
 
 	    base_addr = info->disp->screen_base;
 	    count -= copy_from_user(base_addr+p, buf, count);
-	    *ppos += count;
+	    *ppos = p + count;
 	    err = -EFAULT;
 	}
 	if (count)

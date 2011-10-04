@@ -61,13 +61,13 @@ anslcd_write( struct file * file, const char * buf,
 
 	if ( verify_area(VERIFY_READ, buf, count) )
 		return -EFAULT;
-	for ( i = *ppos; count > 0; ++i, ++p, --count ) 
-	{
+	while (count--) {
 		char c;
-		__get_user(c, p);
+		if (__get_user(c, p++))
+			return -EFAULT;
 		anslcd_write_byte_data( c );
 	}
-	*ppos = i;
+	*ppos += p - buf;
 	return p - buf;
 }
 

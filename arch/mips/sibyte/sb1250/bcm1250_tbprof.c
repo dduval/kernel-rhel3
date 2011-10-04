@@ -284,7 +284,9 @@ static ssize_t sbprof_tb_read(struct file *filp, char *buf,
 	char *dest    =	 buf;
 	long  cur_off = *offp;
 
-	count = 0;
+	if (cur_off < 0)
+		return -EINVAL;
+
 	cur_sample = cur_off / TB_SAMPLE_SIZE;
 	sample_off = cur_off % TB_SAMPLE_SIZE;
 	sample_left = TB_SAMPLE_SIZE - sample_off;

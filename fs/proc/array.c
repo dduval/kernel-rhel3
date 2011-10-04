@@ -653,15 +653,17 @@ ssize_t proc_pid_read_maps (struct task_struct *task, struct file * file, char *
 	struct vm_area_struct * map;
 	char *tmp, *kbuf;
 	long retval;
-	int off, lineno, loff;
+	int lineno, loff;
+	unsigned off;
+	loff_t pos = *ppos;
 
 	/* reject calls with out of range parameters immediately */
 	retval = 0;
-	if (*ppos > LONG_MAX)
+	off = pos;
+	if (off != pos)
 		goto out;
 	if (count == 0)
 		goto out;
-	off = (long)*ppos;
 	/*
 	 * We might sleep getting the page, so get it first.
 	 */

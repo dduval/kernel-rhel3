@@ -347,6 +347,7 @@ static ssize_t ppc_rtas_poweron_read(struct file * file, char * buf,
 		size_t count, loff_t *ppos)
 {
 	char timebuf[40];  
+	loff_t pos = *ppos;
 	int n;
 
 	if (power_on_time == 0)
@@ -354,17 +355,16 @@ static ssize_t ppc_rtas_poweron_read(struct file * file, char * buf,
 	else
 		n = snprintf(timebuf, 40, "%lu\n", power_on_time);
 
-	if (*ppos >= n)
+	if (pos != (unsigned)pos || pos >= n)
 		return 0;
 	n++;		/* Include the null terminator */
-	if (*ppos)
-		n -= *ppos;
+	n -= pos;
 	if (n > count)
 		n = count;
-	if (copy_to_user (buf, timebuf + (*ppos), n)) {
+	if (copy_to_user (buf, timebuf + pos, n)) {
 		return -EFAULT;
 	}
-	*ppos += n;
+	*ppos = pos + n;
 	return n;
 }
 
@@ -395,6 +395,7 @@ static ssize_t ppc_rtas_progress_read(struct file * file, char * buf,
 {
 	int n;
 	char * tmpbuf;
+	loff_t pos = *ppos;
 
 	tmpbuf = kmalloc (MAX_LINELENGTH, GFP_KERNEL);
 	if (!tmpbuf) {
@@ -404,21 +405,20 @@ static ssize_t ppc_rtas_progress_read(struct file * file, char * buf,
 	n = snprintf (tmpbuf, MAX_LINELENGTH, "%s\n", progress_led);
 	if (n > MAX_LINELENGTH) n = MAX_LINELENGTH;
 
-	if (*ppos >= n) {
+	if (pos != (unsigned)pos || pos >= n) {
 		kfree (tmpbuf);
 		return 0;
 	}
 	n++;		/* Include the null terminator */
-	if (*ppos)
-		n -= *ppos;
+	n -= pos;
 	if (n > count)
 		n = count;
-	if (copy_to_user (buf, tmpbuf + (*ppos), n)) {
+	if (copy_to_user (buf, tmpbuf + pos, n)) {
 		kfree (tmpbuf);
 		return -EFAULT;
 	}
 	kfree (tmpbuf);
-	*ppos += n;
+	*ppos = pos + n;
 	return n;
 }
 
@@ -466,6 +466,7 @@ static ssize_t ppc_rtas_clock_read(struct file * file, char * buf,
 	unsigned long tod[8];
 	int n, error;
 	char timebuf[30];  
+	loff_t pos = *ppos;
 
 	error = rtas_call(rtas_token("get-time-of-day"), 0, 8, tod);
 	
@@ -482,17 +483,16 @@ static ssize_t ppc_rtas_clock_read(struct file * file, char * buf,
 				mktime(year, mon, day, hour, min, sec));
 	}
 
-	if (*ppos >= n)
+	if (pos != (unsigned)pos || pos >= n)
 		return 0;
 	n++;		/* Include the null terminator */
-	if (*ppos)
-		n -= *ppos;
+	n -= pos;
 	if (n > count)
 		n = count;
-	if (copy_to_user (buf, timebuf + (*ppos), n)) {
+	if (copy_to_user (buf, timebuf + pos, n)) {
 		return -EFAULT;
 	}
-	*ppos += n;
+	*ppos = pos + n;
 	return n;
 }
 
@@ -873,19 +873,19 @@ static ssize_t ppc_rtas_tone_freq_read(struct file * file, char * buf,
 {
 	int n;
 	char freqbuf[30];  
+	loff_t pos = *ppos;
 
 	n = snprintf(freqbuf, 30, "%lu\n", rtas_tone_frequency);
-	if (*ppos >= n)
+	if (pos != (unsigned)pos || pos >= n)
 		return 0;
 	n++;		/* Include the null terminator */
-	if (*ppos)
-		n -= *ppos;
+	n -= pos;
 	if (n > count)
 		n = count;
-	if (copy_to_user (buf, freqbuf + (*ppos), n)) {
+	if (copy_to_user (buf, freqbuf + pos, n)) {
 		return -EFAULT;
 	}
-	*ppos += n;
+	*ppos = pos + n;
 	return n;
 }
 /* ****************************************************************** */
@@ -931,19 +931,19 @@ static ssize_t ppc_rtas_tone_volume_read(struct file * file, char * buf,
 {
 	int n;
 	char volbuf[10];  
+	loff_t pos = *ppos;
 
 	n = snprintf(volbuf, 10, "%lu\n", rtas_tone_volume);
-	if (*ppos >= n)
+	if (pos != (unsigned)pos || pos >= n)
 		return 0;
 	n++;		/* Include the null terminator */
-	if (*ppos)
-		n -= *ppos;
+	n -= pos;
 	if (n > count)
 		n = count;
-	if (copy_to_user (buf, volbuf + (*ppos), n)) {
+	if (copy_to_user (buf, volbuf + pos, n)) {
 		return -EFAULT;
 	}
-	*ppos += n;
+	*ppos = pos + n;
 	return n;
 }
 
@@ -1047,6 +1047,7 @@ static ssize_t ppc_rtas_errinjct_read(struct file *file, char *buf,
 	int i;
 	int n = 0, cnt;
 	int m = MAX_ERRINJCT_TOKENS * (ERRINJCT_TOKEN_LEN+1);
+	loff_t pos = *ppos;
 
 	buffer = (char *)kmalloc(m, GFP_KERNEL);
 	if (!buffer) {
@@ -1064,21 +1065,20 @@ static ssize_t ppc_rtas_errinjct_read(struct file *file, char *buf,
 		n += cnt;
 	}
 
-	if (*ppos >= n) {
+	if (pos != (unsigned)pos || pos >= n) {
 		kfree(buffer);
 		return 0;
 	}
 	n++;		/* Include the null terminator */
-	if (*ppos)
-		n -= *ppos;
+	n -= pos;
 	if (n > count)
 		n = count;
-	if (copy_to_user(buf, buffer + *ppos, n)) {
+	if (copy_to_user(buf, buffer + pos, n)) {
 		kfree (buffer);
 		return -EFAULT;
 	}
 
-	*ppos += n;
+	*ppos = pos + n;
 
 	kfree(buffer);
 	return n;
@@ -1091,17 +1091,18 @@ static ssize_t ppc_rtas_rmo_buf_read(struct file *file, char *buf,
 				    size_t count, loff_t *ppos)
 {
 	char kbuf[RMO_READ_BUF_MAX];
+	loff_t pos = *ppos;
 	int n;
 
 	n = sprintf(kbuf, "%016lx %x\n", rtas_rmo_buf, RTAS_RMOBUF_MAX);
 
-	if (*ppos >= n)
+	if (pos != (unsigned)pos || pos >= n)
 		return 0;
-	n -= *ppos;
+	n -= pos;
 	if (n > count)
 		n = count;
-	if (copy_to_user(buf, kbuf + *ppos, n))
+	if (copy_to_user(buf, kbuf + pos, n))
 		return -EFAULT;
-	*ppos += n;
+	*ppos = pos + n;
  	return n;
 }

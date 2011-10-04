@@ -352,6 +352,7 @@ static ssize_t
 efi_sys_table_read(struct file *file, char *buffer, size_t count, loff_t *ppos)
 {
        void *data;
+       loff_t pos = *ppos;
        
        ssize_t size;
        int max_nr_entries = 7; 	/* num ptrs to tables we could expose */
@@ -381,18 +382,18 @@ efi_sys_table_read(struct file *file, char *buffer, size_t count, loff_t *ppos)
        if( efi.boot_info > 0 )
 	       length += sprintf(proc_buffer+length, "BootInfo=0x%lx\n", __pa(efi.boot_info));
 
-       if( *ppos >= length )
+       if (pos != (unsigned)pos || pos >= length)
 	       return 0;
 
-       data = (u8 *) proc_buffer + file->f_pos;
-       size = length - file->f_pos;
+       data = (u8 *) proc_buffer + pos;
+       size = length - pos;
        if (size > count)
                size = count;
        if (copy_to_user(buffer, data, size))
                return -EFAULT;
 
        kfree(proc_buffer);
-       *ppos += size;
+       *ppos = pos + size;
        return size;
 }
 

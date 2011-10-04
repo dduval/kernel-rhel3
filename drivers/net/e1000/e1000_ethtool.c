@@ -342,8 +342,12 @@ e1000_ethtool_gregs(struct e1000_adapter *adapter,
 	e1000_read_phy_reg(hw, PHY_1000T_STATUS, &phy_data);
 	regs_buff[24] = (uint32_t)phy_data;  /* phy local receiver status */
 	regs_buff[25] = regs_buff[24];  /* phy remote receiver status */
-
-	return;
+	regs_buff[26] = 0;
+	regs_buff[27] = 0;
+	regs_buff[28] = 0;
+	regs_buff[29] = 0;
+	regs_buff[30] = 0;
+	regs_buff[31] = 0;
 }
 
 static int
@@ -1421,6 +1425,8 @@ e1000_ethtool_ioctl(struct net_device *netdev, struct ifreq *ifr)
 
 		if(copy_from_user(&regs, addr, sizeof(regs)))
 			return -EFAULT;
+		if (regs.len > sizeof(regs_buff))
+			regs.len = sizeof(regs_buff);
 		e1000_ethtool_gregs(adapter, &regs, regs_buff);
 		if(copy_to_user(addr, &regs, sizeof(regs)))
 			return -EFAULT;

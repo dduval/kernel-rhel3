@@ -230,17 +230,21 @@ salinfo_log_read(struct file *file, char *buffer, size_t count, loff_t *ppos)
 	int ret;
 	void *saldata;
 	size_t size;
+	loff_t pos = *ppos;
+
+	if (pos != (unsigned)pos)
+		return 0;
 
 	info.type = data->type;
 	info.log_buffer = 0;
 	call_on_cpu(data->cpu, salinfo_log_read_cpu, &info);
-	if (!info.log_buffer || *ppos >= info.log_size) {
+	if (!info.log_buffer || pos >= info.log_size) {
 		ret = 0;
 		goto out;
 	}
 
-	saldata = info.log_buffer + file->f_pos;
-	size = info.log_size - file->f_pos;
+	saldata = info.log_buffer + pos;
+	size = info.log_size - pos;
 	if (size > count)
 		size = count;
 	if (copy_to_user(buffer, saldata, size)) {
@@ -248,7 +252,7 @@ salinfo_log_read(struct file *file, char *buffer, size_t count, loff_t *ppos)
 		goto out;
 	}
 
-	*ppos += size;
+	*ppos = pos + size;
 	ret = size;
 
 out:

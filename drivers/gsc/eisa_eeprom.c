@@ -33,21 +33,27 @@ static ssize_t eisa_eeprom_read(struct file * file,
 {
 	unsigned char *tmp;
 	ssize_t ret;
+	loff_t n = *ppos;
+	unsigned pos = n;
 	int i;
 	
-	if (*ppos >= HPEE_MAX_LENGTH)
+	if (pos != n || pos >= HPEE_MAX_LENGTH)
 		return 0;
 	
-	count = *ppos + count < HPEE_MAX_LENGTH ? count : HPEE_MAX_LENGTH - *ppos;
+	if (count > HPEE_MAX_LENGTH - pos)
+		count = HPEE_MAX_LENGTH - pos;
+
 	tmp = kmalloc(count, GFP_KERNEL);
 	if (tmp) {
 		for (i = 0; i < count; i++)
-			tmp[i] = gsc_readb(eeprom_addr+(*ppos)++);
+			tmp[i] = gsc_readb(eeprom_addr+pos++);
 
 		if (copy_to_user (buf, tmp, count))
 			ret = -EFAULT;
-		else
+		else {
 			ret = count;
+			*ppos = pos;
+		}
 		kfree (tmp);
 	} else
 		ret = -ENOMEM;

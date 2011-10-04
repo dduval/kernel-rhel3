@@ -309,6 +309,7 @@ ssize_t	rw_raw_dev(int rw, struct file *filp, char *buf,
 	int		minor;
 	kdev_t		dev;
 	unsigned long	limit;
+	loff_t		off = *offp;
 
 	int		sector_size, sector_bits, sector_mask;
 	int		max_sectors;
@@ -318,6 +319,9 @@ ssize_t	rw_raw_dev(int rw, struct file *filp, char *buf,
 	 */
 
 	minor = MINOR(filp->f_dentry->d_inode->i_rdev);
+
+	if (off < 0)
+		return -EINVAL;
 
 	err = alloc_kiovec(1, &iobuf);
 	if (err)
@@ -338,12 +342,12 @@ ssize_t	rw_raw_dev(int rw, struct file *filp, char *buf,
 		 MAJOR(dev), MINOR(dev), limit);
 	
 	err = -EINVAL;
-	if ((*offp & sector_mask) || (size & sector_mask))
+	if ((off & sector_mask) || (size & sector_mask))
 		goto out_free;
 	err = 0;
 	if (size)
 		err = -ENXIO;
-	if ((*offp >> sector_bits) >= limit)
+	if ((off >> sector_bits) >= limit)
 		goto out_free;
 
 	/*
@@ -353,7 +357,7 @@ ssize_t	rw_raw_dev(int rw, struct file *filp, char *buf,
 	 */
 
 	transferred = 0;
-	blocknr = *offp >> sector_bits;
+	blocknr = off >> sector_bits;
 	while (size > 0) {
 		blocks = size >> sector_bits;
 		if (blocks > max_sectors)
@@ -390,7 +394,7 @@ ssize_t	rw_raw_dev(int rw, struct file *filp, char *buf,
 	}
 	
 	if (transferred) {
-		*offp += transferred;
+		*offp = off + transferred;
 		err = transferred;
 	}
 
@@ -511,6 +515,10 @@ ssize_t rwvec_raw_dev(int rw, struct file * filp, const struct iovec *iov,
 	int	i, minor, err;
 	int	sector_size, sector_bits, sector_mask, max_sectors;
 	ssize_t	tot_len;
+	loff_t  off = *offp;
+
+	if (off < 0)
+		return -EINVAL;
 
 	for (i = 0, tot_len = 0; i < iov_count; i++) {
 		ssize_t tmp = tot_len;
@@ -547,15 +555,15 @@ ssize_t rwvec_raw_dev(int rw, struct file * filp, const struct iovec *iov,
 		MAJOR(dev), MINOR(dev), limit);
 
 	err = -EINVAL;
-	if ((*offp & sector_mask) || (tot_len & sector_mask))
+	if ((off & sector_mask) || (tot_len & sector_mask))
 		goto out;
 	err = 0;
 	if (tot_len)
 		err = -ENXIO;
-	if ((*offp >> sector_bits) >= limit) 
+	if ((off >> sector_bits) >= limit) 
 		goto out;
 
-	blocknr = *offp >> sector_bits;
+	blocknr = off >> sector_bits;
 	blocks = tot_len >> sector_bits;
 
 	if (!blocks)
@@ -582,7 +590,7 @@ ssize_t rwvec_raw_dev(int rw, struct file * filp, const struct iovec *iov,
 	unmap_kiobuf(iobuf);
 
 	if (err > 0) 
-		*offp += err;
+		*offp = off + err;
 out:
 	free_kiovec(1, &iobuf);
 	return err;

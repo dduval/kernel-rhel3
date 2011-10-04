@@ -5809,6 +5809,7 @@ ssize_t zfcp_parm_proc_read(struct file *file,
         
 	loff_t len;
 	procbuf_t *pbuf = (procbuf_t *) file->private_data;
+	loff_t pos = *offset;
 
 	ZFCP_LOG_TRACE(
           "enter (file=0x%lx  user_buf=0x%lx "
@@ -5816,20 +5817,20 @@ ssize_t zfcp_parm_proc_read(struct file *file,
           (unsigned long)file,
           (unsigned long)user_buf,
           user_len,
-          (unsigned long)*offset);
+          (unsigned long)pos);
 
-	if ( *offset>=pbuf->len) {
+	if (pos != (unsigned long)pos || pos >= pbuf->len) {
 		return 0;
 	} else {
-		len = min(user_len, (unsigned long)(pbuf->len - *offset));
-		if (copy_to_user( user_buf, &(pbuf->buf[*offset]), len))
+		len = min(user_len, (unsigned long)(pbuf->len - pos));
+		if (copy_to_user( user_buf, &(pbuf->buf[pos]), len))
 			return -EFAULT;
-		(* offset) += len;
+		*offset = pos + len;
 		return len;
 	}
 
         ZFCP_LOG_TRACE("Size-offset is %ld, user_len is %ld\n ",
-                       ((unsigned long)(pbuf->len  - *offset)),
+                       ((unsigned long)(pbuf->len  - pos)),
                        user_len);
 
         ZFCP_LOG_TRACE("exit (%Li)\n", len);
@@ -6247,6 +6248,7 @@ ssize_t zfcp_map_proc_read(struct file *file,
      zfcp_adapter_t *adapter=NULL;
      zfcp_port_t *port=NULL;
      zfcp_unit_t *unit=NULL;
+     loff_t pos = *offset;
      
      /* Is used when we don't have a 0 offset, which cannot happen
       * during the first call
@@ -6259,16 +6261,16 @@ ssize_t zfcp_map_proc_read(struct file *file,
           (unsigned long)file,
           (unsigned long)user_buf,
           user_len,
-          *offset);
+          pos);
 
      /* Do not overwrite proc-buffer */
      user_len = min(user_len, ZFCP_MAX_PROC_SIZE);
      size=0;
-     if((*offset)==0) {
+     if(pos==0) {
              current_unit=0;
              line_offset=0;
      } else {
-		current_unit = (*offset);
+		current_unit = pos;
 		line_offset = do_div(current_unit, item_size);
              ZFCP_LOG_TRACE("item_size %ld, current_unit %Ld, line_offset %Ld\n",
                             item_size,
@@ -6322,7 +6324,7 @@ ssize_t zfcp_map_proc_read(struct file *file,
      }
 
  out:        
-     (*offset) += user_len;
+     *offset = pos + user_len;
 
      ZFCP_LOG_TRACE("exit (%li)\n", user_len);
 
@@ -7051,6 +7053,7 @@ ssize_t zfcp_adapter_proc_read(struct file *file,
 
         loff_t len;
         procbuf_t *pbuf = (procbuf_t *) file->private_data;
+	loff_t pos = *offset;
 
         ZFCP_LOG_TRACE(
           "enter (file=0x%lx  user_buf=0x%lx "
@@ -7058,15 +7061,15 @@ ssize_t zfcp_adapter_proc_read(struct file *file,
           (unsigned long)file,
           (unsigned long)user_buf,
           user_len,
-          (unsigned long)*offset);
+          (unsigned long)pos);
 
-        if ( *offset>=pbuf->len) {
+        if ( pos != (unsigned long)pos || pos >= pbuf->len) {
                 return 0;
         } else {
-                len = min(user_len, (unsigned long)(pbuf->len - *offset));
-                if (copy_to_user( user_buf, &(pbuf->buf[*offset]), len))
+                len = min(user_len, (unsigned long)(pbuf->len - pos));
+                if (copy_to_user( user_buf, &(pbuf->buf[pos]), len))
                         return -EFAULT;
-                (* offset) += len;
+                *offset = pos + len;
                 return len;
         }
 
@@ -7205,6 +7208,7 @@ ssize_t zfcp_port_proc_read(struct file *file,
 
         loff_t len;
         procbuf_t *pbuf = (procbuf_t *) file->private_data;
+	loff_t pos = *offset;
 
         ZFCP_LOG_TRACE(
           "enter (file=0x%lx  user_buf=0x%lx "
@@ -7212,15 +7216,15 @@ ssize_t zfcp_port_proc_read(struct file *file,
           (unsigned long)file,
           (unsigned long)user_buf,
           user_len,
-          (unsigned long)*offset);
+          (unsigned long)pos);
 
-        if ( *offset>=pbuf->len) {
+        if (pos != (unsigned long)pos || pos >= pbuf->len) {
                 return 0;
         } else {
-                len = min(user_len, (unsigned long)(pbuf->len - *offset));
-                if (copy_to_user( user_buf, &(pbuf->buf[*offset]), len))
+                len = min(user_len, (unsigned long)(pbuf->len - pos));
+                if (copy_to_user( user_buf, &(pbuf->buf[pos]), len))
                         return -EFAULT;
-                (* offset) += len;
+                *offset = pos + len;
                 return len;
         }
 
@@ -7607,6 +7611,7 @@ ssize_t zfcp_unit_proc_read(struct file *file,
 
         loff_t len;
         procbuf_t *pbuf = (procbuf_t *) file->private_data;
+	loff_t pos = *offset;
 
         ZFCP_LOG_TRACE(
           "enter (file=0x%lx  user_buf=0x%lx "
@@ -7614,20 +7619,20 @@ ssize_t zfcp_unit_proc_read(struct file *file,
           (unsigned long)file,
           (unsigned long)user_buf,
           user_len,
-          (unsigned long)*offset);
+          (unsigned long)pos);
 
-        if ( *offset>=pbuf->len) {
+        if (pos != (unsigned long)pos || pos >= pbuf->len) {
                 return 0;
         } else {
-                len = min(user_len, (unsigned long)(pbuf->len - *offset));
-                if (copy_to_user( user_buf, &(pbuf->buf[*offset]), len))
+                len = min(user_len, (unsigned long)(pbuf->len - pos));
+                if (copy_to_user( user_buf, &(pbuf->buf[pos]), len))
                         return -EFAULT;
-                (* offset) += len;
+                *offset = pos + len;
                 return len;
         }
 
         ZFCP_LOG_TRACE("Size-offset is %ld, user_len is %ld\n ",
-                       ((unsigned long)(pbuf->len  - *offset)),
+                       ((unsigned long)(pbuf->len  - pos)),
                        user_len);
 
         ZFCP_LOG_TRACE("exit (%Li)\n", len);

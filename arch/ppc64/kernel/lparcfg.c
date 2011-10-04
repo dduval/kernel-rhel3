@@ -212,7 +212,7 @@ static ssize_t lparcfg_read(struct file *file, char *buf,
 		ret = -EFAULT;
 	else {
 		ret = count;
-		*ppos += count;
+		*ppos = p + count;
 	}
 	up(&lparcfg_sem);
 	return ret;

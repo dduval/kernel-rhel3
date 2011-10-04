@@ -225,6 +225,7 @@ static ssize_t rtas_flash_read(struct file *file, char *buf,
 	struct proc_dir_entry *dp = file->f_dentry->d_inode->u.generic_ip;
 	struct rtas_update_flash_t *uf;
 	char msg[RTAS_MSG_MAXLEN];
+	loff_t pos = *ppos;
 	int msglen;
 	ssize_t ret;
 
@@ -238,19 +239,19 @@ static ssize_t rtas_flash_read(struct file *file, char *buf,
 		msglen = sprintf(msg, "%d\n", uf->status);
 	}
 	
-	if (*ppos >= msglen) {
+	if (pos != (unsigned)pos || pos >= msglen) {
 		ret =  0;
 		goto done;
 	}
-	msglen -= *ppos;
+	msglen -= pos;
 	if (msglen > count)
 		msglen = count;
 
-	if (copy_to_user(buf, msg + (*ppos), msglen)) {
+	if (copy_to_user(buf, msg + pos, msglen)) {
 		ret = -EFAULT;
 		goto done;
 	}
-	*ppos += msglen;
+	*ppos = pos + msglen;
 	ret = msglen;
 done:
 	up(&rtas_flash_sem);
@@ -387,6 +388,7 @@ static ssize_t manage_flash_read(struct file *file, char *buf,
 	char msg[RTAS_MSG_MAXLEN];
 	int msglen;
 	ssize_t ret;
+	loff_t pos = *ppos;
 
 	if (down_interruptible(&rtas_flash_sem))
 		return -ERESTARTSYS;
@@ -397,20 +399,20 @@ static ssize_t manage_flash_read(struct file *file, char *buf,
 	}
 
 	msglen = sprintf(msg, "%d\n", args_buf->status);
-	if (*ppos >= msglen) {
+	if (pos != (unsigned)pos || pos >= msglen) {
 		ret = 0;
 		goto done;
 	}
 	
-	msglen -= *ppos;
+	msglen -= pos;
 	if (msglen > count)
 		msglen = count;
 
-	if (copy_to_user(buf, msg + (*ppos), msglen)) {
+	if (copy_to_user(buf, msg + pos, msglen)) {
 		ret = -EFAULT;
 		goto done;
 	}
-	*ppos += msglen;
+	*ppos = pos + msglen;
 	ret = msglen;
 
 done:
@@ -553,6 +555,7 @@ static ssize_t validate_flash_write(struct file *file, const char *buf,
 {
 	struct proc_dir_entry *dp = file->f_dentry->d_inode->u.generic_ip;
 	struct rtas_validate_flash_t *args_buf;
+	loff_t pos = *off;
 	ssize_t ret;
 
 	if (down_interruptible(&rtas_flash_sem))
@@ -570,25 +573,25 @@ static ssize_t validate_flash_write(struct file *file, const char *buf,
 
 	/* We are only interested in the first 4K of the
 	 * candidate image */
-	if ((*off >= VALIDATE_BUF_SIZE) || 
+	if (pos != (unsigned)pos || pos >= VALIDATE_BUF_SIZE || 
 		(args_buf->status == VALIDATE_AUTH)) {
-		*off += count;
+		*off = pos + count;
 		ret = count;
 		goto done;
 	}
 
-	if (*off + count >= VALIDATE_BUF_SIZE)  {
-		count = VALIDATE_BUF_SIZE - *off;
+	if (count >= VALIDATE_BUF_SIZE - pos)  {
+		count = VALIDATE_BUF_SIZE - pos;
 		args_buf->status = VALIDATE_READY;	
 	} else {
 		args_buf->status = VALIDATE_INCOMPLETE;
 	}
 
-	if (copy_from_user(args_buf->buf + *off, buf, count))  {
+	if (copy_from_user(args_buf->buf + pos, buf, count))  {
 		ret = -EFAULT;
 		goto done;
 	}
-	*off += count;
+	*off = pos + count;
 	ret = count;
 
 done:

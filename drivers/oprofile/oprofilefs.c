@@ -55,20 +55,22 @@ static struct super_operations s_ops = {
 ssize_t oprofilefs_str_to_user(char const * str, char * buf, size_t count, loff_t * offset)
 {
 	size_t len = strlen(str);
+	loff_t n = *offset;
+	unsigned pos = n;
 
 	if (!count)
 		return 0;
 
-	if (*offset > len)
+	if (pos != n || pos > len)
 		return 0;
 
-	if (count > len - *offset)
-		count = len - *offset;
+	if (count > len - pos)
+		count = len - pos;
 
-	if (copy_to_user(buf, str + *offset, count))
+	if (copy_to_user(buf, str + pos, count))
 		return -EFAULT;
 
-	*offset += count;
+	*offset = pos + count;
 
 	return count;
 }
@@ -80,22 +82,24 @@ ssize_t oprofilefs_ulong_to_user(unsigned long * val, char * buf, size_t count, 
 {
 	char tmpbuf[TMPBUFSIZE];
 	size_t maxlen;
+	loff_t n = *offset;
+	unsigned pos = n;
 
 	if (!count)
 		return 0;
 
 	maxlen = snprintf(tmpbuf, TMPBUFSIZE, "%lu\n", *val);
 
-	if (*offset > maxlen)
+	if (pos !=n || pos > maxlen)
 		return 0;
 
-	if (count > maxlen - *offset)
-		count = maxlen - *offset;
+	if (count > maxlen - pos)
+		count = maxlen - pos;
 
-	if (copy_to_user(buf, tmpbuf + *offset, count))
+	if (copy_to_user(buf, tmpbuf + pos, count))
 		return -EFAULT;
 
-	*offset += count;
+	*offset = pos + count;
 
 	return count;
 }

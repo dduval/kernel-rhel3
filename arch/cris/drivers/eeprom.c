@@ -494,7 +494,7 @@ static int eeprom_read_buf(loff_t addr, char * buf, int count)
 static ssize_t eeprom_read(struct file * file, char * buf, size_t count, loff_t *off)
 {
   int i, read=0;
-  unsigned long p = file->f_pos;
+  unsigned long p = *off;
 
   unsigned char page;
 
@@ -528,7 +528,7 @@ static ssize_t eeprom_read(struct file * file, char * buf, size_t count, loff_t 
     return -EFAULT;
   }
 
-  if( (p + count) > eeprom.size)
+  if (count > eeprom.size - p)
   {
     /* truncate count */
     count = eeprom.size - p;
@@ -548,7 +548,7 @@ static ssize_t eeprom_read(struct file * file, char * buf, size_t count, loff_t 
   
   if(read > 0)
   {
-    file->f_pos += read;
+    *off = p + read;
   }
 
   eeprom.busy--;
@@ -593,7 +593,7 @@ static ssize_t eeprom_write(struct file * file, const char * buf, size_t count,
   {
     restart = 0;
     written = 0;
-    p = file->f_pos;
+    p = *off;
    
     
     while( (written < count) && (p < eeprom.size))
@@ -721,10 +721,10 @@ static ssize_t eeprom_write(struct file * file, const char * buf, size_t count,
 
   eeprom.busy--;
   wake_up_interruptible(&eeprom.wait_q);
-  if (written == 0 && file->f_pos >= eeprom.size){
+  if (written == 0 && p >= eeprom.size){
     return -ENOSPC;
   }
-  file->f_pos += written;
+  *off = p;
   return written;
 }
 

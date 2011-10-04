@@ -159,6 +159,7 @@ tapechar_read (struct file *filp, char *data, size_t count, loff_t *ppos)
 	struct tape_device *device;
 	struct tape_request *request;
 	size_t block_size;
+	loff_t pos = *ppos;
 	int rc;
 
         DBF_EVENT(6, "TCHAR:read\n");
@@ -208,11 +209,13 @@ tapechar_read (struct file *filp, char *data, size_t count, loff_t *ppos)
 	if (rc == 0) {
 		rc = block_size - device->devstat.rescnt;
 		DBF_EVENT(6, "TCHAR:rbytes:  %x\n", rc);
-		filp->f_pos += rc;
+		pos += rc;
 		/* Copy data from idal buffer to user space. */
 		if (idal_buffer_to_user(device->char_data.idal_buf,
 					data, rc) != 0)
 			rc = -EFAULT;
+		else
+			*ppos = pos;
 	}
 	tape_put_request(request);
 	return rc;
@@ -224,6 +227,7 @@ tapechar_read (struct file *filp, char *data, size_t count, loff_t *ppos)
 ssize_t
 tapechar_write(struct file *filp, const char *data, size_t count, loff_t *ppos)
 {
+	loff_t pos = *ppos;
 	struct tape_device *device;
 	struct tape_request *request;
 	size_t block_size;
@@ -275,7 +279,7 @@ tapechar_write(struct file *filp, const char *data, size_t count, loff_t *ppos)
 			break;
 	        DBF_EVENT(6, "TCHAR:wbytes: %lx\n",
 			  block_size - device->devstat.rescnt); 
-		filp->f_pos += block_size - device->devstat.rescnt;
+		pos += block_size - device->devstat.rescnt;
 		written += block_size - device->devstat.rescnt;
 		if (device->devstat.rescnt != 0)
 			break;
@@ -301,8 +305,10 @@ tapechar_write(struct file *filp, const char *data, size_t count, loff_t *ppos)
 	 * Since process_eov positions the tape in front of the written
 	 * tapemark it doesn't hurt to write two marks again.
 	 */
-	if(!rc)
+	if(!rc) {
 		device->required_tapemarks = 2;
+		*ppos = pos;
+	}
 
 	return rc ? rc : written;
 }

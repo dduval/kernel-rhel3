@@ -1101,10 +1101,14 @@ static void do_shmem_file_read(struct file * filp, loff_t *ppos, read_descriptor
 	struct inode *inode = filp->f_dentry->d_inode;
 	struct address_space *mapping = inode->i_mapping;
 	unsigned long index, offset;
+	loff_t pos = *ppos;
 	int nr = 1;
 
-	index = *ppos >> PAGE_CACHE_SHIFT;
-	offset = *ppos & ~PAGE_CACHE_MASK;
+	if (unlikely(pos < 0))
+		return;
+
+	index = pos >> PAGE_CACHE_SHIFT;
+	offset = pos & ~PAGE_CACHE_MASK;
 
 	while (nr && desc->count) {
 		struct page *page;
