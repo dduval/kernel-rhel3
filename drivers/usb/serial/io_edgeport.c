@@ -2803,6 +2803,11 @@ static void change_port_settings (struct edgeport_port *edge_port, struct termio
 static void unicode_to_ascii (char *string, short *unicode, int unicode_size)
 {
 	int i;
+
+	if (unicode_size <= 0) {
+                return;
+	}
+
 	for (i = 0; i < unicode_size; ++i) {
 		string[i] = (char)(le16_to_cpu(unicode[i]));
 	}
