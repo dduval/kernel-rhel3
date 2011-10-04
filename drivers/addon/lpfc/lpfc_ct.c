@@ -19,7 +19,7 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_ct.c 1.10 2005/05/03 11:21:25EDT sf_support Exp  $
+ * $Id: lpfc_ct.c 437 2005-11-01 17:11:04Z sf_support $
  *
  * Fibre Channel SCSI LAN Device Driver CT support
  */
@@ -1474,227 +1474,194 @@ void
 lpfc_get_hba_model_desc(lpfcHBA_t * phba, uint8_t * mdp, uint8_t * descp)
 {
 	lpfc_vpd_t *vp;
-	uint32_t id;
+	uint16_t dev_id;
+	uint16_t dev_subid;
+	uint8_t hdrtype;
+	char *model_str = "";  
+	char *descr_str = "";
 
 	vp = &phba->vpd;
-	pci_read_config_dword(phba->pcidev, PCI_VENDOR_ID, &id);
+	pci_read_config_word(phba->pcidev, PCI_DEVICE_ID, &dev_id);
+	pci_read_config_byte(phba->pcidev, PCI_HEADER_TYPE, &hdrtype);
 
-	switch ((id >> 16) & 0xffff) {
+	switch (dev_id) {
+	case PCI_DEVICE_ID_FIREFLY:
+		model_str = "LP6000";
+		descr_str = "Emulex LP6000 1Gb PCI Fibre Channel Adapter";
+		break;
 	case PCI_DEVICE_ID_SUPERFLY:
-		if ((vp->rev.biuRev == 1) ||
-		    (vp->rev.biuRev == 2) || (vp->rev.biuRev == 3)) {
-			if (mdp) {
-				memcpy(mdp, "LP7000", 8);
-			}
-			if (descp) {
-				memcpy(descp,
-				       "Emulex LightPulse LP7000 1 Gigabit PCI "
-				       "Fibre Channel Adapter",
-				       62);
-			}
-		} else {
-			if (mdp) {
-				memcpy(mdp, "LP7000E", 9);
-			}
-			if (descp) {
-				memcpy(descp,
-				       "Emulex LightPulse LP7000E 1 Gigabit "
-				       "PCI Fibre Channel Adapter",
-				       62);
-			}
+		if (vp->rev.biuRev >= 1 && vp->rev.biuRev <= 3) {
+			model_str = "LP7000";
+			descr_str = "Emulex LP7000 1Gb PCI Fibre Channel Adapter";
+		}
+		else {
+			model_str = "LP7000E";
+			descr_str = "Emulex LP7000E 1Gb PCI Fibre Channel Adapter";
 		}
 		break;
 	case PCI_DEVICE_ID_DRAGONFLY:
-		if (mdp) {
-			memcpy(mdp, "LP8000", 8);
-		}
-		if (descp) {
-			memcpy(descp,
-			       "Emulex LightPulse LP8000 1 Gigabit PCI Fibre "
-			       "Channel Adapter",
-			       62);
-		}
+		model_str = "LP8000";
+		descr_str = "Emulex LP8000 1Gb PCI Fibre Channel Adapter";
 		break;
 	case PCI_DEVICE_ID_CENTAUR:
 		if (FC_JEDEC_ID(vp->rev.biuRev) == CENTAUR_2G_JEDEC_ID) {
-			if (mdp) {
-				memcpy(mdp, "LP9002", 8);
-			}
-			if (descp) {
-				memcpy(descp,
-				       "Emulex LightPulse LP9002 2 Gigabit PCI "
-				       "Fibre Channel Adapter",
-				       62);
-			}
-		} else {
-			if (mdp) {
-				memcpy(mdp, "LP9000", 8);
-			}
-			if (descp) {
-				memcpy(descp,
-				       "Emulex LightPulse LP9000 1 Gigabit PCI "
-				       "Fibre Channel Adapter",
-				       62);
-			}
+			model_str = "LP9002";
+			descr_str = "Emulex LP9002 2Gb PCI Fibre Channel Adapter";
+		}
+		else {
+			model_str = "LP9000";
+			descr_str = "Emulex LP9000 1Gb PCI Fibre Channel Adapter";
 		}
 		break;
 	case PCI_DEVICE_ID_RFLY:
-		{
-			if (mdp) {
-				memcpy(mdp, "LP952", 7);
-			}
-			if (descp) {
-				memcpy(descp,
-				       "Emulex LightPulse LP952 2 Gigabit PCI "
-				       "Fibre Channel Adapter",
-				       62);
-			}
-		}
+		model_str = "LP952";
+		descr_str = "Emulex LP952 2Gb PCI Fibre Channel Adapter";
 		break;
 	case PCI_DEVICE_ID_PEGASUS:
-		if (mdp) {
-			memcpy(mdp, "LP9802", 8);
-		}
-		if (descp) {
-			memcpy(descp,
-			       "Emulex LightPulse LP9802 2 Gigabit PCI Fibre "
-			       "Channel Adapter",
-			       62);
-		}
+		model_str = "LP9802";
+		descr_str = "Emulex LP9802 2Gb PCI-X Fibre Channel Adapter";
 		break;
 	case PCI_DEVICE_ID_THOR:
-		if (mdp) {
-			memcpy(mdp, "LP10000", 9);
+		if (hdrtype == 0x80) {
+			model_str = "LP10000DC";
+			descr_str = "Emulex LP10000DC 2Gb 2-port PCI-X Fibre Channel Adapter";
 		}
-		if (descp) {
-			memcpy(descp,
-			       "Emulex LightPulse LP10000 2 Gigabit PCI Fibre "
-			       "Channel Adapter",
-			       63);
+		else {
+			model_str = "LP10000";
+			descr_str = "Emulex LP10000 2Gb PCI-X Fibre Channel Adapter";
 		}
 		break;
 	case PCI_DEVICE_ID_VIPER:
-		if (mdp) {
-			memcpy(mdp, "LPX1000", 9);
-		}
-		if (descp) {
-			memcpy(descp,
-			       "Emulex LightPulse LPX1000 10 Gigabit PCI Fibre "
-			       "Channel Adapter",
-			       63);
-		}
+		model_str = "LPX1000";
+		descr_str = "Emulex LPX1000 10Gb PCI-X Fibre Channel Adapter";
 		break;
 	case PCI_DEVICE_ID_PFLY:
-		if (mdp) {
-			memcpy(mdp, "LP982", 7);
-		}
-		if (descp) {
-			memcpy(descp,
-			       "Emulex LightPulse LP982 2 Gigabit PCI Fibre "
-			       "Channel Adapter",
-			       62);
-		}
+		model_str = "LP982";
+		descr_str = "Emulex LP982 2Gb PCI-X Fibre Channel Adapter";
 		break;
 	case PCI_DEVICE_ID_TFLY:
-		if (mdp) {
-			memcpy(mdp, "LP1050", 8);
+		if (hdrtype == 0x80) {
+			model_str = "LP1050DC";
+			descr_str = "Emulex LP1050DC 2Gb 2-port PCI-X Fibre Channel Adapter";
 		}
-		if (descp) {
-			memcpy(descp,
-			       "Emulex LightPulse LP1050 2 Gigabit PCI Fibre "
-			       "Channel Adapter",
-			       63);
-		}
-		break;
-	case PCI_DEVICE_ID_LP101:
-		if (mdp) {
-			memcpy(mdp, "LP101", 7);
-		}
-		if (descp) {
-			memcpy(descp,
-			       "Emulex LightPulse LP101 2 Gigabit PCI Fibre "
-			       "Channel Adapter",
-			       62);
+		else {
+			model_str = "LP1050";
+			descr_str = "Emulex LP1050 2Gb PCI-X Fibre Channel Adapter";
 		}
 		break;
 	case PCI_DEVICE_ID_HELIOS:
-		if (mdp) {
-			memcpy(mdp, "LP11000", 9);
+		if (hdrtype == 0x80) {
+			model_str = "LP11002";
+			descr_str = "Emulex LP11002 4Gb 2-port PCI-X2 Fibre Channel Adapter";
 		}
-		if (descp) {
-			memcpy(descp,
-			       "Emulex LightPulse LP11000 4 Gigabit PCI Fibre "
-			       "Channel Adapter",
-			       64);
+		else {
+			model_str = "LP11000";
+			descr_str = "Emulex LP11000 4Gb PCI-X2 Fibre Channel Adapter";
 		}
+		break;
+	case PCI_DEVICE_ID_HELIOS_SCSP:
+		model_str = "LP11000-SP";
+		descr_str = "Emulex LP11000-SP 4Gb PCI-X2 Fibre Channel Adapter";
+		break;
+	case PCI_DEVICE_ID_HELIOS_DCSP:
+		model_str = "LP11002-SP";
+		descr_str = "Emulex LP11002-SP 4Gb 2-port PCI-X2 Fibre Channel Adapter";
+		break;
+	case PCI_DEVICE_ID_NEPTUNE:
+		if (hdrtype == 0x80) {
+			model_str = "LPe1002";
+			descr_str = "Emulex LPe1002 4Gb 2-port PCIe Fibre Channel Adapter";
+		}
+		else {
+			model_str = "LPe1000";
+			descr_str = "Emulex LPe1000 4Gb PCIe Fibre Channel Adapter";
+		}
+		break;
+	case PCI_DEVICE_ID_NEPTUNE_SCSP:
+		model_str = "LPe1000-SP";
+		descr_str = "Emulex LPe1000-SP 4Gb PCIe Fibre Channel Adapter";
+		break;
+	case PCI_DEVICE_ID_NEPTUNE_DCSP:
+		model_str = "LPe1002-SP";
+		descr_str = "Emulex LPe1002-SP 4Gb 2-port PCIe Fibre Channel Adapter";
 		break;
 	case PCI_DEVICE_ID_BMID:
-		if (mdp) {
-			memcpy(mdp, "LP1150", 8);
-		}
-		if (descp) {
-			memcpy(descp,
-			       "Emulex LightPulse LP1150 4 Gigabit PCI Fibre "
-			       "Channel Adapter",
-			       63);
-		}
+		model_str = "LP1150";
+		descr_str = "Emulex LP1150 4Gb PCI-X2 Fibre Channel Adapter";
 		break;
 	case PCI_DEVICE_ID_BSMB:
-		if (mdp) {
-			memcpy(mdp, "LP111", 7);
-		}
-		if (descp) {
-			memcpy(descp,
-			       "Emulex LightPulse LP111 4 Gigabit PCI Fibre "
-			       "Channel Adapter",
-			       62);
-		}
+		model_str = "LP111";
+		descr_str = "Emulex LP111 4Gb PCI-X2 Fibre Channel Adapter";
 		break;
 	case PCI_DEVICE_ID_ZEPHYR:
-		if (mdp) {
-			memcpy(mdp, "LP11000e", 10);
+		if (hdrtype == 0x80) {
+			model_str = "LPe11002";
+			descr_str = "Emulex LPe11002 4Gb 2-port PCIe Fibre Channel Adapter";
 		}
-		if (descp) {
-			memcpy(descp,
-			       "Emulex LightPulse LP11000e 4 Gigabit PCI Fibre "
-			       "Channel Adapter",
-			       65);
+		else {
+			model_str = "LPe11000";
+			descr_str = "Emulex LPe11000 4Gb PCIe Fibre Channel Adapter";
 		}
+		break;
+	case PCI_DEVICE_ID_ZEPHYR_SCSP:
+		model_str = "LPe11000-SP";
+		descr_str = "Emulex LPe11000-SP 4Gb PCIe Fibre Channel Adapter";
+		break;
+	case PCI_DEVICE_ID_ZEPHYR_DCSP:
+		model_str = "LPe11002-SP";
+		descr_str = "Emulex LPe11002-SP 4Gb 2-port PCIe Fibre Channel Adapter";
 		break;
 	case PCI_DEVICE_ID_ZMID:
-		if (mdp) {
-			memcpy(mdp, "LP1150e", 9);
-		}
-		if (descp) {
-			memcpy(descp,
-			       "Emulex LightPulse LP1150e 4 Gigabit PCI Fibre "
-			       "Channel Adapter",
-			       64);
-		}
+		model_str = "LPe1150";
+		descr_str = "Emulex LPe1150 4Gb PCIe Fibre Channel Adapter";
 		break;
 	case PCI_DEVICE_ID_ZSMB:
-		if (mdp) {
-			memcpy(mdp, "LP111e", 8);
-		}
-		if (descp) {
-			memcpy(descp,
-			       "Emulex LightPulse LP111e 4 Gigabit PCI Fibre "
-			       "Channel Adapter",
-			       63);
-		}
+		model_str = "LPe111";
+		descr_str = "Emulex LPe111 4Gb PCIe Fibre Channel Adapter";
+		break;
+	case PCI_DEVICE_ID_LP101:
+		model_str = "LP101";
+		descr_str = "Emulex LP101 2Gb PCI-X Fibre Channel Adapter";
 		break;
 	case PCI_DEVICE_ID_LP10000S:
-		if (mdp) {
-			memcpy(mdp, "LP10000-S", 10);
-		}
-		if (descp) {
-			memcpy(descp,
-			       "Emulex LightPulse LP10000-S 2 Gigabit PCI-X Fibre "
-			       "Channel Adapter",
-			       66);
+		model_str = "LP10000-S";
+		descr_str = "Emulex LP10000-S 2Gb PCI Fibre Channel Adapter";
+		break;
+	case PCI_DEVICE_ID_LP11000S:
+	case PCI_DEVICE_ID_LPE11000S:
+		pci_read_config_word(phba->pcidev, PCI_SUBSYSTEM_ID, &dev_subid);
+		switch (dev_subid) {
+		case PCI_SUBSYSTEM_ID_LP11000S:
+			model_str = "LP11000-S";
+			descr_str = "Emulex LP11000-S 4Gb PCI-X2 Fibre Channel Adapter";
+			break;
+		case PCI_SUBSYSTEM_ID_LP11002S:
+			model_str = "LP11002-S";
+			descr_str = "Emulex LP11002-S 4Gb 2-port PCI-X2 Fibre Channel Adapter";
+			break;
+		case PCI_SUBSYSTEM_ID_LPE11000S:
+			model_str = "LPe11000-S";
+			descr_str = "Emulex LPe11000-S 4Gb PCIe Fibre Channel Adapter";
+			break;
+		case PCI_SUBSYSTEM_ID_LPE11002S:
+			model_str = "LPe11002-S";
+			descr_str = "Emulex LPe11002-S 4Gb 2-port PCIe Fibre Channel Adapter";
+			break;
+		case PCI_SUBSYSTEM_ID_LPE11010S:
+			model_str = "LPe11010-S";
+			descr_str = "Emulex LPe11010-S 4Gb 10-port PCIe Fibre Channel Adapter";
+			break;
+		default:
+			break;
 		}
 		break;
+	default:
+		break;
 	}
+	if (mdp)
+		sprintf(mdp, "%s", model_str);
+	if (descp)
+		sprintf(descp, "%s", descr_str);
 }
 
 void

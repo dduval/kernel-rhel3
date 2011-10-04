@@ -31,6 +31,7 @@
 #include <linux/fs.h>
 
 #include <asm/uaccess.h>
+#include <asm/div64.h>
 
 #define ROUND_UP(x,y) (((x)+(y)-1)/(y))
 #define DEFAULT_POLLMASK (POLLIN | POLLOUT | POLLRDNORM | POLLWRNORM)
@@ -578,24 +579,33 @@ static int do_poll(unsigned int nfds, unsigned int nchunks, unsigned int nleft,
 	return count;
 }
 
-asmlinkage long sys_poll(struct pollfd * ufds, unsigned int nfds, long timeout)
+asmlinkage long sys_poll(struct pollfd *ufds, unsigned int nfds, int timeout_msecs)
 {
 	int i, j, fdcount, err;
 	struct pollfd **fds;
 	poll_table table, *wait;
 	int nchunks, nleft;
+	long timeout;
+	int64_t lltimeout;
 
 	/* Do a sanity check on nfds ... */
 	if (nfds > current->files->max_fdset && nfds > OPEN_MAX)
 		return -EINVAL;
 
-	if (timeout) {
-		/* Careful about overflow in the intermediate values */
-		if ((unsigned long) timeout < MAX_SCHEDULE_TIMEOUT / HZ)
-			timeout = (unsigned long)(timeout*HZ+999)/1000+1;
-		else /* Negative or overflow */
+	if (timeout_msecs) {
+		if (timeout_msecs < 0)
 			timeout = MAX_SCHEDULE_TIMEOUT;
-	}
+		else {
+			lltimeout = (int64_t)timeout_msecs * HZ + 999;
+			do_div(lltimeout, 1000);
+			lltimeout++;
+			if (lltimeout > MAX_SCHEDULE_TIMEOUT)
+				timeout = MAX_SCHEDULE_TIMEOUT;
+			else
+				timeout = (long)lltimeout;
+		}
+	} else
+		timeout = 0;
 
 	poll_initwait(&table);
 	wait = &table;

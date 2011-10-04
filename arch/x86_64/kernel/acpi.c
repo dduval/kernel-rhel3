@@ -133,7 +133,7 @@ acpi_get_crs_addr (struct acpi_buffer *buf, int type, u64 *base, u64 *length, u6
 	}
 }
 
-acpi_status
+void
 acpi_get_addr_space(acpi_handle obj, u8 type, u64 *base, u64 *length, u64 *tra)
 {
 	acpi_status status;

@@ -52,8 +52,12 @@ static int alloc_ldt(mm_context_t *pc, int mincount, int reload)
 	}
 	pc->size = mincount;
 	if (reload) {
+#ifdef CONFIG_SMP
+		local_irq_disable();
+#endif
 		load_LDT(pc);
 #ifdef CONFIG_SMP
+		local_irq_enable();
 		if (current->mm->cpu_vm_mask != (1<<smp_processor_id()))
 			smp_call_function(flush_ldt, 0, 1, 1);
 #endif

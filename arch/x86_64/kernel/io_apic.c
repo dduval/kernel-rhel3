@@ -35,10 +35,6 @@
 #include <asm/acpi.h>
 #include <asm/mach_apic.h>
 
-#undef APIC_LOCKUP_DEBUG
-
-#define APIC_LOCKUP_DEBUG
-
 static spinlock_t ioapic_lock = SPIN_LOCK_UNLOCKED;
 
 /*
@@ -1246,30 +1242,11 @@ static void end_level_ioapic_irq (unsigned int irq)
 	ack_APIC_irq();
 
 	if (!(v & (1 << (i & 0x1f)))) {
-#ifdef APIC_LOCKUP_DEBUG
-		struct irq_pin_list *entry;
-#endif
-
 #ifdef APIC_MISMATCH_DEBUG
 		atomic_inc(&irq_mis_count);
 #endif
 		spin_lock(&ioapic_lock);
 		__mask_and_edge_IO_APIC_irq(irq);
-#ifdef APIC_LOCKUP_DEBUG
-		for (entry = irq_2_pin + irq;;) {
-			unsigned int reg;
-
-			if (entry->pin == -1)
-				break;
-			reg = io_apic_read(entry->apic, 0x10 + entry->pin * 2);
-			if (reg & 0x00004000)
-				printk(KERN_CRIT "Aieee!!!  Remote IRR"
-					" still set after unlock!\n");
-			if (!entry->next)
-				break;
-			entry = irq_2_pin + entry->next;
-		}
-#endif
 		__unmask_and_level_IO_APIC_irq(irq);
 		spin_unlock(&ioapic_lock);
 	}
@@ -1643,78 +1620,6 @@ void __init setup_IO_APIC(void)
    -------------------------------------------------------------------------- */
 
 #ifdef CONFIG_ACPI_BOOT
-
-#define IO_APIC_MAX_ID		0xFE
-
-int __init io_apic_get_unique_id (int ioapic, int apic_id)
-{
-	struct IO_APIC_reg_00 reg_00;
-	static unsigned long apic_id_map = 0;
-	unsigned long flags;
-	int i = 0;
-
-	/*
-	 * The P4 platform supports up to 256 APIC IDs on two separate APIC 
-	 * buses (one for LAPICs, one for IOAPICs), where predecessors only 
-	 * supports up to 16 on one shared APIC bus.
-	 * 
-	 * TBD: Expand LAPIC/IOAPIC support on P4-class systems to take full
-	 *      advantage of new APIC bus architecture.
-	 */
-
-	if (!apic_id_map)
-		apic_id_map = phys_cpu_present_map;
-
-	spin_lock_irqsave(&ioapic_lock, flags);
-	*(int *)&reg_00 = io_apic_read(ioapic, 0);
-	spin_unlock_irqrestore(&ioapic_lock, flags);
-
-	if (apic_id >= IO_APIC_MAX_ID) {
-		printk(KERN_WARNING "IOAPIC[%d]: Invalid apic_id %d, trying "
-			"%d\n", ioapic, apic_id, reg_00.ID);
-		apic_id = reg_00.ID;
-	}
-
-	/*
-	 * Every APIC in a system must have a unique ID or we get lots of nice 
-	 * 'stuck on smp_invalidate_needed IPI wait' messages.
-	 */
-	if (apic_id_map & (1 << apic_id)) {
-
-		for (i = 0; i < IO_APIC_MAX_ID; i++) {
-			if (!(apic_id_map & (1 << i)))
-				break;
-		}
-
-		if (i == IO_APIC_MAX_ID)
-			panic("Max apic_id exceeded!\n");
-
-		printk(KERN_WARNING "IOAPIC[%d]: apic_id %d already used, "
-			"trying %d\n", ioapic, apic_id, i);
-
-		apic_id = i;
-	} 
-
-	apic_id_map |= (1 << apic_id);
-
-	if (reg_00.ID != apic_id) {
-		reg_00.ID = apic_id;
-
-		spin_lock_irqsave(&ioapic_lock, flags);
-		io_apic_write(ioapic, 0, *(int *)&reg_00);
-		*(int *)&reg_00 = io_apic_read(ioapic, 0);
-		spin_unlock_irqrestore(&ioapic_lock, flags);
-
-		/* Sanity check */
-		if (reg_00.ID != apic_id)
-			panic("IOAPIC[%d]: Unable change apic_id!\n", ioapic);
-	}
-
-	printk(KERN_INFO "IOAPIC[%d]: Assigned apic_id %d\n", ioapic, apic_id);
-
-	return apic_id;
-}
-
 
 int __init io_apic_get_version (int ioapic)
 {

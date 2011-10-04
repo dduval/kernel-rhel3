@@ -11,6 +11,7 @@ extern void pda_init(int);
 
 extern void mcheck_init(struct cpuinfo_x86 *c);
 extern void init_memory_mapping(void);
+extern void dmi_scan_machine(void);
 
 extern void system_call(void); 
 extern void ia32_cstar_target(void); 

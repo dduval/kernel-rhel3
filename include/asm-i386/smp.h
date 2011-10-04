@@ -36,6 +36,8 @@ extern int pic_mode;
 extern int smp_num_siblings;
 extern int smp_num_cores;
 extern int cpu_sibling_map[];
+extern int phys_proc_id[];
+extern int cpu_core_id[];
 
 extern void smp_flush_tlb(void);
 extern void smp_message_irq(int cpl, void *dev_id, struct pt_regs *regs);
@@ -95,7 +97,9 @@ extern void smp_store_cpu_info(int id);		/* Store per CPU info (like the initial
 static __inline int hard_smp_processor_id(void)
 {
 	/* we don't want to mark this access volatile - bad code generation */
-	return GET_APIC_ID(*(unsigned long *)(APIC_BASE+APIC_ID));
+	unsigned long ul = *(unsigned long *)(APIC_BASE+APIC_ID);
+	barrier();
+	return GET_APIC_ID(ul);
 }
 
 static __inline int logical_smp_processor_id(void)

@@ -72,6 +72,8 @@ int exec_shield = 1;
 extern int exec_shield32;
 #endif
 int exec_shield_randomize = 1;
+extern int printk_ratelimit_jiffies;
+extern int printk_ratelimit_burst;
 
 /* this is needed for the proc_dointvec_minmax for [fs_]overflow UID and GID */
 static int maxolduid = 65535;
@@ -209,6 +211,10 @@ static ctl_table kern_table[] = {
 	 0644, NULL, &proc_dointvec},
 	{KERN_PANIC, "panic_on_oops", &panic_on_oops, sizeof(int),
 	 0644, NULL, &proc_dointvec},
+	{KERN_PRINTK_RATELIMIT, "printk_ratelimit", &printk_ratelimit_jiffies,
+	 sizeof(int), 0644, NULL, &proc_dointvec_jiffies},
+	{KERN_PRINTK_RATELIMIT_BURST, "printk_ratelimit_burst",
+	 &printk_ratelimit_burst, sizeof(int), 0644, NULL, &proc_dointvec},
 	{KERN_PANIC, "print_fatal_signals", &print_fatal_signals, sizeof(int),
 	 0644, NULL, &proc_dointvec},
 	{KERN_PANIC, "exec-shield", &exec_shield, sizeof(int),
@@ -359,6 +365,9 @@ extern int inactive_clean_percent;
 extern int skip_mapped_pages;
 extern int oom_kill_limit;
 extern int kscand_work_percent;
+#if defined(CONFIG_DISCONTIGMEM) && defined(CONFIG_NUMA)
+extern int numa_memory_allocator;
+#endif
 
 static ctl_table vm_table[] = {
 	{VM_BDFLUSH, "bdflush", &bdf_prm, 9*sizeof(int), 0644, NULL,
@@ -401,6 +410,10 @@ static ctl_table vm_table[] = {
 		0644, NULL, &proc_dointvec},
 	{VM_KSCAND_WORK_PERCENT, "kscand_work_percent", &kscand_work_percent,
 		sizeof(kscand_work_percent), 0644, NULL, &proc_dointvec},
+#if defined(CONFIG_DISCONTIGMEM) && defined(CONFIG_NUMA)
+	{VM_NUMA_ALLOCATOR, "numa_memory_allocator", &numa_memory_allocator,
+		sizeof(numa_memory_allocator), 0644, NULL, &proc_dointvec},
+#endif
 	{0}
 };
 

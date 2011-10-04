@@ -26,7 +26,7 @@ endif
 obj-y	:= process.o semaphore.o signal.o entry.o traps.o irq.o \
 		ptrace.o i8259.o ioport.o ldt.o setup.o time.o sys_x86_64.o \
 		pci-dma.o x8664_ksyms.o i387.o syscall.o vsyscall.o \
-		setup64.o e820.o
+		setup64.o e820.o dmi_scan.o
 
 ifdef CONFIG_PCI
 obj-y			+= pci-x86_64.o

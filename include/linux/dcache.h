@@ -184,6 +184,7 @@ extern void prune_dcache(int);
 /* icache memory management (defined in linux/fs/inode.c) */
 extern int shrink_icache_memory(int, int);
 extern void prune_icache(int);
+extern int shrink_icache_sb(int, struct super_block *);
 
 /* quota cache memory management (defined in linux/fs/dquot.c) */
 extern int shrink_dqcache_memory(int, unsigned int);

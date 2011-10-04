@@ -648,8 +648,6 @@ extern int idle_cpu(int cpu);
 extern task_t *cpu_idle_ptr(int cpu);
 extern task_t *cpu_curr_ptr(int cpu);
 
-int set_user(uid_t new_ruid, int dumpclear);
-
 
 /* Reevaluate whether the task has signals pending delivery.
  * This is required every time the blocked sigset_t changes.
@@ -990,6 +988,8 @@ extern int do_fork(unsigned long, unsigned long, struct pt_regs *, unsigned long
 extern void reap_thread(task_t *p);
 extern void release_task(struct task_struct * p);
 
+extern void set_task_comm(struct task_struct *tsk, char *from);
+extern void get_task_comm(char *to, struct task_struct *tsk);
 
 extern void FASTCALL(add_wait_queue(wait_queue_head_t *q, wait_queue_t * wait));
 extern void FASTCALL(add_wait_queue_exclusive(wait_queue_head_t *q, wait_queue_t * wait));

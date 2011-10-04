@@ -414,6 +414,9 @@ long do_futex(unsigned long uaddr, int op, int val, unsigned long timeout,
 	unsigned long pos_in_page;
 	int ret;
 
+	if (!access_ok(VERIFY_READ, uaddr, sizeof(unsigned long)))
+		return -EFAULT;
+
 	pos_in_page = uaddr % PAGE_SIZE;
 
 	/* Must be "naturally" aligned */
@@ -429,7 +432,12 @@ long do_futex(unsigned long uaddr, int op, int val, unsigned long timeout,
 		break;
 	case FUTEX_REQUEUE:
 	{
-		unsigned long pos_in_page2 = uaddr2 % PAGE_SIZE;
+		unsigned long pos_in_page2;
+
+		if (!access_ok(VERIFY_READ, uaddr2, sizeof(unsigned long)))
+			return -EFAULT;
+
+		pos_in_page2 = uaddr2 % PAGE_SIZE;
 
 		/* Must be "naturally" aligned */
 		if (pos_in_page2 % sizeof(u32))
@@ -441,7 +449,12 @@ long do_futex(unsigned long uaddr, int op, int val, unsigned long timeout,
 	}
 	case FUTEX_CMP_REQUEUE:
 	{
-		unsigned long pos_in_page2 = uaddr2 % PAGE_SIZE;
+		unsigned long pos_in_page2;
+
+		if (!access_ok(VERIFY_READ, uaddr2, sizeof(unsigned long)))
+			return -EFAULT;
+
+		pos_in_page2 = uaddr2 % PAGE_SIZE;
 
 		/* Must be "naturally" aligned */
 		if (pos_in_page2 % sizeof(u32))

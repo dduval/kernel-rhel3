@@ -599,6 +599,10 @@ try_again:
 	 */
 	wakeup_kswapd(gfp_mask);
 
+	/* skip to the next node below pages_low */
+	if (gfp_mask & __GFP_NUMA)
+		return NULL;
+
 	/*
 	 * After waking up kswapd, we try to allocate a page
 	 * from any zone which isn't critical yet.
@@ -761,6 +765,10 @@ defragment_again:
 				if (page)
 					return page;
 			}
+			/* retry the allocation with no inactive_clean_pages */
+			page = rmqueue(z, order);
+			if (page)
+				return page;
 		}
 
 		/* If we can wait for IO to complete, we wait... */
@@ -1391,7 +1399,8 @@ static int __init setup_mem_frac(char *str)
 __setup("memfrac=", setup_mem_frac);
 
 #ifdef CONFIG_HIGHMEM
-void __init reset_highmem_zone(int highmempages) {
+void __init reset_highmem_zone(int highmempages)
+{
 
 	pg_data_t	*pgdat;
 	int		sum;

@@ -61,6 +61,7 @@
 #include <net/ip_fib.h>
 
 struct ipv4_devconf ipv4_devconf = { 1, 1, 1, 1, 0, };
+int ipv4_devconf_arp_announce = 0;
 static struct ipv4_devconf ipv4_devconf_dflt = { 1, 1, 1, 1, 1, };
 
 static void rtmsg_ifa(int event, struct in_ifaddr *);
@@ -1116,7 +1117,7 @@ int ipv4_doint_and_flush_strategy(ctl_table *table, int *name, int nlen,
 static struct devinet_sysctl_table
 {
 	struct ctl_table_header *sysctl_header;
-	ctl_table devinet_vars[18];
+	ctl_table devinet_vars[19];
 	ctl_table devinet_dev[2];
 	ctl_table devinet_conf_dir[2];
 	ctl_table devinet_proto_dir[2];
@@ -1174,6 +1175,11 @@ static struct devinet_sysctl_table
 	{NET_IPV4_CONF_FORCE_IGMP_VERSION, "force_igmp_version",
 	 &ipv4_devconf.force_igmp_version, sizeof(int), 0644, NULL,
 	 &ipv4_doint_and_flush, &ipv4_doint_and_flush_strategy},
+#define DEVINET_SYSCTL_NUM_GLOBAL_VARS 1
+#define DEVINET_SYSCTL_GLOBAL_VARS_OFFSET 17
+	{NET_IPV4_CONF_ARP_ANNOUNCE, "arp_announce",
+	 &ipv4_devconf_arp_announce, sizeof(int), 0644, NULL,
+	 &proc_dointvec},
 	 {0}},
 
 	{{NET_PROTO_CONF_ALL, "all", NULL, 0, 0555, devinet_sysctl.devinet_vars},{0}},
@@ -1184,7 +1190,7 @@ static struct devinet_sysctl_table
 
 static void devinet_sysctl_register(struct in_device *in_dev, struct ipv4_devconf *p)
 {
-	int i;
+	int i, global_offset;
 	struct net_device *dev = in_dev ? in_dev->dev : NULL;
 	struct devinet_sysctl_table *t;
 
@@ -1196,6 +1202,11 @@ static void devinet_sysctl_register(struct in_device *in_dev, struct ipv4_devcon
 		t->devinet_vars[i].data += (char*)p - (char*)&ipv4_devconf;
 		t->devinet_vars[i].de = NULL;
 	}
+	/* eliminate any global-only sysctl entries */
+	global_offset = DEVINET_SYSCTL_GLOBAL_VARS_OFFSET;
+	for (i=0; i<DEVINET_SYSCTL_NUM_GLOBAL_VARS; i++)
+		memset(&t->devinet_vars[i+global_offset], 0,
+		       sizeof(t->devinet_vars[0]));
 	if (dev) {
 		t->devinet_dev[0].procname = dev->name;
 		t->devinet_dev[0].ctl_name = dev->ifindex;

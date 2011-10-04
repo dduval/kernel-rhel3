@@ -34,6 +34,7 @@
 #include <linux/stddef.h>
 #include <linux/slab.h>
 #include <linux/pci.h>
+#include <linux/bootmem.h>
 #include <asm/mpspec.h>
 #include <asm/io.h>
 #include <asm/apic.h>
@@ -213,8 +214,6 @@ __va_range(unsigned long phys, unsigned long size)
 	return ((unsigned char *) base + offset);
 }
 
-static u8 __initdata saved_rsdt_area[4096];
-
 static int __init acpi_tables_init(void)
 {
 	int result = -ENODEV;
@@ -240,15 +239,16 @@ static int __init acpi_tables_init(void)
 		return -EINVAL;
 	}
 
+	header = (acpi_table_header *)
+		__va_range(rsdp->rsdt_address, sizeof(acpi_table_header));
 	rsdt = (struct acpi_table_rsdt *)
-	    __va_range(rsdp->rsdt_address, sizeof(struct acpi_table_rsdt));
+	    __va_range(rsdp->rsdt_address, header->length);
 
 	if (!rsdt) {
 		printk(KERN_WARNING "ACPI: Invalid root system description tables (RSDT)\n");
 		return -ENODEV;
 	}
 	
-	header = & rsdt->header;
 	acpi_print_table_header(header);
 	
 	if (strncmp(header->signature, RSDT_SIG, strlen(RSDT_SIG))) {
@@ -264,11 +264,10 @@ static int __init acpi_tables_init(void)
 	 */
 	tables = (header->length - sizeof(acpi_table_header)) / 4;
 		    
-	saved_rsdt = (struct acpi_table_rsdt *)saved_rsdt_area;
+	saved_rsdt = alloc_bootmem(header->length);
 
-	if (header->length > sizeof(saved_rsdt_area)) {
-		printk(KERN_WARNING "ACPI: Too big length in RSDT: %d\n", 
-								header->length);
+	if (!saved_rsdt) {
+		printk(KERN_WARNING "ACPI: Unable to allocate memory for RSDT\n");
 		return -ENODEV;
 	}
 	memcpy(saved_rsdt, rsdt, header->length);

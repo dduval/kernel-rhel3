@@ -798,7 +798,7 @@ int invalidate_device(kdev_t dev, int do_sync)
 	 !inode_has_buffers(inode))
 #define INODE(entry)	(list_entry(entry, struct inode, i_list))
 
-void prune_icache(int goal)
+static void __prune_icache(int goal, struct super_block *sb)
 {
 	LIST_HEAD(list);
 	struct list_head *entry, *freeable = &list;
@@ -815,6 +815,8 @@ void prune_icache(int goal)
 
 		entry = entry->prev;
 		inode = INODE(tmp);
+		if (sb && inode->i_sb != sb)
+			continue;
 		if (inode->i_state & (I_FREEING|I_CLEAR|I_LOCK))
 			continue;
 		if (!CAN_UNUSE(inode))
@@ -912,6 +914,19 @@ void prune_icache(int goal)
 	}
 	spin_unlock(&inode_lock);
 #endif /* CONFIG_HIGHMEM */
+}
+
+void prune_icache(int goal)
+{
+	__prune_icache(goal, NULL);
+}
+
+int shrink_icache_sb(int goal, struct super_block *sb)
+{
+	__prune_icache(goal, sb);
+	if (RATE_LIMIT(HZ))
+		return kmem_cache_shrink(inode_cachep);
+	return 0;
 }
 
 int shrink_icache_memory(int priority, int gfp_mask)

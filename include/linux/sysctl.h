@@ -134,6 +134,8 @@ enum
 	KERN_S390_HZ_TIMER=62,	/* int: hz timer on or off */
 	KERN_UNKNOWN_NMI_PANIC=63, /* int: unknown nmi panic flag */
 	KERN_MEM_NMI_PANIC=64,  /* int: memory nmi panic flag */
+	KERN_PRINTK_RATELIMIT=65, /* int: tune printk ratelimiting */
+	KERN_PRINTK_RATELIMIT_BURST=66,	/* int: tune printk ratelimiting */
 };
 
 
@@ -162,6 +164,7 @@ enum
 	VM_SKIP_MAPPED_PAGES=27,/* int: don't reclaim pages w/active mappings */
 	VM_OOM_KILL=28,		/* int: limit on concurrent OOM kills */
 	VM_KSCAND_WORK_PERCENT=29, /* int: % of work on each kscand iteration */
+	VM_NUMA_ALLOCATOR=30,	/* NUMA memory allocation policy */
 };
 
 
@@ -366,6 +369,7 @@ enum
 	NET_IPV4_CONF_NOXFRM=15,
 	NET_IPV4_CONF_NOPOLICY=16,
 	NET_IPV4_CONF_FORCE_IGMP_VERSION=17,
+	NET_IPV4_CONF_ARP_ANNOUNCE=18,
 };
 
 /* /proc/sys/net/ipv6 */

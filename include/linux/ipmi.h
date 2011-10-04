@@ -67,6 +67,7 @@
  * interface is defined later in the file.  */
 
 
+extern struct proc_dir_entry *proc_ipmi_root;
 
 /*
  * This is an overlay for all the address types, so it's easy to

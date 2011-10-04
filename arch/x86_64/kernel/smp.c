@@ -350,16 +350,32 @@ static struct call_data_struct * saved_call_data;
 void dump_smp_call_function (void (*func) (void *info), void *info)
 {
 	static struct call_data_struct dumpdata;
+	static int dumping_cpu = -1;
 	int waitcount;
 
 	spin_lock(&dump_call_lock);
-	/* if another cpu beat us, they win! */
+	/*
+	 * The cpu that reaches here first will do dumping.  Only the dumping
+	 * cpu skips the if-statement below ONLY ONCE.  The other cpus freeze
+	 * themselves here.
+	 */
 	if (dumpdata.func) {
 		spin_unlock(&dump_call_lock);
+		/*
+		 * The dumping cpu reaches here in case that the netdump starts
+		 * after the diskdump fails.  In the case, the dumping cpu
+		 * needs to return to continue the netdump.  In other cases,
+		 * freezes itself by calling func().
+		 */
+		if (dumping_cpu == smp_processor_id())
+			return;
+
 		func(info);
 		for (;;);
 		/* NOTREACHED */
 	}
+
+	dumping_cpu = smp_processor_id();
 
 	/* freeze call_lock or wait for on-going IPIs to settle down */
 	waitcount = 0;

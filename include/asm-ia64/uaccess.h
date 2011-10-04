@@ -165,12 +165,14 @@ extern void __put_user_unknown (void);
 
 #define __put_user_nocheck(x,ptr,size)		\
 ({						\
+	__typeof__(*(ptr)) *__pu_addr = (ptr);	\
+	__typeof__(x) __x = (x);		\
 	register long __pu_err asm ("r8") = 0;	\
 	switch (size) {				\
-	  case 1: __put_user_8(x,ptr); break;	\
-	  case 2: __put_user_16(x,ptr); break;	\
-	  case 4: __put_user_32(x,ptr); break;	\
-	  case 8: __put_user_64(x,ptr); break;	\
+	  case 1: __put_user_8(__x,__pu_addr); break;	\
+	  case 2: __put_user_16(__x,__pu_addr); break;	\
+	  case 4: __put_user_32(__x,__pu_addr); break;	\
+	  case 8: __put_user_64(__x,__pu_addr); break;	\
 	  default: __put_user_unknown(); break;	\
 	}					\
 	__pu_err;				\
@@ -178,15 +180,16 @@ extern void __put_user_unknown (void);
 
 #define __put_user_check(x,ptr,size,segment)			\
 ({								\
-	register long __pu_err asm ("r8") = -EFAULT;		\
 	__typeof__(*(ptr)) *__pu_addr = (ptr);			\
+	__typeof__(x) __x = (x);				\
+	register long __pu_err asm ("r8") = -EFAULT;		\
 	if (__access_ok((long)__pu_addr,size,segment)) {	\
 		__pu_err = 0;					\
 		switch (size) {					\
-		  case 1: __put_user_8(x,__pu_addr); break;	\
-		  case 2: __put_user_16(x,__pu_addr); break;	\
-		  case 4: __put_user_32(x,__pu_addr); break;	\
-		  case 8: __put_user_64(x,__pu_addr); break;	\
+		  case 1: __put_user_8(__x,__pu_addr); break;	\
+		  case 2: __put_user_16(__x,__pu_addr); break;	\
+		  case 4: __put_user_32(__x,__pu_addr); break;	\
+		  case 8: __put_user_64(__x,__pu_addr); break;	\
 		  default: __put_user_unknown(); break;		\
 		}						\
 	}							\

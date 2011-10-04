@@ -2689,10 +2689,11 @@ asmlinkage long
 sys32_time (int *tloc)
 {
 	int i;
+	struct timeval tv;
 
-	/* SMP: This is fairly trivial. We grab CURRENT_TIME and
-	   stuff it to user space. No side effects */
-	i = CURRENT_TIME;
+	do_gettimeofday(&tv);
+	i = tv.tv_sec;
+
 	if (tloc) {
 		if (put_user(i, tloc))
 			i = -EFAULT;

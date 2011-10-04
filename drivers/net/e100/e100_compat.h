@@ -32,11 +32,6 @@ typedef void irqreturn_t;
 
 #define netdev_priv(dev) dev->priv
 
-static inline struct mii_ioctl_data *if_mii(struct ifreq *rq)
-{
-	return (struct mii_ioctl_data *) &rq->ifr_ifru;
-}
-
 static inline unsigned long msecs_to_jiffies(unsigned long msecs)
 {
 	return ((HZ * msecs + 999) / 1000);

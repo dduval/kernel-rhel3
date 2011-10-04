@@ -417,10 +417,9 @@ static Scsi_Cmnd *__scsi_end_request(Scsi_Cmnd * SCpnt,
 
 	req = &SCpnt->request;
 	req->errors = 0;
-	if (!uptodate) {
+	if (!uptodate && printk_ratelimit())
 		printk(" I/O error: dev %s, sector %lu\n",
-		       kdevname(req->rq_dev), req->sector);
-	}
+			kdevname(req->rq_dev), req->sector);
 	do {
 		if ((bh = req->bh) != NULL) {
 			prefetch(bh->b_reqnext);
@@ -798,12 +797,14 @@ void scsi_io_completion(Scsi_Cmnd * SCpnt, int good_sectors,
 		struct Scsi_Device_Template *STpnt;
 
 		STpnt = scsi_get_request_dev(&SCpnt->request);
-		printk("SCSI %s error : host %d channel %d id %d lun %d return code = %x\n",
-		       (STpnt ? STpnt->name : "device"),
-		       SCpnt->device->host->host_no,
-		       SCpnt->device->channel,
-		       SCpnt->device->id,
-		       SCpnt->device->lun, result);
+		if (printk_ratelimit())
+			printk("SCSI %s error : host %d channel %d id %d lun %d "
+				"return code = %x\n",
+				(STpnt ? STpnt->name : "device"),
+				SCpnt->device->host->host_no,
+				SCpnt->device->channel,
+				SCpnt->device->id,
+				SCpnt->device->lun, result);
 
 		if (driver_byte(result) & DRIVER_SENSE)
 			print_sense("sd", SCpnt);
@@ -905,6 +906,17 @@ void scsi_request_fn(request_queue_t * q)
 		 * we need to check to see if the queue is plugged or not.
 		 */
 		if (SHpnt->in_recovery || q->plugged)
+			return;
+
+		/*
+		 * There are several points in time (device scan time, hot
+		 * add or removal of devices, hosts that unblock themselves
+		 * at inopportune moments) at which it is possible that
+		 * we may get called with a device that is only partially
+		 * initialized.  Check the has_cmdblocks value and bail
+		 * if the device isn't fully configured.
+		 */
+		if (!SDpnt->has_cmdblocks)
 			return;
 
 		/*

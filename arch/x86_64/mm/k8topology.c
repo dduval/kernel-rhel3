@@ -53,34 +53,37 @@ struct node {
 #define for_all_nodes(n) \
 	for (n=0; n<MAXNODE;n++) if (nodes[n].start!=nodes[n].end)
 
-static __init int compute_hash_shift(struct node *nodes, int numnodes, u64 maxmem)
+static int __init compute_hash_shift(struct node *nodes)
 {
 	int i; 
-	int shift = 24;
-	u64 addr;
+	int shift = 20;
+	u64 addr, maxend = 0UL;
 	
-	/* When in doubt use brute force. */
-	while (shift < 48) { 
-		memset(memnodemap,0xff,sizeof(*memnodemap) * NODEMAPSIZE); 
-		for_all_nodes (i) { 
-			for (addr = nodes[i].start; 
-			     addr < nodes[i].end; 
-			     addr += (1UL << shift)) {
-				if (memnodemap[addr >> shift] != 0xff && 
-				    memnodemap[addr >> shift] != i) { 
-					printk("node %d shift %d addr %Lx conflict %d\n", 
-					       i, shift, addr, memnodemap[addr>>shift]);
-					goto next; 
-				} 
-				memnodemap[addr >> shift] = i; 
+	for (i = 0; i < MAXNODE; i++)
+		if ((nodes[i].start != nodes[i].end) && (nodes[i].end > maxend))
+			maxend = nodes[i].end;
+
+	while ((1UL << shift) < (maxend / NODEMAPSIZE))
+		shift++;
+
+	memset(memnodemap, 0xff, sizeof(*memnodemap) * NODEMAPSIZE);
+	for (i = 0; i < MAXNODE; i++) {
+		if (nodes[i].start == nodes[i].end)
+			continue;
+		for (addr = nodes[i].start;
+		     addr < nodes[i].end;
+		     addr += (1UL << shift)) {
+			if (memnodemap[addr >> shift] != 0xff) {
+				printk(KERN_INFO
+	"Your memory is not aligned - you need to rebuild your kernel "
+	"with a bigger NODEMAPSIZE (shift=%d addr=%lx)\n",
+					shift, addr);
+				return -1;
 			} 
+			memnodemap[addr >> shift] = i;
 		} 
-		return shift; 
-	next:
-		shift++; 
 	} 
-	memset(memnodemap,0,sizeof(*memnodemap) * NODEMAPSIZE); 
-	return -1; 
+	return shift;
 }
 
 extern unsigned long nodes_present;
@@ -185,7 +188,7 @@ int __init k8_scan_nodes(unsigned long start, unsigned long end)
 	if (maxnode <= 0)
 		return -1; 
 
-	memnode_shift = compute_hash_shift(nodes,maxnode,end);
+	memnode_shift = compute_hash_shift(nodes);
 	if (memnode_shift < 0) { 
 		printk(KERN_ERR "No NUMA node hash function found. Contact maintainer\n"); 
 		return -1; 

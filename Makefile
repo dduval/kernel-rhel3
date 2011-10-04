@@ -539,7 +539,7 @@ dep-files: scripts/mkdep archdep include/linux/version.h
 ifdef CONFIG_MODVERSIONS
 	$(MAKE) update-modverfile
 endif
-	scripts/mkdep -- `find $(FINDHPATH) \( -name SCCS -o -name .svn \) -prune -o -follow -name \*.h ! -name modversions.h -print` > .hdepend
+	find $(FINDHPATH) \( -name SCCS -o -name .svn \) -prune -o -follow -name \*.h ! -name modversions.h -print | xargs -s 100000 scripts/mkdep -- > .hdepend
 	scripts/mkdep -- init/*.c > .depend
 	(find $(TOPDIR) \( -name .depend -o -name .hdepend \) -print | xargs $(AWK) -f scripts/include_deps) > tmp_include_depends
 	sed -ne 's/^\([^ ].*\):.*/  \1 \\/p' tmp_include_depends > tmp_include_depends_1

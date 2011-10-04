@@ -1320,6 +1320,47 @@ static int analyze_sbs(mddev_t * mddev)
 	memcpy (sb, freshest->sb, sizeof(*sb));
 
 	/*
+	 * For multipathing, lots of things are different from "true"
+	 * RAIDs.
+	 * All rdev's could be read, so they are no longer faulty.
+	 * As there is just one sb, trying to find changed devices via the
+	 * this_disk pointer is useless too.
+	 *
+	 * lmb@suse.de, 2002-09-12
+	 */
+
+	if (sb->level == -4) {
+		int desc_nr = 0;
+
+		/* ... and initialize from the current rdevs instead */
+		ITERATE_RDEV(mddev,rdev,tmp) {
+			mdp_disk_t *desc;
+
+			rdev->desc_nr=desc_nr;
+
+			desc = &sb->disks[rdev->desc_nr];
+
+			desc->number = desc_nr;
+			desc->major = MAJOR(rdev->dev);
+			desc->minor = MINOR(rdev->dev);
+			desc->raid_disk = desc_nr;
+
+			/* We could read from it, so it isn't faulty
+			 * any longer */
+			if (disk_faulty(desc))
+				mark_disk_spare(desc);
+
+			memcpy(&rdev->sb->this_disk,desc,sizeof(*desc));
+
+			desc_nr++;
+		}
+
+		/* Kick out all old info about disks we used to have,
+		 * if any */
+		for (i = desc_nr; i < MD_SB_DISKS; i++)
+			memset(&(sb->disks[i]),0,sizeof(mdp_disk_t));
+	} else {
+		/*
 	 * at this point we have picked the 'best' superblock
 	 * from all available superblocks.
 	 * now we validate this superblock and kick out possibly
@@ -1345,7 +1386,6 @@ static int analyze_sbs(mddev_t * mddev)
 	 * Fix up changed device names ... but only if this disk has a
 	 * recent update time. Use faulty checksum ones too.
 	 */
-	if (mddev->sb->level != -4)
 	ITERATE_RDEV(mddev,rdev,tmp) {
 		__u64 ev1, ev2, ev3;
 		if (rdev->faulty || rdev->alias_device) {
@@ -1397,13 +1437,8 @@ static int analyze_sbs(mddev_t * mddev)
 
 		/*
 		 * We kick faulty devices/descriptors immediately.
-		 *
-		 * Note: multipath devices are a special case.  Since we
-		 * were able to read the superblock on the path, we don't
-		 * care if it was previously marked as faulty, it's up now
-		 * so enable it.
 		 */
-		if (disk_faulty(desc) && mddev->sb->level != -4) {
+			if (disk_faulty(desc)) {
 			found = 0;
 			ITERATE_RDEV(mddev,rdev,tmp) {
 				if (rdev->desc_nr != desc->number)
@@ -1422,15 +1457,6 @@ static int analyze_sbs(mddev_t * mddev)
 			}
 			remove_descriptor(desc, sb);
 			continue;
-		} else if (disk_faulty(desc)) {
-			/*
-			 * multipath entry marked as faulty, unfaulty it
-			 */
-			rdev = find_rdev(mddev, dev);
-			if(rdev)
-				mark_disk_spare(desc);
-			else
-				remove_descriptor(desc, sb);
 		}
 
 		if (dev == MKDEV(0,0))
@@ -1440,17 +1466,6 @@ static int analyze_sbs(mddev_t * mddev)
 		 */
 		found = 0;
 		ITERATE_RDEV(mddev,rdev,tmp) {
-			/*
-			 * Multi-path IO special-case: since we have no
-			 * this_disk descriptor at auto-detect time,
-			 * we cannot check rdev->number.
-			 * We can check the device though.
-			 */
-			if ((sb->level == -4) && (rdev->dev ==
-					MKDEV(desc->major,desc->minor))) {
-				found = 1;
-				break;
-			}
 			if (rdev->desc_nr == desc->number) {
 				found = 1;
 				break;
@@ -1462,6 +1477,7 @@ static int analyze_sbs(mddev_t * mddev)
 		printk(KERN_WARNING "md%d: former device %s is unavailable, removing from array!\n",
 		       mdidx(mddev), partition_name(dev));
 		remove_descriptor(desc, sb);
+	}
 	}
 
 	/*

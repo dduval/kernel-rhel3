@@ -47,7 +47,7 @@
 #include <linux/proc_fs.h>
 
 #define PFX "IPMI message handler: "
-#define IPMI_MSGHANDLER_VERSION "35.4"
+#define IPMI_MSGHANDLER_VERSION "35.11"
 
 /* This is a mighty handy macro backported from 2.6. */
 #ifndef list_for_each_entry_safe
@@ -63,7 +63,7 @@ static int ipmi_init_msghandler(void);
 
 static int initialized = 0;
 
-static struct proc_dir_entry *proc_ipmi_root = NULL;
+struct proc_dir_entry *proc_ipmi_root;
 
 #define MAX_EVENTS_IN_QUEUE	25
 
@@ -677,7 +677,7 @@ int ipmi_create_user(unsigned int          if_num,
 		return -ENOMEM;
 
 	down_read(&interfaces_sem);
-	if ((if_num > MAX_IPMI_INTERFACES) || ipmi_interfaces[if_num] == NULL)
+	if ((if_num >= MAX_IPMI_INTERFACES) || ipmi_interfaces[if_num] == NULL)
 	{
 		rv = -EINVAL;
 		goto out_unlock;
@@ -1537,6 +1537,7 @@ int ipmi_smi_add_proc_entry(ipmi_smi_t smi, char *name,
 	struct proc_dir_entry *file;
 	int                   rv = 0;
 
+#ifdef CONFIG_PROC_FS
 	file = create_proc_entry(name, 0, smi->proc_dir);
 	if (!file)
 		rv = -ENOMEM;
@@ -1547,14 +1548,33 @@ int ipmi_smi_add_proc_entry(ipmi_smi_t smi, char *name,
 		file->write_proc = write_proc;
 		file->owner = owner;
 	}
+#endif /* CONFIG_PROC_FS */
 
 	return rv;
+}
+
+int ipmi_if_num_add_proc_entry(int if_num, char *name,
+			    read_proc_t *read_proc, write_proc_t *write_proc,
+			    void *data, struct module *owner)
+{
+
+	/* make sure if_num is not bogus */
+	if (if_num < MAX_IPMI_INTERFACES) {
+		/* check if interface at index if_num exist */
+		if (ipmi_interfaces[if_num] != NULL) {
+			return ipmi_smi_add_proc_entry(ipmi_interfaces[if_num], 
+				name, read_proc, write_proc, data, owner);
+		}
+	}
+
+	return -EINVAL;
 }
 
 static int add_proc_entries(ipmi_smi_t smi, int num)
 {
 	int rv = 0;
 
+#ifdef CONFIG_PROC_FS
 	sprintf(smi->proc_dir_name, "%d", num);
 	smi->proc_dir = proc_mkdir(smi->proc_dir_name, proc_ipmi_root);
 	if (!smi->proc_dir)
@@ -1577,7 +1597,7 @@ static int add_proc_entries(ipmi_smi_t smi, int num)
 		rv = ipmi_smi_add_proc_entry(smi, "version",
 					     version_file_read_proc, NULL,
 					     smi, THIS_MODULE);
-
+#endif
 	return rv;
 }
 
@@ -2582,7 +2602,7 @@ void ipmi_smi_msg_received(ipmi_smi_t          intf,
 	spin_lock_irqsave(&(intf->waiting_msgs_lock), flags);
 	if (!list_empty(&(intf->waiting_msgs))) {
 		list_add_tail(&(msg->link), &(intf->waiting_msgs));
-		spin_unlock(&(intf->waiting_msgs_lock));
+		spin_unlock_irqrestore(&(intf->waiting_msgs_lock), flags);
 		goto out_unlock;
 	}
 	spin_unlock_irqrestore(&(intf->waiting_msgs_lock), flags);
@@ -2591,9 +2611,9 @@ void ipmi_smi_msg_received(ipmi_smi_t          intf,
 	if (rv > 0) {
 		/* Could not handle the message now, just add it to a
                    list to handle later. */
-		spin_lock(&(intf->waiting_msgs_lock));
+		spin_lock_irqsave(&(intf->waiting_msgs_lock), flags);
 		list_add_tail(&(msg->link), &(intf->waiting_msgs));
-		spin_unlock(&(intf->waiting_msgs_lock));
+		spin_unlock_irqrestore(&(intf->waiting_msgs_lock), flags);
 	} else if (rv == 0) {
 		ipmi_free_smi_msg(msg);
 	}
@@ -2780,16 +2800,13 @@ static struct timer_list ipmi_timer;
    the queue and this silliness can go away. */
 #define IPMI_REQUEST_EV_TIME	(1000 / (IPMI_TIMEOUT_TIME))
 
-static volatile int stop_operation = 0;
-static volatile int timer_stopped = 0;
+static atomic_t stop_operation;
 static unsigned int ticks_to_req_ev = IPMI_REQUEST_EV_TIME;
 
 static void ipmi_timeout(unsigned long data)
 {
-	if (stop_operation) {
-		timer_stopped = 1;
+	if (atomic_read(&stop_operation))
 		return;
-	}
 
 	ticks_to_req_ev--;
 	if (ticks_to_req_ev == 0) {
@@ -2799,8 +2816,7 @@ static void ipmi_timeout(unsigned long data)
 
 	ipmi_timeout_handler(IPMI_TIMEOUT_TIME);
 
-	ipmi_timer.expires += IPMI_TIMEOUT_JIFFIES;
-	add_timer(&ipmi_timer);
+	mod_timer(&ipmi_timer, jiffies + IPMI_TIMEOUT_JIFFIES);
 }
 
 
@@ -3122,6 +3138,7 @@ static __init int ipmi_init_msghandler(void)
 		ipmi_interfaces[i] = NULL;
 	}
 
+#ifdef CONFIG_PROC_FS
 	proc_ipmi_root = proc_mkdir("ipmi", 0);
 	if (!proc_ipmi_root) {
 	    printk(KERN_ERR PFX "Unable to create IPMI proc dir\n");
@@ -3129,6 +3146,7 @@ static __init int ipmi_init_msghandler(void)
 	}
 
 	proc_ipmi_root->owner = THIS_MODULE;
+#endif /* CONFIG_PROC_FS */
 
 	init_timer(&ipmi_timer);
 	ipmi_timer.data = 0;
@@ -3157,11 +3175,8 @@ static __exit void cleanup_ipmi(void)
 
 	/* Tell the timer to stop, then wait for it to stop.  This avoids
 	   problems with race conditions removing the timer here. */
-	stop_operation = 1;
-	while (!timer_stopped) {
-		set_current_state(TASK_UNINTERRUPTIBLE);
-		schedule_timeout(1);
-	}
+	atomic_inc(&stop_operation);
+	del_timer_sync(&ipmi_timer);
 
 	remove_proc_entry(proc_ipmi_root->name, &proc_root);
 
@@ -3213,4 +3228,6 @@ EXPORT_SYMBOL(ipmi_get_my_address);
 EXPORT_SYMBOL(ipmi_set_my_LUN);
 EXPORT_SYMBOL(ipmi_get_my_LUN);
 EXPORT_SYMBOL(ipmi_smi_add_proc_entry);
+EXPORT_SYMBOL(ipmi_if_num_add_proc_entry);
 EXPORT_SYMBOL(ipmi_user_set_run_to_completion);
+EXPORT_SYMBOL(proc_ipmi_root);

@@ -27,6 +27,11 @@ SECTIONS
 	*(.gnu.warning)
 	} = 0x9090
 
+  . = ALIGN(4096);		/* kernel entry code */
+  entry_tramp_start = .;
+  .entry.text : { *(.entry.text) }
+  entry_tramp_end = .;
+
   _etext = .;			/* End of text section */
 
   .rodata : { *(.rodata) *(.rodata.*) }
@@ -53,11 +58,6 @@ SECTIONS
 
   . = ALIGN(8192);		/* init_task */
   .data.init_task : { *(.data.init_task) }
-
-  entry_tramp_start = .;
-  . = ALIGN(4096);		/* kernel entry code */
-  .entry.text : { *(.entry.text) }
-  entry_tramp_end = .;
 
   . = ALIGN(4096);		/* Init code and data */
   __init_begin = .;

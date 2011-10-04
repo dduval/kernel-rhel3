@@ -15,11 +15,6 @@ static inline void *netdev_priv(struct net_device *dev)
 	return dev->priv;
 }
 
-static inline struct mii_ioctl_data *if_mii(struct ifreq *rq)
-{
-	return (struct mii_ioctl_data *) &rq->ifr_ifru;
-}
-
 #ifndef WARN_ON
 #define WARN_ON(x)	do { } while (0)
 #endif
@@ -49,26 +44,68 @@ typedef u32 pm_message_t;
 #define LPA_PAUSE_ASYM			0x0800
 #endif
 
-static inline unsigned long msecs_to_jiffies(unsigned long msecs)
+/*
+ * Convert jiffies to milliseconds and back.
+ *
+ * Avoid unnecessary multiplications/divisions in the
+ * two most common HZ cases:
+ */
+static inline unsigned int jiffies_to_msecs(const unsigned long j)
 {
-	return ((HZ * msecs + 999) / 1000);
+#if HZ <= 1000 && !(1000 % HZ)
+        return (1000 / HZ) * j;
+#elif HZ > 1000 && !(HZ % 1000)
+        return (j + (HZ / 1000) - 1)/(HZ / 1000);
+#else
+        return (j * 1000) / HZ;
+#endif
+}
+
+static inline unsigned long msecs_to_jiffies(const unsigned int m)
+{
+	if (m > jiffies_to_msecs(MAX_JIFFY_OFFSET))
+		return MAX_JIFFY_OFFSET;
+#if HZ <= 1000 && !(1000 % HZ)
+	return (m + (1000 / HZ) - 1) / (1000 / HZ);
+#elif HZ > 1000 && !(HZ % 1000)
+	return m * (HZ / 1000);
+#else
+	return (m * HZ + 999) / 1000;
+#endif
 }
 
 /**
- *	msleep - sleep for a number of milliseconds
- *	@msecs: number of milliseconds to sleep
- *
- *	Issues schedule_timeout call for the specified number
- *	of milliseconds.
- *
- *	LOCKING:
- *	None.
+ * msleep - sleep safely even with waitqueue interruptions
+ * @msecs: Time in milliseconds to sleep for
  */
-
-static inline void msleep(unsigned long msecs)
+static inline void msleep(unsigned int msecs)
 {
-	set_current_state(TASK_UNINTERRUPTIBLE);
-	schedule_timeout(msecs_to_jiffies(msecs) + 1);
+	unsigned long timeout = msecs_to_jiffies(msecs);
+
+	if (unlikely(crashdump_mode())) {
+		while (msecs--) udelay(1000);
+		return;
+	}
+
+	while (timeout) {
+		set_current_state(TASK_UNINTERRUPTIBLE);
+		timeout = schedule_timeout(timeout);
+	}
+}
+
+/**
+ * msleep_interruptible - sleep waiting for waitqueue interruptions
+ * @msecs: Time in milliseconds to sleep for
+ */
+static inline unsigned long msleep_interruptible(unsigned int msecs)
+{
+	unsigned long timeout = msecs_to_jiffies(msecs);
+
+	while (timeout && !signal_pending(current)) {
+		set_current_state(TASK_INTERRUPTIBLE);
+		timeout = schedule_timeout(timeout);
+	}
+	return jiffies_to_msecs(timeout);
 }
 
 #define pci_dma_sync_single_for_cpu(pdev, dma_addr, len, dir) \
@@ -77,11 +114,15 @@ static inline void msleep(unsigned long msecs)
 #define pci_dma_sync_single_for_device(pdev, dma_addr, len, dir) \
 	pci_dma_sync_single((pdev), (dma_addr), (len), (dir))
 
+#define pci_get_device(vendor, device, from) \
+	pci_find_device(vendor, device, from)
 #define pci_get_slot(bus, devfn) pci_find_slot((bus)->number, devfn)
 #define pci_dev_put(pdev)
 
 #define pci_enable_msi(pdev)	(-1)
 #define pci_disable_msi(pdev)
+
+#define pci_set_consistent_dma_mask(pdev,mask)	(0)
 
 /**
  * PCI_DEVICE - macro used to describe a specific pci device

@@ -2,6 +2,14 @@
  * SMP boot-related support
  *
  * Copyright (C) 2001 David Mosberger-Tang <davidm@hpl.hp.com>
+ * Copyright (C) 2001, 2004-2005 Intel Corp
+ * 	Rohit Seth <rohit.seth@intel.com>
+ * 	Suresh Siddha <suresh.b.siddha@intel.com>
+ * 	Gordon Jin <gordon.jin@intel.com>
+ *
+ * 04/12/26 Jin Gordon <gordon.jin@intel.com>
+ * 04/12/26 Rohit Seth <rohit.seth@intel.com>
+ *						Add multi-threading and multi-core detection
  *
  * 01/05/16 Rohit Seth <rohit.seth@intel.com>	Moved SMP booting functions from smp.c to here.
  * 01/04/27 David Mosberger <davidm@hpl.hp.com>	Added ITC synching code.
@@ -84,6 +92,9 @@ int smp_num_cpus = 1;
 
 /* Bitmask of currently online CPUs */
 volatile unsigned long cpu_online_map;
+
+int smp_num_siblings = 1;
+int smp_num_cpucores = 1;
 
 /* which logical CPU number maps to which CPU (physical APIC ID) */
 volatile int ia64_cpu_to_sapicid[NR_CPUS];
@@ -355,7 +366,7 @@ smp_callin (void)
 	ia64_set_kr(IA64_KR_IO_BASE, __pa(ia64_iobase));
 
 #ifdef CONFIG_IA64_MCA
-	ia64_mca_cmc_vector_setup();	/* Setup vector on AP & enable */
+	ia64_mca_cmc_vector_setup();	/* Setup vector on AP */
 	ia64_mca_check_errors();	/* For post-failure MCA error logging */
 #endif
 
@@ -584,3 +595,102 @@ init_smp_config(void)
  */
 unsigned long cache_decay_ticks=10;
 
+/*
+ * mt_info[] is a temporary store for all info returned by
+ * PAL_LOGICAL_TO_PHYSICAL, to be copied into cpuinfo_ia64 when the
+ * specific cpu comes.
+ */
+static struct {
+	__u32   socket_id;
+	__u16   core_id;
+	__u16   thread_id;
+	__u16   proc_fixed_addr;
+} mt_info[NR_CPUS] __initdata;
+static int mt_info_index __initdata;
+
+/*
+ * Search the mt_info to find out if this socket's cid/tid information is
+ * cached or not. If the socket exists, fill in the core_id and thread_id 
+ * in cpuinfo
+ */
+static int __init
+check_for_new_socket(__u16 logical_address, struct cpuinfo_ia64_topology *c)
+{
+	int i;
+	__u32 sid = c->socket_id;
+
+	for (i = 0; i < mt_info_index; i++) {
+		if (mt_info[i].proc_fixed_addr == logical_address
+		    && mt_info[i].socket_id == sid) {
+			c->core_id = mt_info[i].core_id;
+			c->thread_id = mt_info[i].thread_id;
+			return 1; /* not a new socket */
+		}
+	}
+	return 0;
+}
+
+/*
+ * identify_siblings(cpu) gets called from identify_cpu. This populates the 
+ * information related to logical execution units in per_cpu_data structure.
+ */
+void __init
+identify_siblings(struct cpuinfo_ia64_topology *c)
+{
+	s64 status;
+	u16 pltid;
+	u64 proc_fixed_addr;
+	int count, i;
+	pal_logical_to_physical_t info;
+
+	if (smp_num_cpucores == 1 && smp_num_siblings == 1)
+		return;
+
+	if ((status = ia64_pal_logical_to_phys(0, &info)) != PAL_STATUS_SUCCESS) {
+		printk(KERN_ERR "ia64_pal_logical_to_phys failed with %ld\n",
+		       status);
+		return;
+	}
+	if ((status = ia64_sal_physical_id_info(&pltid)) != PAL_STATUS_SUCCESS) {
+		printk(KERN_ERR "ia64_sal_pltid failed with %ld\n", status);
+		return;
+	}
+	if ((status = ia64_pal_fixed_addr(&proc_fixed_addr)) != PAL_STATUS_SUCCESS) {
+		printk(KERN_ERR "ia64_pal_fixed_addr failed with %ld\n", status);
+		return;
+	}
+
+	c->socket_id =  (pltid << 8) | info.overview_ppid;
+	c->cores_per_socket = info.overview_cpp;
+	c->threads_per_core = info.overview_tpc;
+	count = c->num_log = info.overview_num_log;
+
+	/* If the thread and core id information is already cached, then
+	 * we will simply update cpu_info and return. Otherwise, we will
+	 * do the PAL calls and cache core and thread id's of all the siblings.
+	 */
+	if (check_for_new_socket(proc_fixed_addr, c))
+		return;
+
+	for (i = 0; i < count; i++) {
+		if (i && (status = ia64_pal_logical_to_phys(i, &info))
+			  != PAL_STATUS_SUCCESS) {
+                	printk(KERN_ERR "ia64_pal_logical_to_phys failed"
+					" with %ld\n", status);
+                	return;
+		}
+		if (info.log2_la == proc_fixed_addr) {
+			c->core_id = info.log1_cid;
+			c->thread_id = info.log1_tid;
+		}
+
+		if (mt_info_index >= NR_CPUS)
+			continue;
+
+		mt_info[mt_info_index].socket_id = c->socket_id;
+		mt_info[mt_info_index].core_id = info.log1_cid;
+		mt_info[mt_info_index].thread_id = info.log1_tid;
+		mt_info[mt_info_index].proc_fixed_addr = info.log2_la;
+		++mt_info_index;
+	}
+}

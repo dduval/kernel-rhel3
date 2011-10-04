@@ -140,16 +140,34 @@ static struct usb_serial_device_type pl2303_device = {
 	.shutdown =		pl2303_shutdown,
 };
 
-struct pl2303_private { 
+enum pl2303_type {
+	type_0,		/* don't know the difference between type 0 and */
+	type_1,		/* type 1, until someone from prolific tells us... */
+	HX,		/* HX version of the pl2303 chip */
+};
+
+struct pl2303_private {
 	u8 line_control;
 	u8 termios_initialized;
+	enum pl2303_type type;
 };
 
 
 static int pl2303_startup (struct usb_serial *serial)
 {
 	struct pl2303_private *priv;
+	enum pl2303_type type = type_0;
 	int i;
+
+	if (serial->dev->descriptor.bDeviceClass == 0x02)
+		type = type_0;
+	else if (serial->dev->descriptor.bMaxPacketSize0 == 0x40)
+		type = HX;
+	else if (serial->dev->descriptor.bDeviceClass == 0x00)
+		type = type_1;
+	else if (serial->dev->descriptor.bDeviceClass == 0xFF)
+		type = type_1;
+	dbg("device type: %d", type);
 
 	for (i = 0; i < serial->num_ports; ++i) {
 		priv = kmalloc (sizeof (struct pl2303_private), GFP_KERNEL);
@@ -157,6 +175,7 @@ static int pl2303_startup (struct usb_serial *serial)
 			return -ENOMEM;
 		memset (priv, 0x00, sizeof (struct pl2303_private));
 		serial->port[i].private = priv;
+		priv->type = type;
 	}
 	return 0;
 }
@@ -177,6 +196,9 @@ static int pl2303_write (struct usb_serial_port *port, int from_user,  const uns
 	int result;
 
 	dbg("%s - port %d, %d bytes", __FUNCTION__, port->number, count);
+
+	if (!count)
+		return count;
 
 	if (port->write_urb->status == -EINPROGRESS) {
 		dbg("%s - already writing", __FUNCTION__);
@@ -209,7 +231,7 @@ static int pl2303_write (struct usb_serial_port *port, int from_user,  const uns
 static void pl2303_set_termios (struct usb_serial_port *port, struct termios *old_termios)
 {
 	struct usb_serial *serial = port->serial;
-	struct pl2303_private *priv;
+	struct pl2303_private *priv = port->private;
 	unsigned int cflag;
 	unsigned char *buf;
 	int baud;
@@ -334,7 +356,6 @@ static void pl2303_set_termios (struct usb_serial_port *port, struct termios *ol
 	dbg ("0x21:0x20:0:0  %d", i);
 
 	if (cflag && CBAUD) {
-		priv = port->private;
 		if ((cflag && CBAUD) == B0)
 			priv->line_control &= ~(CONTROL_DTR | CONTROL_RTS);
 		else
@@ -351,10 +372,17 @@ static void pl2303_set_termios (struct usb_serial_port *port, struct termios *ol
 	     buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6]);
 
 	if (cflag & CRTSCTS) {
-		i = usb_control_msg (serial->dev, usb_sndctrlpipe (serial->dev, 0),
-				     VENDOR_WRITE_REQUEST, VENDOR_WRITE_REQUEST_TYPE,
-				     0x0, 0x41, NULL, 0, 100);
-		dbg ("0x40:0x1:0x0:0x41  %d", i);
+		__u16 index;
+		if (priv->type == HX)
+			index = 0x61;
+		else
+			index = 0x41;
+		i = usb_control_msg(serial->dev, 
+				    usb_sndctrlpipe(serial->dev, 0),
+				    VENDOR_WRITE_REQUEST,
+				    VENDOR_WRITE_REQUEST_TYPE,
+				    0x0, index, NULL, 0, 100);
+		dbg ("0x40:0x1:0x0:0x%x  %d", index, i);
 	}
 
 	kfree (buf);
@@ -365,6 +393,7 @@ static int pl2303_open (struct usb_serial_port *port, struct file *filp)
 {
 	struct termios tmp_termios;
 	struct usb_serial *serial = port->serial;
+	struct pl2303_private *priv = port->private;
 	unsigned char buf[10];
 	int result;
 
@@ -392,8 +421,17 @@ static int pl2303_open (struct usb_serial_port *port, struct file *filp)
 	FISH (VENDOR_READ_REQUEST_TYPE, VENDOR_READ_REQUEST, 0x8484, 0);
 	FISH (VENDOR_READ_REQUEST_TYPE, VENDOR_READ_REQUEST, 0x8383, 0);
 	SOUP (VENDOR_WRITE_REQUEST_TYPE, VENDOR_WRITE_REQUEST, 0, 1);
-	SOUP (VENDOR_WRITE_REQUEST_TYPE, VENDOR_WRITE_REQUEST, 1, 0xc0);
-	SOUP (VENDOR_WRITE_REQUEST_TYPE, VENDOR_WRITE_REQUEST, 2, 4);
+	SOUP (VENDOR_WRITE_REQUEST_TYPE, VENDOR_WRITE_REQUEST, 1, 0);
+ 
+	if (priv->type == HX) {
+		/* HX chip */
+		SOUP (VENDOR_WRITE_REQUEST_TYPE, VENDOR_WRITE_REQUEST, 2, 0x44);
+		/* reset upstream data pipes */
+          	SOUP (VENDOR_WRITE_REQUEST_TYPE, VENDOR_WRITE_REQUEST, 8, 0);
+        	SOUP (VENDOR_WRITE_REQUEST_TYPE, VENDOR_WRITE_REQUEST, 9, 0);
+	} else {
+		SOUP (VENDOR_WRITE_REQUEST_TYPE, VENDOR_WRITE_REQUEST, 2, 0x24);
+	}
 
 	/* Setup termios */
 	if (port->tty) {
@@ -560,9 +598,9 @@ static void pl2303_break_ctl (struct usb_serial_port *port, int break_state)
 		state = BREAK_OFF;
 	else
 		state = BREAK_ON;
-	dbg("%s - turning break %s", state==BREAK_OFF ? "off" : "on", __FUNCTION__);
+	dbg("%s - turning break %s", __FUNCTION__, state==BREAK_OFF ? "off" : "on");
 
-	result = usb_control_msg (serial->dev, usb_rcvctrlpipe (serial->dev, 0),
+	result = usb_control_msg (serial->dev, usb_sndctrlpipe (serial->dev, 0),
 				  BREAK_REQUEST, BREAK_REQUEST_TYPE, state, 
 				  0, NULL, 0, 100);
 	if (result)

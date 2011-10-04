@@ -54,7 +54,7 @@ extern int e820_mapped(unsigned long start, unsigned long end, int type);
 
 extern void e820_bootmem_free(pg_data_t *pgdat, unsigned long start,unsigned long end);
 
-extern void parse_mem_cmdline (char ** cmdline_p);
+extern void parse_cmdline_early(char ** cmdline_p);
 
 extern struct e820map e820;
 #endif/*!__ASSEMBLY__*/

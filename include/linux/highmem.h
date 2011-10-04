@@ -10,8 +10,9 @@ extern struct page *highmem_start_page;
 
 #include <asm/highmem.h>
 
-/* declarations for linux/mm/highmem.c */
-unsigned int nr_free_highpages(void);
+/* prototypes for functions in mm/page_alloc.c */
+extern unsigned int nr_free_highpages(void);
+extern void __init reset_highmem_zone(int);
 
 extern struct buffer_head *create_bounce(int rw, struct buffer_head * bh_orig);
 extern int superbh_will_bounce(unsigned long pfn, struct buffer_head *bh);

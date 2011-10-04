@@ -18,6 +18,6 @@ dep_tristate '   iSCSI support (scsi-over-network)' CONFIG_SCSI_ISCSI $CONFIG_SC
 dep_tristate '   IBM native DASD driver for iSeries, pSeries (ipr)' CONFIG_SCSI_IPR $CONFIG_SCSI $CONFIG_PCI m
 dep_tristate '   LightPulse Fibre Channel HBA support (lpfc)' CONFIG_SCSI_LPFC $CONFIG_PCI m
 dep_tristate '   MPT Fusion Enhanced SCSI error reporting' CONFIG_FUSION_ISENSE $CONFIG_FUSION m
-
+tristate '   BIOS update support for DELL systems via procfs' CONFIG_DELL_RBU
 
 endmenu

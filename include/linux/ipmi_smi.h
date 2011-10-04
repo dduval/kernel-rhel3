@@ -151,4 +151,7 @@ int ipmi_smi_add_proc_entry(ipmi_smi_t smi, char *name,
 			    read_proc_t *read_proc, write_proc_t *write_proc,
 			    void *data, struct module *owner);
 
+int ipmi_if_num_add_proc_entry(int if_num, char *name,
+			       read_proc_t *read_proc, write_proc_t *write_proc,
+			       void *data, struct module *owner);
 #endif /* __LINUX_IPMI_SMI_H */

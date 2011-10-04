@@ -1108,10 +1108,8 @@ static int init_one_kcs(int kcs_port,
 #ifdef CONFIG_ACPI
 
 #include <linux/acpi.h>
-/* A real hack, but everything's not there yet in 2.4. */
-#define COMPILER_DEPENDENT_UINT64 unsigned long
-#include <../drivers/acpi/include/acpi.h>
-#include <../drivers/acpi/include/actypes.h>
+#include <acpi/acpi.h>
+#include <acpi/actypes.h>
 
 struct SPMITable {
 	s8	Signature[4];
@@ -1133,20 +1131,20 @@ struct SPMITable {
 	u8	InterruptType;
 
 	/* If bit 0 of InterruptType is set, then this is the SCI
-           interrupt in the GPEx_STS register. */
+	   interrupt in the GPEx_STS register. */
 	u8	GPE;
 
 	s16	Reserved;
 
 	/* If bit 1 of InterruptType is set, then this is the I/O
-           APIC/SAPIC interrupt. */
+	   APIC/SAPIC interrupt. */
 	u32	GlobalSystemInterrupt;
 
 	/* The actual register address. */
-	acpi_generic_address addr;
+	struct acpi_generic_address addr;
 
 	u8	UID[4];
-
+ 
 	s8      spmi_id[1]; /* A '\0' terminated array starts here. */
 };
 
@@ -1157,33 +1155,31 @@ static int acpi_find_bmc(unsigned long *physaddr, int *port)
 
 	status = acpi_get_firmware_table("SPMI", 1,
 					 ACPI_LOGICAL_ADDRESSING,
-					 (acpi_table_header **) &spmi);
+					 (struct acpi_table_header **) &spmi);
 	if (status != AE_OK)
 		goto not_found;
-
 	if (spmi->InterfaceType[0] != 1)
 		/* Not IPMI. */
 		goto not_found;
 
 	if (spmi->InterfaceType[1] != 1)
-		/* Not KCS. */
+                /* Not KCS. */
 		goto not_found;
 
 	if (spmi->addr.address_space_id == ACPI_ADR_SPACE_SYSTEM_MEMORY) {
 		*physaddr = spmi->addr.address;
-		printk("ipmi_kcs_intf: Found ACPI-specified state machine"
+		printk(KERN_DEBUG "ipmi_kcs_intf: Found ACPI-specified state machine"
 		       " at memory address 0x%lx\n",
 		       (unsigned long) spmi->addr.address);
 	} else if (spmi->addr.address_space_id == ACPI_ADR_SPACE_SYSTEM_IO) {
 		*port = spmi->addr.address;
-		printk("ipmi_kcs_intf: Found ACPI-specified state machine"
+		printk(KERN_DEBUG "ipmi_kcs_intf: Found ACPI-specified state machine"
 		       " at I/O address 0x%x\n",
 		       (int) spmi->addr.address);
 	} else
 		goto not_found; /* Not an address type we recognise. */
 
 	return 0;
-
  not_found:
 	return -ENODEV;
 }
@@ -1247,7 +1243,7 @@ static __init int init_ipmi_kcs(void)
 	}
 
 	if (kcs_infos[0] == NULL) {
-		printk("ipmi_kcs: Unable to find any KCS interfaces\n");
+		printk(KERN_DEBUG "ipmi_kcs: Unable to find any KCS interfaces\n");
 		return -ENODEV;
 	} 
 

@@ -50,7 +50,7 @@
 #include <asm/apic.h>
 #endif
 
-#define IPMI_WATCHDOG_VERSION "35.4"
+#define IPMI_WATCHDOG_VERSION "35.11"
 
 /*
  * The IPMI command/response information for the watchdog timer.
@@ -780,7 +780,7 @@ static void ipmi_register_watchdog(int ipmi_intf)
 
 	rv = ipmi_create_user(ipmi_intf, &ipmi_hndlrs, NULL, &watchdog_user);
 	if (rv < 0) {
-		printk("IPMI watchdog: Unable to register with ipmi\n");
+		printk(KERN_DEBUG "IPMI watchdog: Unable to register with ipmi\n");
 		goto out;
 	}
 
@@ -792,7 +792,7 @@ static void ipmi_register_watchdog(int ipmi_intf)
 	if (rv < 0) {
 		ipmi_destroy_user(watchdog_user);
 		watchdog_user = NULL;
-		printk("IPMI watchdog: Unable to register misc device\n");
+		printk(KERN_DEBUG "IPMI watchdog: Unable to register misc device\n");
 	}
 
  out:
@@ -803,7 +803,7 @@ static void ipmi_register_watchdog(int ipmi_intf)
 		start_now = 0; /* Disable this function after first startup. */
 		ipmi_watchdog_state = action_val;
 		ipmi_set_timeout(IPMI_SET_TIMEOUT_FORCE_HB);
-		printk("Starting IPMI Watchdog now!\n");
+		printk(KERN_DEBUG "Starting IPMI Watchdog now!\n");
 	}
 }
 
@@ -932,7 +932,7 @@ static int __init ipmi_wdog_init(void)
 		action_val = WDOG_TIMEOUT_POWER_DOWN;
 	} else {
 		action_val = WDOG_TIMEOUT_RESET;
-		printk("ipmi_watchdog: Unknown action '%s', defaulting to"
+		printk(KERN_DEBUG "ipmi_watchdog: Unknown action '%s', defaulting to"
 		       " reset\n", action);
 	}
 
@@ -948,7 +948,7 @@ static int __init ipmi_wdog_init(void)
 		preaction_val = WDOG_PRETIMEOUT_MSG_INT;
 	} else {
 		preaction_val = WDOG_PRETIMEOUT_NONE;
-		printk("ipmi_watchdog: Unknown preaction '%s', defaulting to"
+		printk(KERN_DEBUG "ipmi_watchdog: Unknown preaction '%s', defaulting to"
 		       " none\n", preaction);
 	}
 
@@ -960,7 +960,7 @@ static int __init ipmi_wdog_init(void)
 		preop_val = WDOG_PREOP_GIVE_DATA;
 	} else {
 		preop_val = WDOG_PREOP_NONE;
-		printk("ipmi_watchdog: Unknown preop '%s', defaulting to"
+		printk(KERN_DEBUG "ipmi_watchdog: Unknown preop '%s', defaulting to"
 		       " none\n", preop);
 	}
 
@@ -1123,7 +1123,7 @@ static int __init ipmi_wdog_setup(char *str)
 		else if (strcmp(option, "preop_give_data") == 0) {
 			preop = "preop_give_data";
 		} else {
-		    printk("Unknown IPMI watchdog option: '%s'\n", option);
+		    printk(KERN_DEBUG "Unknown IPMI watchdog option: '%s'\n", option);
 		}
 	}
 

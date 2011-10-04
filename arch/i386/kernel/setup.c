@@ -74,6 +74,7 @@
  *  Provisions for empty E820 memory regions (reported by certain BIOSes).
  *  Alex Achenbach <xela@slit.de>, December 2002.
  *
+ *  Adding cache identification through cpuid(4)
  */
 
 /*
@@ -178,6 +179,7 @@ static u32 disabled_x86_caps[NCAPINTS] __initdata = { 0 };
 extern int blk_nohighio;
 
 int enable_acpi_smp_table;
+unsigned int sibling_ht_mask;
 
 /*
  * This is set up by the setup-routine at boot-time
@@ -1131,6 +1133,62 @@ static void __init register_memory(unsigned long max_low_pfn)
 		pci_mem_start = low_mem_size;
 }
 
+/*
+ * find out the number of processor cores on the die
+ */
+static int __init num_cpu_cores(struct cpuinfo_x86 *c)
+{
+	unsigned int eax, level;
+
+	level = c ? c->cpuid_level : cpuid_eax(0);
+
+	if (level < 4)
+		return 1;
+
+	__asm__("cpuid"
+		: "=a" (eax)
+		: "0" (4), "c" (0)
+		: "bx", "dx");
+	if (eax & 0x1f)
+		return ((eax >> 26) + 1);
+	else
+		return 1;
+}
+
+static void __init noht_init(void)
+{
+	unsigned int cpuid_level;
+	char vendorid[13];
+	vendorid[12] = 0;
+
+	/* Have to get CPUID level and vendor ID here since
+	 * we haven't populated boot_cpu_data yet
+	 */
+
+	cpuid(0, &cpuid_level, (int *)&vendorid[0], (int *)&vendorid[8], (int *)&vendorid[4]);
+
+	if (!strncmp(vendorid, "GenuineIntel", 12)) {
+		unsigned int siblings, eax, ebx;
+		/* If "noht" specified, calculate a mask that
+		 * can be used to determine which APIC IDs
+		 * correspond to the first CPU in a sibling
+		 * set.
+		 */
+		printk("Disabling hyperthreading\n");
+		ebx = cpuid_ebx(1);
+		siblings = (ebx & 0xff0000) >> 16;
+		if (!siblings)
+			siblings = 1;
+		else
+			siblings /= num_cpu_cores(NULL);
+
+		sibling_ht_mask = 1;
+		while (sibling_ht_mask < siblings)
+			sibling_ht_mask <<= 1;
+		sibling_ht_mask--;
+	}
+}
+
 unsigned long __TASK_SIZE = 0xc0000000;
 
 void __init setup_arch(char **cmdline_p)
@@ -1191,6 +1249,7 @@ void __init setup_arch(char **cmdline_p)
 	 * parsing ACPI SMP table might prove useful on some non-HT cpu.
 	 */
 	if (disable_x86_ht) {
+		noht_init();
 		clear_bit(X86_FEATURE_HT, &boot_cpu_data.x86_capability[0]);
 		set_bit(X86_FEATURE_HT, disabled_x86_caps);
 		enable_acpi_smp_table = 0;
@@ -1369,6 +1428,28 @@ static int __init init_amd(struct cpuinfo_x86 *c)
 	u32 l, h;
 	int mbytes = max_mapnr >> (20-PAGE_SHIFT);
 	int r;
+#ifdef CONFIG_SMP
+	int tmp, cpu;
+	unsigned int coreshift = 0;
+
+	/* Figure out what physical package we're on. */
+	if (cpuid_ebx(1) & 0xff0000) {
+		/* nonzero sibling count */
+		if (cpuid_eax(0x80000000) >= 0x80000008 &&
+		    (tmp = (cpuid_ecx(0x80000008) & 0xff)) > 0) {
+			smp_num_cores = tmp + 1;
+			do {
+				coreshift++;
+				tmp >>= 1;
+			} while (tmp > 0);
+		}
+	}
+
+	cpu = smp_processor_id();
+	tmp = hard_smp_processor_id();
+	cpu_core_id[cpu] = tmp & ((1 << coreshift) - 1);
+	phys_proc_id[cpu] = tmp >> coreshift;
+#endif
 
 	/*
 	 *	FIXME: We should handle the K5 here. Set up the write
@@ -2303,29 +2384,111 @@ static struct _cache_table cache_table[] __initdata =
 	{ 0x00, 0, 0}
 };
 
-
-/*
- * find out the number of processor cores on the die
- */
-static int __init num_cpu_cores(struct cpuinfo_x86 *c)
+/* Some CPUID calls want 'count' to be placed in ecx */
+static inline void cpuid_count(int op, int count, int *eax, int *ebx, int *ecx,
+	       	int *edx)
 {
-	unsigned int eax;
-	if (c->cpuid_level < 4)
-		return 1;
 	__asm__("cpuid"
-		: "=a" (eax)
-		: "0" (4), "c" (0)
-		: "bx", "dx");
-	if (eax & 0x1f)
-		return ((eax >> 26) + 1);
-	else
-		return 1;
+		: "=a" (*eax),
+		  "=b" (*ebx),
+		  "=c" (*ecx),
+		  "=d" (*edx)
+		: "0" (op), "c" (count));
+}
+
+enum _cache_type
+{
+	CACHE_TYPE_NULL	= 0,
+	CACHE_TYPE_DATA = 1,
+	CACHE_TYPE_INST = 2,
+	CACHE_TYPE_UNIFIED = 3
+};
+
+union _cpuid4_leaf_eax {
+	struct {
+		enum _cache_type	type:5;
+		unsigned int		level:3;
+		unsigned int		is_self_initializing:1;
+		unsigned int		is_fully_associative:1;
+		unsigned int		reserved:4;
+		unsigned int		num_threads_sharing:12;
+		unsigned int		num_cores_on_die:6;
+	} split;
+	u32 full;
+};
+
+union _cpuid4_leaf_ebx {
+	struct {
+		unsigned int		coherency_line_size:12;
+		unsigned int		physical_line_partition:10;
+		unsigned int		ways_of_associativity:10;
+	} split;
+	u32 full;
+};
+
+union _cpuid4_leaf_ecx {
+	struct {
+		unsigned int		number_of_sets:32;
+	} split;
+	u32 full;
+};
+
+struct _cpuid4_info {
+	union _cpuid4_leaf_eax eax;
+	union _cpuid4_leaf_ebx ebx;
+	union _cpuid4_leaf_ecx ecx;
+	unsigned long size;
+};
+
+#define MAX_CACHE_LEAVES		4
+
+static int __init cpuid4_cache_lookup(int index, struct _cpuid4_info *this_leaf)
+{
+	unsigned int		eax, ebx, ecx, edx;
+	union _cpuid4_leaf_eax	cache_eax;
+
+	cpuid_count(4, index, &eax, &ebx, &ecx, &edx);
+	cache_eax.full = eax;
+	if (cache_eax.split.type == CACHE_TYPE_NULL)
+		return -1;
+
+	this_leaf->eax.full = eax;
+	this_leaf->ebx.full = ebx;
+	this_leaf->ecx.full = ecx;
+	this_leaf->size = (this_leaf->ecx.split.number_of_sets + 1) *
+		(this_leaf->ebx.split.coherency_line_size + 1) *
+		(this_leaf->ebx.split.physical_line_partition + 1) *
+		(this_leaf->ebx.split.ways_of_associativity + 1);
+	return 0;
+}
+
+static int __init find_num_cache_leaves(void)
+{
+	unsigned int		eax, ebx, ecx, edx;
+	union _cpuid4_leaf_eax	cache_eax;
+	int 			i;
+	int 			retval;
+
+	retval = MAX_CACHE_LEAVES;
+	/* Do cpuid(4) loop to find out num_cache_leaves */
+	for (i = 0; i < MAX_CACHE_LEAVES; i++) {
+		cpuid_count(4, i, &eax, &ebx, &ecx, &edx);
+		cache_eax.full = eax;
+		if (cache_eax.split.type == CACHE_TYPE_NULL) {
+			retval = i;
+			break;
+		}
+	}
+	return retval;
 }
 
 static void __init init_intel(struct cpuinfo_x86 *c)
 {
 	unsigned int trace = 0, l1i = 0, l1d = 0, l2 = 0, l3 = 0; /* Cache sizes */
 	char *p = NULL;
+	unsigned int new_l1d = 0, new_l1i = 0; /* Cache sizes from cpuid(4) */
+	unsigned int new_l2 = 0, new_l3 = 0, i; /* Cache sizes from cpuid(4) */
+
 #ifndef CONFIG_X86_F00F_WORKS_OK
 	static int f00f_workaround_enabled = 0;
 
@@ -2345,6 +2508,47 @@ static void __init init_intel(struct cpuinfo_x86 *c)
 	}
 #endif /* CONFIG_X86_F00F_WORKS_OK */
 
+	if (c->cpuid_level > 4) {
+		static int is_initialized;
+		static int num_cache_leaves;
+
+		if (is_initialized == 0) {
+			/* Init num_cache_leaves from boot CPU */
+			num_cache_leaves = find_num_cache_leaves();
+			is_initialized++;
+		}
+ 
+		/*
+		 * Whenever possible use cpuid(4), deterministic cache 
+		 * parameters cpuid leaf to find the cache details
+		 */
+		for (i = 0; i < num_cache_leaves; i++) {
+			struct _cpuid4_info this_leaf;
+			int retval;
+
+			retval = cpuid4_cache_lookup(i, &this_leaf);
+			if (retval >= 0) {
+				switch(this_leaf.eax.split.level) {
+				    case 1:
+					if (this_leaf.eax.split.type == 
+							CACHE_TYPE_DATA)
+						new_l1d = this_leaf.size/1024;
+					else if (this_leaf.eax.split.type == 
+							CACHE_TYPE_INST)
+						new_l1i = this_leaf.size/1024;
+					break;
+				    case 2:
+					new_l2 = this_leaf.size/1024;
+					break;
+				    case 3:
+					new_l3 = this_leaf.size/1024;
+					break;
+				    default:
+					break;
+				}
+			}
+		}
+	}
 	if (c->cpuid_level > 1) {
 		/* supports eax=2  call */
 		int i, j, n;
@@ -2396,6 +2600,15 @@ static void __init init_intel(struct cpuinfo_x86 *c)
 			}
 		}
 
+		if (new_l1d)
+			l1d = new_l1d;
+		if (new_l1i)
+			l1i = new_l1i;
+		if (new_l2)
+			l2 = new_l2;
+		if (new_l3)
+			l3 = new_l3;
+
 		/* Intel PIII Tualatin. This comes in two flavours.
 		 * One has 256kb of cache, the other 512. We have no way
 		 * to determine which, so we use a boottime override
@@ -2407,16 +2620,15 @@ static void __init init_intel(struct cpuinfo_x86 *c)
 		if (cachesize_override != -1)
 			l2 = cachesize_override;
 
-		if ( trace )
-			printk (KERN_INFO "CPU: Trace cache: %dK uops", trace);
-		else if ( l1i )
-			printk (KERN_INFO "CPU: L1 I cache: %dK", l1i);
-		if ( l1d )
-			printk(", L1 D cache: %dK\n", l1d);
-
-		if ( l2 )
+		if (trace)
+			printk(KERN_INFO "CPU: Trace cache: %dK uops\n", trace);
+		if (l1i || l1d)
+			printk(KERN_INFO
+				"CPU: L1 I-cache: %dK, L1 D-cache: %dK\n",
+				l1i, l1d);
+		if (l2)
 			printk(KERN_INFO "CPU: L2 cache: %dK\n", l2);
-		if ( l3 )
+		if (l3)
 			printk(KERN_INFO "CPU: L3 cache: %dK\n", l3);
 
 		/*
@@ -2461,8 +2673,6 @@ static void __init init_intel(struct cpuinfo_x86 *c)
 	
 #ifdef CONFIG_SMP
 	if (test_bit(X86_FEATURE_HT, &c->x86_capability) && !disable_x86_ht) {
-		extern	int phys_proc_id[NR_CPUS];
-		extern	int cpu_core_id[NR_CPUS];
 		extern int acpi_proc_id[NR_CPUS];
 		extern int acpi_provides_cpus;
 		static int warned_mismatch;
@@ -3107,8 +3317,6 @@ static int show_cpuinfo(struct seq_file *m, void *v)
 	 * applications want to get the raw CPUID data, they should access
 	 * /dev/cpu/<cpu_nr>/cpuid instead.
 	 */
-	extern	int phys_proc_id[NR_CPUS];
-	extern	int cpu_core_id[NR_CPUS];
 	static char *x86_cap_flags[] = {
 		/* Intel-defined */
 	        "fpu", "vme", "de", "pse", "tsc", "msr", "pae", "mce",

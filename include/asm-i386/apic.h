@@ -96,6 +96,4 @@ extern unsigned int nmi_watchdog;
 
 #endif /* CONFIG_X86_LOCAL_APIC */
 
-extern int phys_proc_id[NR_CPUS];
-
 #endif /* __ASM_APIC_H */

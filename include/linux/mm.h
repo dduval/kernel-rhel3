@@ -331,18 +331,12 @@ typedef struct page {
 
 /* note: don't make page flags of values 24 or higher! */
 
-#ifndef arch_set_page_uptodate
-#define arch_set_page_uptodate(page)
-#endif
-
 /* Make it prettier to test the above... */
 #define UnlockPage(page)	unlock_page(page)
 #define Page_Uptodate(page)	test_bit(PG_uptodate, &(page)->flags)
-#define SetPageUptodate(page) \
-	do {								\
-		arch_set_page_uptodate(page);				\
-		set_bit(PG_uptodate, &(page)->flags);			\
-	} while (0)
+#ifndef SetPageUptodate
+#define SetPageUptodate(page)	set_bit(PG_uptodate, &(page)->flags)
+#endif
 #define ClearPageUptodate(page)	clear_bit(PG_uptodate, &(page)->flags)
 #define PageDirty(page)		test_bit(PG_dirty, &(page)->flags)
 #define SetPageDirty(page)	set_bit(PG_dirty, &(page)->flags)
@@ -845,6 +839,7 @@ extern struct page *filemap_nopage(struct vm_area_struct *, unsigned long, int);
 #define __GFP_HIGHIO	0x80	/* Can start high mem physical IO? */
 #define __GFP_FS	0x100	/* Can call down to low-level FS? */
 #define __GFP_WIRED	0x200   /* Highmem bias and wired */
+#define __GFP_NUMA	0x400	/* NUMA allocation */
 
 #define __GFP_BITS_SHIFT 16	/* Room for 16 __GFP_FOO bits */
 #define __GFP_BITS_MASK ((1 << __GFP_BITS_SHIFT) - 1)

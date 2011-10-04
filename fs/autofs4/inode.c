@@ -200,6 +200,7 @@ struct super_block *autofs4_read_super(struct super_block *s, void *data,
 	sbi->version = 0;
 	sbi->sub_version = 0;
 	init_MUTEX(&sbi->wq_sem);
+	spin_lock_init(&sbi->fs_lock);
 	sbi->queues = NULL;
 	sbi->reghost_enabled = 0;
 	sbi->needs_reghost = 0;

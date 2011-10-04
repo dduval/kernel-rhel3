@@ -37,6 +37,8 @@ extern struct smp_boot_data {
 extern char no_int_routing __initdata;
 
 extern volatile unsigned long cpu_online_map;
+extern int smp_num_siblings;
+extern int smp_num_cpucores;
 extern unsigned long ipi_base_addr;
 extern unsigned char smp_int_redirect;
 extern int smp_num_cpus;
@@ -129,7 +131,7 @@ extern void smp_do_timer (struct pt_regs *regs);
 
 extern int smp_call_function_single (int cpuid, void (*func) (void *info), void *info,
 				     int retry, int wait);
-
+extern void identify_siblings (struct cpuinfo_ia64_topology *);
 
 #endif /* CONFIG_SMP */
 #endif /* _ASM_IA64_SMP_H */

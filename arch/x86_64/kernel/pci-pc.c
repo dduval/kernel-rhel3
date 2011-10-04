@@ -118,44 +118,59 @@ static int pci_conf1_write (int seg, int bus, int dev, int fn, int reg, int len,
 
 static int pci_conf1_read_config_byte(struct pci_dev *dev, int where, u8 *value)
 {
-	outl(CONFIG_CMD(dev,where), 0xCF8);
-	*value = inb(0xCFC + (where&3));
-	return PCIBIOS_SUCCESSFUL;
+	int result;
+	u32 data;
+
+	if (!value)
+		return -EINVAL;
+
+	result = pci_conf1_read(0, dev->bus->number, PCI_SLOT(dev->devfn),
+		 		PCI_FUNC(dev->devfn), where, 1, &data);
+
+	*value = (u8)data;
+
+	return result;
 }
 
 static int pci_conf1_read_config_word(struct pci_dev *dev, int where, u16 *value)
 {
-	outl(CONFIG_CMD(dev,where), 0xCF8);    
-	*value = inw(0xCFC + (where&2));
-	return PCIBIOS_SUCCESSFUL;    
+	int result;
+	u32 data;
+
+	if (!value)
+		return -EINVAL;
+
+	result = pci_conf1_read(0, dev->bus->number, PCI_SLOT(dev->devfn),
+		 		PCI_FUNC(dev->devfn), where, 2, &data);
+
+	*value = (u16)data;
+
+	return result;
 }
 
 static int pci_conf1_read_config_dword(struct pci_dev *dev, int where, u32 *value)
 {
-	outl(CONFIG_CMD(dev,where), 0xCF8);
-	*value = inl(0xCFC);
-	return PCIBIOS_SUCCESSFUL;    
+	return pci_conf1_read(0, dev->bus->number, PCI_SLOT(dev->devfn),
+			      PCI_FUNC(dev->devfn), where, 4, value);
+
 }
 
 static int pci_conf1_write_config_byte(struct pci_dev *dev, int where, u8 value)
 {
-	outl(CONFIG_CMD(dev,where), 0xCF8);    
-	outb(value, 0xCFC + (where&3));
-	return PCIBIOS_SUCCESSFUL;
+	return pci_conf1_write(0, dev->bus->number, PCI_SLOT(dev->devfn),
+			       PCI_FUNC(dev->devfn), where, 1, value);
 }
 
 static int pci_conf1_write_config_word(struct pci_dev *dev, int where, u16 value)
 {
-	outl(CONFIG_CMD(dev,where), 0xCF8);
-	outw(value, 0xCFC + (where&2));
-	return PCIBIOS_SUCCESSFUL;
+	return pci_conf1_write(0, dev->bus->number, PCI_SLOT(dev->devfn),
+			       PCI_FUNC(dev->devfn), where, 2, value);
 }
 
 static int pci_conf1_write_config_dword(struct pci_dev *dev, int where, u32 value)
 {
-	outl(CONFIG_CMD(dev,where), 0xCF8);
-	outl(value, 0xCFC);
-	return PCIBIOS_SUCCESSFUL;
+	return pci_conf1_write(0, dev->bus->number, PCI_SLOT(dev->devfn),
+			       PCI_FUNC(dev->devfn), where, 4, value);
 }
 
 #undef CONFIG_CMD
@@ -255,50 +270,58 @@ static int pci_conf2_write (int seg, int bus, int dev, int fn, int reg, int len,
 
 static int pci_conf2_read_config_byte(struct pci_dev *dev, int where, u8 *value)
 {
-	SET(dev);
-	*value = inb(IOADDR(dev->devfn,where));
-	outb (0, 0xCF8);
-	return PCIBIOS_SUCCESSFUL;
+	int result;
+	u32 data;
+
+	if (!value)
+		return -EINVAL;
+
+	result = pci_conf2_read(0, dev->bus->number, PCI_SLOT(dev->devfn),
+				PCI_FUNC(dev->devfn), where, 1, &data);
+
+	*value = (u8)data;
+
+	return result;
 }
 
 static int pci_conf2_read_config_word(struct pci_dev *dev, int where, u16 *value)
 {
-	SET(dev);
-	*value = inw(IOADDR(dev->devfn,where));
-	outb (0, 0xCF8);
-	return PCIBIOS_SUCCESSFUL;
+	int result;
+	u32 data;
+
+	if (!value)
+		return -EINVAL;
+
+	result = pci_conf2_read(0, dev->bus->number, PCI_SLOT(dev->devfn),
+				PCI_FUNC(dev->devfn), where, 2, &data);
+
+	*value = (u16)data;
+
+	return result;
 }
 
 static int pci_conf2_read_config_dword(struct pci_dev *dev, int where, u32 *value)
 {
-	SET(dev);
-	*value = inl (IOADDR(dev->devfn,where));    
-	outb (0, 0xCF8);    
-	return PCIBIOS_SUCCESSFUL;
+	return pci_conf2_read(0, dev->bus->number, PCI_SLOT(dev->devfn),
+			      PCI_FUNC(dev->devfn), where, 4, value);
 }
 
 static int pci_conf2_write_config_byte(struct pci_dev *dev, int where, u8 value)
 {
-	SET(dev);
-	outb (value, IOADDR(dev->devfn,where));
-	outb (0, 0xCF8);    
-	return PCIBIOS_SUCCESSFUL;
+	return pci_conf2_write(0, dev->bus->number, PCI_SLOT(dev->devfn),
+			       PCI_FUNC(dev->devfn), where, 1, value);
 }
 
 static int pci_conf2_write_config_word(struct pci_dev *dev, int where, u16 value)
 {
-	SET(dev);
-	outw (value, IOADDR(dev->devfn,where));
-	outb (0, 0xCF8);    
-	return PCIBIOS_SUCCESSFUL;
+	return pci_conf2_write(0, dev->bus->number, PCI_SLOT(dev->devfn),
+			       PCI_FUNC(dev->devfn), where, 2, value);
 }
 
 static int pci_conf2_write_config_dword(struct pci_dev *dev, int where, u32 value)
 {
-	SET(dev);
-	outl (value, IOADDR(dev->devfn,where));    
-	outb (0, 0xCF8);    
-	return PCIBIOS_SUCCESSFUL;
+	return pci_conf2_write(0, dev->bus->number, PCI_SLOT(dev->devfn),
+			       PCI_FUNC(dev->devfn), where, 4, value);
 }
 
 #undef SET
@@ -517,14 +540,14 @@ static void __devinit pci_scan_mptable(void)
 		return;
 	} 
 
-	pcibios_last_bus = 0xfe;
-
 	for (i = 0; i < MAX_MP_BUSSES; i++) {
 		int n = mp_bus_id_to_pci_bus[i]; 
 		if (n < 0 || n >= 0xff)
 			continue; 
 		if (pci_bus_exists(&pci_root_buses, n))
 			continue;
+		if (n > pcibios_last_bus)
+			pcibios_last_bus = n;
 		printk(KERN_INFO "PCI: Scanning bus %02x from mptable\n", n); 
 		pci_scan_bus(n, pci_root_ops, NULL); 
 	} 			
@@ -611,6 +634,7 @@ pcibios_scan_root(void *handle, int seg, int bus)
 {
 	struct pci_controller *controller;
 	u64 base, size, offset;
+	extern void acpi_get_addr_space(acpi_handle, u8, u64 *, u64 *, u64 *);
 
 	acpi_root_bridges++;
 
@@ -638,13 +662,13 @@ void __devinit pcibios_init(void)
 	/* Only probe blindly if ACPI didn't tell us about root bridges */
 	if (!acpi_noirq && acpi_root_bridges) {
 #ifdef CONFIG_ACPI_PCI
-		if(!acpi_pci_irq_init()) {
+		if (!acpi_pci_irq_init()) {
 			pci_using_acpi_prt = 1;
 			printk(KERN_INFO "PCI: Using ACPI for IRQ routing\n");
 		} else
-			printk(KERN_WARNING, "PCI: Invalid ACPI-PCI IRQ routing table\n");
+			printk(KERN_WARNING "PCI: Invalid ACPI-PCI IRQ routing table\n");
 #else
-		printk(KERN_WARNING, "PCI: acpi_root_bridges nonzero but ACPI not configured\n");
+		printk(KERN_WARNING "PCI: acpi_root_bridges nonzero but ACPI not configured\n");
 #endif
 	}
 	else {

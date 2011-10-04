@@ -184,7 +184,10 @@ nfsd_cache_lookup(struct svc_rqst *rqstp, int type)
 		    xid == rp->c_xid && proc == rp->c_proc &&
 		    proto == rp->c_prot && vers == rp->c_vers &&
 		    time_before(jiffies, rp->c_timestamp + 120*HZ) &&
-		    memcmp((char*)&rqstp->rq_addr, (char*)&rp->c_addr, sizeof(rp->c_addr))==0) {
+		    rqstp->rq_addr.sin_family == rp->c_addr.sin_family &&
+		    memcmp((char*)&rqstp->rq_addr.sin_addr, 
+				(char*)&rp->c_addr.sin_addr,
+				sizeof(rp->c_addr.sin_addr)) == 0) {
 			nfsdstats.rchits++;
 			goto found_entry;
 		}

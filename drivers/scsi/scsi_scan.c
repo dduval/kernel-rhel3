@@ -146,6 +146,7 @@ static struct dev_info device_list[] =
 	{"PIONEER", "CD-ROM DRM-600", "*", BLIST_FORCELUN | BLIST_SINGLELUN},
 	{"PIONEER", "CD-ROM DRM-602X", "*", BLIST_FORCELUN | BLIST_SINGLELUN},
 	{"PIONEER", "CD-ROM DRM-604X", "*", BLIST_FORCELUN | BLIST_SINGLELUN},
+	{"PIONEER", "CD-ROM DRM-624X", "*", BLIST_FORCELUN | BLIST_SINGLELUN},
 	{"EMULEX", "MD21/S2     ESDI", "*", BLIST_SINGLELUN},
 	{"CANON", "IPUBJD", "*", BLIST_SPARSELUN},
 	{"nCipher", "Fastness Crypto", "*", BLIST_FORCELUN},
@@ -181,6 +182,7 @@ static struct dev_info device_list[] =
 	{"HP", "NetRAID-4M", "*", BLIST_FORCELUN},
 	{"ADAPTEC", "AACRAID", "*", BLIST_FORCELUN},
 	{"ADAPTEC", "Adaptec 5400S", "*", BLIST_FORCELUN},
+	{"APPLE", "Xserve", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
 	{"COMPAQ", "MSA1000", "*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_NOSTARTONADD},
 	{"COMPAQ", "HSV110", "*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_NOSTARTONADD},
 	{"HP", "HSV100", "*", BLIST_SPARSELUN | BLIST_LARGELUN | BLIST_NOSTARTONADD},
@@ -213,6 +215,8 @@ static struct dev_info device_list[] =
 	{"WINSYS","Flashdisk", "*", BLIST_SPARSELUN},
 	{"DotHill","SANnet II FC", "*", BLIST_SPARSELUN},	
 	{"DotHill","SANnet II SATA", "*", BLIST_SPARSELUN},	
+	{"DotHill","SANnet RAID X300", "*", BLIST_SPARSELUN},
+	{"IOI", "Media Bay", "*", BLIST_FORCELUN},	
 	{"SUN", "T300", "*", BLIST_SPARSELUN},
 	{"SUN", "T4", "*", BLIST_SPARSELUN},
 	{"SGI", "RAID3", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
@@ -264,6 +268,7 @@ static struct dev_info device_list[] =
 	{"STK", "OPENstorage D178", "*", BLIST_SPARSELUN},
 	{"EMC", "Celerra iSCSI", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
 	{"EMC", "iSCSI", "*", BLIST_SPARSELUN | BLIST_LARGELUN},
+	{"FALCON", "IPSTOR DISK", "*", BLIST_SPARSELUN},
 
 	/*
 	 * Must be at end of list...

@@ -29,6 +29,7 @@ subdir-$(CONFIG_SCSI_AACRAID)	+= aacraid
 subdir-$(CONFIG_SCSI_AIC7XXX)	+= aic7xxx
 subdir-$(CONFIG_SCSI_AIC79XX)	+= aic7xxx
 subdir-$(CONFIG_PCMCIA)		+= pcmcia
+subdir-$(CONFIG_SCSI_MEGARAID_SAS) += megaraid
 
 
 obj-$(CONFIG_SCSI)		+= scsi_mod.o

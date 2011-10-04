@@ -573,14 +573,10 @@ int dont_enable_local_apic __initdata = 0;
 static int __init detect_init_APIC (void)
 {
 	u32 h, l, features;
-	extern void get_cpu_vendor(struct cpuinfo_x86*);
 
 	/* Disabled by DMI scan or kernel option? */
 	if (dont_enable_local_apic)
 		return -1;
-
-	/* Workaround for us being called before identify_cpu(). */
-	get_cpu_vendor(&boot_cpu_data);
 
 	switch (boot_cpu_data.x86_vendor) {
 	case X86_VENDOR_AMD:

@@ -3408,6 +3408,15 @@ static int do_usbdevfs_discsignal(unsigned int fd, unsigned int cmd, unsigned lo
 	return err;
 }
 
+struct usbdevfs_ioctl32
+{
+	int ifno;
+	int ioctl_code;
+	u32 data;
+};
+
+#define USBDEVFS_IOCTL32            _IOWR('U',18, struct usbdevfs_ioctl32)
+
 struct mtd_oob_buf32 {
 	u32 start;
 	u32 length;
@@ -4395,6 +4404,7 @@ HANDLE_IOCTL(USBDEVFS_BULK32, do_usbdevfs_bulk)
 HANDLE_IOCTL(USBDEVFS_REAPURB32, do_usbdevfs_reapurb)
 HANDLE_IOCTL(USBDEVFS_REAPURBNDELAY32, do_usbdevfs_reapurb)
 HANDLE_IOCTL(USBDEVFS_DISCSIGNAL32, do_usbdevfs_discsignal)
+COMPATIBLE_IOCTL(USBDEVFS_IOCTL32)
 /* take care of sizeof(sizeof()) breakage */
 /* elevator */
 HANDLE_IOCTL(BLKELVGET_32, do_blkelvget)

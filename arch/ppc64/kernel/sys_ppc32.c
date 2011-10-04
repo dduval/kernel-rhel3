@@ -57,7 +57,6 @@
 #include <linux/compat.h>
 #include <linux/netfilter_ipv4/ip_tables.h>
 #include <linux/netfilter_ipv4/ipt_limit.h>
-#include <linux/icmpv6.h>
 
 #include <asm/types.h>
 #include <asm/ipc.h>
@@ -3516,32 +3515,6 @@ static int do_set_attach_filter(int fd, int level, int optname,
 	return ret;
 }
 
-static int do_set_icmpv6_filter(int fd, int level, int optname,
-				char *optval, int optlen)
-{
-	struct icmp6_filter kfilter;
-	mm_segment_t old_fs;
-	int ret, i;
-
-	if (copy_from_user(&kfilter, optval, sizeof(kfilter)))
-		return -EFAULT;
-
-	for (i = 0; i < 8; i += 2) {
-		u32 tmp = kfilter.data[i];
-
-		kfilter.data[i] = kfilter.data[i + 1];
-		kfilter.data[i + 1] = tmp;
-	}
-
-	old_fs = get_fs();
-	set_fs(KERNEL_DS);
-	ret = sys_setsockopt(fd, level, optname,
-			     (char *) &kfilter, sizeof(kfilter));
-	set_fs(old_fs);
-
-	return ret;
-}
-
 static int do_set_sock_timeout(int fd, int level, int optname, char *optval, int optlen)
 {
 	struct timeval32 *up = (struct timeval32 *) optval;
@@ -3569,9 +3542,6 @@ asmlinkage long sys32_setsockopt(int fd, int level, int optname,
 					    optval, optlen);
 	if (level == SOL_SOCKET && optname == SO_ATTACH_FILTER)
 		return do_set_attach_filter(fd, level, optname,
-					    optval, optlen);
-	if (level == SOL_ICMPV6 && optname == ICMPV6_FILTER)
-		return do_set_icmpv6_filter(fd, level, optname,
 					    optval, optlen);
 	if (level == SOL_SOCKET &&
 	    (optname == SO_SNDTIMEO || optname == SO_RCVTIMEO))
@@ -4033,16 +4003,22 @@ static void scm_detach_fds32(struct msghdr *kmsg, struct scm_cookie *scm)
  *		IPV6_RTHDR	ipv6 routing exthdr	32-bit clean
  *		IPV6_AUTHHDR	ipv6 auth exthdr	32-bit clean
  */
-static void cmsg32_recvmsg_fixup(struct msghdr *kmsg, unsigned long orig_cmsg_uptr)
+static void cmsg32_recvmsg_fixup(struct msghdr *kmsg,
+		unsigned long orig_cmsg_uptr, __kernel_size_t orig_cmsg_len)
 {
 	unsigned char *workbuf, *wp;
-	unsigned long bufsz, space_avail;
+	unsigned long data64sz, buf32sz, data32sz;
 	struct cmsghdr *ucmsg;
 
-	bufsz = ((unsigned long)kmsg->msg_control) - orig_cmsg_uptr;
-	space_avail = kmsg->msg_controllen + bufsz;
-	wp = workbuf = kmalloc(bufsz, GFP_KERNEL);
-	if(workbuf == NULL)
+	/* the 32-bit control messages should be no bigger than the 64-bit
+	 * control messages */
+	data64sz = ((unsigned long) kmsg->msg_control) - orig_cmsg_uptr;
+	buf32sz = data64sz;
+
+	/* we assemble the 32-bit control messages in kernel memory before
+	 * overwriting the userspace buffer */
+	wp = workbuf = kmalloc(buf32sz, GFP_KERNEL);
+	if (workbuf == NULL)
 		goto fail;
 
 	/* To make this more sane we assume the kernel sends back properly
@@ -4050,10 +4026,10 @@ static void cmsg32_recvmsg_fixup(struct msghdr *kmsg, unsigned long orig_cmsg_up
 	 * the cmsg_len for MSG_TRUNC cases, we need not check that case either.
 	 */
 	ucmsg = (struct cmsghdr *) orig_cmsg_uptr;
-	while(((unsigned long)ucmsg) <=
-	      (((unsigned long)kmsg->msg_control) - sizeof(struct cmsghdr))) {
+
+	while (data64sz >= sizeof(struct cmsghdr)) {
 		struct cmsghdr32 *kcmsg32 = (struct cmsghdr32 *) wp;
-		int clen64, clen32;
+		unsigned long clen64, dlen, clen32;
 
 		/* UCMSG is the 64-bit format CMSG entry in user-space.
 		 * KCMSG32 is within the kernel space temporary buffer
@@ -4064,11 +4040,13 @@ static void cmsg32_recvmsg_fixup(struct msghdr *kmsg, unsigned long orig_cmsg_up
 		__get_user(kcmsg32->cmsg_type, &ucmsg->cmsg_type);
 
 		clen64 = kcmsg32->cmsg_len;
-		copy_from_user(CMSG32_DATA(kcmsg32), CMSG_DATA(ucmsg),
-			       clen64 - CMSG_ALIGN(sizeof(*ucmsg)));
-		clen32 = ((clen64 - CMSG_ALIGN(sizeof(*ucmsg))) +
-			  CMSG32_ALIGN(sizeof(struct cmsghdr32)));
-		kcmsg32->cmsg_len = clen32;
+		if (clen64 < CMSG_ALIGN(sizeof(struct cmsghdr)) ||
+		    clen64 > data64sz)
+			goto overrun;
+
+		dlen = clen64 - CMSG_ALIGN(sizeof(struct cmsghdr));
+
+		copy_from_user(CMSG32_DATA(kcmsg32), CMSG_DATA(ucmsg), dlen);
 
 		switch (kcmsg32->cmsg_type) {
 			/*
@@ -4078,25 +4056,46 @@ static void cmsg32_recvmsg_fixup(struct msghdr *kmsg, unsigned long orig_cmsg_up
 		case SO_TIMESTAMP: {
 			__kernel_time_t32* ptr_time32 = CMSG32_DATA(kcmsg32);
 			__kernel_time_t*   ptr_time   = CMSG_DATA(ucmsg);
+
+			if (dlen < sizeof(__kernel_time_t) * 2)
+				goto overrun;
+
 			*ptr_time32     = *ptr_time;
 			*(ptr_time32+1) = *(ptr_time+1);
-			kcmsg32->cmsg_len -= 2*(sizeof(__kernel_time_t) -
-						sizeof(__kernel_time_t32));
+
+			dlen = 2 * sizeof(__kernel_time_t32);
 		}
 		default:;
 		}
 
+		clen32 = CMSG32_LEN(dlen);
+		kcmsg32->cmsg_len = clen32;
+		data64sz -= CMSG_ALIGN(clen64);
 		ucmsg = (struct cmsghdr *) (((char *)ucmsg) + CMSG_ALIGN(clen64));
 		wp = (((char *)kcmsg32) + CMSG32_ALIGN(kcmsg32->cmsg_len));
+		continue;
+
+	overrun:
+		{
+			static int count;
+
+			if (count++ < 20)
+				printk(KERN_INFO "recvmsg_fixup: "
+				       "bad data length %d, level %d, "
+				       "type %d, process %d (%s)\n",
+				       clen64, kcmsg32->cmsg_level,
+				       kcmsg32->cmsg_type,
+				       current->pid, current->comm);
+		}
+		break;
 	}
 
 	/* Copy back fixed up data, and adjust pointers. */
-	bufsz = (wp - workbuf);
-	copy_to_user((void *)orig_cmsg_uptr, workbuf, bufsz);
+	data32sz = wp - workbuf;
+	copy_to_user((void *) orig_cmsg_uptr, workbuf, data32sz);
 
-	kmsg->msg_control = (struct cmsghdr *)
-		(((char *)orig_cmsg_uptr) + bufsz);
-	kmsg->msg_controllen = space_avail - bufsz;
+	kmsg->msg_control = (struct cmsghdr *) (orig_cmsg_uptr + data32sz);
+	kmsg->msg_controllen = orig_cmsg_len - data32sz;
 
 	kfree(workbuf);
 	return;
@@ -4106,8 +4105,9 @@ fail:
 	 * the application could get confused and crash.  So to
 	 * ensure greater recovery, we report no CMSGs.
 	 */
-	kmsg->msg_controllen += bufsz;
+	kmsg->msg_controllen = orig_cmsg_len;
 	kmsg->msg_control = (void *) orig_cmsg_uptr;
+	return;
 }
 
 asmlinkage long sys32_recvmsg(int fd, struct msghdr32* user_msg, unsigned int user_flags)
@@ -4120,6 +4120,7 @@ asmlinkage long sys32_recvmsg(int fd, struct msghdr32* user_msg, unsigned int us
 	struct sockaddr *uaddr;
 	int *uaddr_len;
 	unsigned long cmsg_ptr;
+	__kernel_size_t cmsg_len;
 	int err, total_len, len = 0;
 	
 	PPCDBG(PPCDBG_SYS32, "sys32_recvmsg - entered - fd=%x, user_msg@=%p, user_flags=%x \n", fd, user_msg, user_flags);
@@ -4137,6 +4138,7 @@ asmlinkage long sys32_recvmsg(int fd, struct msghdr32* user_msg, unsigned int us
 	total_len = err;
 
 	cmsg_ptr = (unsigned long) kern_msg.msg_control;
+	cmsg_len = kern_msg.msg_controllen;
 	kern_msg.msg_flags = 0;
 
 	sock = sockfd_lookup(fd, &err);
@@ -4162,7 +4164,8 @@ asmlinkage long sys32_recvmsg(int fd, struct msghdr32* user_msg, unsigned int us
 				 * to fix it up before we tack on more stuff.
 				 */
 				if((unsigned long) kern_msg.msg_control != cmsg_ptr)
-					cmsg32_recvmsg_fixup(&kern_msg, cmsg_ptr);
+					cmsg32_recvmsg_fixup(&kern_msg,
+							cmsg_ptr, cmsg_len);
 
 				/* Wheee... */
 				if(sock->passcred)

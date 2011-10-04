@@ -19,10 +19,10 @@
  *******************************************************************/
 
 /*
- * $Id: lpfc_version.h 1.11 2005/07/11 14:52:16EDT sf_support Exp  $
+ * $Id: lpfc_version.h 439 2005-11-01 19:04:57Z sf_support $
  */
 
-#define LPFC_DRIVER_VERSION "7.3.2"
+#define LPFC_DRIVER_VERSION "7.3.3"
 
 #define LPFC_DRIVER_NAME "lpfc"
 

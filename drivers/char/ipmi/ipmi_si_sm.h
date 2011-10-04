@@ -62,6 +62,7 @@ enum si_sm_result
 {
 	SI_SM_CALL_WITHOUT_DELAY, /* Call the driver again immediately */
 	SI_SM_CALL_WITH_DELAY,	/* Delay some before calling again. */
+	SI_SM_CALL_WITH_TICK_DELAY,	/* Delay at least 1 tick before calling again. */
 	SI_SM_TRANSACTION_COMPLETE, /* A transaction is finished. */
 	SI_SM_IDLE,		/* The SM is in idle state. */
 	SI_SM_HOSED,		/* The hardware violated the state machine. */
@@ -118,9 +119,3 @@ extern struct si_sm_handlers kcs_smi_handlers;
 extern struct si_sm_handlers smic_smi_handlers;
 extern struct si_sm_handlers bt_smi_handlers;
 
-/*
- * RHEL 3 ACPI is insufficient to
- * support the code here, so turn it
- * off.
-*/
-#undef CONFIG_ACPI

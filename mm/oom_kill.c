@@ -245,7 +245,8 @@ retry:
 		extern int numa_nodes;
 		if (numa_nodes > 1) {
 			printk("OOM kill occurred on an x86_64 NUMA system!\n");
-			printk("The numa=off boot option might help avoid this.\n");
+			printk("Setting /proc/sys/vm/numa_memory_allocator or\n");
+			printk("using the numa=off boot option might help avoid this.\n");
 		}
 	}
 #endif

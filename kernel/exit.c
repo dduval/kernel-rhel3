@@ -474,10 +474,8 @@ static inline void choose_new_parent(task_t *p, task_t *reaper, task_t *child_re
 	 * Make sure we're not reparenting to ourselves and that
 	 * the parent is not a zombie.
 	 */
-	if (p == reaper || reaper->state >= TASK_ZOMBIE)
-		p->real_parent = child_reaper;
-	else
-		p->real_parent = reaper;
+	BUG_ON(p == reaper || reaper->state >= TASK_ZOMBIE);
+	p->real_parent = reaper;
 	if (p->parent == p->real_parent)
 		BUG();
 }
@@ -543,9 +541,13 @@ static inline void forget_original_parent(struct task_struct * father)
 	struct task_struct *p, *reaper = father;
 	struct list_head *_p, *_n;
 
-	reaper = father->group_leader;
-	if (reaper == father)
-		reaper = child_reaper;
+	do {
+		reaper = next_thread(reaper);
+		if (reaper == father) {
+			reaper = child_reaper;
+			break;
+		}
+	} while (reaper->state >= TASK_ZOMBIE);
 
 	/*
 	 * There are only two places where our children can be:
@@ -1042,8 +1044,10 @@ repeat:
 				/*
 				 * Eligible but we cannot release it yet:
 				 */
-				if (ret == 2)
+				if (ret == 2) {
+					flag = 1;
 					continue;
+				}
 				retval = wait_task_zombie(p, stat_addr, ru);
 				if (retval != 0) /* He released the lock.  */
 					goto end_wait4;

@@ -26,6 +26,7 @@ struct ipv4_devconf
 };
 
 extern struct ipv4_devconf ipv4_devconf;
+extern int ipv4_devconf_arp_announce;
 
 struct in_device
 {
@@ -71,6 +72,7 @@ struct in_device
 	  (ipv4_devconf.accept_redirects || (in_dev)->cnf.accept_redirects)))
 
 #define IN_DEV_ARPFILTER(in_dev)	(ipv4_devconf.arp_filter || (in_dev)->cnf.arp_filter)
+#define IN_DEV_ARP_ANNOUNCE(in_dev)	(ipv4_devconf_arp_announce)
 
 struct in_ifaddr
 {

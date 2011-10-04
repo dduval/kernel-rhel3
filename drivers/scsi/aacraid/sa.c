@@ -39,13 +39,12 @@
 #include <linux/delay.h>
 #include <linux/completion.h>
 #include <linux/time.h>
-static inline unsigned long get_seconds(void)
-{
-	struct timeval now;
-	do_gettimeofday(&now);
-	return now.tv_sec;
-}
 #include <linux/interrupt.h>
+#if (!defined(IRQ_NONE))
+  typedef void irqreturn_t;
+# define IRQ_HANDLED
+# define IRQ_NONE
+#endif
 #include <asm/semaphore.h>
 
 #include "scsi.h"
@@ -53,7 +52,7 @@ static inline unsigned long get_seconds(void)
 
 #include "aacraid.h"
 
-static void aac_sa_intr(int irq, void *dev_id, struct pt_regs *regs)
+static irqreturn_t aac_sa_intr(int irq, void *dev_id, struct pt_regs *regs)
 {
 	struct aac_dev *dev = dev_id;
 	unsigned short intstat, mask;
@@ -69,7 +68,7 @@ static void aac_sa_intr(int irq, void *dev_id, struct pt_regs *regs)
 
 	if (intstat & mask) {
 		if (intstat & PrintfReady) {
-			aac_printf(dev, le32_to_cpu(sa_readl(dev, Mailbox5)));
+			aac_printf(dev, sa_readl(dev, Mailbox5));
 			sa_writew(dev, DoorbellClrReg_p, PrintfReady); /* clear PrintfReady */
 			sa_writew(dev, DoorbellReg_s, PrintfDone);
 		} else if (intstat & DOORBELL_1) {	// dev -> Host Normal Command Ready
@@ -83,7 +82,19 @@ static void aac_sa_intr(int irq, void *dev_id, struct pt_regs *regs)
 		} else if (intstat & DOORBELL_4) {	// dev -> Host Normal Response Not Full
 			sa_writew(dev, DoorbellClrReg_p, DOORBELL_4);
 		}
+		return IRQ_HANDLED;
 	}
+	return IRQ_NONE;
+}
+
+/**
+ *	aac_sa_disable_interrupt	-	disable interrupt
+ *	@dev: Which adapter to enable.
+ */
+
+static void aac_sa_disable_interrupt (struct aac_dev *dev)
+{
+	sa_writew(dev, SaDbCSR.PRISETIRQMASK, 0xffff);
 }
 
 /**
@@ -94,7 +105,7 @@ static void aac_sa_intr(int irq, void *dev_id, struct pt_regs *regs)
  *	Notify the adapter of an event
  */
  
-void aac_sa_notify_adapter(struct aac_dev *dev, u32 event)
+static void aac_sa_notify_adapter(struct aac_dev *dev, u32 event)
 {
 	switch (event) {
 
@@ -111,8 +122,10 @@ void aac_sa_notify_adapter(struct aac_dev *dev, u32 event)
 		sa_writew(dev, DoorbellReg_s,DOORBELL_3);
 		break;
 	case HostShutdown:
-		//sa_sync_cmd(dev, HOST_CRASHING, 0, 0, 0, 0, 0, 0, 0,
-		//  NULL, NULL, NULL, NULL, NULL);
+		/*
+		sa_sync_cmd(dev, HOST_CRASHING, 0, 0, 0, 0, 0, 0,
+		NULL, NULL, NULL, NULL, NULL);
+		*/
 		break;
 	case FastIo:
 		sa_writew(dev, DoorbellReg_s,DOORBELL_6);
@@ -138,9 +151,9 @@ void aac_sa_notify_adapter(struct aac_dev *dev, u32 event)
  *	for its	completion.
  */
 
-static int sa_sync_cmd(struct aac_dev *dev, u32 command,
-	u32 p1, u32 p2, u32 p3, u32 p4, u32 p5, u32 p6, u32 p7,
-	u32 *ret, u32 * r1, u32 * r2, u32 * r3, u32 * r4)
+static int sa_sync_cmd(struct aac_dev *dev, u32 command, 
+		u32 p1, u32 p2, u32 p3, u32 p4, u32 p5, u32 p6,
+		u32 *ret, u32 *r1, u32 *r2, u32 *r3, u32 *r4)
 {
 	unsigned long start;
  	int ok;
@@ -151,13 +164,11 @@ static int sa_sync_cmd(struct aac_dev *dev, u32 command,
 	/*
 	 *	Write the parameters into Mailboxes 1 - 4
 	 */
-	sa_writel(dev, Mailbox1, cpu_to_le32(p1));
-	sa_writel(dev, Mailbox2, cpu_to_le32(p2));
-	sa_writel(dev, Mailbox3, cpu_to_le32(p3));
-	sa_writel(dev, Mailbox4, cpu_to_le32(p4));
-	sa_writel(dev, Mailbox5, cpu_to_le32(p5));
-	sa_writel(dev, Mailbox6, cpu_to_le32(p6));
-	sa_writel(dev, Mailbox7, cpu_to_le32(p7));
+	sa_writel(dev, Mailbox1, p1);
+	sa_writel(dev, Mailbox2, p2);
+	sa_writel(dev, Mailbox3, p3);
+	sa_writel(dev, Mailbox4, p4);
+
 	/*
 	 *	Clear the synch command doorbell to start on a clean slate.
 	 */
@@ -184,8 +195,7 @@ static int sa_sync_cmd(struct aac_dev *dev, u32 command,
 			ok = 1;
 			break;
 		}
-		set_current_state(TASK_UNINTERRUPTIBLE);
-		schedule_timeout(1);
+		msleep(1);
 	}
 
 	if (ok != 1)
@@ -198,15 +208,15 @@ static int sa_sync_cmd(struct aac_dev *dev, u32 command,
 	 *	Pull the synch status from Mailbox 0.
 	 */
 	if (ret)
-		*ret = le32_to_cpu(sa_readl(dev, Mailbox0));
+		*ret = sa_readl(dev, Mailbox0);
 	if (r1)
-		*r1 = le32_to_cpu(sa_readl(dev, Mailbox1));
+		*r1 = sa_readl(dev, Mailbox1);
 	if (r2)
-		*r2 = le32_to_cpu(sa_readl(dev, Mailbox2));
+		*r2 = sa_readl(dev, Mailbox2);
 	if (r3)
-		*r3 = le32_to_cpu(sa_readl(dev, Mailbox3));
+		*r3 = sa_readl(dev, Mailbox3);
 	if (r4)
-		*r4 = le32_to_cpu(sa_readl(dev, Mailbox4));
+		*r4 = sa_readl(dev, Mailbox4);
 	return 0;
 }
 
@@ -219,8 +229,8 @@ static int sa_sync_cmd(struct aac_dev *dev, u32 command,
  
 static void aac_sa_interrupt_adapter (struct aac_dev *dev)
 {
-	sa_sync_cmd(dev, BREAKPOINT_REQUEST, 0, 0, 0, 0, 0, 0, 0,
-	  NULL, NULL, NULL, NULL, NULL);
+	sa_sync_cmd(dev, BREAKPOINT_REQUEST, 0, 0, 0, 0, 0, 0,
+			NULL, NULL, NULL, NULL, NULL);
 }
 
 /**
@@ -239,8 +249,9 @@ static void aac_sa_start_adapter(struct aac_dev *dev)
 	init = dev->init;
 	init->HostElapsedSeconds = cpu_to_le32(get_seconds());
 	/* We can only use a 32 bit address here */
-	sa_sync_cmd(dev, INIT_STRUCT_BASE_ADDRESS, (u32)(ulong)dev->init_pa,
-	  0, 0, 0, 0, 0, 0, NULL, NULL, NULL, NULL, NULL);
+	sa_sync_cmd(dev, INIT_STRUCT_BASE_ADDRESS, 
+			(u32)(ulong)dev->init_pa, 0, 0, 0, 0, 0,
+			NULL, NULL, NULL, NULL, NULL);
 }
 
 /**
@@ -297,26 +308,27 @@ int aac_sa_init(struct aac_dev *dev)
 	/*
 	 *	Check to see if the board failed any self tests.
 	 */
-	if (sa_readl(dev, Mailbox7) & cpu_to_le32(SELF_TEST_FAILED)) {
+	if (sa_readl(dev, Mailbox7) & SELF_TEST_FAILED) {
 		printk(KERN_WARNING "%s%d: adapter self-test failed.\n", name, instance);
-		return -1;
+		goto error_iounmap;
 	}
 	/*
 	 *	Check to see if the board panic'd while booting.
 	 */
-	if (sa_readl(dev, Mailbox7) & cpu_to_le32(KERNEL_PANIC)) {
+	if (sa_readl(dev, Mailbox7) & KERNEL_PANIC) {
 		printk(KERN_WARNING "%s%d: adapter kernel panic'd.\n", name, instance);
-		return -1;
+		goto error_iounmap;
 	}
 	start = jiffies;
 	/*
 	 *	Wait for the adapter to be up and running. Wait up to 3 minutes.
 	 */
-	while (!(sa_readl(dev, Mailbox7) & cpu_to_le32(KERNEL_UP_AND_RUNNING))) {
+	while (!(sa_readl(dev, Mailbox7) & KERNEL_UP_AND_RUNNING)) {
 		if (time_after(jiffies, start+180*HZ)) {
-			status = le32_to_cpu(sa_readl(dev, Mailbox7));
-			printk(KERN_WARNING "%s%d: adapter kernel failed to start, init status = %lx.\n", name, instance, status);
-			return -1;
+			status = sa_readl(dev, Mailbox7);
+			printk(KERN_WARNING "%s%d: adapter kernel failed to start, init status = %lx.\n", 
+					name, instance, status);
+			goto error_iounmap;
 		}
 		set_current_state(TASK_UNINTERRUPTIBLE);
 		schedule_timeout(1);
@@ -324,7 +336,7 @@ int aac_sa_init(struct aac_dev *dev)
 
 	if (request_irq(dev->scsi_host_ptr->irq, aac_sa_intr, SA_SHIRQ|SA_INTERRUPT, "aacraid", (void *)dev ) < 0) {
 		printk(KERN_WARNING "%s%d: Interrupt unavailable.\n", name, instance);
-		return -1;
+		goto error_iounmap;
 	}
 
 	/*
@@ -332,28 +344,22 @@ int aac_sa_init(struct aac_dev *dev)
 	 */
 
 	dev->a_ops.adapter_interrupt = aac_sa_interrupt_adapter;
+	dev->a_ops.adapter_disable_int = aac_sa_disable_interrupt;
 	dev->a_ops.adapter_notify = aac_sa_notify_adapter;
 	dev->a_ops.adapter_sync_cmd = sa_sync_cmd;
 	dev->a_ops.adapter_check_health = aac_sa_check_health;
+	dev->a_ops.adapter_intr = aac_sa_intr;
 
 	/*
 	 *	First clear out all interrupts.  Then enable the one's that 
 	 *	we can handle.
 	 */
-	sa_writew(dev, SaDbCSR.PRISETIRQMASK, cpu_to_le16(0xffff));
-	sa_writew(dev, SaDbCSR.PRICLEARIRQMASK, (PrintfReady | DOORBELL_1 | DOORBELL_2 | DOORBELL_3 | DOORBELL_4));
+	sa_writew(dev, SaDbCSR.PRISETIRQMASK, 0xffff);
+	sa_writew(dev, SaDbCSR.PRICLEARIRQMASK, (PrintfReady | DOORBELL_1 | 
+				DOORBELL_2 | DOORBELL_3 | DOORBELL_4));
 
 	if(aac_init_adapter(dev) == NULL)
-		return -1;
-
-	/*
-	 *	Start any kernel threads needed
-	 */
-	dev->thread_pid = kernel_thread((int (*)(void *))aac_command_thread, dev, 0);
-	if (dev->thread_pid < 0) {
-	     printk(KERN_ERR "aacraid: Unable to create command thread.\n");
-	     return -1;
-	}
+		goto error_irq;
 
 	/*
 	 *	Tell the adapter that all is configure, and it can start 
@@ -361,5 +367,13 @@ int aac_sa_init(struct aac_dev *dev)
 	 */
 	aac_sa_start_adapter(dev);
 	return 0;
+
+error_irq:
+	sa_writew(dev, SaDbCSR.PRISETIRQMASK, 0xffff);
+	free_irq(dev->scsi_host_ptr->irq, (void *)dev);
+
+error_iounmap:
+
+	return -1;
 }
 

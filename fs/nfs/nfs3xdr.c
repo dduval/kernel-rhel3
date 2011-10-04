@@ -827,8 +827,11 @@ nfs3_xdr_readlinkres(struct rpc_rqst *req, u32 *p, struct nfs_fattr *fattr)
 	strlen = (u32*)kmap_atomic(rcvbuf->pages[0], KM_USER0);
 	/* Convert length of symlink */
 	len = ntohl(*strlen);
-	if (len > rcvbuf->page_len)
-		len = rcvbuf->page_len;
+	if (len >= rcvbuf->page_len - sizeof(u32)) {
+		dprintk("NFS: READLINK server returned giant symlink!\n");
+		kunmap(rcvbuf->pages[0]);
+		return -ENAMETOOLONG;
+        }
 	*strlen = len;
 	/* NULL terminate the string we got */
 	string = (char *)(strlen + 1);

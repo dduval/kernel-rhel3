@@ -289,6 +289,7 @@ EXPORT_SYMBOL(d_find_alias);
 EXPORT_SYMBOL(d_prune_aliases);
 EXPORT_SYMBOL(prune_dcache);
 EXPORT_SYMBOL(shrink_dcache_sb);
+EXPORT_SYMBOL_GPL(shrink_icache_sb);
 EXPORT_SYMBOL(shrink_dcache_parent);
 EXPORT_SYMBOL_GPL(flush_dentry_attributes);
 EXPORT_SYMBOL(find_inode_number);

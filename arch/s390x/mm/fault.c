@@ -415,8 +415,6 @@ asmlinkage void
 pfault_interrupt(struct pt_regs *regs, __u16 error_code)
 {
 	struct task_struct *tsk;
-	wait_queue_head_t queue;
-	wait_queue_head_t *qp;
 	__u16 subcode;
 
 	/*
@@ -435,42 +433,32 @@ pfault_interrupt(struct pt_regs *regs, __u16 error_code)
 	tsk = (struct task_struct *)
 		(*((unsigned long *) __LC_PFAULT_INTPARM) - THREAD_SIZE);
 
-	/*
-	 * We got all needed information from the lowcore and can
-	 * now safely switch on interrupts.
-	 */
-	if (regs->psw.mask & PSW_PROBLEM_STATE)
-		__sti();
-
 	if (subcode & 0x0080) {
 		/* signal bit is set -> a page has been swapped in by VM */
-		qp = (wait_queue_head_t *)
-			xchg(&tsk->thread.pfault_wait, -1);
-		if (qp != NULL) {
+		if (xchg(&tsk->thread.pfault_wait, -1) != 0) {
 			/* Initial interrupt was faster than the completion
 			 * interrupt. pfault_wait is valid. Set pfault_wait
 			 * back to zero and wake up the process. This can
 			 * safely be done because the task is still sleeping
-			 * and can't procude new pfaults. */
+			 * and can't produce new pfaults. */
+			task_lock(tsk);
 			tsk->thread.pfault_wait = 0ULL;
-			wake_up(qp);
+			wake_up_process(tsk);
+			task_unlock(tsk);
 		}
 	} else {
 		/* signal bit not set -> a real page is missing. */
-                init_waitqueue_head (&queue);
-		qp = (wait_queue_head_t *)
-			xchg(&tsk->thread.pfault_wait, (addr_t) &queue);
-		if (qp != NULL) {
+		set_task_state(tsk, TASK_UNINTERRUPTIBLE);
+		if (xchg(&tsk->thread.pfault_wait, 1) != 0) {
 			/* Completion interrupt was faster than the initial
 			 * interrupt (swapped in a -1 for pfault_wait). Set
 			 * pfault_wait back to zero and exit. This can be
 			 * done safely because tsk is running in kernel 
 			 * mode and can't produce new pfaults. */
 			tsk->thread.pfault_wait = 0ULL;
-		}
-
-                /* go to sleep */
-                wait_event(queue, tsk->thread.pfault_wait == 0ULL);
+			set_task_state(tsk, TASK_RUNNING);
+		} else
+			tsk->need_resched = 1;
 	}
 }
 #endif

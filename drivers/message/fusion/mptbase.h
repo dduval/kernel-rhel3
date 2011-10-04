@@ -77,12 +77,12 @@
 #define COPYRIGHT	"Copyright (c) 1999-2005 " MODULEAUTHOR
 #endif
 
-#define MPT_LINUX_VERSION_COMMON	"2.06.16.01"
-#define MPT_LINUX_PACKAGE_NAME		"@(#)mptlinux-2.06.16i.01"
+#define MPT_LINUX_VERSION_COMMON	"2.06.16.02"
+#define MPT_LINUX_PACKAGE_NAME		"@(#)mptlinux-2.06.16.02"
 #define MPT_LINUX_MAJOR_VERSION		2
 #define MPT_LINUX_MINOR_VERSION		6
 #define MPT_LINUX_BUILD_VERSION		16
-#define MPT_LINUX_RELEASE_VERSION	01
+#define MPT_LINUX_RELEASE_VERSION	02
 #define WHAT_MAGIC_STRING		"@" "(" "#" ")"
 
 #define show_mptmod_ver(s,ver)  \

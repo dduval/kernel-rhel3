@@ -14,6 +14,7 @@
 
 #include <asm/segment.h>
 #include <asm/io.h>
+#include <asm/mpspec.h>
 #include <asm/smp.h>
 #include <asm/smpboot.h>
 
@@ -1139,6 +1140,32 @@ static void __devinit pcibios_fixup_peer_bridges(void)
 	}
 }
 
+static void __devinit pci_scan_mptable(void)
+{ 
+#ifdef CONFIG_X86_LOCAL_APIC
+	int i; 
+
+	/* Handle ACPI here */
+	if (!smp_found_config) { 
+		printk(KERN_WARNING "PCI: Warning: no mptable. Scanning busses upto 0xff\n"); 
+		pcibios_last_bus = 0xfe; 
+		return;
+	} 
+
+	for (i = 0; i < MAX_MP_BUSSES; i++) {
+		int n = mp_bus_id_to_pci_bus[i]; 
+		if (n < 0 || n >= 0xff)
+			continue; 
+		if (pci_bus_exists(&pci_root_buses, n))
+			continue;
+		if (n > pcibios_last_bus)
+			pcibios_last_bus = n;
+		printk(KERN_INFO "PCI: Scanning bus %02x from mptable\n", n); 
+		pci_scan_bus(n, pci_root_ops, NULL); 
+	}
+#endif			
+} 
+
 /*
  * Exceptions for specific devices. Usually work-arounds for fatal design flaws.
  */
@@ -1418,6 +1445,7 @@ void __init pcibios_init(void)
 	}
 
 	pcibios_irq_init();
+	pci_scan_mptable(); 
 	pcibios_fixup_peer_bridges();
 	pcibios_fixup_irqs();
 	pcibios_resource_survey();

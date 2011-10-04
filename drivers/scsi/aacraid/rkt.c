@@ -39,13 +39,12 @@
 #include <linux/delay.h>
 #include <linux/completion.h>
 #include <linux/time.h>
-static inline unsigned long get_seconds(void)
-{
-	struct timeval now;
-	do_gettimeofday(&now);
-	return now.tv_sec;
-}
 #include <linux/interrupt.h>
+#if (!defined(IRQ_NONE))
+  typedef void irqreturn_t;
+# define IRQ_HANDLED
+# define IRQ_NONE
+#endif
 #include <asm/semaphore.h>
 
 #include "scsi.h"
@@ -53,7 +52,7 @@ static inline unsigned long get_seconds(void)
 
 #include "aacraid.h"
 
-static void aac_rkt_intr(int irq, void *dev_id, struct pt_regs *regs)
+static irqreturn_t aac_rkt_intr(int irq, void *dev_id, struct pt_regs *regs)
 {
 	struct aac_dev *dev = dev_id;
 
@@ -65,10 +64,11 @@ static void aac_rkt_intr(int irq, void *dev_id, struct pt_regs *regs)
 			do {
 				if (aac_intr_normal(dev, Index)) {
 					rkt_writel(dev, MUnit.OutboundQueue, Index);
-					rkt_writel(dev, MUnit.ODR, DoorBellAdapterNormCmdReady);
+					rkt_writel(dev, MUnit.ODR, DoorBellAdapterNormRespReady);
 				}
 				Index = rkt_readl(dev, MUnit.OutboundQueue);
 			} while (Index != 0xFFFFFFFFL);
+			return IRQ_HANDLED;
 		}
 	} else {
 		unsigned long bellbits;
@@ -84,13 +84,14 @@ static void aac_rkt_intr(int irq, void *dev_id, struct pt_regs *regs)
 		{
 			bellbits = rkt_readl(dev, OutboundDoorbellReg);
 			if (bellbits & DoorBellPrintfReady) {
-				aac_printf(dev, le32_to_cpu(rkt_readl (dev, IndexRegs.Mailbox[5])));
+				aac_printf(dev, rkt_readl (dev, IndexRegs.Mailbox[5]));
 				rkt_writel(dev, MUnit.ODR,DoorBellPrintfReady);
 				rkt_writel(dev, InboundDoorbellReg,DoorBellPrintfDone);
 			}
 			else if (bellbits & DoorBellAdapterNormCmdReady) {
 				rkt_writel(dev, MUnit.ODR, DoorBellAdapterNormCmdReady);
 				aac_command_normal(&dev->queues->queue[HostNormCmdQueue]);
+//				rkt_writel(dev, MUnit.ODR, DoorBellAdapterNormCmdReady);
 			}
 			else if (bellbits & DoorBellAdapterNormRespReady) {
 				rkt_writel(dev, MUnit.ODR,DoorBellAdapterNormRespReady);
@@ -103,8 +104,20 @@ static void aac_rkt_intr(int irq, void *dev_id, struct pt_regs *regs)
 				rkt_writel(dev, MUnit.ODR, DoorBellAdapterNormCmdNotFull);
 				rkt_writel(dev, MUnit.ODR, DoorBellAdapterNormRespNotFull);
 			}
+			return IRQ_HANDLED;
 		}
 	}
+	return IRQ_NONE;
+}
+
+/**
+ *	aac_rkt_disable_interrupt	-	Disable interrupts
+ *	@dev: Adapter
+ */
+
+static void aac_rkt_disable_interrupt(struct aac_dev *dev)
+{
+	rkt_writeb(dev, MUnit.OIMR, dev->OIMR = 0xff);
 }
 
 /**
@@ -119,7 +132,7 @@ static void aac_rkt_intr(int irq, void *dev_id, struct pt_regs *regs)
  */
 
 static int rkt_sync_cmd(struct aac_dev *dev, u32 command,
-	u32 p1, u32 p2, u32 p3, u32 p4, u32 p5, u32 p6, u32 p7,
+	u32 p1, u32 p2, u32 p3, u32 p4, u32 p5, u32 p6,
 	u32 *status, u32 *r1, u32 *r2, u32 *r3, u32 *r4)
 {
 	unsigned long start;
@@ -129,15 +142,12 @@ static int rkt_sync_cmd(struct aac_dev *dev, u32 command,
 	 */
 	rkt_writel(dev, InboundMailbox0, command);
 	/*
-	 *	Write the parameters into Mailboxes 1 - 7
+	 *	Write the parameters into Mailboxes 1 - 6
 	 */
-	rkt_writel(dev, InboundMailbox1, cpu_to_le32(p1));
-	rkt_writel(dev, InboundMailbox2, cpu_to_le32(p2));
-	rkt_writel(dev, InboundMailbox3, cpu_to_le32(p3));
-	rkt_writel(dev, InboundMailbox4, cpu_to_le32(p4));
-	rkt_writel(dev, InboundMailbox5, cpu_to_le32(p5));
-	rkt_writel(dev, InboundMailbox6, cpu_to_le32(p6));
-	rkt_writel(dev, InboundMailbox7, cpu_to_le32(p7));
+	rkt_writel(dev, InboundMailbox1, p1);
+	rkt_writel(dev, InboundMailbox2, p2);
+	rkt_writel(dev, InboundMailbox3, p3);
+	rkt_writel(dev, InboundMailbox4, p4);
 	/*
 	 *	Clear the synch command doorbell to start on a clean slate.
 	 */
@@ -179,8 +189,7 @@ static int rkt_sync_cmd(struct aac_dev *dev, u32 command,
 		/*
 		 *	Yield the processor in case we are slow 
 		 */
-		set_current_state(TASK_UNINTERRUPTIBLE);
-		schedule_timeout(1);
+		msleep(1);
 	}
 	if (ok != 1) {
 		/*
@@ -196,15 +205,15 @@ static int rkt_sync_cmd(struct aac_dev *dev, u32 command,
 	 *	Pull the synch status from Mailbox 0.
 	 */
 	if (status)
-		*status = le32_to_cpu(rkt_readl(dev, IndexRegs.Mailbox[0]));
+		*status = rkt_readl(dev, IndexRegs.Mailbox[0]);
 	if (r1)
-		*r1 = le32_to_cpu(rkt_readl(dev, IndexRegs.Mailbox[1]));
+		*r1 = rkt_readl(dev, IndexRegs.Mailbox[1]);
 	if (r2)
-		*r2 = le32_to_cpu(rkt_readl(dev, IndexRegs.Mailbox[2]));
+		*r2 = rkt_readl(dev, IndexRegs.Mailbox[2]);
 	if (r3)
-		*r3 = le32_to_cpu(rkt_readl(dev, IndexRegs.Mailbox[3]));
+		*r3 = rkt_readl(dev, IndexRegs.Mailbox[3]);
 	if (r4)
-		*r4 = le32_to_cpu(rkt_readl(dev, IndexRegs.Mailbox[4]));
+		*r4 = rkt_readl(dev, IndexRegs.Mailbox[4]);
 	/*
 	 *	Clear the synch command doorbell.
 	 */
@@ -229,7 +238,7 @@ static int rkt_sync_cmd(struct aac_dev *dev, u32 command,
 
 static void aac_rkt_interrupt_adapter(struct aac_dev *dev)
 {
-	rkt_sync_cmd(dev, BREAKPOINT_REQUEST, 0, 0, 0, 0, 0, 0, 0,
+	rkt_sync_cmd(dev, BREAKPOINT_REQUEST, 0, 0, 0, 0, 0, 0,
 	  NULL, NULL, NULL, NULL, NULL);
 }
 
@@ -259,7 +268,7 @@ static void aac_rkt_notify_adapter(struct aac_dev *dev, u32 event)
 		rkt_writel(dev, MUnit.IDR,INBOUNDDOORBELL_3);
 		break;
 	case HostShutdown:
-//		rkt_sync_cmd(dev, HOST_CRASHING, 0, 0, 0, 0, 0, 0, 0,
+//		rkt_sync_cmd(dev, HOST_CRASHING, 0, 0, 0, 0, 0, 0,
 //		  NULL, NULL, NULL, NULL, NULL);
 		break;
 	case FastIo:
@@ -289,7 +298,7 @@ static void aac_rkt_start_adapter(struct aac_dev *dev)
 	init->HostElapsedSeconds = cpu_to_le32(get_seconds());
 	// We can only use a 32 bit address here
 	rkt_sync_cmd(dev, INIT_STRUCT_BASE_ADDRESS, (u32)(ulong)dev->init_pa,
-	  0, 0, 0, 0, 0, 0, NULL, NULL, NULL, NULL, NULL);
+	  0, 0, 0, 0, 0, NULL, NULL, NULL, NULL, NULL);
 }
 
 /**
@@ -301,7 +310,7 @@ static void aac_rkt_start_adapter(struct aac_dev *dev)
  */
 static int aac_rkt_check_health(struct aac_dev *dev)
 {
-	long status = le32_to_cpu(rkt_readl(dev, IndexRegs.Mailbox[7]));
+	u32 status = rkt_readl(dev, MUnit.OMRx[0]);
 
 	/*
 	 *	Check to see if the board failed any self tests.
@@ -314,8 +323,8 @@ static int aac_rkt_check_health(struct aac_dev *dev)
 	if (status & KERNEL_PANIC) {
 		char * buffer;
 		struct POSTSTATUS {
-			u32 Post_Command;
-			u32 Post_Address;
+			__le32 Post_Command;
+			__le32 Post_Address;
 		} * post;
 		dma_addr_t paddr, baddr;
 		int ret;
@@ -333,14 +342,14 @@ static int aac_rkt_check_health(struct aac_dev *dev)
 			return ret;
 		}
                 memset(buffer, 0, 512);
-                post->Post_Command = cpu_to_le32(COMMAND_POST_RESULTS);
+		post->Post_Command = cpu_to_le32(COMMAND_POST_RESULTS);
                 post->Post_Address = cpu_to_le32(baddr);
-                rkt_writel(dev, MUnit.IMRx[0], cpu_to_le32(paddr));
-                rkt_sync_cmd(dev, COMMAND_POST_RESULTS, baddr, 0, 0, 0, 0, 0, 0,
+                rkt_writel(dev, MUnit.IMRx[0], paddr);
+                rkt_sync_cmd(dev, COMMAND_POST_RESULTS, baddr, 0, 0, 0, 0, 0,
 		  NULL, NULL, NULL, NULL, NULL);
 		pci_free_consistent(dev->pdev, sizeof(struct POSTSTATUS),
 		  post, paddr);
-                if ((buffer[0] == '0') && (buffer[1] == 'x')) {
+                if ((buffer[0] == '0') && ((buffer[1] == 'x') || (buffer[1] == 'X'))) {
                         ret = (buffer[2] <= '9') ? (buffer[2] - '0') : (buffer[2] - 'A' + 10);
                         ret <<= 4;
                         ret += (buffer[3] <= '9') ? (buffer[3] - '0') : (buffer[3] - 'A' + 10);
@@ -367,20 +376,28 @@ static int aac_rkt_check_health(struct aac_dev *dev)
  */
 static int aac_rkt_send(struct fib * fib)
 {
-	u64 addr;
+	u64 addr = fib->hw_fib_pa;
 	struct aac_dev *dev = fib->dev;
 	u32 * device = (u32 *)(dev->regs.rkt);
-	u32 Index = rkt_readl(dev, MUnit.InboundQueue);
+	u32 Index;
+
+	dprintk((KERN_DEBUG "%p->aac_rkt_send(%p->%llx)\n", dev, fib, addr));
+	Index = rkt_readl(dev, MUnit.InboundQueue);
 	if (Index == 0xFFFFFFFFL)
 		Index = rkt_readl(dev, MUnit.InboundQueue);
+	dprintk((KERN_DEBUG "Index = 0x%x\n", Index));
 	if (Index == 0xFFFFFFFFL)
 		return Index;
-	addr = fib->hw_fib_pa;
-	device += le32_to_cpu(Index) / sizeof(u32);
-	writel(cpu_to_le32((u32)(addr & 0xffffffff)), device++);
-	writel(cpu_to_le32((u32)(addr >> 32)), device++);
-	writel(cpu_to_le32(le16_to_cpu(fib->hw_fib->header.Size)), device);
+	device += Index / sizeof(u32);
+	dprintk((KERN_DEBUG "entry = %x %x %u\n", (u32)(addr & 0xffffffff),
+	  (u32)(addr >> 32), (u32)le16_to_cpu(fib->hw_fib->header.Size)));
+	writel((u32)(addr & 0xffffffff), device);
+	++device;
+	writel((u32)(addr >> 32), device);
+	++device;
+	writel(le16_to_cpu(fib->hw_fib->header.Size), device);
 	rkt_writel(dev, MUnit.InboundQueue, Index);
+	dprintk((KERN_DEBUG "aac_rkt_send - return 0\n"));
 	return 0;
 }
 
@@ -396,6 +413,7 @@ static int aac_rkt_send(struct fib * fib)
 int aac_rkt_init(struct aac_dev *dev)
 {
 	unsigned long start;
+	unsigned long status;
 	int instance;
 	const char * name;
 
@@ -403,41 +421,45 @@ int aac_rkt_init(struct aac_dev *dev)
 	name     = dev->name;
 
 	/*
+	 *	Check to see if the board panic'd while booting.
+	 */
+	if (rkt_readl(dev, MUnit.OMRx[0]) & KERNEL_PANIC) {
+		u32 var;
+		printk(KERN_ERR "%s%d: adapter kernel panic'd.\n", dev->name, instance);
+		var = 0;
+		if ((aac_rkt_check_health(dev) <= 0)
+		 || rkt_sync_cmd(dev, IOP_RESET, 0, 0, 0, 0, 0, 0,
+		  &var, NULL, NULL, NULL, NULL)
+		 || (var != 0x00000001)
+		 || (rkt_readl(dev, MUnit.OMRx[0]) & KERNEL_PANIC))
+			goto error_iounmap;
+	}
+	/*
 	 *	Check to see if the board failed any self tests.
 	 */
-	if (rkt_readl(dev, MUnit.OMRx[0]) & cpu_to_le32(SELF_TEST_FAILED)) {
+	if (rkt_readl(dev, MUnit.OMRx[0]) & SELF_TEST_FAILED) {
 		printk(KERN_ERR "%s%d: adapter self-test failed.\n", dev->name, instance);
-		return -1;
+		goto error_iounmap;
 	}
 	/*
 	 *	Check to see if the monitor panic'd while booting.
 	 */
-	if (rkt_readl(dev, MUnit.OMRx[0]) & cpu_to_le32(MONITOR_PANIC)) {
-		printk(KERN_ERR "%s%d: adapter monitor panic'd.\n", dev->name, instance);
-		return -1;
-	}
-	/*
-	 *	Check to see if the board panic'd while booting.
-	 */
-	if (rkt_readl(dev, MUnit.OMRx[0]) & cpu_to_le32(KERNEL_PANIC)) {
-		printk(KERN_ERR "%s%d: adapter kernel panic'd.\n", dev->name, instance);
-		return -1;
+	if (rkt_readl(dev, MUnit.OMRx[0]) & MONITOR_PANIC) {
+		printk(KERN_ERR "%s%d: adapter monitor panic.\n", dev->name, instance);
+		goto error_iounmap;
 	}
 	start = jiffies;
 	/*
 	 *	Wait for the adapter to be up and running. Wait up to 3 minutes
 	 */
-	dprintk ((KERN_DEBUG "rkt_readl(dev,MUnit.OMRx[0]=%x\n",
-	  rkt_readl(dev, MUnit.OMRx[0])));
-	while (
-//	 (!(rkt_readl(dev, IndexRegs.Mailbox[7]) & cpu_to_le32(KERNEL_UP_AND_RUNNING))) || 
-	 (!(rkt_readl(dev, MUnit.OMRx[0]) & cpu_to_le32(KERNEL_UP_AND_RUNNING)))) 
+	while (!(rkt_readl(dev, MUnit.OMRx[0]) & KERNEL_UP_AND_RUNNING))
 	{
 		if(time_after(jiffies, start+180*HZ))
 		{
-			unsigned long status = le32_to_cpu(rkt_readl(dev, MUnit.OMRx[0]));
-			printk(KERN_ERR "%s%d: adapter kernel failed to start, init status = %lx.\n", dev->name, instance, status);
-			return -1;
+			status = rkt_readl(dev, MUnit.OMRx[0]);
+			printk(KERN_ERR "%s%d: adapter kernel failed to start, init status = %lx.\n", 
+					dev->name, instance, status);
+			goto error_iounmap;
 		}
 		set_current_state(TASK_UNINTERRUPTIBLE);
 		schedule_timeout(1);
@@ -445,20 +467,18 @@ int aac_rkt_init(struct aac_dev *dev)
 	if (request_irq(dev->scsi_host_ptr->irq, aac_rkt_intr, SA_SHIRQ|SA_INTERRUPT, "aacraid", (void *)dev)<0) 
 	{
 		printk(KERN_ERR "%s%d: Interrupt unavailable.\n", name, instance);
-		return -1;
+		goto error_iounmap;
 	}
 	/*
 	 *	Fill in the function dispatch table.
 	 */
 	dev->a_ops.adapter_interrupt = aac_rkt_interrupt_adapter;
+	dev->a_ops.adapter_disable_int = aac_rkt_disable_interrupt;
 	dev->a_ops.adapter_notify = aac_rkt_notify_adapter;
 	dev->a_ops.adapter_sync_cmd = rkt_sync_cmd;
 	dev->a_ops.adapter_check_health = aac_rkt_check_health;
 	dev->a_ops.adapter_send = aac_rkt_send;
-#if (defined(__xscale__))
-//DEBUG
-	dev->a_ops.adapter_send = NULL;
-#endif
+	dev->a_ops.adapter_intr = aac_rkt_intr;
 
 	/*
 	 *	First clear out all interrupts.  Then enable the one's that we
@@ -469,22 +489,37 @@ int aac_rkt_init(struct aac_dev *dev)
 	rkt_writeb(dev, MUnit.OIMR, dev->OIMR = 0xfb);
 
 	if (aac_init_adapter(dev) == NULL)
-		return -1;
-	if (dev->new_comm_interface)
+		goto error_irq;
+	if (dev->new_comm_interface) {
+		/*
+		 * FIB Setup has already been done, but we can minimize the
+		 * damage by at least ensuring the OS never issues more
+		 * commands than we can handle. The Rocket adapters currently
+		 * can only handle 246 commands and 8 AIFs at the same time,
+		 * and in fact do notify us accordingly if we negotiate the
+		 * FIB size. The problem that causes us to add this check is
+		 * to ensure that we do not overdo it with the adapter when a
+		 * hard coded FIB override is being utilized. This special
+		 * case warrants this half baked, but convenient, check here.
+		 */
+		if (dev->scsi_host_ptr->can_queue > (246 - AAC_NUM_MGT_FIB)) {
+			dev->init->MaxIoCommands = cpu_to_le32(246);
+			dev->scsi_host_ptr->can_queue = 246 - AAC_NUM_MGT_FIB;
+		}
 		rkt_writeb(dev, MUnit.OIMR, dev->OIMR = 0xf7);
-	/*
-	 *	Start any kernel threads needed
-	 */
-	dev->thread_pid = kernel_thread((int (*)(void *))aac_command_thread, dev, 0);
-	if(dev->thread_pid < 0)
-	{
-		printk(KERN_ERR "aacraid: Unable to create rkt thread.\n");
-		return -1;
-	}	
+	}
 	/*
 	 *	Tell the adapter that all is configured, and it can start
 	 *	accepting requests
 	 */
 	aac_rkt_start_adapter(dev);
 	return 0;
+
+error_irq:
+	rkt_writeb(dev, MUnit.OIMR, dev->OIMR = 0xff);
+	free_irq(dev->scsi_host_ptr->irq, (void *)dev);
+
+error_iounmap:
+
+	return -1;
 }

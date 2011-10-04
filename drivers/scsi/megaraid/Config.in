@@ -1,0 +1,1 @@
+dep_tristate 'LSI Logic SAS based MegaRAID module' CONFIG_SCSI_MEGARAID_SAS $CONFIG_SCSI

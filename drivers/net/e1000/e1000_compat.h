@@ -1,12 +1,30 @@
 #ifndef __E1000_COMPAT_H__
 #define __E1000_COMPAT_H__
 
+#define skb_header_cloned(skb) 0
+
+#define __iomem
+#define __bitwise
+#define __force
+
+typedef u32 pm_message_t;
+
+typedef int __bitwise pci_power_t;
+
+#define PCI_D0	((pci_power_t __force) 0)
+#define PCI_D1	((pci_power_t __force) 1)
+#define PCI_D2	((pci_power_t __force) 2)
+#define PCI_D3hot	((pci_power_t __force) 3)
+#define PCI_D3cold	((pci_power_t __force) 4)
+
+#define pci_choose_state(pdev, state)	(state)
+
 typedef void irqreturn_t;
 #define IRQ_NONE
 #define IRQ_HANDLED
 #define IRQ_RETVAL(x)
 
-#define __iomem
+#define netdev_priv(dev) dev->priv
 
 #ifndef NET_IP_ALIGN
 #define NET_IP_ALIGN    2
@@ -22,11 +40,6 @@ typedef void irqreturn_t;
 /* Driver transmit return codes */
 #define NETDEV_TX_OK 0          /* driver took care of packet */
 #define NETDEV_TX_BUSY 1        /* driver tx path was busy*/
-
-static inline struct mii_ioctl_data *if_mii(struct ifreq *rq)
-{
-        return (struct mii_ioctl_data *) &rq->ifr_ifru;
-}
 
 static inline unsigned long msecs_to_jiffies(unsigned long msecs)
 {

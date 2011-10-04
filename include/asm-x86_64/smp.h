@@ -50,7 +50,8 @@ extern int pic_mode;
 extern int smp_num_siblings;
 extern int smp_num_cores;
 extern int cpu_sibling_map[];
-extern u8 phys_proc_id[NR_CPUS];
+extern u8 phys_proc_id[];
+extern u8 cpu_core_id[];
 
 extern void smp_flush_tlb(void);
 extern void smp_message_irq(int cpl, void *dev_id, struct pt_regs *regs);

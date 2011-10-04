@@ -671,6 +671,10 @@ static int b44_alloc_rx_skb(struct b44 *bp, int src_idx, u32 dest_idx_unmasked)
 	dp->ctrl = cpu_to_le32(ctrl);
 	dp->addr = cpu_to_le32((u32) mapping + bp->rx_offset + bp->dma_offset);
 
+	if (bp->flags & B44_FLAG_RX_RING_HACK)
+		pci_dma_sync_single(bp->pdev, bp->rx_ring_dma, DMA_TABLE_BYTES,
+		                    PCI_DMA_TODEVICE);
+
 	return RX_PKT_BUF_SZ;
 }
 
@@ -695,6 +699,10 @@ static void b44_recycle_rx(struct b44 *bp, int src_idx, u32 dest_idx_unmasked)
 	pci_unmap_addr_set(dest_map, mapping,
 			   pci_unmap_addr(src_map, mapping));
 
+	if (bp->flags & B44_FLAG_RX_RING_HACK)
+		pci_dma_sync_single(bp->pdev, bp->rx_ring_dma, DMA_TABLE_BYTES,
+		                    PCI_DMA_FROMDEVICE);
+
 	ctrl = src_desc->ctrl;
 	if (dest_idx == (B44_RX_RING_SIZE - 1))
 		ctrl |= cpu_to_le32(DESC_CTRL_EOT);
@@ -704,6 +712,10 @@ static void b44_recycle_rx(struct b44 *bp, int src_idx, u32 dest_idx_unmasked)
 	dest_desc->ctrl = ctrl;
 	dest_desc->addr = src_desc->addr;
 	src_map->skb = NULL;
+
+	if (bp->flags & B44_FLAG_RX_RING_HACK)
+		pci_dma_sync_single(bp->pdev, bp->rx_ring_dma, DMA_TABLE_BYTES,
+		                    PCI_DMA_TODEVICE);
 
 	pci_dma_sync_single(bp->pdev, src_desc->addr,
 			    RX_PKT_BUF_SZ,
@@ -945,6 +957,10 @@ static int b44_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	bp->tx_ring[entry].ctrl = cpu_to_le32(ctrl);
 	bp->tx_ring[entry].addr = cpu_to_le32((u32) mapping+bp->dma_offset);
 
+	if (bp->flags & B44_FLAG_TX_RING_HACK)
+		pci_dma_sync_single(bp->pdev, bp->tx_ring_dma, DMA_TABLE_BYTES,
+		                    PCI_DMA_TODEVICE);
+
 	entry = NEXT_TX(entry);
 
 	bp->tx_prod = entry;
@@ -1050,6 +1066,14 @@ static void b44_init_rings(struct b44 *bp)
 	memset(bp->rx_ring, 0, B44_RX_RING_BYTES);
 	memset(bp->tx_ring, 0, B44_TX_RING_BYTES);
 
+	if (bp->flags & B44_FLAG_RX_RING_HACK)
+		pci_dma_sync_single(bp->pdev, bp->rx_ring_dma, DMA_TABLE_BYTES,
+		                    PCI_DMA_TODEVICE);
+
+	if (bp->flags & B44_FLAG_TX_RING_HACK)
+		pci_dma_sync_single(bp->pdev, bp->tx_ring_dma, DMA_TABLE_BYTES,
+		                    PCI_DMA_TODEVICE);
+
 	for (i = 0; i < bp->rx_pending; i++) {
 		if (b44_alloc_rx_skb(bp, -1, i) < 0)
 			break;
@@ -1071,13 +1095,27 @@ static void b44_free_consistent(struct b44 *bp)
 		bp->tx_buffers = NULL;
 	}
 	if (bp->rx_ring) {
-		pci_free_consistent(bp->pdev, DMA_TABLE_BYTES,
-				    bp->rx_ring, bp->rx_ring_dma);
+		if (bp->flags & B44_FLAG_RX_RING_HACK) {
+			pci_unmap_single(bp->pdev, bp->rx_ring_dma,
+			                 DMA_TABLE_BYTES,
+			                 PCI_DMA_BIDIRECTIONAL);
+			kfree(bp->rx_ring);
+			bp->flags &= ~B44_FLAG_RX_RING_HACK;
+		} else
+			pci_free_consistent(bp->pdev, DMA_TABLE_BYTES,
+					    bp->rx_ring, bp->rx_ring_dma);
 		bp->rx_ring = NULL;
 	}
 	if (bp->tx_ring) {
-		pci_free_consistent(bp->pdev, DMA_TABLE_BYTES,
-				    bp->tx_ring, bp->tx_ring_dma);
+		if (bp->flags & B44_FLAG_TX_RING_HACK) {
+			pci_unmap_single(bp->pdev, bp->tx_ring_dma,
+			                 DMA_TABLE_BYTES,
+			                 PCI_DMA_TODEVICE);
+			kfree(bp->tx_ring);
+			bp->flags &= ~B44_FLAG_TX_RING_HACK;
+		} else
+			pci_free_consistent(bp->pdev, DMA_TABLE_BYTES,
+					    bp->tx_ring, bp->tx_ring_dma);
 		bp->tx_ring = NULL;
 	}
 	if (bp->tx_bufs) {
@@ -1115,12 +1153,56 @@ static int b44_alloc_consistent(struct b44 *bp)
 
 	size = DMA_TABLE_BYTES;
 	bp->rx_ring = pci_alloc_consistent(bp->pdev, size, &bp->rx_ring_dma);
-	if (!bp->rx_ring)
-		goto out_err;
+	if (!bp->rx_ring) {
+		/* Allocation may have failed due to pci_alloc_consistent
+		   insisting on use of GFP_DMA, which is more restrictive
+		   than necessary...  */
+		struct dma_desc *rx_ring;
+		dma_addr_t rx_ring_dma;
+
+		if (!(rx_ring = (struct dma_desc *)kmalloc(size, GFP_KERNEL)))
+			goto out_err;
+
+		memset(rx_ring, 0, size);
+		rx_ring_dma = pci_map_single(bp->pdev, rx_ring,
+		                             DMA_TABLE_BYTES,
+		                             PCI_DMA_BIDIRECTIONAL);
+
+		if (rx_ring_dma + size > B44_DMA_MASK) {
+			kfree(rx_ring);
+			goto out_err;
+		}
+
+		bp->rx_ring = rx_ring;
+		bp->rx_ring_dma = rx_ring_dma;
+		bp->flags |= B44_FLAG_RX_RING_HACK;
+	}
 
 	bp->tx_ring = pci_alloc_consistent(bp->pdev, size, &bp->tx_ring_dma);
-	if (!bp->tx_ring)
-		goto out_err;
+	if (!bp->tx_ring) {
+		/* Allocation may have failed due to pci_alloc_consistent
+		   insisting on use of GFP_DMA, which is more restrictive
+		   than necessary...  */
+		struct dma_desc *tx_ring;
+		dma_addr_t tx_ring_dma;
+
+		if (!(tx_ring = (struct dma_desc *)kmalloc(size, GFP_KERNEL)))
+			goto out_err;
+
+		memset(tx_ring, 0, size);
+		tx_ring_dma = pci_map_single(bp->pdev, tx_ring,
+		                             DMA_TABLE_BYTES,
+		                             PCI_DMA_TODEVICE);
+
+		if (tx_ring_dma + size > B44_DMA_MASK) {
+			kfree(tx_ring);
+			goto out_err;
+		}
+
+		bp->tx_ring = tx_ring;
+		bp->tx_ring_dma = tx_ring_dma;
+		bp->flags |= B44_FLAG_TX_RING_HACK;
+	}
 
 	return 0;
 

@@ -257,18 +257,19 @@ asmlinkage long sys_setpriority(int which, int who, int niceval)
 				error = set_one_prio(p, niceval, error);
 			break;
 		case PRIO_USER:
+			user = current->user;
 			if (!who)
-				user = current->user;
+				who = current->uid;
 			else
-				user = find_user(who);
-
-			if (!user)
-				goto out_unlock;
+				if ((who != current->uid) && !(user = find_user(who)))
+					goto out_unlock;	/* No processes for this user */
 
 			do_each_thread(g, p)
 				if (p->uid == who)
 					error = set_one_prio(p, niceval, error);
 			while_each_thread(g, p);
+			if (who != current->uid)
+				free_uid(user);		/* For find_user() */
 			break;
 	}
 out_unlock:
@@ -316,13 +317,12 @@ asmlinkage long sys_getpriority(int which, int who)
 			}
 			break;
 		case PRIO_USER:
+			user = current->user;
 			if (!who)
-				user = current->user;
+				who = current->uid;
 			else
-				user = find_user(who);
-
-			if (!user)
-				goto out_unlock;
+				if ((who != current->uid) && !(user = find_user(who)))
+					goto out_unlock;	/* No processes for this user */
 
 			do_each_thread(g, p)
 				if (p->uid == who) {
@@ -331,6 +331,8 @@ asmlinkage long sys_getpriority(int which, int who)
 						retval = niceval;
 				}
 			while_each_thread(g, p);
+			if (who != current->uid)
+				free_uid(user);		/* for find_user() */
 			break;
 	}
 out_unlock:

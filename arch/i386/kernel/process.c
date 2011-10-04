@@ -990,6 +990,8 @@ asmlinkage int sys_get_thread_area(struct user_desc *u_info)
 	if (idx < GDT_ENTRY_TLS_MIN || idx > GDT_ENTRY_TLS_MAX)
 		return -EINVAL;
 
+	memset(&info, 0, sizeof(info));
+
 	desc = current->thread.tls_array + idx - GDT_ENTRY_TLS_MIN;
 
 	info.entry_number = idx;
@@ -1198,7 +1200,7 @@ search_all:
 			 * as much as possible:
 			 */
 			if (ascii_shield && (addr >= 0x01000000)) {
-				tmp = randomize_range(0x01000000, mm->brk, len);
+				tmp = randomize_range(0x01000000, PAGE_ALIGN(max(mm->start_brk, 0x08000000UL)), len);
 				vma = find_vma(mm, tmp);
 				if (TASK_SIZE - len >= tmp &&
 				    (!vma || tmp + len <= vma->vm_start))

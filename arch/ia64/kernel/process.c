@@ -138,6 +138,10 @@ default_idle (void)
 #ifdef CONFIG_IA64_PAL_IDLE
 	if (!current->need_resched)
 		safe_halt();
+	else
+		cpu_relax();
+#else
+	cpu_relax();
 #endif
 }
 

@@ -114,12 +114,12 @@ static int block_dump_rw_block(struct disk_dump_partition *dump_part,
 	return -1;	
 }
 
-static int block_dump_sanity_check(struct disk_dump_device *dump_device){
-
+static int block_dump_sanity_check(struct disk_dump_device *dump_device)
+{
 	device_info_t *device_info = dump_device->device;
 	block_device_operations_dump *blk_dev_ops = device_info->blk_dump_ops;
 
-	if (!check_crc_module()){
+	if (!check_crc_module()) {
 		printk("<1>checksum error.  block dump module may be compromised\n");
 		return -EINVAL;
 	}
@@ -131,7 +131,8 @@ static int block_dump_sanity_check(struct disk_dump_device *dump_device){
 	return -1;	
 }
 
-static void *block_dump_probe(kdev_t dev){
+static void *block_dump_probe(kdev_t dev)
+{
 	const struct block_device_operations *blk_fops;
 	struct block_device *blk_dev; 
 	block_device_operations_dump *blk_dump_ops;
@@ -150,7 +151,10 @@ static void *block_dump_probe(kdev_t dev){
 	
 	if ( blk_dump_ops->block_probe != NULL ) {
 		device_info->device = blk_dump_ops->block_probe(dev);	
-
+		/* Save driver module so usage count can be modified when
+		 * in use.
+		 */
+		device_info->module = blk_fops->owner;
 		device_info->blk_dump_ops = blk_dump_ops;
 		return device_info;
 	}
@@ -158,12 +162,16 @@ static void *block_dump_probe(kdev_t dev){
 	return NULL;
 }
 
-static int block_dump_add_device(struct disk_dump_device *dump_device){
+static int block_dump_add_device(struct disk_dump_device *dump_device)
+{
 	device_info_t *device_info = dump_device->device;
 	block_device_operations_dump *blk_dev_ops = device_info->blk_dump_ops;
 
 	if(!memcpy(&dump_device->ops, &block_dump_device_ops, sizeof(struct disk_dump_device_ops)))
 		return -1;
+
+	if ( device_info->module )
+		__MOD_INC_USE_COUNT(device_info->module);
 
 	if ( blk_dev_ops->block_add_device != NULL ) {
 		dump_device->max_blocks = blk_dev_ops->block_add_device(device_info->device);
@@ -172,7 +180,12 @@ static int block_dump_add_device(struct disk_dump_device *dump_device){
 	return 0;
 }
 
-static void block_dump_remove_device(struct disk_dump_device *dump_device){
+static void block_dump_remove_device(struct disk_dump_device *dump_device)
+{
+	device_info_t *device_info = dump_device->device;
+
+	if (device_info->module)
+		__MOD_DEC_USE_COUNT(device_info->module);
 }
 
 static void block_dump_compute_cksum(void)

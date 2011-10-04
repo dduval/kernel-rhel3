@@ -88,6 +88,10 @@ static struct page * alloc_pages_pgdat(pg_data_t *pgdat, unsigned int gfp_mask,
 	return __alloc_pages(gfp_mask, order, pgdat->node_zonelists + (gfp_mask & GFP_ZONEMASK));
 }
 
+#ifdef CONFIG_NUMA
+int numa_memory_allocator = 0;
+#endif
+
 /*
  * This can be refined. Currently, tries to do round robin, instead
  * should do concentratic circle search, starting from current node.
@@ -104,6 +108,31 @@ struct page * _alloc_pages(unsigned int gfp_mask, unsigned int order)
 	if (order >= MAX_ORDER)
 		return NULL;
 #ifdef CONFIG_NUMA
+	/* since the numa allocator is tunable we skip it if its off */
+	if (!numa_memory_allocator)
+		goto std_allocator;
+	/* The first two loops will allocate memory from every node
+	 * down to pages_low. This prevents the system from swapping
+	 * like crazy on one or more nodes while others still have
+	 * lots of free memory
+	 */
+	start = temp = NODE_DATA(numa_node_id());
+	while (temp) {
+		if ((ret = alloc_pages_pgdat(temp, gfp_mask|__GFP_NUMA, order)))
+			return(ret);
+		temp = temp->node_next;
+	}
+	temp = pgdat_list;
+	while (temp != start) {
+		if ((ret = alloc_pages_pgdat(temp, gfp_mask|__GFP_NUMA, order)))
+			return(ret);
+		temp = temp->node_next;
+	}
+	/* The second two loops will allocate memory from every node
+	 * all the way down to and below pages_min thereby causing
+	 * lots of swapping but not until every node is below pages_low.
+	 */
+std_allocator:
 	temp = NODE_DATA(numa_node_id());
 #else
 	spin_lock_irqsave(&node_lock, flags);

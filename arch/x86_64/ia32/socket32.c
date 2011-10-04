@@ -16,7 +16,7 @@
 #include <linux/sched.h>
 #include <linux/types.h>
 #include <linux/file.h>
-#include <linux/icmpv6.h>
+#include <linux/skbuff.h>
 #include <linux/socket.h>
 #include <linux/filter.h>
 
@@ -529,33 +529,6 @@ static int do_set_attach_filter(int fd, int level, int optname,
 	return ret;
 }
 
-static int do_set_icmpv6_filter(int fd, int level, int optname,
-				char *optval, int optlen)
-{
-	struct icmp6_filter kfilter;
-	mm_segment_t old_fs;
-	int ret, i;
-
-	if (copy_from_user(&kfilter, optval, sizeof(kfilter)))
-		return -EFAULT;
-
-
-	for (i = 0; i < 8; i += 2) {
-		u32 tmp = kfilter.data[i];
-
-		kfilter.data[i] = kfilter.data[i + 1];
-		kfilter.data[i + 1] = tmp;
-	}
-
-	old_fs = get_fs();
-	set_fs(KERNEL_DS);
-	ret = sys_setsockopt(fd, level, optname,
-			     (char *) &kfilter, sizeof(kfilter));
-	set_fs(old_fs);
-
-	return ret;
-}
-
 struct timeval32
 {
 	int tv_sec, tv_usec;
@@ -596,9 +569,6 @@ asmlinkage long sys32_setsockopt(int fd, int level, int optname,
 {
 	if (level == SOL_SOCKET && optname == SO_ATTACH_FILTER)
 		return do_set_attach_filter(fd, level, optname,
-					    optval, optlen);
-	if (level == SOL_ICMPV6 && optname == ICMPV6_FILTER)
-		return do_set_icmpv6_filter(fd, level, optname,
 					    optval, optlen);
 
 	if (level == SOL_SOCKET &&

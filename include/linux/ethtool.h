@@ -255,6 +255,7 @@ struct net_device;
 /* Some generic methods drivers may use in their ethtool_ops */
 u32 ethtool_op_get_link(struct net_device *dev);
 u32 ethtool_op_get_tx_csum(struct net_device *dev);
+int ethtool_op_set_tx_csum(struct net_device *dev, u32 data);
 u32 ethtool_op_get_sg(struct net_device *dev);
 int ethtool_op_set_sg(struct net_device *dev, u32 data);
 
@@ -417,10 +418,11 @@ struct ethtool_ops {
  * it was foced up into this mode or autonegotiated.
  */
 
-/* The forced speed, 10Mb, 100Mb, gigabit, 10GbE. */
+/* The forced speed, 10Mb, 100Mb, gigabit, 2.5Gb, 10GbE. */
 #define SPEED_10		10
 #define SPEED_100		100
 #define SPEED_1000		1000
+#define SPEED_2500		2500
 #define SPEED_10000		10000
 
 /* Duplex, half or full. */

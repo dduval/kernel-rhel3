@@ -108,9 +108,18 @@ static int __init mpf_checksum(unsigned char *mp, int len)
 static void __init MP_processor_info (struct mpc_config_processor *m)
 {
 	int ver;
+	extern unsigned int sibling_ht_mask;
 
 	if (!(m->mpc_cpuflag & CPU_ENABLED))
 		return;
+
+	/* if the "noht" boot option is set, then use sibling_ht_mask
+	 * to enable only the first processor of a sibling set.
+	 */
+	if (m->mpc_apicid & sibling_ht_mask) {
+		m->mpc_cpuflag &= ~CPU_ENABLED;
+		return;
+	}
 
 	printk(KERN_INFO "Processor #%d %d:%d APIC version %d\n",
 		m->mpc_apicid,
@@ -758,7 +767,7 @@ void __init mp_register_ioapic (
 	mp_ioapics[idx].mpc_apicaddr = address;
 
 	set_fixmap_nocache(FIX_IO_APIC_BASE_0 + idx, address);
-	mp_ioapics[idx].mpc_apicid = io_apic_get_unique_id(idx, id);
+	mp_ioapics[idx].mpc_apicid = id;
 	mp_ioapics[idx].mpc_apicver = io_apic_get_version(idx);
 	
 	/* 

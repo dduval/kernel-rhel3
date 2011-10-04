@@ -24,6 +24,7 @@ typedef struct _device_info_t
 {
 	void *device;
 	void *blk_dump_ops;
+	struct module *module;
 } device_info_t;
 
 #endif // BLOCKDUMP_H

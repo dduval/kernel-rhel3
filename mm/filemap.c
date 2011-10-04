@@ -617,7 +617,10 @@ int filemap_fdatawait(struct address_space * mapping)
 		struct page *page = list_entry(mapping->locked_pages.next, struct page, list);
 
 		list_del(&page->list);
-		list_add(&page->list, &mapping->clean_pages);
+		if (PageDirty(page))
+			list_add(&page->list, &mapping->dirty_pages);
+		else
+			list_add(&page->list, &mapping->clean_pages);
 
 		if (!PageLocked(page)) {
 			if (PageError(page))
@@ -1763,7 +1766,7 @@ static inline int get_min_io_size(struct inode *inode)
  * i_alloc_sem is kept until the IO completes. 
  */
 
-static ssize_t generic_file_direct_IO(int rw, struct file * filp, char * buf, size_t count, loff_t offset)
+static ssize_t generic_file_direct_IO(int rw, struct file * filp, char * buf, size_t *d_count, loff_t offset, int *ret_errno)
 {
 	ssize_t retval, progress;
 	int new_iobuf, chunk_size, blocksize_mask, blocksize, blocksize_bits, iosize;
@@ -1773,7 +1776,9 @@ static ssize_t generic_file_direct_IO(int rw, struct file * filp, char * buf, si
 	loff_t size = inode->i_size;
 	int sectsize = get_min_io_size(inode), good_sectsize = 0;
 	int sectsize_bits;
+	size_t count;
 
+	count = *d_count;
 	new_iobuf = 0;
 	iobuf = filp->f_iobuf;
 	if (test_and_set_bit(0, &filp->f_iobuf_lock)) {
@@ -1860,6 +1865,8 @@ static ssize_t generic_file_direct_IO(int rw, struct file * filp, char * buf, si
 			buf += retval;
 			/* warning: weird semantics here, we're reporting a read behind the end of the file */
 			progress += retval;
+		} else {
+			*ret_errno = retval;
 		}
 
 		unmap_kiobuf(iobuf);
@@ -1867,6 +1874,7 @@ static ssize_t generic_file_direct_IO(int rw, struct file * filp, char * buf, si
 		if (retval != iosize)
 			break;
 	}
+	*d_count -= progress;
 
 	if (progress)
 		retval = progress;
@@ -1902,7 +1910,7 @@ int file_read_actor(read_descriptor_t * desc, struct page *page, unsigned long o
 	return size;
 }
 
-static ssize_t generic_file_new_read(struct file * filp, char * buf, size_t count, loff_t *ppos, int flags)
+static ssize_t generic_file_new_read(struct file * filp, char * buf, size_t count, loff_t *ppos, int flags, int *ret_errno)
 {
 	ssize_t retval;
 
@@ -1938,15 +1946,17 @@ static ssize_t generic_file_new_read(struct file * filp, char * buf, size_t coun
 		loff_t pos = *ppos, size;
 		struct address_space *mapping = filp->f_dentry->d_inode->i_mapping;
 		struct inode *inode = mapping->host;
+		size_t d_count;
 
 		retval = 0;
 		if (!count)
 			goto out; /* skip atime */
+		d_count = count;
 		down_read(&inode->i_alloc_sem);
 		down(&inode->i_sem);
 		size = inode->i_size;
 		if (pos < size) {
-			retval = generic_file_direct_IO(READ, filp, buf, count, pos);
+			retval = generic_file_direct_IO(READ, filp, buf, &d_count, pos, ret_errno);
 			if (retval > 0)
 				*ppos = pos + retval;
 		}
@@ -1963,7 +1973,8 @@ static ssize_t generic_file_new_read(struct file * filp, char * buf, size_t coun
  */
 ssize_t generic_file_read(struct file * filp, char * buf, size_t count, loff_t *ppos)
 {
-	return generic_file_new_read(filp, buf, count, ppos, 0);
+	int ret_errno = 0;
+	return generic_file_new_read(filp, buf, count, ppos, 0, &ret_errno);
 }
 
 int file_send_actor(read_descriptor_t * desc, struct page *page, unsigned long offset , unsigned long size)
@@ -3253,12 +3264,9 @@ static int precheck_file_write(struct file *file, struct inode *inode,
 			send_sig(SIGXFSZ, current, 0);
 			goto out;
 		}
-		/* Fix this up when we got to rlimit64 */
-		if (pos > 0xFFFFFFFFULL)
-			*count = 0;
-		else if(*count > limit - (u32)pos) {
+		if (*count > limit - (unsigned long)pos) {
 			/* send_sig(SIGXFSZ, current, 0); */
-			*count = limit - (u32)pos;
+			*count = limit - (unsigned long)pos;
 		}
 	}
 
@@ -3270,9 +3278,9 @@ static int precheck_file_write(struct file *file, struct inode *inode,
 			send_sig(SIGXFSZ, current, 0);
 			goto out;
 		}
-		if (*count > MAX_NON_LFS - (u32)pos) {
+		if (*count > MAX_NON_LFS - (unsigned long)pos) {
 			/* send_sig(SIGXFSZ, current, 0); */
-			*count = MAX_NON_LFS - (u32)pos;
+			*count = MAX_NON_LFS - (unsigned long)pos;
 		}
 	}
 
@@ -3472,7 +3480,7 @@ sync_failure:
 }
 
 ssize_t
-do_generic_direct_write(struct file *file,const char *buf,size_t count, loff_t *ppos)
+static do_generic_direct_write(struct file *file, const char *buf, size_t *d_count, loff_t *ppos, int *ret_errno)
 {
 	struct address_space *mapping = file->f_dentry->d_inode->i_mapping;
 	struct inode	*inode = mapping->host;
@@ -3484,14 +3492,16 @@ do_generic_direct_write(struct file *file,const char *buf,size_t count, loff_t *
 	pos = *ppos;
 	written = 0;
 	
-	err = precheck_file_write(file, inode, &count, &pos);
-	if (err != 0 || count == 0)
+	err = precheck_file_write(file, inode, d_count, &pos);
+
+	if (err != 0 || *d_count == 0)
 		goto out;
 	
 	if (!file->f_flags & O_DIRECT)
 		BUG();
 
-	written = generic_file_direct_IO(WRITE, file, (char *) buf, count, pos);
+	written = generic_file_direct_IO(WRITE, file, (char *) buf, d_count, pos, ret_errno);
+
 	if (written > 0) {
 		loff_t end = pos + written;
 		if (end > inode->i_size && !S_ISBLK(inode->i_mode)) {
@@ -3501,6 +3511,7 @@ do_generic_direct_write(struct file *file,const char *buf,size_t count, loff_t *
 		*ppos = end;
 		invalidate_inode_pages2(mapping);
 	}
+
 	/*
 	 * Sync the fs metadata but not the minor inode changes and
 	 * of course not the data as we did direct DMA for the IO.
@@ -3535,6 +3546,8 @@ generic_file_write(struct file *file,const char *buf,size_t count, loff_t *ppos)
 {
 	struct inode	*inode = file->f_dentry->d_inode->i_mapping->host;
 	ssize_t		err;
+	int		ret_errno = 0;
+	size_t		d_count;
 
 	if ((ssize_t) count < 0)
 		return -EINVAL;
@@ -3543,15 +3556,24 @@ generic_file_write(struct file *file,const char *buf,size_t count, loff_t *ppos)
 		return -EFAULT;
 
 	if (file->f_flags & O_DIRECT) {
+		d_count = count;
 		/* do_generic_direct_write may drop i_sem during the
 		   actual IO */
 		down_read(&inode->i_alloc_sem);
 		down(&inode->i_sem);
-		err = do_generic_direct_write(file, buf, count, ppos);
+		err = do_generic_direct_write(file, buf, &d_count, ppos, &ret_errno);
 		up(&inode->i_sem);
 		up_read(&inode->i_alloc_sem);
-		if (unlikely(err == -ENOTBLK))
-			err = do_odirect_fallback(file, inode, buf, count, ppos);
+		if (unlikely(err == -ENOTBLK || ret_errno == -ENOTBLK))  {
+			err = do_odirect_fallback(file, inode,
+				buf + (count - d_count), d_count, ppos);
+			if (err > 0)
+				err = (count - d_count) + err;
+			else if (d_count < count)
+				err = (count - d_count);
+			/* if dcount == count, then nothing has been written,
+			   so just return the error */
+		}
 	} else {
 		down(&inode->i_sem);
 		err = do_generic_file_write(file, buf, count, ppos);

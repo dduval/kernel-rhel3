@@ -176,14 +176,8 @@ nlmsvc_create_block(struct svc_rqst *rqstp, struct nlm_file *file,
 	struct nlm_rqst		*call;
 
 	/* Create host handle for callback */
-	/* We must up the semaphore in case the host lookup does
-	 * garbage collection (which calls nlmsvc_traverse_blocks),
-	 * but this shouldn't be a problem because nlmsvc_lock has
-	 * to retry the lock after this anyway */
-	up(&file->f_sema);
 	host = nlmclnt_lookup_host(&rqstp->rq_addr,
 				rqstp->rq_prot, rqstp->rq_vers);
-	down(&file->f_sema);
 	if (host == NULL)
 		return NULL;
 
@@ -312,7 +306,7 @@ nlmsvc_lock(struct svc_rqst *rqstp, struct nlm_file *file,
 			struct nlm_lock *lock, int wait, struct nlm_cookie *cookie)
 {
 	struct file_lock	*conflock;
-	struct nlm_block	*block;
+	struct nlm_block	*block, *nblock = NULL;
 	int			error;
 
 	dprintk("lockd: nlmsvc_lock(%04x/%ld, ty=%d, pi=%d, %Ld-%Ld, bl=%d)\n",
@@ -323,8 +317,6 @@ nlmsvc_lock(struct svc_rqst *rqstp, struct nlm_file *file,
 				(long long)lock->fl.fl_end,
 				wait);
 
-	/* Lock file against concurrent access */
-	down(&file->f_sema);
 
 	/* Get existing block (in case client is busy-waiting) */
 	block = nlmsvc_lookup_block(file, lock, 0);
@@ -332,6 +324,9 @@ nlmsvc_lock(struct svc_rqst *rqstp, struct nlm_file *file,
 	lock->fl.fl_flags |= FL_LOCKD;
 
 again:
+	/* Lock file against concurrent access */
+	down(&file->f_sema);
+
 	if (!(conflock = posix_test_lock(&file->f_file, &lock->fl))) {
 		error = posix_lock_file(&file->f_file, &lock->fl, 0);
 
@@ -358,16 +353,22 @@ again:
 	}
 
 	if (posix_locks_deadlock(&lock->fl, conflock)) {
+		if (nblock)
+			nlmsvc_delete_block(nblock, 0);
 		up(&file->f_sema);
 		return nlm_deadlock;
 	}
 
 	/* If we don't have a block, create and initialize it. Then
 	 * retry because we may have slept in kmalloc. */
+	/* We have to release f_sema as nlmsvc_create_block may try to
+	 * to claim it while doing host garbage collection */
 	if (block == NULL) {
+		up(&file->f_sema);
 		dprintk("lockd: blocking on this lock (allocating).\n");
 		if (!(block = nlmsvc_create_block(rqstp, file, lock, cookie)))
 			return nlm_lck_denied_nolocks;
+		nblock = block;
 		goto again;
 	}
 

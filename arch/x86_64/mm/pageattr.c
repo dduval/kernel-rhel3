@@ -26,7 +26,8 @@ static inline pte_t *lookup_address(unsigned long address)
         return pte_offset_kernel(pmd, address);
 } 
 
-static struct page *split_large_page(unsigned long address, pgprot_t prot)
+static struct page *split_large_page(unsigned long address, pgprot_t prot,
+					pgprot_t ref_prot)
 { 
 	int i; 
 	unsigned long addr;
@@ -39,7 +40,7 @@ static struct page *split_large_page(unsigned long address, pgprot_t prot)
 	pbase = (pte_t *)page_address(base);
 	for (i = 0; i < PTRS_PER_PTE; i++, addr += PAGE_SIZE) {
 		pbase[i] = mk_pte_phys(addr, 
-				      addr == address ? prot : PAGE_KERNEL);
+				      addr == address ? prot : ref_prot);
 	}
 	return base;
 } 
@@ -60,7 +61,8 @@ static void flush_kernel_map(void * address)
 
 /* no more special protections in this 2MB area - revert to a
    large page again. */
-static inline void revert_page(struct page *kpte_page, unsigned long address)
+static inline void revert_page(struct page *kpte_page, unsigned long address,
+				int is_kern_mapping)
 {
 	pgd_t *pgd;
 	pmd_t *pmd; 
@@ -72,7 +74,8 @@ static inline void revert_page(struct page *kpte_page, unsigned long address)
 	if (!pmd) BUG(); 
 	if ((pmd_val(*pmd) & _PAGE_GLOBAL) == 0) BUG(); 
 	
-	large_pte = mk_pte_phys(__pa(address) & LARGE_PAGE_MASK, PAGE_KERNEL_LARGE); 
+	large_pte = mk_pte_phys(__pa(address) & LARGE_PAGE_MASK,
+		(is_kern_mapping) ? PAGE_KERNEL_EXEC_LARGE : PAGE_KERNEL_LARGE);
 	set_pte((pte_t *)pmd, large_pte);
 }	
  
@@ -90,7 +93,7 @@ static inline void revert_page(struct page *kpte_page, unsigned long address)
  */
 static int 
 __change_page_attr(unsigned long address, struct page *page, pgprot_t prot, 
-		   struct page **oldpage) 
+		   struct page **oldpage, int is_kern_mapping)
 { 
 	pte_t *kpte; 
 	struct page *kpte_page;
@@ -103,10 +106,15 @@ __change_page_attr(unsigned long address, struct page *page, pgprot_t prot,
 		if ((pte_val(*kpte) & _PAGE_PSE) == 0) { 
 			set_pte(kpte, mk_pte(page, prot)); 
 		} else {
-			struct page *split = split_large_page(address, prot); 
+			pgprot_t ref_prot;
+			struct page *split;
+
+			ref_prot = (is_kern_mapping)
+				? PAGE_KERNEL_EXECUTABLE : PAGE_KERNEL;
+			split = split_large_page(address, prot, ref_prot);
 			if (!split)
 				return -ENOMEM;
-			set_pte(kpte,mk_pte(split, PAGE_KERNEL));
+			set_pte(kpte, mk_pte(split, ref_prot));
 			kpte_page = split;
 		}
 		atomic_inc(&kpte_page->count);	
@@ -117,7 +125,7 @@ __change_page_attr(unsigned long address, struct page *page, pgprot_t prot,
 
 	if (atomic_read(&kpte_page->count) == 1) { 
 		*oldpage = kpte_page;
-		revert_page(kpte_page, address);
+		revert_page(kpte_page, address, is_kern_mapping);
 	} 
 	return 0;
 } 
@@ -142,13 +150,13 @@ int change_page_attr(struct page *page, int numpages, pgprot_t prot)
 	for (i = 0; i < numpages; i++, page++) { 
 		fpage = fpage2 = NULL;
 		err = __change_page_attr((unsigned long)page_address(page), 
-					 page, prot, &fpage); 
+					 page, prot, &fpage, 0);
 		
 		/* Handle kernel mapping too which aliases part of the lowmem */
 		if (!err && page_to_phys(page) < KERNEL_TEXT_SIZE) { 
 			err = __change_page_attr((unsigned long) __START_KERNEL_map + 
 						 page_to_phys(page),
-						 page, prot, &fpage2); 
+						 page, prot, &fpage2, 1);
 		} 
 
 		if (err) 

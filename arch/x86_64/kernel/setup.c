@@ -73,6 +73,10 @@ static int __init acpioff(char *str)
 __setup("acpi=off", acpioff);
 
 
+/* For enabling/disabling HT */
+unsigned int sibling_ht_mask;
+int disable_x86_ht;
+
 /* For PCI or other memory-mapped resources */
 unsigned long pci_mem_start = 0x10000000;
 
@@ -203,6 +207,62 @@ static void __init contig_initmem_init(void)
 }
 #endif
 
+/*
+ * find out the number of processor cores on the die
+ */
+static int __init num_cpu_cores(struct cpuinfo_x86 *c)
+{
+	unsigned int eax, level;
+
+	level = c ? c->cpuid_level : cpuid_eax(0);
+
+	if (level < 4)
+		return 1;
+
+	__asm__("cpuid"
+		: "=a" (eax)
+		: "0" (4), "c" (0)
+		: "bx", "dx");
+	if (eax & 0x1f)
+		return ((eax >> 26) + 1);
+	else
+		return 1;
+}
+
+static void __init noht_init(void)
+{
+	unsigned int cpuid_level;
+	char vendorid[13];
+	vendorid[12] = 0;
+
+	/* Have to get CPUID level and vendor ID here since
+ 	 * we haven't populated boot_cpu_data yet
+	 */
+
+	cpuid(0, &cpuid_level, (int *)&vendorid[0], (int *)&vendorid[8], (int *)&vendorid[4]);
+
+	if (!strncmp(vendorid, "GenuineIntel", 12)) {
+		unsigned int siblings, eax, ebx;
+		/* If "noht" specified, calculate a mask that
+		 * can be used to determine which APIC IDs
+		 * correspond to the first CPU in a sibling
+		 * set.
+		 */
+		printk("Disabling hyperthreading\n");
+		ebx = cpuid_ebx(1);
+		siblings = (ebx & 0xff0000) >> 16;
+		if (!siblings)
+			siblings = 1;
+		else
+			siblings /= num_cpu_cores(NULL);
+
+		sibling_ht_mask = 1;
+		while (sibling_ht_mask < siblings)
+			sibling_ht_mask <<= 1;
+		sibling_ht_mask--;
+	}
+}
+
 void __init setup_arch(char **cmdline_p)
 {
 	int i;
@@ -232,11 +292,14 @@ void __init setup_arch(char **cmdline_p)
 	data_resource.start = virt_to_bus(&_etext);
 	data_resource.end = virt_to_bus(&_edata)-1;
 
-	parse_mem_cmdline(cmdline_p);
+	parse_cmdline_early(cmdline_p);
 
 	e820_end_of_ram();
 
 	init_memory_mapping(); 
+
+	if (disable_x86_ht)
+		noht_init();
 
 #ifdef CONFIG_BLK_DEV_INITRD
 	if (LOADER_TYPE && INITRD_START) {
@@ -307,6 +370,7 @@ void __init setup_arch(char **cmdline_p)
 #endif
 
 	paging_init();
+	dmi_scan_machine();
 #ifdef CONFIG_ACPI_BOOT
 	/*
 	 * Initialize the ACPI boot-time table parser (gets the RSDP and SDT).
@@ -469,23 +533,102 @@ static struct _cache_table cache_table[] __initdata =
 
 int select_idle_routine(struct cpuinfo_x86 *c);
 
-
-/*
- * find out the number of processor cores on the die
- */
-static int __init num_cpu_cores(struct cpuinfo_x86 *c)
+/* Some CPUID calls want 'count' to be placed in ecx */
+static inline void cpuid_count(int op, int count, int *eax, int *ebx, int *ecx,
+	       	int *edx)
 {
-	unsigned int eax;
-	if (c->cpuid_level < 4)
-		return 1;
 	__asm__("cpuid"
-		: "=a" (eax)
-		: "0" (4), "c" (0)
-		: "bx", "dx");
-	if (eax & 0x1f)
-		return ((eax >> 26) + 1);
-	else
-		return 1;
+		: "=a" (*eax),
+		  "=b" (*ebx),
+		  "=c" (*ecx),
+		  "=d" (*edx)
+		: "0" (op), "c" (count));
+}
+
+enum _cache_type
+{
+	CACHE_TYPE_NULL	= 0,
+	CACHE_TYPE_DATA = 1,
+	CACHE_TYPE_INST = 2,
+	CACHE_TYPE_UNIFIED = 3
+};
+
+union _cpuid4_leaf_eax {
+	struct {
+		enum _cache_type	type:5;
+		unsigned int		level:3;
+		unsigned int		is_self_initializing:1;
+		unsigned int		is_fully_associative:1;
+		unsigned int		reserved:4;
+		unsigned int		num_threads_sharing:12;
+		unsigned int		num_cores_on_die:6;
+	} split;
+	u32 full;
+};
+
+union _cpuid4_leaf_ebx {
+	struct {
+		unsigned int		coherency_line_size:12;
+		unsigned int		physical_line_partition:10;
+		unsigned int		ways_of_associativity:10;
+	} split;
+	u32 full;
+};
+
+union _cpuid4_leaf_ecx {
+	struct {
+		unsigned int		number_of_sets:32;
+	} split;
+	u32 full;
+};
+
+struct _cpuid4_info {
+	union _cpuid4_leaf_eax eax;
+	union _cpuid4_leaf_ebx ebx;
+	union _cpuid4_leaf_ecx ecx;
+	unsigned long size;
+};
+
+#define MAX_CACHE_LEAVES		4
+
+static int __init cpuid4_cache_lookup(int index, struct _cpuid4_info *this_leaf)
+{
+	unsigned int		eax, ebx, ecx, edx;
+	union _cpuid4_leaf_eax	cache_eax;
+
+	cpuid_count(4, index, &eax, &ebx, &ecx, &edx);
+	cache_eax.full = eax;
+	if (cache_eax.split.type == CACHE_TYPE_NULL)
+		return -1;
+
+	this_leaf->eax.full = eax;
+	this_leaf->ebx.full = ebx;
+	this_leaf->ecx.full = ecx;
+	this_leaf->size = (this_leaf->ecx.split.number_of_sets + 1) *
+		(this_leaf->ebx.split.coherency_line_size + 1) *
+		(this_leaf->ebx.split.physical_line_partition + 1) *
+		(this_leaf->ebx.split.ways_of_associativity + 1);
+	return 0;
+}
+
+static int __init find_num_cache_leaves(void)
+{
+	unsigned int		eax, ebx, ecx, edx;
+	union _cpuid4_leaf_eax	cache_eax;
+	int 			i;
+	int 			retval;
+
+	retval = MAX_CACHE_LEAVES;
+	/* Do cpuid(4) loop to find out num_cache_leaves */
+	for (i = 0; i < MAX_CACHE_LEAVES; i++) {
+		cpuid_count(4, i, &eax, &ebx, &ecx, &edx);
+		cache_eax.full = eax;
+		if (cache_eax.split.type == CACHE_TYPE_NULL) {
+			retval = i;
+			break;
+		}
+	}
+	return retval;
 }
 
 static void __init init_intel(struct cpuinfo_x86 *c)
@@ -493,11 +636,53 @@ static void __init init_intel(struct cpuinfo_x86 *c)
 	unsigned int trace = 0, l1i = 0, l1d = 0, l2 = 0, l3 = 0; /* Cache sizes */
 	char *p = NULL;
 	u32 eax, dummy;
-
+	unsigned int new_l1d = 0, new_l1i = 0; /* Cache sizes from cpuid(4) */
+	unsigned int new_l2 = 0, new_l3 = 0, i; /* Cache sizes from cpuid(4) */
 	unsigned int n;
 
 
 	select_idle_routine(c);
+	if (c->cpuid_level > 4) {
+		static int is_initialized;
+		static int num_cache_leaves;
+
+		if (is_initialized == 0) {
+			/* Init num_cache_leaves from boot CPU */
+			num_cache_leaves = find_num_cache_leaves();
+			is_initialized++;
+		}
+ 
+		/*
+		 * Whenever possible use cpuid(4), deterministic cache 
+		 * parameters cpuid leaf to find the cache details
+		 */
+		for (i = 0; i < num_cache_leaves; i++) {
+			struct _cpuid4_info this_leaf;
+			int retval;
+
+			retval = cpuid4_cache_lookup(i, &this_leaf);
+			if (retval >= 0) {
+				switch(this_leaf.eax.split.level) {
+				    case 1:
+					if (this_leaf.eax.split.type == 
+							CACHE_TYPE_DATA)
+						new_l1d = this_leaf.size/1024;
+					else if (this_leaf.eax.split.type == 
+							CACHE_TYPE_INST)
+						new_l1i = this_leaf.size/1024;
+					break;
+				    case 2:
+					new_l2 = this_leaf.size/1024;
+					break;
+				    case 3:
+					new_l3 = this_leaf.size/1024;
+					break;
+				    default:
+					break;
+				}
+			}
+		}
+	}
 	if (c->cpuid_level > 1) {
 		/* supports eax=2  call */
 		int i, j, n;
@@ -549,16 +734,24 @@ static void __init init_intel(struct cpuinfo_x86 *c)
 			}
 		}
 
-		if ( trace )
-			printk (KERN_INFO "CPU: Trace cache: %dK uops", trace);
-		else if ( l1i )
-			printk (KERN_INFO "CPU: L1 I cache: %dK", l1i);
-		if ( l1d )
-			printk(", L1 D cache: %dK\n", l1d);
+		if (new_l1d)
+			l1d = new_l1d;
+		if (new_l1i)
+			l1i = new_l1i;
+		if (new_l2)
+			l2 = new_l2;
+		if (new_l3)
+			l3 = new_l3;
 
-		if ( l2 )
+		if (trace)
+			printk(KERN_INFO "CPU: Trace cache: %dK uops\n", trace);
+		if (l1i || l1d)
+			printk(KERN_INFO
+				"CPU: L1 I-cache: %dK, L1 D-cache: %dK\n",
+				l1i, l1d);
+		if (l2)
 			printk(KERN_INFO "CPU: L2 cache: %dK\n", l2);
-		if ( l3 )
+		if (l3)
 			printk(KERN_INFO "CPU: L3 cache: %dK\n", l3);
 
 		/*
@@ -575,9 +768,6 @@ static void __init init_intel(struct cpuinfo_x86 *c)
 	
 #ifdef CONFIG_SMP
 	if (test_bit(X86_FEATURE_HT, &c->x86_capability)) {
-		extern	u8 phys_proc_id[NR_CPUS];
-		extern  u8 cpu_core_id[NR_CPUS];
-		
 		int 	index_lsb, index_msb, tmp;
 		int	initial_apic_id;
 		int 	cpu = smp_processor_id();
@@ -586,9 +776,10 @@ static void __init init_intel(struct cpuinfo_x86 *c)
 		cpuid(1, &eax, &ebx, &ecx, &edx);
 		smp_num_siblings = (ebx & 0xff0000) >> 16;
 
-		if (smp_num_siblings == 1) {
+		if (disable_x86_ht || smp_num_siblings == 1) {
 			printk(KERN_INFO  "CPU: Hyper-Threading is disabled\n");
-		} else if (smp_num_siblings > 1 ) {
+			clear_bit(X86_FEATURE_HT, &c->x86_capability);
+		} else if (smp_num_siblings > 1) {
 
 			smp_num_cores = num_cpu_cores(c);
 
@@ -668,6 +859,28 @@ end:
 static int __init init_amd(struct cpuinfo_x86 *c)
 {
 	int r;
+#ifdef CONFIG_SMP
+	int tmp, cpu;
+	unsigned int coreshift = 0;
+
+	/* Figure out what physical package we're on. */
+	if (cpuid_ebx(1) & 0xff0000) {
+		/* nonzero sibling count */
+		if (cpuid_eax(0x80000000) >= 0x80000008 &&
+		    (tmp = (cpuid_ecx(0x80000008) & 0xff)) > 0) {
+			smp_num_cores = tmp + 1;
+			do {
+				coreshift++;
+				tmp >>= 1;
+			} while (tmp > 0);
+		}
+	}
+
+	cpu = smp_processor_id();
+	tmp = hard_smp_processor_id();
+	cpu_core_id[cpu] = tmp & ((1 << coreshift) - 1);
+	phys_proc_id[cpu] = tmp >> coreshift;
+#endif
 
 	/* Bit 31 in normal CPUID used for nonstandard 3DNow ID;
 	   3DNow is IDd by bit 31 in extended CPUID (1*32+31) anyway */
@@ -843,10 +1056,6 @@ static int show_cpuinfo(struct seq_file *m, void *v)
 {
 	struct cpuinfo_x86 *c = v;
 	int n = c - cpu_data;
-#ifdef CONFIG_SMP
-	extern	u8 phys_proc_id[NR_CPUS];
-	extern  u8 cpu_core_id[NR_CPUS];
-#endif
 
 	/* 
 	 * These flag bits must match the definitions in <asm/cpufeature.h>.

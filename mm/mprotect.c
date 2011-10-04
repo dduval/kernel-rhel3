@@ -62,6 +62,7 @@ static inline void change_pte_range(struct vm_area_struct *vma,
 			entry = vm_ptep_get_and_clear(vma, address + start, pte);
 			vm_set_pte(vma, address + start,
 				   pte, pte_modify(entry, newprot));
+			update_mmu_cache(vma, address + start, entry);
 		}
 		address += PAGE_SIZE;
 		pte++;

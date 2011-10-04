@@ -157,9 +157,18 @@ static struct mpc_config_translation *translation_table[MAX_MPC_ENTRY] __initdat
 void __init MP_processor_info (struct mpc_config_processor *m)
 {
  	int ver, quad, logical_apicid;
+	extern unsigned int sibling_ht_mask;
  	
 	if (!(m->mpc_cpuflag & CPU_ENABLED))
 		return;
+
+	/* If the "noht" boot option is set, then enable only the
+	 * first CPU of a sibling set...
+	 */
+        if (m->mpc_apicid & sibling_ht_mask) {
+		m->mpc_cpuflag &= ~CPU_ENABLED;
+		return;
+	}
 
 	logical_apicid = m->mpc_apicid;
 	if (clustered_apic_mode == CLUSTERED_APIC_NUMAQ) {

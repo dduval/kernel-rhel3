@@ -158,7 +158,8 @@ paddr_to_local_pfn(unsigned long phys_addr, struct page **mem_map, int check)
 
 extern void setup_node_bootmem(int nodeid, unsigned long start_, unsigned long end_);
 
-#define pfn_valid(pfn)          ((pfn) < num_physpages)
+#define pfn_valid(pfn) ((pfn) >= num_physpages ? 0 : \
+				(phys_to_nid((pfn) << PAGE_SHIFT) != 0xff))
 
 #ifdef CONFIG_NUMA
 extern int fake_node;

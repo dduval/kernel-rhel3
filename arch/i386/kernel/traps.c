@@ -138,7 +138,7 @@ void show_trace(unsigned long * stack)
 #if !CONFIG_FRAME_POINTER
 	int i;
 #endif
-	unsigned long addr;
+	unsigned long addr, limit;
 	/* static to not take up stackspace; if we race here too bad */
 	static char buffer[512];
 
@@ -163,7 +163,8 @@ void show_trace(unsigned long * stack)
 out:
 #else
 	i = 1;
-	while (((long) stack & (THREAD_SIZE-1)) != 0) {
+	limit = ((unsigned long)stack & ~(THREAD_SIZE - 1)) + THREAD_SIZE - 3;
+	while ((unsigned long)stack < limit) {
 		addr = *stack++;
 		if (kernel_text_address(addr)) {
 			lookup_symbol(addr, buffer, 512);
@@ -187,7 +188,7 @@ void show_trace_task(struct task_struct *tsk)
 
 void show_stack(unsigned long * esp)
 {
-	unsigned long *stack;
+	unsigned long *stack, limit;
 	int i;
 
 	// debugging aid: "show_stack(NULL);" prints the
@@ -197,8 +198,9 @@ void show_stack(unsigned long * esp)
 		esp=(unsigned long*)&esp;
 
 	stack = esp;
+	limit = ((unsigned long)stack & ~(THREAD_SIZE - 1)) + THREAD_SIZE - 3;
 	for(i=0; i < kstack_depth_to_print; i++) {
-		if (((long) stack & (THREAD_SIZE-1)) == 0)
+		if ((unsigned long)stack >= limit)
 			break;
 		if (i && ((i % 8) == 0))
 			printk("\n       ");

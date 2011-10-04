@@ -62,6 +62,7 @@ static int pdev_is_sata(struct pci_dev *pdev)
 			return 0;
 	}
 	BUG();
+	return 0; /* eliminate compilation warning */
 }
  
 /**
@@ -807,6 +808,7 @@ static unsigned int setup_mmio_siimage (struct pci_dev *dev, const char *name)
 	u8 tmpbyte	= 0;
 	unsigned long addr;
 	void *ioaddr;
+	u32 tmp, irq_mask;
 
 	/*
 	 *	Drop back to PIO if we can't map the mmio. Some
@@ -833,6 +835,14 @@ static unsigned int setup_mmio_siimage (struct pci_dev *dev, const char *name)
 	addr = (unsigned long) ioaddr;
 
 	if (pdev_is_sata(dev)) {
+		/* make sure IDE0/1 interrupts are not masked */
+		irq_mask = (1 << 22) | (1 << 23);
+		tmp = readl(addr + 0x48);
+		if (tmp & irq_mask) {
+			tmp &= ~irq_mask;
+			writel(tmp, addr + 0x48);
+			readl(addr + 0x48); /* flush */
+		}
 		writel(0, addr + 0x148);
 		writel(0, addr + 0x1C8);
 	}
@@ -1114,7 +1124,7 @@ static void __init init_hwif_siimage (ide_hwif_t *hwif)
 	hwif->reset_poll = &siimage_reset_poll;
 	hwif->pre_reset = &siimage_pre_reset;
 
-	if(is_sata(hwif) == PCI_DEVICE_ID_SII_3112)
+	if (is_sata(hwif))
 		hwif->busproc   = &siimage_busproc;
 
 	if (!hwif->dma_base) {
@@ -1127,7 +1137,7 @@ static void __init init_hwif_siimage (ide_hwif_t *hwif)
 	hwif->mwdma_mask = 0x07;
 	hwif->swdma_mask = 0x07;
 
-	if (hwif->pci_dev->device != PCI_DEVICE_ID_SII_3112)
+	if (!is_sata(hwif))
 		hwif->atapi_dma = 1;
 
 	hwif->ide_dma_check = &siimage_config_drive_for_dma;

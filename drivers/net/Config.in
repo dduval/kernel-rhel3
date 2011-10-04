@@ -269,8 +269,7 @@ dep_tristate 'Packet Engines Yellowfin Gigabit-NIC support (EXPERIMENTAL)' CONFI
 dep_tristate 'Realtek 8169 Gigabit Ethernet support' CONFIG_R8169 $CONFIG_PCI
 dep_tristate 'SysKonnect SK-98xx and SK-95xx Gigabit Ethernet Adapter family support' CONFIG_SK98LIN $CONFIG_PCI
 dep_tristate 'Broadcom Tigon3 support' CONFIG_TIGON3 $CONFIG_PCI
-
-endmenu
+dep_tristate 'Broadcom NetXtremeII support' CONFIG_BNX2 $CONFIG_PCI
 
 if [ "$CONFIG_PPC_ISERIES" = "y" ]; then
    dep_tristate 'iSeries Virtual Ethernet driver support' CONFIG_VETH $CONFIG_PPC_ISERIES

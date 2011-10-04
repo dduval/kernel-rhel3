@@ -78,6 +78,9 @@ unsigned long eeh_total_mmio_ffs;
 unsigned long eeh_false_positives;
 unsigned long eeh_ignored_failures;
 unsigned long eeh_device_not_found;
+unsigned long eeh_node_not_found;
+unsigned long eeh_config_not_found;
+unsigned long eeh_no_check;
 
 /* RTAS tokens */
 static int ibm_set_eeh_option;
@@ -209,6 +212,10 @@ pci_addr_cache_insert(struct pci_dev *dev, unsigned long alo,
 	struct rb_node_s *parent = NULL;
 	struct pci_io_addr_range *piar;
 
+#ifdef DEBUG
+	printk(KERN_INFO "PCI: add %s %s [%lx:%lx] to addr cache\n",
+		       pci_name(dev), dev->name, alo, ahi);
+#endif
 	/* Walk tree, find a place to insert into tree */
 	while (*p) {
 		parent = *p;
@@ -251,6 +258,10 @@ static void __pci_addr_cache_insert_device(struct pci_dev *dev)
 			pci_name(dev));
 		return;
 	}
+#ifdef DEBUG
+	printk(KERN_INFO "PCI: adding %s %s to address cache\n",
+		       pci_name(dev), dev->name);
+#endif
 
 	/* Skip any devices for which EEH is not enabled. */
 	if (!(dn->eeh_mode & EEH_MODE_SUPPORTED) ||
@@ -426,16 +437,20 @@ int eeh_dn_check_failure(struct device_node *dn, struct pci_dev *dev)
 	if (!eeh_subsystem_enabled)
 		return 0;
 
-	if (!dn)
+	if (!dn) {
+		eeh_node_not_found++;
 		return 0;
+	}
 
 	/* Access to IO BARs might get this far and still not want checking. */
 	if (!(dn->eeh_mode & EEH_MODE_SUPPORTED) ||
 	    dn->eeh_mode & EEH_MODE_NOCHECK) {
+		eeh_no_check++;
 		return 0;
 	}
 
 	if (!dn->eeh_config_addr) {
+		eeh_config_not_found++;
 		return 0;
 	}
 
@@ -487,7 +502,8 @@ int eeh_dn_check_failure(struct device_node *dn, struct pci_dev *dev)
 
 /**
  * eeh_check_failure - check if all 1's data is due to EEH slot freeze
- * @token i/o token, should be address in the form 0xA....
+ * @token i/o token, should be address in the form 0xA.... (or 0xE.... for
+ *        mappings set up before mem init i.e. PHB I/O space)
  * @val value, should be all 1's (XXX why do we need this arg??)
  *
  * Check for an eeh failure at the given token address.
@@ -504,11 +520,21 @@ unsigned long eeh_check_failure(void *token, unsigned long val)
 	struct pci_dev *dev;
 	struct device_node *dn;
 
+	/* If token is an I/O address, we know it was passed to us
+	 * by a port I/O function (inb, inw, or inl), so subtracting
+	 * pci_io_base gets the physical address for us.
+	 */
+	if (REGION_ID((unsigned long)token) == IO_REGION_ID)
+		addr = (unsigned long)token - pci_io_base;
+	else
+		addr = eeh_token_to_phys((unsigned long)token);
+
 	/* Finding the phys addr + pci device; this is pretty quick. */
-	addr = eeh_token_to_phys((unsigned long)token);
 	dev = pci_get_device_by_addr(addr);
-	if (!dev)
+	if (!dev) {
+		eeh_device_not_found++;
 		return val;
+	}
 
 	dn = pci_device_to_OF_node(dev);
 	eeh_dn_check_failure (dn, dev);
@@ -720,10 +746,17 @@ static int eeh_proc_falsepositive_read(char *page, char **start, off_t off,
 	int len;
 	len = sprintf(page,
 		      "eeh_device_not_found=%ld\n"
+		      "eeh_node_not_found=%ld\n"
+		      "eeh_config_not_found=%ld\n"
+		      "eeh_no_check=%ld\n"
 		      "eeh_false_positives=%ld\n"
 		      "eeh_total_mmio_ffs=%ld\n"
 		      "eeh_ignored_failures=%ld\n",
-		      eeh_device_not_found, eeh_false_positives,
+		      eeh_device_not_found,
+		      eeh_node_not_found,
+		      eeh_config_not_found,
+		      eeh_no_check,
+		      eeh_false_positives,
 		      eeh_total_mmio_ffs, eeh_ignored_failures);
 	return len;
 }

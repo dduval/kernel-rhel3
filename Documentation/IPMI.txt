@@ -101,6 +101,9 @@ ipmi_kcs_drv - A driver for the KCS SI.  Most systems have a KCS
 interface for IPMI.  This is deprecated, ipmi_si_drv supports KCS and
 SMIC interfaces.
 
+ipmi_smb_intf - A driver for accessing BMCs on the SMBus. It uses the
+I2C kernel driver's SMBus interfaces to send and receive IPMI messages
+over the SMBus.
 
 
 Much documentation for the interface is in the include files.  The
@@ -458,10 +461,64 @@ interrupts enabled, the driver will run VERY slowly.  Don't blame me,
 the KCS interface sucks.
 
 
+The SMBus Driver
+----------------
+
+The SMBus driver allows up to 4 SMBus devices to be configured in the
+system.  By default, the driver will register any SMBus interfaces it finds
+in the I2C address range of 0x20 to 0x4f on any adapter.  You can change this
+at module load time (for a module) with:
+
+  insmod ipmi_smb_intf.o
+	smb_addr=<adapter1>,<i2caddr1>[,<adapter2>,<i2caddr2>[,...]]
+	smb_dbg=<flags1>,<flags2>...
+	[smb_defaultprobe=0] [smb_dbg_probe=1]
+
+The addresses are specified in pairs, the first is the adapter ID and the
+second is the I2C address on that adapter.
+
+The debug flags are bit flags for each BMC found, they are:
+IPMI messages: 1, driver state: 2, timing: 4, I2C probe: 8
+
+Setting smb_defaultprobe to zero disabled the default probing of SMBus
+interfaces at address range 0x20 to 0x4f.  This means that only the
+BMCs specified on the smb_addr line will be detected.
+
+Setting smb_dbg_probe to 1 will enable debugging of the probing and
+detection process for BMCs on the SMBusses.
+
+Discovering the IPMI compilant BMC on the SMBus can cause devices
+on the I2C bus to fail. The SMBus driver writes a "Get Device ID" IPMI
+message as a block write to the I2C bus and waits for a response.
+This action can be detrimental to some I2C devices. It is highly recommended
+that the known I2c address be given to the SMBus driver in the smb_addr
+parameter. The default adrress range will not be used when a smb_addr
+parameter is provided.
+
+When compiled into the kernel, the addresses can be specified on the
+kernel command line as:
+
+  ipmi_smb=[<adapter1>.]<addr1>[:<debug1>],[<adapter2>.<addr2>[:<debug1>]....
+
+The [<adapterx>.]<addrx>[:<debugx>] I2C address-debug flag are value
+set for each BMC.  If the adapter is not given, then it defaults to
+zero.  The debug flag is the same as the smb_dbg flag given above.
+
+You may also specify "nodefaults" and "debug_probe", separated by
+commas, on the ipmi_smb line.  These will disable the default SMB
+probe and enable debugging of the BMC probing and detection process,
+respectively.
+
+Note that you might need some I2C changes if CONFIG_IPMI_PANIC_EVENT
+is enabled along with this, so the I2C driver knows to run to
+completion during sending a panic event.
+
+
 Other Pieces
 ------------
 
 Watchdog
+--------
 
 A watchdog timer is provided that implements the Linux-standard
 watchdog timer interface.  It has three module parameters that can be

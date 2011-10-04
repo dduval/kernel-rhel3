@@ -43,8 +43,14 @@
 #include <linux/ipmi.h>
 #include <asm/semaphore.h>
 #include <linux/init.h>
+#include <linux/compat.h>
+#if defined(CONFIG_COMPAT) && !defined(CONFIG_IA64)
+#include <asm/ioctl32.h>
+#endif /* CONFIG_COMPAT && !CONFIG_IA64 */
+#include <asm/semaphore.h>
+#include "ipmi_kcompat.h"
 
-#define IPMI_DEVINTF_VERSION "35.4"
+#define IPMI_DEVINTF_VERSION "35.11"
 
 struct ipmi_file_private
 {
@@ -495,6 +501,167 @@ static int ipmi_ioctl(struct inode  *inode,
 	return rv;
 }
 
+#if defined(CONFIG_COMPAT) && !defined(CONFIG_IA64)
+#define IPMICTL_SEND_COMMAND32         _IOR(IPMI_IOC_MAGIC, 13,  struct ipmi_req32)
+#define IPMICTL_SEND_COMMAND_SETTIME32 _IOR(IPMI_IOC_MAGIC, 21,  struct ipmi_req_settime32)
+#define IPMICTL_RECEIVE_MSG32          _IOWR(IPMI_IOC_MAGIC, 12, struct ipmi_recv32)
+#define IPMICTL_RECEIVE_MSG_TRUNC32    _IOWR(IPMI_IOC_MAGIC, 11, struct ipmi_recv32)
+
+struct ipmi_msg32
+{
+        uint8_t       netfn;
+        uint8_t       cmd;
+        uint16_t      data_len;
+        compat_uptr_t data;     // userspace address
+};
+
+struct ipmi_req32
+{
+        compat_uptr_t addr;     // userspace address
+        uint32_t      addr_len;
+        int32_t       msgid;
+
+        struct ipmi_msg32 msg;
+};
+
+struct ipmi_recv32
+{
+        int32_t       recv_type;
+        compat_uptr_t addr;      // userspace address
+        uint32_t      addr_len;
+        uint32_t      msgid;
+
+        struct ipmi_msg32 msg;
+};
+
+struct ipmi_req_settime32
+{
+        struct ipmi_req32  req;
+        int32_t            retries;
+        uint32_t           retry_time_ms;
+};
+
+/*
+ * Define some helper functions for copying IPMI data
+ */
+static void ipmi_copymsg64(struct ipmi_msg *p64, struct ipmi_msg32 *p32)
+{
+        p64->netfn    = p32->netfn;
+        p64->cmd      = p32->cmd;
+        p64->data_len = p32->data_len;
+        p64->data     = (char *)(u64)p32->data;
+}
+static void ipmi_copymsg32(struct ipmi_msg32 *p32, struct ipmi_msg *p64)
+{
+        p32->netfn    = p64->netfn;
+        p32->cmd      = p64->cmd;
+        p32->data_len = p64->data_len;
+}
+static void ipmi_copyreq64(struct ipmi_req *p64, struct ipmi_req32 *p32)
+{
+        p64->addr     = (char *)(u64)p32->addr;
+        p64->addr_len = p32->addr_len;
+        p64->msgid    = p32->msgid;
+        ipmi_copymsg64(&p64->msg, &p32->msg);
+}
+static void ipmi_copyrecv64(struct ipmi_recv *p64, struct ipmi_recv32 *p32)
+{
+        p64->recv_type = p32->recv_type;
+        p64->addr      = (char *)(u64)p32->addr;
+        p64->addr_len  = p32->addr_len;
+        p64->msgid     = p32->msgid;
+        ipmi_copymsg64(&p64->msg, &p32->msg);
+}
+static void ipmi_copyrecv32(struct ipmi_recv32 *p32, struct ipmi_recv *p64)
+{
+        p32->recv_type = p64->recv_type;
+        p32->addr_len  = p64->addr_len;
+        p32->msgid     = p64->msgid;
+        ipmi_copymsg32(&p32->msg, &p64->msg);
+}
+
+/*
+ * Handle 32-bit ioctls on 64-bit kernel
+ */
+static int ipmi_ioctl32(unsigned int fd, unsigned int cmd, unsigned long arg,
+                        struct file *filep)
+{
+        int rc;
+
+        switch(cmd) {
+        case IPMICTL_SEND_COMMAND32:
+        {
+                struct ipmi_req   *preq64, req64;
+                struct ipmi_req32  req32;
+      
+		/*
+		 * Copy in the 32-bit ioctl structure from userspace, move fields
+		 *   to 64-bit ioctl structure, copy back to userspace and issue 64-bit ioctl
+		 */
+                if (copy_from_user(&req32, compat_ptr(arg), sizeof(req32))) {
+                        return -EFAULT;
+                }
+                ipmi_copyreq64(&req64, &req32);
+
+                preq64 = compat_alloc_user_space(sizeof(req64));
+                if (copy_to_user(preq64, &req64, sizeof(req64))) {
+                        return -EFAULT;
+                }
+                return ipmi_ioctl(filep->f_dentry->d_inode, filep, IPMICTL_SEND_COMMAND, (unsigned long)preq64);
+        }
+        case IPMICTL_SEND_COMMAND_SETTIME32:
+        {
+                struct ipmi_req_settime  *preq64, req64;
+                struct ipmi_req_settime32 req32;
+
+                if (copy_from_user(&req32, compat_ptr(arg), sizeof(req32))) {
+                        return -EFAULT;
+                }
+                ipmi_copyreq64(&req64.req, &req32.req); 
+                req64.retries = req32.retries;
+                req64.retry_time_ms = req32.retry_time_ms;
+
+                preq64 = compat_alloc_user_space(sizeof(req64));
+                if (copy_to_user(preq64, &req64, sizeof(req64))) {
+                        return -EFAULT;
+                }
+                return ipmi_ioctl(filep->f_dentry->d_inode, filep, IPMICTL_SEND_COMMAND_SETTIME, (unsigned long)preq64);
+        }
+        case IPMICTL_RECEIVE_MSG32:
+        case IPMICTL_RECEIVE_MSG_TRUNC32:
+        {
+                struct ipmi_recv   *precv64, recv64;
+                struct ipmi_recv32  recv32;
+
+                if (copy_from_user(&recv32, compat_ptr(arg), sizeof(recv32))) {
+                        return -EFAULT;
+                }
+                ipmi_copyrecv64(&recv64, &recv32);
+
+                precv64 = compat_alloc_user_space(sizeof(recv64));
+                if (copy_to_user(precv64, &recv64, sizeof(recv64))) {
+                        return -EFAULT;
+                }
+                rc = ipmi_ioctl(filep->f_dentry->d_inode, filep, 
+                                (cmd == IPMICTL_RECEIVE_MSG32) ? IPMICTL_RECEIVE_MSG : IPMICTL_RECEIVE_MSG_TRUNC, 
+                                (unsigned long)precv64);
+                if (rc != 0) {
+                        return rc;
+                }
+                if (copy_from_user(&recv64, precv64, sizeof(recv64))) {
+                        return -EFAULT;
+                }
+                ipmi_copyrecv32(&recv32, &recv64);
+                if (copy_to_user(compat_ptr(arg), &recv32, sizeof(recv32))) {
+                        return -EFAULT;
+                }
+                return rc;
+        }
+        default:
+                return ipmi_ioctl(filep->f_dentry->d_inode, filep, cmd, arg);
+        }
+}
+#endif /* CONFIG_COMPAT && !CONFIG_IA64 */
 
 static struct file_operations ipmi_fops = {
 	.owner		= THIS_MODULE,
@@ -575,12 +742,42 @@ static __init int init_ipmi_devintf(void)
 		return rv;
 	}
 
+#if defined(CONFIG_COMPAT) && !defined(CONFIG_IA64)
+	register_ioctl32_conversion(IPMICTL_SEND_COMMAND32, ipmi_ioctl32);
+	register_ioctl32_conversion(IPMICTL_SEND_COMMAND_SETTIME32,ipmi_ioctl32);
+	register_ioctl32_conversion(IPMICTL_RECEIVE_MSG32, ipmi_ioctl32);
+	register_ioctl32_conversion(IPMICTL_RECEIVE_MSG_TRUNC32, ipmi_ioctl32);
+	register_ioctl32_conversion(IPMICTL_REGISTER_FOR_CMD, ipmi_ioctl32);
+	register_ioctl32_conversion(IPMICTL_UNREGISTER_FOR_CMD, ipmi_ioctl32);
+	register_ioctl32_conversion(IPMICTL_SET_GETS_EVENTS_CMD, ipmi_ioctl32);
+	register_ioctl32_conversion(IPMICTL_SET_MY_ADDRESS_CMD, ipmi_ioctl32);
+	register_ioctl32_conversion(IPMICTL_GET_MY_ADDRESS_CMD, ipmi_ioctl32);
+	register_ioctl32_conversion(IPMICTL_SET_MY_LUN_CMD, ipmi_ioctl32);
+	register_ioctl32_conversion(IPMICTL_GET_MY_LUN_CMD, ipmi_ioctl32);
+	register_ioctl32_conversion(IPMICTL_SET_TIMING_PARMS_CMD,ipmi_ioctl32);
+	register_ioctl32_conversion(IPMICTL_GET_TIMING_PARMS_CMD,ipmi_ioctl32);
+#endif /* CONFIG_COMPAT && !CONFIG_IA64 */
 	return 0;
 }
 module_init(init_ipmi_devintf);
 
 static __exit void cleanup_ipmi(void)
 {
+#if defined(CONFIG_COMPAT) && !defined(CONFIG_IA64)
+	unregister_ioctl32_conversion(IPMICTL_SEND_COMMAND32);
+	unregister_ioctl32_conversion(IPMICTL_SEND_COMMAND_SETTIME32);
+	unregister_ioctl32_conversion(IPMICTL_RECEIVE_MSG32);
+	unregister_ioctl32_conversion(IPMICTL_RECEIVE_MSG_TRUNC32);
+	unregister_ioctl32_conversion(IPMICTL_REGISTER_FOR_CMD);
+	unregister_ioctl32_conversion(IPMICTL_UNREGISTER_FOR_CMD);
+	unregister_ioctl32_conversion(IPMICTL_SET_GETS_EVENTS_CMD);
+	unregister_ioctl32_conversion(IPMICTL_SET_MY_ADDRESS_CMD);
+	unregister_ioctl32_conversion(IPMICTL_GET_MY_ADDRESS_CMD);
+	unregister_ioctl32_conversion(IPMICTL_SET_MY_LUN_CMD);
+	unregister_ioctl32_conversion(IPMICTL_GET_MY_LUN_CMD);
+	unregister_ioctl32_conversion(IPMICTL_SET_TIMING_PARMS_CMD);
+	unregister_ioctl32_conversion(IPMICTL_GET_TIMING_PARMS_CMD);
+#endif /* CONFIG_COMPAT && !CONFIG_IA64 */
 	ipmi_smi_watcher_unregister(&smi_watcher);
 	devfs_unregister(devfs_handle);
 	unregister_chrdev(ipmi_major, DEVICE_NAME);

@@ -32,7 +32,8 @@ static inline pte_t *lookup_address(unsigned long address)
     return pte_offset_kernel(pmd, address);
 } 
 
-static struct page *split_large_page(unsigned long address, pgprot_t prot)
+static struct page *split_large_page(unsigned long address, pgprot_t prot,
+					pgprot_t ref_prot)
 { 
 	int i; 
 	unsigned long addr;
@@ -45,7 +46,7 @@ static struct page *split_large_page(unsigned long address, pgprot_t prot)
 	pbase = (pte_t *)page_address(base);
 	for (i = 0; i < PTRS_PER_PTE; i++, addr += PAGE_SIZE) {
 		pbase[i] = mk_pte_phys(addr, 
-				      addr == address ? prot : PAGE_KERNEL);
+				      addr == address ? prot : ref_prot);
 	}
 	return base;
 } 
@@ -124,12 +125,19 @@ __change_page_attr(struct page *page, pgprot_t prot, struct page **oldpage)
 		if ((pte_val(*kpte) & _PAGE_PSE) == 0) {
 			set_pte_atomic(kpte, mk_pte(page, prot)); 
 		} else {
-			struct page *split = split_large_page(address, prot); 
+			pgprot_t ref_prot;
+			struct page *split;
+			extern char _etext;
+
+			ref_prot =
+			 ((address & LARGE_PAGE_MASK) < (unsigned long)&_etext)
+				? PAGE_KERNEL_EXEC : PAGE_KERNEL;
+			split = split_large_page(address, prot, ref_prot);
 			if (!split)
 				return -ENOMEM;
-			set_pmd_pte(kpte,address,mk_pte(split, PAGE_KERNEL));
+			set_pmd_pte(kpte, address, mk_pte(split, ref_prot));
 			kpte_page = split;
-		}	
+		}
 		atomic_inc(&kpte_page->count);
 	} else if ((pte_val(*kpte) & _PAGE_PSE) == 0) { 
 		set_pte_atomic(kpte, mk_pte(page, PAGE_KERNEL));

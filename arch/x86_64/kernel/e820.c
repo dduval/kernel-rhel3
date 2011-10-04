@@ -14,6 +14,7 @@
 #include <asm/e820.h>
 #include <asm/proto.h>
 #include <asm/bootsetup.h>
+#include <asm/smp.h>
 
 extern unsigned long table_start, table_end;
 extern char _end[];
@@ -507,7 +508,7 @@ extern int fallback_aper_order;
 extern int iommu_setup(char *opt);
 extern int acpi_disabled;
 
-void __init parse_mem_cmdline (char ** cmdline_p)
+void __init parse_cmdline_early (char ** cmdline_p)
 {
 	char c = ' ', *to = command_line, *from = COMMAND_LINE;
 	int len = 0;
@@ -545,6 +546,13 @@ void __init parse_mem_cmdline (char ** cmdline_p)
 		}
 		else if (!memcmp(from, "acpi=noirq", 8)) {
 			acpi_noirq = 1;
+#ifdef CONFIG_IA32E
+#ifdef CONFIG_X86_LOCAL_APIC
+			/* revert nmi_watchdog default if acpi=noirq is used */
+			if (nmi_watchdog == NMI_IO_APIC)
+				nmi_watchdog = NMI_LOCAL_APIC;
+#endif
+#endif
 		}
 #endif
 #ifdef CONFIG_GART_IOMMU 
@@ -577,6 +585,10 @@ void __init parse_mem_cmdline (char ** cmdline_p)
 			use_pmtmr = 1;
 		}
 #endif
+		else if (!memcmp(from, "noht", 4)) {
+			extern int disable_x86_ht;
+			disable_x86_ht = 1;
+		}
 	next:
 		c = *(from++);
 		if (!c)

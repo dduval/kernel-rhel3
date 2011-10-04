@@ -487,6 +487,7 @@ static void disk_dump(struct pt_regs *regs, void *platform_arg)
 
 	if (SECTOR_BLOCK(dump_part->nr_sects) < header_blocks + bitmap_blocks) {
 		Warn("dump partition is too small. Aborted");
+		ret = -EIO;
 		goto done;
 	}
 
@@ -494,6 +495,7 @@ static void disk_dump(struct pt_regs *regs, void *platform_arg)
 	printk("check dump partition...\n");
 	if (!check_dump_partition(dump_part, total_blocks)) {
 		Err("check partition failed.");
+		ret = -EIO;
 		goto done;
 	}
 

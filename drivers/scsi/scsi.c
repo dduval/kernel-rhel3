@@ -213,8 +213,13 @@ void  scsi_initialize_queue(Scsi_Device * SDpnt, struct Scsi_Host * SHpnt)
 	q->queue_lock = &SDpnt->device_lock;
 	q->queuedata = (void *) SDpnt;
 
-	q->max_segments = SHpnt->sg_tablesize;
-
+/*
+ * scsi_malloc() can only dish out items of PAGE_SIZE or less, so we cannot
+ * build a request that requires an sg table allocation of more than that.
+ */
+	q->max_segments = min_t(int, SHpnt->sg_tablesize,
+				PAGE_SIZE / sizeof(struct scatterlist));
+	
         if (SHpnt->hostt->vary_io)
                 blk_queue_large_superbh(q, SHpnt->max_sectors, q->max_segments);
         else

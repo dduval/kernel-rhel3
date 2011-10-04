@@ -75,6 +75,8 @@ if [ "$CONFIG_SCSI_MEGARAID" != "y" ]; then
    dep_tristate 'AMI MegaRAID support (new driver)' CONFIG_SCSI_MEGARAID2 $CONFIG_SCSI
 fi
 
+source drivers/scsi/megaraid/Config.in
+
 dep_mbool 'Serial ATA (SATA) support' CONFIG_SCSI_SATA $CONFIG_SCSI
 dep_tristate '  AHCI SATA support (EXPERIMENTAL)' CONFIG_SCSI_SATA_AHCI $CONFIG_SCSI_SATA $CONFIG_PCI $CONFIG_EXPERIMENTAL
 dep_tristate '  ServerWorks Frodo / Apple K2 SATA support (EXPERIMENTAL)' CONFIG_SCSI_SATA_SVW $CONFIG_SCSI_SATA $CONFIG_PCI $CONFIG_EXPERIMENTAL

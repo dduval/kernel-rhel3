@@ -349,11 +349,16 @@ static void st_sleep_done(Scsi_Cmnd * SCpnt)
 			(STp->buffer)->midlevel_result = INT_MAX;	/* OK */
 	} else
 		(STp->buffer)->midlevel_result = SCpnt->result;
-	SCpnt->request.rq_status = RQ_SCSI_DONE;
-	(STp->buffer)->last_SRpnt = SCpnt->sc_request;
+
+	if ((STp->buffer)->writing) {
+		SCpnt->sc_request->sr_request.waiting = NULL;
+
+		(STp->buffer)->syscall_result = st_chk_result(STp, SCpnt->sc_request);
+		scsi_release_request(SCpnt->sc_request);
+	}
 	DEB( STp->write_pending = 0; )
 
-	complete(SCpnt->request.waiting);
+	complete(&(STp->wait));
 }
 
 
@@ -423,10 +428,6 @@ static void write_behind_check(Scsi_Tape * STp)
         ) /* end DEB */
 
 	wait_for_completion(&(STp->wait));
-	(STp->buffer)->last_SRpnt->sr_request.waiting = NULL;
-
-	(STp->buffer)->syscall_result = st_chk_result(STp, (STp->buffer)->last_SRpnt);
-	scsi_release_request((STp->buffer)->last_SRpnt);
 
 	STbuffer->buffer_bytes -= STbuffer->writing;
 	STps = &(STp->ps[STp->partition]);

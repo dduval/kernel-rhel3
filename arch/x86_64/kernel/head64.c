@@ -15,6 +15,7 @@
 
 #include <asm/processor.h>
 #include <asm/proto.h>
+#include <asm/smp.h>
 
 static void __init clear_bss(void)
 {
@@ -62,6 +63,13 @@ static void __init setup_boot_cpu_data(void)
 	      (int *)&boot_cpu_data.x86_vendor_id[0],
 	      (int *)&boot_cpu_data.x86_vendor_id[8],
 	      (int *)&boot_cpu_data.x86_vendor_id[4]);
+	get_cpu_vendor(&boot_cpu_data);
+#ifdef CONFIG_IA32E
+#ifdef CONFIG_X86_LOCAL_APIC
+	if (boot_cpu_data.x86_vendor == X86_VENDOR_INTEL)
+		nmi_watchdog = NMI_IO_APIC;
+#endif
+#endif
 
 	/* get cpu type */
 	cpuid(1, &eax, &dummy, &extra, (int *)&boot_cpu_data.x86_capability[0]);

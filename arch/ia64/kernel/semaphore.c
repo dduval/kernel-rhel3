@@ -46,6 +46,7 @@ __up (struct semaphore *sem)
 static spinlock_t semaphore_lock = SPIN_LOCK_UNLOCKED;
 
 void __wtd_down(struct semaphore * sem, struct worktodo *wtd);
+void __wtd_down_from_wakeup(struct semaphore * sem, struct worktodo *wtd);
 
 void __wtd_down_action(void *data)
 {
@@ -55,7 +56,7 @@ void __wtd_down_action(void *data)
 	wtd_pop(wtd);
 	sem = wtd->data;
 
-	__wtd_down(sem, wtd);
+	__wtd_down_from_wakeup(sem, wtd);
 }
 
 void __wtd_down_waiter(wait_queue_t *wait)
@@ -68,7 +69,12 @@ void __wtd_down_waiter(wait_queue_t *wait)
 	wtd_queue(wtd);
 }
 
-void __wtd_down(struct semaphore * sem, struct worktodo *wtd)
+/*
+ *  Same as __wtd_down, but sem->sleepers is not incremented when
+ *  coming from a wakeup.
+ */
+void wtd_down_common(struct semaphore * sem, struct worktodo *wtd,
+			int do_incr)
 {
 	int gotit;
 	int sleepers;
@@ -77,7 +83,7 @@ void __wtd_down(struct semaphore * sem, struct worktodo *wtd)
 	wtd->data = sem;
 
 	spin_lock_irq(&semaphore_lock);
-	sem->sleepers++;
+	sem->sleepers += do_incr;
 	sleepers = sem->sleepers;
 	gotit = add_wait_queue_exclusive_cond(&sem->wait, &wtd->wait,
 			atomic_add_negative(sleepers - 1, &sem->count));
@@ -91,6 +97,20 @@ void __wtd_down(struct semaphore * sem, struct worktodo *wtd)
 		wake_up(&sem->wait);
 		wtd_queue(wtd);
 	}
+}
+
+void __wtd_down(struct semaphore * sem, struct worktodo *wtd)
+{
+	wtd_down_common(sem, wtd, 1);
+}
+
+/*
+ * Same as __wtd_down, but sem->sleepers is not incremented when
+ * coming from a wakeup.
+ */
+void __wtd_down_from_wakeup(struct semaphore * sem, struct worktodo *wtd)
+{
+	wtd_down_common(sem, wtd, 0);
 }
 
 /* Returns 0 if we acquired the semaphore, 1 if it was queued. */

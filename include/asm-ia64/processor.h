@@ -195,6 +195,16 @@ struct cpuinfo_ia64 {
 	__u64 platform_specific;
 } __attribute__ ((aligned (PAGE_SIZE)));
 
+struct cpuinfo_ia64_topology {
+	__u32 socket_id;	/* physical processor socket id */
+	__u16 core_id;		/* core id */
+	__u16 thread_id;	/* thread id */
+	__u16 num_log;		/* Total number of logical processors on
+				 * this socket that were successfully booted */
+	__u8  cores_per_socket;	/* Cores per processor socket */
+	__u8  threads_per_core;	/* Threads per core */
+};
+
 /*
  * The "local" data pointer.  It points to the per-CPU data of the currently executing
  * CPU, much like "current" points to the per-task data of the currently executing task.
@@ -218,6 +228,9 @@ struct cpuinfo_ia64 {
   extern struct cpuinfo_ia64 _cpu_data[NR_CPUS];
 # define cpu_data(cpu)		(&_cpu_data[cpu])
 #endif
+
+extern struct cpuinfo_ia64_topology _cpu_data_topology[NR_CPUS];
+#define cpu_data_topology(cpu)	(&_cpu_data_topology[cpu])
 
 extern void identify_cpu (struct cpuinfo_ia64 *);
 extern void print_cpu_info (struct cpuinfo_ia64 *);

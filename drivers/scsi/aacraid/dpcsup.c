@@ -71,12 +71,11 @@ unsigned int aac_response_normal(struct aac_queue * q)
 	while(aac_consumer_get(dev, q, &entry))
 	{
 		int fast;
-		u32 index;
-		index = le32_to_cpu(entry->addr);
+		u32 index = le32_to_cpu(entry->addr);
 		fast = index & 0x01;
 		fib = &dev->fibs[index >> 2];
 		hwfib = fib->hw_fib;
-
+		
 		aac_consumer_free(dev, q, HostNormRespQueue);
 		/*
 		 *	Remove this fib from the Outstanding I/O queue.
@@ -91,7 +90,7 @@ unsigned int aac_response_normal(struct aac_queue * q)
 			dev->queues->queue[AdapNormCmdQueue].numpending--;
 		} else {
 			printk(KERN_WARNING "aacraid: FIB timeout (%x).\n", fib->flags);
-			printk(KERN_DEBUG"aacraid: hwfib=%p index=%i fib=%p\n",hwfib, hwfib->header.SenderData,fib);
+			printk(KERN_DEBUG"aacraid: hwfib=%p fib index=%i fib=%p\n",hwfib, hwfib->header.SenderData,fib);
 			continue;
 		}
 		spin_unlock_irqrestore(q->lock, flags);
@@ -100,7 +99,7 @@ unsigned int aac_response_normal(struct aac_queue * q)
 			/*
 			 *	Doctor the fib
 			 */
-			*(u32 *)hwfib->data = cpu_to_le32(ST_OK);
+			*(__le32 *)hwfib->data = cpu_to_le32(ST_OK);
 			hwfib->header.XferState |= cpu_to_le32(AdapterProcessed);
 		}
 
@@ -108,7 +107,7 @@ unsigned int aac_response_normal(struct aac_queue * q)
 
 		if (hwfib->header.Command == cpu_to_le16(NuFileSystem))
 		{
-			u32 *pstatus = (u32 *)hwfib->data;
+			__le32 *pstatus = (__le32 *)hwfib->data;
 			if (*pstatus & cpu_to_le32(0xffff0000))
 				*pstatus = cpu_to_le32(ST_OK);
 		}
@@ -175,25 +174,25 @@ unsigned int aac_command_normal(struct aac_queue *q)
 		struct hw_fib * hw_fib;
 		u32 index;
 		struct fib *fib = &fibctx;
-
+		
 		/*
-		 *	Allocate a FIB. For non queued stuff we can just use
-		 * the stack so we are happy. We need a fib object in order to
-		 * manage the linked lists.
+		 *	Allocate a FIB. For non queued stuff
+		 *	we can just use the stack so we are happy. We need
+		 *	a fib object in order to manage the linked lists
 		 */
 		if (dev->aif_thread) {
 			/* Limit the number we retreive from fib pool */
 			struct list_head * each;
-			int i = (dev->init->AdapterFibsSize / sizeof(struct hw_fib)) - 1;
+			int i = (le32_to_cpu(dev->init->AdapterFibsSize) / sizeof(struct hw_fib)) - 1;
 			list_for_each(each, &(q->cmdq))
 				if (--i <= 0)
 					break;
 			if ((i <= 0) || (!(fib = kmalloc(sizeof(struct fib),GFP_ATOMIC))))
 				fib = &fibctx;
 		}
-
-		index = le32_to_cpu(entry->addr / sizeof(struct hw_fib));
+		index = le32_to_cpu(entry->addr) / sizeof(struct hw_fib);
 		hw_fib = &dev->aif_base_va[index];
+		
 		memset(fib, 0, sizeof(struct fib));
 		INIT_LIST_HEAD(&fib->fiblink);
 		fib->type = FSAFS_NTC_FIB_CONTEXT;
@@ -202,9 +201,9 @@ unsigned int aac_command_normal(struct aac_queue *q)
 		fib->data = hw_fib->data;
 		fib->dev = dev;
 		
-		if (dev->aif_thread && fib != &fibctx)
-		{		
-			list_add_tail(&fib->fiblink, &q->cmdq);
+				
+		if (dev->aif_thread && fib != &fibctx) {
+		        list_add_tail(&fib->fiblink, &q->cmdq);
 	 	        aac_consumer_free(dev, q, HostNormCmdQueue);
 		        wake_up_interruptible(&q->cmdready);
 		} else {
@@ -213,7 +212,7 @@ unsigned int aac_command_normal(struct aac_queue *q)
 			/*
 			 *	Set the status of this FIB
 			 */
-			*(u32 *)hw_fib->data = cpu_to_le32(ST_OK);
+			*(__le32 *)hw_fib->data = cpu_to_le32(ST_OK);
 			fib_adapter_complete(fib, sizeof(u32));
 			spin_lock_irqsave(q->lock, flags);
 		}		
@@ -235,7 +234,7 @@ unsigned int aac_command_normal(struct aac_queue *q)
 
 unsigned int aac_intr_normal(struct aac_dev * dev, u32 Index)
 {
-	int index = le32_to_cpu(Index);
+	u32 index = le32_to_cpu(Index);
 
 	dprintk((KERN_INFO "aac_intr_normal(%p,%x)\n", dev, Index));
 	if ((index & 0x00000002L)) {
@@ -254,8 +253,12 @@ unsigned int aac_intr_normal(struct aac_dev * dev, u32 Index)
 		if ((!dev->aif_thread)
 		 || (!(fib = kmalloc(sizeof(struct fib),GFP_ATOMIC))))
 			return 1;
-
-		hw_fib = (struct hw_fib *)(((char *)(dev->regs.sa)) + (index & ~0x00000002L));
+		if (!(hw_fib = kmalloc(sizeof(struct hw_fib),GFP_ATOMIC))) {
+			kfree (fib);
+			return 1;
+		}
+		memset(hw_fib, 0, sizeof(struct hw_fib));
+		memcpy(hw_fib, (struct hw_fib *)(((char *)(dev->regs.sa)) + (index & ~0x00000002L)), sizeof(struct hw_fib));
 		memset(fib, 0, sizeof(struct fib));
 		INIT_LIST_HEAD(&fib->fiblink);
 		fib->type = FSAFS_NTC_FIB_CONTEXT;
@@ -263,7 +266,7 @@ unsigned int aac_intr_normal(struct aac_dev * dev, u32 Index)
 		fib->hw_fib = hw_fib;
 		fib->data = hw_fib->data;
 		fib->dev = dev;
-		
+	
 		spin_lock_irqsave(q->lock, flags);
 		list_add_tail(&fib->fiblink, &q->cmdq);
 	        wake_up_interruptible(&q->cmdready);
@@ -295,7 +298,7 @@ unsigned int aac_intr_normal(struct aac_dev * dev, u32 Index)
 			/*
 			 *	Doctor the fib
 			 */
-			*(u32 *)hwfib->data = cpu_to_le32(ST_OK);
+			*(__le32 *)hwfib->data = cpu_to_le32(ST_OK);
 			hwfib->header.XferState |= cpu_to_le32(AdapterProcessed);
 		}
 
